@@ -1,0 +1,66 @@
+{
+    "layer": "top",
+    "position": "top",
+    "height": 32,
+    "margin-top": 8,
+    "margin-left": 14,
+    "margin-right": 14,
+    "spacing": 10,
+
+    "modules-left": ["custom/launcher", "custom/firefox", "custom/discord", "custom/kitty", "custom/files"],
+    "modules-center": ["hyprland/workspaces", "clock"],
+    "modules-right": ["pulseaudio", "network", "cpu", "memory", "tray"],
+
+    "custom/launcher": {
+        "format": "󰣇",
+        "on-click": "wofi --show drun",
+        "tooltip": true,
+        "tooltip-format": "App Launcher"
+    },
+    "custom/firefox": {
+        "format": "Firefox",
+        "on-click": "firefox",
+        "tooltip": false
+    },
+    "custom/discord": {
+        "format": "Discord",
+        "on-click": "discord",
+        "tooltip": false
+    },
+    "custom/kitty": {
+        "format": "Terminal",
+        "on-click": "kitty",
+        "tooltip": false
+    },
+    "custom/files": {
+        "format": "Files",
+        "on-click": "nautilus",
+        "tooltip": false
+    },
+
+    "hyprland/workspaces": {
+        "disable-scroll": true,
+        "all-outputs": true,
+        "format": "{name}"
+    },
+    "clock": {
+        "format": "{:%H:%M   %b %d}"
+    },
+    "pulseaudio": {
+        "format": "Vol {volume}%",
+        "format-muted": "Muted",
+        "on-click": "pavucontrol"
+    },
+    "network": {
+        "format-wifi": "Wifi {signalStrength}%",
+        "format-ethernet": "Ethernet",
+        "format-disconnected": "Offline",
+        "on-click": "nm-connection-editor"
+    },
+    "cpu": {
+        "format": "CPU {usage}%"
+    },
+    "memory": {
+        "format": "RAM {percentage}%"
+    }
+}
