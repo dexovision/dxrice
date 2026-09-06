@@ -20,7 +20,7 @@ local menu        = "wofi --show drun"
 -------------------
 hl.on("hyprland.start", function()
     hl.exec_cmd("waybar")
-    hl.exec_cmd("swaybg -i /home/dexo/Pictures/Wallpapers/hk_static.png -m fill")
+    hl.exec_cmd("swaybg -i " .. os.getenv("HOME") .. "/Pictures/Wallpapers/hk_static.png -m fill")
     hl.exec_cmd("mako")
     hl.exec_cmd("nm-applet --indicator")
     hl.exec_cmd("blueman-applet")
