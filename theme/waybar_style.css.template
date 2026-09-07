@@ -34,6 +34,7 @@ button {
     border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
     box-shadow: none;
     text-shadow: none;
+    transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
 }
 
 /* Base style for modules matching taskbar/clock */
@@ -43,6 +44,7 @@ button {
 #cpu,
 #memory,
 #tray,
+#image,
 .modules-left widget > * {
     background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
     background-image: none;
@@ -51,6 +53,13 @@ button {
     margin: 2px 2px;
     border-radius: ${RADIUS}px;
     border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+/* Custom-image shortcuts ("pfps"): square avatar clipped to the same
+   corner radius as everything else, sized to match icon shortcuts. */
+#image {
+    padding: 2px;
 }
 
 /* Force active/focused GTK button states to stay dark */
