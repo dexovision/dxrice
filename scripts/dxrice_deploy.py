@@ -23,6 +23,7 @@ nothing gets scattered into $HOME besides real app config directories.
 
 Usage: dxrice_deploy.py <repo_dir>
 """
+import json
 import os
 import sys
 from pathlib import Path
@@ -84,13 +85,66 @@ def deploy_static(repo_dir: Path, manifest: dict, results: dict):
         results[str(dst)] = result
 
 
+_QS_MODULES = ["pulseaudio", "network", "cpu", "memory"]
+_QS_OLD_DEFAULT_ON_CLICK = {"pulseaudio": "pavucontrol", "network": "nm-connection-editor"}
+_QS_ON_CLICK = ('sh -c \'python3 "$(cat ~/.local/state/dxrice/repo_path 2>/dev/null '
+                '|| echo ~/dxrice)/scripts/dxrice_quick_settings.py"\'')
+
+
+def _migrate_waybar_quicksettings(dst: Path) -> bool:
+    """A live waybar/config from before the Quick Settings panel existed
+    has pulseaudio/network/cpu/memory as flat modules-right entries, never
+    grouped, never wired to it -- and since this file is now copy-once
+    like hyprland.lua (see module docstring), that config would otherwise
+    never change on its own. Narrowly upgrades just that cluster in place:
+    groups the four into group/quicksettings and points their clicks at
+    the panel, leaving modules-left (your actual shortcuts) and everything
+    else completely untouched. Only overwrites an on-click that's still
+    the old untouched default (pavucontrol / nm-connection-editor) or
+    unset -- a click action you deliberately customized since is left as
+    you set it."""
+    try:
+        cfg = json.loads(dst.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    right = cfg.get("modules-right", [])
+    if "group/quicksettings" in cfg or "group/quicksettings" in right:
+        return False
+    if not all(m in right for m in _QS_MODULES):
+        return False
+
+    idx = right.index("pulseaudio")
+    new_right = [m for m in right if m not in _QS_MODULES]
+    new_right.insert(idx, "group/quicksettings")
+    cfg["modules-right"] = new_right
+    cfg["group/quicksettings"] = {"orientation": "horizontal", "modules": list(_QS_MODULES)}
+    for m in _QS_MODULES:
+        entry = cfg.setdefault(m, {})
+        current = entry.get("on-click")
+        if current is None or current == _QS_OLD_DEFAULT_ON_CLICK.get(m):
+            entry["on-click"] = _QS_ON_CLICK
+        entry.pop("on-click-right", None)
+
+    dst.write_text(json.dumps(cfg, indent=4))
+    return True
+
+
+_COPY_ONCE_MIGRATIONS = {
+    "config": [_migrate_waybar_quicksettings],
+}
+
+
 def deploy_copy_once(repo_dir: Path, manifest: dict, results: dict):
     for rel, dst in COPY_ONCE_FILES:
         src = repo_dir / rel
         if not src.is_file():
             continue
         if dst.exists():
-            results[str(dst)] = "left-alone (never auto-overwritten)"
+            migrated = any(migrate(dst) for migrate in _COPY_ONCE_MIGRATIONS.get(dst.name, []))
+            if migrated:
+                results[str(dst)] = "migrated (Quick Settings cluster added, your shortcuts untouched)"
+            else:
+                results[str(dst)] = "left-alone (never auto-overwritten)"
             continue
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
@@ -103,7 +157,8 @@ def print_summary(results: dict):
     for path, result in results.items():
         by_result.setdefault(result, []).append(path)
 
-    order = ["installed", "adopted", "updated", "left-alone (never auto-overwritten)",
+    order = ["installed", "adopted", "updated", "migrated (Quick Settings cluster added, your shortcuts untouched)",
+             "left-alone (never auto-overwritten)",
              "unchanged", "skipped-modified", "removed (legacy copy -- scripts now run from the repo checkout)",
              "removed (now empty)", "left-alone (you edited this legacy copy -- remove it yourself if unwanted)",
              "left-alone (not something this rice put here)"]
@@ -111,6 +166,7 @@ def print_summary(results: dict):
         "installed": "Newly installed",
         "adopted": "Took over pre-existing file (old version backed up)",
         "updated": "Updated to latest",
+        "migrated (Quick Settings cluster added, your shortcuts untouched)": "Upgraded in place (Quick Settings cluster added, your shortcuts untouched)",
         "left-alone (never auto-overwritten)": "Left alone (yours to edit)",
         "unchanged": "Already up to date",
         "skipped-modified": "SKIPPED -- you edited this since the last deploy",
