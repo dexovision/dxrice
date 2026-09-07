@@ -151,6 +151,7 @@ cfg[modid] = {
     "on-click": f"sh -c '{cmd} >/dev/null 2>&1 &'",
     "tooltip": True,
     "tooltip-format": label,
+    "class": "app-icon",
 }
 cfg.setdefault("modules-left", [])
 if modid not in cfg["modules-left"]:
@@ -262,10 +263,13 @@ with open(config_path) as f:
 
 changed = []
 for modid in cfg.get("modules-left", []):
-    if not modid.startswith("custom/") or modid == "custom/launcher":
+    if not modid.startswith("custom/"):
         continue
     entry = cfg.get(modid)
     if not entry:
+        continue
+    entry["class"] = "app-icon"
+    if modid == "custom/launcher":
         continue
     old_format = entry.get("format", "")
     name = entry.get("tooltip-format") or old_format

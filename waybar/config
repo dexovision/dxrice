@@ -1,7 +1,7 @@
 {
     "layer": "top",
     "position": "top",
-    "height": 32,
+    "height": 44,
     "margin-top": 8,
     "margin-left": 14,
     "margin-right": 14,
@@ -29,25 +29,29 @@
         "format": "\udb82\udcc7",
         "on-click": "wofi --show drun",
         "tooltip": true,
-        "tooltip-format": "App Launcher"
+        "tooltip-format": "App Launcher",
+        "class": "app-icon"
     },
     "custom/firefox": {
         "format": "\uf269",
         "on-click": "sh -c '/usr/lib/firefox/firefox >/dev/null 2>&1 &'",
         "tooltip": true,
-        "tooltip-format": "Firefox"
+        "tooltip-format": "Firefox",
+        "class": "app-icon"
     },
     "custom/discord": {
         "format": "\udb81\ude6f",
         "on-click": "discord",
         "tooltip": true,
-        "tooltip-format": "Discord"
+        "tooltip-format": "Discord",
+        "class": "app-icon"
     },
     "custom/files": {
         "format": "\uf07b",
         "on-click": "nautilus",
         "tooltip": true,
-        "tooltip-format": "Files"
+        "tooltip-format": "Files",
+        "class": "app-icon"
     },
     "hyprland/workspaces": {
         "disable-scroll": true,
@@ -78,12 +82,14 @@
         "format": "\uf11b",
         "on-click": "sh -c 'flatpak run org.vinegarhq.Sober >/dev/null 2>&1 &'",
         "tooltip": true,
-        "tooltip-format": "Sober"
+        "tooltip-format": "Sober",
+        "class": "app-icon"
     },
     "custom/terminal": {
         "format": "\uf120",
         "on-click": "sh -c 'kitty >/dev/null 2>&1 &'",
         "tooltip": true,
-        "tooltip-format": "Terminal"
+        "tooltip-format": "Terminal",
+        "class": "app-icon"
     }
 }

@@ -83,3 +83,9 @@ button.active {
     background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.4);
     border-radius: 8px;
 }
+
+/* App-shortcut icons (launcher + custom taskbar buttons) size independently
+   from the clock/volume/network/etc text modules above. */
+.app-icon {
+    font-size: ${FONT_SIZE_WAYBAR_ICONS}px;
+}

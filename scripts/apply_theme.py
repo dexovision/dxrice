@@ -49,6 +49,7 @@ def build_vars(theme):
     return {
         "FONT_FAMILY": theme["font_family"],
         "FONT_SIZE_WAYBAR": theme["font_size_waybar"],
+        "FONT_SIZE_WAYBAR_ICONS": theme["font_size_waybar_icons"],
         "FONT_SIZE_WOFI": theme["font_size_wofi"],
         "FONT_SIZE_MAKO": theme["font_size_mako"],
 
