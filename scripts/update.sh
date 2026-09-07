@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
-REPO_DIR="$HOME/dotfiles-rice"
+# Always target the repository root (one level up from this script's location)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "==> Syncing local system configs to dotfiles repo..."
 mkdir -p "$REPO_DIR"/{hypr,kitty,waybar,mako,scripts}
@@ -15,9 +17,6 @@ cp ~/.config/mako/config "$REPO_DIR/mako/" 2>/dev/null || true
 if [ -d "$HOME/scripts" ]; then
     cp ~/scripts/*.py ~/scripts/*.sh "$REPO_DIR/scripts/" 2>/dev/null || true
 fi
-
-# Remove update.sh from being copied into scripts subdirectory if it exists there
-rm -f "$REPO_DIR/scripts/update.sh"
 
 echo "==> Checking for hardcoded user paths or usernames..."
 HARDCODES=$(grep -rn "dexo\|DXpc\|/home/[a-z]" "$REPO_DIR/hypr" "$REPO_DIR/kitty" "$REPO_DIR/waybar" "$REPO_DIR/scripts" 2>/dev/null | grep -v "usuario" || true)
