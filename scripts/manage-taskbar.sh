@@ -1,72 +1,78 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIG=~/.config/waybar/config
-CSS=~/.config/waybar/style.css
+CONFIG="$HOME/.config/waybar/config"
+
+# Locate dotfiles path if running inside dotfiles repo
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_CONFIG="$REPO_DIR/waybar/config"
 
 restart_waybar() {
-    pkill -9 waybar 2>/dev/null || true
-    sleep 0.5
+    pkill -x waybar 2>/dev/null || true
+    sleep 0.3
     setsid waybar >/dev/null 2>&1 < /dev/null &
     disown
 }
 
+sync_repo() {
+    if [ -f "$REPO_CONFIG" ]; then
+        cp "$CONFIG" "$REPO_CONFIG"
+        echo "Synced changes to $REPO_CONFIG"
+    fi
+}
+
 add_app() {
-    read -rp "App name (shown on the bar): " LABEL
+    read -rp "App name or Nerd Font Icon (e.g. 󰄛 or Kitty): " LABEL
     [ -z "$LABEL" ] && { echo "No name entered, cancelled."; return; }
 
-    read -rp "Command to run (e.g. firefox, discord, spotify): " CMD
+    read -rp "Command to run (e.g. kitty, firefox): " CMD
     [ -z "$CMD" ] && { echo "No command entered, cancelled."; return; }
 
-    SLUG=$(echo "$LABEL" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+    SLUG=$(echo "$LABEL" | tr "[:upper:]" "[:lower:]" | tr -cd "a-zA-Z0-9")
+    [ -z "$SLUG" ] && SLUG="app$(date +%s)"
     MODID="custom/$SLUG"
-    CSSID="custom-$SLUG"
 
-    python3 << PYEOF
-import json
-with open("$CONFIG") as f:
+    python3 - "$CONFIG" "$MODID" "$LABEL" "$CMD" << 'PYEOF'
+import sys, json
+
+config_path, modid, label, cmd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+
+with open(config_path, "r") as f:
     cfg = json.load(f)
-modid = "$MODID"
+
 cfg[modid] = {
-    "format": "$LABEL",
-    "on-click": "sh -c '$CMD >/dev/null 2>&1 &'",
+    "format": label,
+    "on-click": f"sh -c '{cmd} >/dev/null 2>&1 &'",
     "tooltip": False
 }
+
+if "modules-left" not in cfg:
+    cfg["modules-left"] = []
+
 if modid not in cfg["modules-left"]:
     cfg["modules-left"].append(modid)
-with open("$CONFIG", "w") as f:
+
+with open(config_path, "w") as f:
     json.dump(cfg, f, indent=4)
 PYEOF
 
-    cat >> "$CSS" << CSSEOF
-
-#$CSSID {
-    background: rgba(18, 20, 26, 0.55);
-    color: #e6e6e6;
-    padding: 4px 12px;
-    margin: 2px 0;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-#$CSSID:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
-}
-CSSEOF
-
+    sync_repo
     restart_waybar
     echo "Added '$LABEL' to your taskbar."
 }
 
 remove_app() {
     echo "Current taskbar apps:"
-    python3 -c "
-import json
-with open('$CONFIG') as f:
+    python3 - "$CONFIG" << 'PYEOF'
+import sys, json
+config_path = sys.argv[1]
+with open(config_path) as f:
     cfg = json.load(f)
-for i, m in enumerate(cfg.get('modules-left', [])):
-    if m.startswith('custom/'):
-        print(f'  {i}: {m}  ->  {cfg.get(m, {}).get(\"format\", \"\")}')"
+for i, m in enumerate(cfg.get("modules-left", [])):
+    if m.startswith("custom/"):
+        fmt = cfg.get(m, {}).get("format", "")
+        print(f"  {i}: {m}  ->  {fmt}")
+PYEOF
 
     echo ""
     read -rp "Enter the number to remove (or 'q' to cancel): " CHOICE
@@ -77,12 +83,15 @@ for i, m in enumerate(cfg.get('modules-left', [])):
         return
     fi
 
-    python3 << PYEOF
-import json
-with open("$CONFIG") as f:
+    python3 - "$CONFIG" "$CHOICE" << 'PYEOF'
+import sys, json
+config_path = sys.argv[1]
+idx = int(sys.argv[2])
+
+with open(config_path) as f:
     cfg = json.load(f)
+
 mods = cfg.get("modules-left", [])
-idx = $CHOICE
 if idx < 0 or idx >= len(mods):
     print("Index out of range, nothing removed.")
 else:
@@ -94,11 +103,12 @@ else:
         cfg["modules-left"] = mods
         if modid in cfg:
             del cfg[modid]
-        with open("$CONFIG", "w") as f:
+        with open(config_path, "w") as f:
             json.dump(cfg, f, indent=4)
         print(f"Removed {modid}.")
 PYEOF
 
+    sync_repo
     restart_waybar
 }
 

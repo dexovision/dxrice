@@ -11,7 +11,7 @@ hl.monitor({
 ---------------------
 ---- MY PROGRAMS ----
 ---------------------
-local terminal    = "kitty"
+local terminal    = os.getenv("TERMINAL") or "kitty"
 local fileManager = "nautilus"
 local menu        = "wofi --show drun"
 
@@ -19,14 +19,22 @@ local menu        = "wofi --show drun"
 ---- AUTOSTART ----
 -------------------
 hl.on("hyprland.start", function()
+    local home = os.getenv("HOME")
     hl.exec_cmd("waybar")
-    hl.exec_cmd("swaybg -i " .. os.getenv("HOME") .. "/Pictures/Wallpapers/hk_static.png -m fill")
+    
+    -- Dynamic Wallpaper Setup
+    local bg_path = os.getenv("BG_WALLPAPER") or (home .. "/Pictures/Wallpapers/default.png")
+    hl.exec_cmd("swaybg -i " .. bg_path .. " -m fill")
+
     hl.exec_cmd("mako")
     hl.exec_cmd("nm-applet --indicator")
     hl.exec_cmd("blueman-applet")
     hl.exec_cmd("/usr/lib/polkit-kde-agent-1")
     hl.exec_cmd("wl-paste --type text --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
+    
+    -- Core Python Script Execution using absolute user paths
+    hl.exec_cmd("python3 " .. home .. "/scripts/infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
 end)
 
 -------------------------------
@@ -170,11 +178,15 @@ end
 
 hl.window_rule({ name = "kitty-glass", match = { class = "kitty" }, opacity = "0.82 override 0.75 override" })
 
--- >>> infinite-desktop (clean, manual) START
-hl.on("hyprland.start", function()
-    hl.exec_cmd("python3 ~/scripts/infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
-end)
 
+
+hl.window_rule({ name = "float-everything", match = { class = ".*" }, float = true })
+
+
+hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("kitty -e ~/scripts/manage-taskbar.sh"))
+hl.bind(mainMod .. " + SHIFT + O", hl.dsp.exec_cmd("kitty -e ~/scripts/reorder-taskbar.sh"))
+
+-- Infinite Desktop Keybindings
 hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "-1" }))
 hl.bind(mainMod .. " + X", hl.dsp.focus({ workspace = "+1" }))
 hl.bind(mainMod .. " + SHIFT + Z", hl.dsp.window.move({ workspace = "-1" }))
@@ -195,11 +207,3 @@ hl.bind(mainMod .. " + CTRL + left",  hl.dsp.exec_cmd("python3 ~/scripts/resize_
 hl.bind(mainMod .. " + CTRL + right", hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py right"), { repeating = true })
 hl.bind(mainMod .. " + CTRL + up",    hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py up"),    { repeating = true })
 hl.bind(mainMod .. " + CTRL + down",  hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py down"),  { repeating = true })
--- <<< infinite-desktop (clean, manual) END
-
-
-hl.window_rule({ name = "float-everything", match = { class = ".*" }, float = true })
-
-
-hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("kitty -e ~/scripts/manage-taskbar.sh"))
-hl.bind(mainMod .. " + SHIFT + O", hl.dsp.exec_cmd("kitty -e ~/scripts/reorder-taskbar.sh"))
