@@ -317,8 +317,14 @@ def idle_inhibit_active():
     try:
         with open(IDLE_INHIBIT_PID_FILE) as f:
             pid = int(f.read().strip())
-        os.kill(pid, 0)
-        return True
+        # Not just os.kill(pid, 0): if the inhibitor process died without
+        # going through set_idle_inhibit(False) -- OOM kill, manual pkill --
+        # the stale pid file remains, and the OS can hand that same PID
+        # number to an unrelated process later. Confirming it's actually
+        # still a systemd-inhibit process avoids a false "active" reading.
+        with open(f"/proc/{pid}/comm") as f:
+            comm = f.read().strip()
+        return comm == "systemd-inhibit"
     except (OSError, ValueError):
         return False
 
@@ -595,6 +601,26 @@ def make_device_menu_button(devices, on_select):
     return menu_btn
 
 
+def make_debounced(fn, delay_ms=80):
+    """Wraps fn so rapid repeated calls (e.g. every tick of a dragged
+    slider) only actually invoke it once, ~delay_ms after the last call --
+    used to keep a slider from spawning a subprocess per pixel of motion."""
+    state = {"id": None}
+
+    def wrapped(*args):
+        if state["id"] is not None:
+            GLib.source_remove(state["id"])
+
+        def apply_call():
+            fn(*args)
+            state["id"] = None
+            return False
+
+        state["id"] = GLib.timeout_add(delay_ms, apply_call)
+
+    return wrapped
+
+
 def make_slider_row(icon_on, icon_off, initial, muted, on_change, on_mute, devices=None, on_device=None):
     row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
     row.add_css_class("qs-row")
@@ -624,23 +650,15 @@ def make_slider_row(icon_on, icon_off, initial, muted, on_change, on_mute, devic
     pct_label.set_xalign(1.0)
     row.append(pct_label)
 
-    # Debounced: the label/scale still update on every tick while dragging,
-    # but wpctl only actually gets called ~80ms after motion pauses, so a
+    # The label/scale still update on every tick while dragging, but
+    # wpctl only actually gets called ~80ms after motion pauses, so a
     # fast drag doesn't spawn a subprocess per pixel.
-    debounce_id = [None]
+    debounced_change = make_debounced(on_change)
 
     def _on_value_changed(s):
         v = int(s.get_value())
         pct_label.set_label(f"{v}%")
-        if debounce_id[0] is not None:
-            GLib.source_remove(debounce_id[0])
-
-        def apply_change():
-            on_change(v)
-            debounce_id[0] = None
-            return False
-
-        debounce_id[0] = GLib.timeout_add(80, apply_change)
+        debounced_change(v)
 
     scale.connect("value-changed", _on_value_changed)
 
@@ -780,11 +798,26 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         card = make_card()
         box = Gtk.Box(spacing=6, homogeneous=True)
         box.append(make_action_button("edit-cut-symbolic", "Region",
-                                       lambda: (self.close(), screenshot_region())))
+                                       lambda: self._take_screenshot(screenshot_region)))
         box.append(make_action_button("view-fullscreen-symbolic", "Full Screen",
-                                       lambda: (self.close(), screenshot_full())))
+                                       lambda: self._take_screenshot(screenshot_full)))
         card.append(box)
         content.append(card)
+
+    def _take_screenshot(self, fn):
+        # self.close() alone races: it triggers close-request -> app.quit(),
+        # which can end the main loop before a delayed grim call ever gets
+        # to run. Hide first (no close-request fires from this), give the
+        # compositor a moment to actually unmap the overlay surface so it
+        # isn't in the shot, then take it and close for real.
+        self.set_visible(False)
+
+        def after_hide():
+            fn()
+            self.close()
+            return False
+
+        GLib.timeout_add(150, after_hide)
 
     # ---- media (playerctl) ----
 
@@ -795,9 +828,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         self._refresh_media()
 
     def _refresh_media(self):
-        for w in self._media_widgets:
-            self.media_card.remove(w)
-        self._media_widgets = []
+        clear_rows(self.media_card, self._media_widgets)
 
         meta = player_metadata()
         self.media_card.set_visible(meta is not None)
@@ -867,31 +898,25 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row.add_css_class("qs-row")
         row.append(Gtk.Image.new_from_icon_name("display-brightness-symbolic"))
+
+        brightness = get_brightness_percent()
         scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True)
         scale.set_range(1, 100)
-        scale.set_value(get_brightness_percent())
+        scale.set_value(brightness)
         scale.set_draw_value(False)
         row.append(scale)
 
-        pct_label = _label(f"{get_brightness_percent()}%", ellipsize=False)
+        pct_label = _label(f"{brightness}%", ellipsize=False)
         pct_label.set_width_chars(4)
         pct_label.set_xalign(1.0)
         row.append(pct_label)
 
-        debounce_id = [None]
+        debounced_change = make_debounced(set_brightness_percent)
 
         def _on_value_changed(s):
             v = int(s.get_value())
             pct_label.set_label(f"{v}%")
-            if debounce_id[0] is not None:
-                GLib.source_remove(debounce_id[0])
-
-            def apply_change():
-                set_brightness_percent(v)
-                debounce_id[0] = None
-                return False
-
-            debounce_id[0] = GLib.timeout_add(80, apply_change)
+            debounced_change(v)
 
         scale.connect("value-changed", _on_value_changed)
         card.append(row)
@@ -903,6 +928,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         self.wifi_card = make_card()
         content.append(self.wifi_card)
         self._wifi_row_widgets = []
+        self._wifi_gen = 0
         self._rebuild_wifi_card()
 
     def _rebuild_wifi_card_once(self):
@@ -917,11 +943,18 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
             return
         # A wifi scan can take a real amount of time -- show a placeholder
         # and fetch the list off the main thread so the window still opens
-        # instantly instead of freezing until nmcli returns.
+        # instantly instead of freezing until nmcli returns. The generation
+        # counter discards a stale result if a second rebuild (e.g. the
+        # user toggled wifi off then back on) starts and finishes before
+        # this one's fetch returns.
         show_loading(self.wifi_card, self._wifi_row_widgets, "Scanning...")
-        run_async(lambda: list_wifi_networks()[:8], self._on_wifi_networks_ready)
+        self._wifi_gen += 1
+        gen = self._wifi_gen
+        run_async(lambda: list_wifi_networks()[:8], lambda networks: self._on_wifi_networks_ready(gen, networks))
 
-    def _on_wifi_networks_ready(self, networks):
+    def _on_wifi_networks_ready(self, gen, networks):
+        if gen != self._wifi_gen:
+            return False
         clear_rows(self.wifi_card, self._wifi_row_widgets)
         for ssid, sig, security, connected in networks:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -961,6 +994,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         self.bt_card = make_card()
         content.append(self.bt_card)
         self._bt_row_widgets = []
+        self._bt_gen = 0
         self._rebuild_bt_card()
 
     def _rebuild_bt_card_once(self):
@@ -976,10 +1010,17 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         # list_bluetooth_devices() runs a separate `bluetoothctl info` per
         # paired device -- with several devices that's easily a
         # multi-second block if done synchronously during window setup.
+        # The generation counter discards a stale result if a second
+        # rebuild (e.g. connecting to two devices in quick succession)
+        # starts and finishes before this one's fetch returns.
         show_loading(self.bt_card, self._bt_row_widgets, "Loading devices...")
-        run_async(list_bluetooth_devices, self._on_bt_devices_ready)
+        self._bt_gen += 1
+        gen = self._bt_gen
+        run_async(list_bluetooth_devices, lambda devices: self._on_bt_devices_ready(gen, devices))
 
-    def _on_bt_devices_ready(self, devices):
+    def _on_bt_devices_ready(self, gen, devices):
+        if gen != self._bt_gen:
+            return False
         clear_rows(self.bt_card, self._bt_row_widgets)
         if not devices:
             row = Gtk.Box()
@@ -1020,9 +1061,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         self._rebuild_clipboard_card()
 
     def _rebuild_clipboard_card(self):
-        for w in self._clip_row_widgets:
-            self.clip_card.remove(w)
-        self._clip_row_widgets = []
+        clear_rows(self.clip_card, self._clip_row_widgets)
         entries = list_clipboard_history(8)
         for raw, preview in entries:
             btn = Gtk.Button()
