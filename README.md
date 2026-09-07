@@ -9,10 +9,14 @@ A fully configured, Lua-based Hyprland environment optimized for performance, mo
 Install all system core, audio, font, and runtime dependencies before running the installer:
 
 Official Packages (pacman):
+```bash
 sudo pacman -S --needed hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol networkmanager network-manager-applet bluez bluez-utils blueman ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent python python-evdev jq brightnessctl playerctl
+```
 
 AUR Packages (yay / paru):
+```bash
 yay -S --needed nwg-look
+```
 
 ---
 
@@ -20,7 +24,7 @@ yay -S --needed nwg-look
 
 Clone the repository and run the automated interactive installer:
 
-git clone https://github.com/YOUR_USERNAME/dotfiles-rice.git ~/dotfiles-rice
+git clone https://github.com/dexovision/dotfiles-rice.git ~/dotfiles-rice
 cd ~/dotfiles-rice
 chmod +x install.sh
 ./install.sh
