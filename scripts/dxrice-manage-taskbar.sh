@@ -6,7 +6,7 @@ CONFIG="$HOME/.config/waybar/config"
 # gets deployed to ~/scripts/manage-taskbar.sh, and deriving the repo path
 # from there (../..) used to silently resolve to $HOME and make sync_repo a
 # no-op -- your taskbar edits never made it back into git.
-REPO_CONFIG="$HOME/dotfiles-rice/waybar/config"
+REPO_CONFIG="$HOME/dxrice/waybar/config"
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 restart_waybar() {
@@ -22,7 +22,7 @@ sync_repo() {
 }
 
 icon_for() {
-    python3 "$SCRIPTS_DIR/rice_icons.py" "$@" 2>/dev/null || echo ""
+    python3 "$SCRIPTS_DIR/dxrice_icons.py" "$@" 2>/dev/null || echo ""
 }
 
 show_modules() {
@@ -255,7 +255,7 @@ fix_icons() {
     python3 - "$CONFIG" "$SCRIPTS_DIR" << 'PYEOF'
 import json, sys
 sys.path.insert(0, sys.argv[2])
-from rice_icons import icon_for
+from dxrice_icons import icon_for
 
 config_path = sys.argv[1]
 with open(config_path) as f:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GTK4/Adwaita settings app for the rice's theme.json.
 
-Edits ~/dotfiles-rice/theme/theme.json and calls apply_theme.py to render +
+Edits ~/dxrice/theme/theme.json and calls dxrice_apply_theme.py to render +
 hot-reload waybar/wofi/mako/kitty/hyprlock/hyprland.lua.
 """
 import copy
@@ -17,11 +17,11 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 HOME = os.path.expanduser("~")
-REPO = os.path.join(HOME, "dotfiles-rice")
+REPO = os.path.join(HOME, "dxrice")
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = os.path.join(THEME_DIR, "theme.json")
 PRESETS_DIR = os.path.join(THEME_DIR, "presets")
-APPLY_SCRIPT = os.path.join(HOME, "scripts", "apply_theme.py")
+APPLY_SCRIPT = os.path.join(HOME, "scripts", "dxrice_apply_theme.py")
 
 BUILTIN_PRESETS = {
     "Glass Charcoal (default)": {
@@ -194,7 +194,7 @@ def rgba_to_hex(rgba):
 
 class ThemeWindow(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Rice Theme")
+        super().__init__(application=app, title="DXrice Theme")
         self.set_default_size(560, 720)
 
         # Super+C (this rice's WM close-window keybind) force-kills the
@@ -438,7 +438,7 @@ class ThemeApp(Adw.Application):
         # background reload is still running can leave a stuck instance
         # registered on the session bus -- the next launch then silently
         # reactivates that dead instance instead of opening a fresh one.
-        super().__init__(application_id="dev.dexo.RiceTheme",
+        super().__init__(application_id="dev.dexo.DXrice",
                           flags=Gio.ApplicationFlags.NON_UNIQUE)
 
     def do_activate(self):

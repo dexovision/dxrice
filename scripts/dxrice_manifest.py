@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared deploy-guard used by install.sh (via rice_deploy.py) and apply_theme.py.
+"""Shared deploy-guard used by install.sh (via dxrice_deploy.py) and dxrice_apply_theme.py.
 
 Tracks a sha256 of every file this rice has deployed into ~/.config (and
 ~/scripts) in a small manifest. On a later deploy/update we only ever
@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 
 HOME = Path.home()
-STATE_DIR = HOME / ".local" / "state" / "hyprland-rice"
+STATE_DIR = HOME / ".local" / "state" / "dxrice"
 MANIFEST_PATH = STATE_DIR / "manifest.json"
 BACKUP_DIR = STATE_DIR / "backups"
 

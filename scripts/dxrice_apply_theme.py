@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Renders theme.json into every app's real config and hot-reloads them.
 
-Single source of truth: ~/dotfiles-rice/theme/theme.json
-Templates:              ~/dotfiles-rice/theme/*.template  (string.Template ${TOKENS})
-Usage: apply_theme.py [path/to/theme.json]
+Single source of truth: ~/dxrice/theme/theme.json
+Templates:              ~/dxrice/theme/*.template  (string.Template ${TOKENS})
+Usage: dxrice_apply_theme.py [path/to/theme.json]
 """
 import json
 import os
@@ -13,10 +13,10 @@ import sys
 from string import Template
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import rice_manifest
+import dxrice_manifest
 
 HOME = os.path.expanduser("~")
-REPO = os.path.join(HOME, "dotfiles-rice")
+REPO = os.path.join(HOME, "dxrice")
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = os.path.join(THEME_DIR, "theme.json")
 
@@ -92,15 +92,15 @@ def build_vars(theme):
 
 def render_templates(theme):
     tvars = build_vars(theme)
-    manifest = rice_manifest.load_manifest()
+    manifest = dxrice_manifest.load_manifest()
     results = {}
     for template_name, target_path in TARGETS.items():
         src = os.path.join(THEME_DIR, template_name)
         with open(src) as f:
             rendered = Template(f.read()).safe_substitute(tvars)
-        result = rice_manifest.deploy_file(target_path, rendered.encode(), manifest)
+        result = dxrice_manifest.deploy_file(target_path, rendered.encode(), manifest)
         results[target_path] = result
-    rice_manifest.save_manifest(manifest)
+    dxrice_manifest.save_manifest(manifest)
 
     skipped = [p for p, r in results.items() if r == "skipped-modified"]
     if skipped:

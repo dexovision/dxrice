@@ -6,7 +6,7 @@ import os
 import fcntl
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hypr_ipc import (hyprctl_json, toggle_floating_lua, move_window_exact_lua,
+from dxrice_hypr_ipc import (hyprctl_json, toggle_floating_lua, move_window_exact_lua,
                        resize_window_exact_lua, batch)
 
 LOCK_FILE = "/tmp/floating_tile_toggle.lock"

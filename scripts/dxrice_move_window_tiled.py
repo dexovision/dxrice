@@ -4,7 +4,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hypr_ipc import hyprctl_json, move_window_tiled
+from dxrice_hypr_ipc import hyprctl_json, move_window_tiled
 
 DIR_SHORT = {"left": "l", "right": "r", "up": "u", "down": "d"}
 
@@ -22,7 +22,7 @@ def get_layout():
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
-        print("Usage: move_window_tiled.py <left|right|up|down>")
+        print("Usage: dxrice_move_window_tiled.py <left|right|up|down>")
         sys.exit(1)
 
     direction = sys.argv[1]

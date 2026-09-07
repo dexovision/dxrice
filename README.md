@@ -1,4 +1,4 @@
-# Hyprland Infinite Desktop Rice
+# DXrice
 
 A fully configured, Lua-based Hyprland environment optimized for performance, modularity, and an interactive "Infinite Desktop" workflow. Managed clean via Git.
 
@@ -22,11 +22,11 @@ yay -S --needed nwg-look
 
 ## Quick Start Installation
 
-Clone the repository (it must land at `~/dotfiles-rice` -- the theme engine hardcodes that path) and run the installer:
+Clone the repository (it must land at `~/dxrice` -- the theme engine hardcodes that path) and run the installer:
 
 ```bash
-git clone https://github.com/dexovision/hyprland-rice.git ~/dotfiles-rice
-cd ~/dotfiles-rice
+git clone https://github.com/dexovision/dxrice.git ~/dxrice
+cd ~/dxrice
 chmod +x install.sh
 ./install.sh
 ```
@@ -40,16 +40,16 @@ What `./install.sh` does on a fresh machine:
 ## Updating
 
 ```bash
-cd ~/dotfiles-rice
+cd ~/dxrice
 ./install.sh update
 ```
 
-This pulls the latest commit (auto-stashing and restoring any uncommitted local changes in the repo, e.g. `theme.json` edits made through the GUI, around the pull so they aren't lost or blocked) and then re-deploys. The re-deploy is guarded by a small manifest at `~/.local/state/hyprland-rice/manifest.json` that remembers the hash of every file it last wrote:
+This pulls the latest commit (auto-stashing and restoring any uncommitted local changes in the repo, e.g. `theme.json` edits made through the GUI, around the pull so they aren't lost or blocked) and then re-deploys. The re-deploy is guarded by a small manifest at `~/.local/state/dxrice/manifest.json` that remembers the hash of every file it last wrote:
 
 * If a live file (in `~/.config/...` or `~/scripts/`) still matches what was last deployed, it's safely updated to the new version.
 * If you've hand-edited that file since -- it's **left alone** and reported as skipped, never silently overwritten. The output tells you exactly which files were skipped so you can diff and merge by hand if you want the new version.
-* The very first deploy of a pre-existing, unmanaged file (e.g. running the installer on a machine that already had a `~/.config/waybar/config` from something else) backs the old one up under `~/.local/state/hyprland-rice/backups/` before taking it over.
-* `hyprland.lua` is a special case: it's the most hand-edited file in the whole rice (keybinds, autostart, monitor setup), so it is **only ever copied in once**, on a completely fresh install where no live copy exists yet. After that, `update` never touches it -- new theme colors/blur values still reach it through `apply_theme.py`'s narrow, line-by-line patch (see Theming below), but nothing else about it is ever auto-changed. If a rice update adds new default keybinds, check the repo's `hypr/hyprland.lua` by hand and copy over what you want.
+* The very first deploy of a pre-existing, unmanaged file (e.g. running the installer on a machine that already had a `~/.config/waybar/config` from something else) backs the old one up under `~/.local/state/dxrice/backups/` before taking it over.
+* `hyprland.lua` is a special case: it's the most hand-edited file in the whole rice (keybinds, autostart, monitor setup), so it is **only ever copied in once**, on a completely fresh install where no live copy exists yet. After that, `update` never touches it -- new theme colors/blur values still reach it through `dxrice_apply_theme.py`'s narrow, line-by-line patch (see Theming below), but nothing else about it is ever auto-changed. If a rice update adds new default keybinds, check the repo's `hypr/hyprland.lua` by hand and copy over what you want.
 
 ---
 
@@ -85,18 +85,18 @@ The custom Infinite Desktop navigation engine and taskbar management are powered
 
 ## Theming (GUI Settings App)
 
-Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, and wallpaper — is controlled from one place: `~/dotfiles-rice/theme/theme.json`. Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`~/scripts/theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
+Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, and wallpaper — is controlled from one place: `~/dxrice/theme/theme.json`. Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`~/scripts/dxrice_theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
 
 How it works:
 * `theme/theme.json` is the single source of truth for every themeable value.
 * `theme/*.template` files (waybar, wofi, mako, kitty, hyprlock) are plain configs with `${TOKEN}` placeholders.
-* `~/scripts/apply_theme.py` renders those templates into the real `~/.config/...` files, patches the color/decoration block of `hyprland.lua` in place (regex, so your keybinds and autostart are untouched), and hot-reloads waybar, mako, kitty, and Hyprland — no session restart needed.
+* `~/scripts/dxrice_apply_theme.py` renders those templates into the real `~/.config/...` files, patches the color/decoration block of `hyprland.lua` in place (regex, so your keybinds and autostart are untouched), and hot-reloads waybar, mako, kitty, and Hyprland — no session restart needed.
 * The GUI is just a front-end over that same script: tweak a color/slider, hit **Apply**, everything reloads live.
 * **Presets:** four built-in looks (Glass Charcoal, Nord, Dracula, Sunset) plus save/load your own from the Presets section at the top of the settings window.
 
 To theme by hand instead of via the GUI, edit `theme/theme.json` directly and run:
 ```bash
-python3 ~/scripts/apply_theme.py
+python3 ~/scripts/dxrice_apply_theme.py
 ```
 
 ---
@@ -104,9 +104,9 @@ python3 ~/scripts/apply_theme.py
 ## Customization & Tweaks
 
 ### Taskbar & Window Management
-* `manage-taskbar.sh` (`SUPER + Shift + A`) manages the waybar app shortcuts on the left side of the bar. It always syncs its changes back into `~/dotfiles-rice/waybar/config` so they survive an `install.sh update`.
+* `dxrice-manage-taskbar.sh` (`SUPER + Shift + A`) manages the waybar app shortcuts on the left side of the bar. It always syncs its changes back into `~/dxrice/waybar/config` so they survive an `install.sh update`.
 * **Add app shortcut (browse installed apps):** scans `/usr/share/applications` and `~/.local/share/applications`, lets you search/pick by name, and pulls the real command straight from the `.desktop` file -- no typing exec paths by hand.
-* **Icons, not text labels:** every shortcut shows a real Nerd Font glyph (via `~/scripts/rice_icons.py`, matched against the app's name/command) instead of a plain text button, with the app name shown on hover as a tooltip. Falls back to a generic window icon for anything unrecognized.
+* **Icons, not text labels:** every shortcut shows a real Nerd Font glyph (via `~/scripts/dxrice_icons.py`, matched against the app's name/command) instead of a plain text button, with the app name shown on hover as a tooltip. Falls back to a generic window icon for anything unrecognized.
 * **Fix icons on existing shortcuts:** a one-shot menu option that re-derives icons for shortcuts you already added under the old text-label behavior.
 * Taskbar window switching and reordering work dynamically across tiled and floating workspace layouts.
 

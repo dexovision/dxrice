@@ -25,7 +25,7 @@ fi
 echo "== Active window: $ADDR =="
 echo
 
-echo "== Testing move to (100, 100) with the syntax hypr_ipc.py uses =="
+echo "== Testing move to (100, 100) with the syntax dxrice_hypr_ipc.py uses =="
 OUT=$(hyprctl dispatch "hl.dsp.window.move({ window = \"address:$ADDR\", coords = { 100, 100 }, mode = \"exact\" })" 2>&1)
 echo "$OUT"
 if echo "$OUT" | grep -qi "error"; then
@@ -57,4 +57,4 @@ fi
 
 echo
 echo "== Once you confirm the correct field names, edit ONLY these two functions"
-echo "   in hypr_ipc.py: move_window_exact_lua() and resize_window_exact_lua()"
+echo "   in dxrice_hypr_ipc.py: move_window_exact_lua() and resize_window_exact_lua()"

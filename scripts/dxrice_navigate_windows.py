@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-navigate_windows.py
+dxrice_navigate_windows.py
 Navigates between windows in the active workspace using Super+arrows.
 
 - Floating: moves all windows to center the target (infinite canvas)
 - Tiled master: movefocus l/r/u/d
 - Tiled dwindle: movefocus left/right/up/down
 
-Usage: python3 navigate_windows.py <left|right|up|down>
+Usage: python3 dxrice_navigate_windows.py <left|right|up|down>
 """
 
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hypr_ipc import hyprctl_json, move_focus, move_window_exact_lua, focus_window, batch_async
+from dxrice_hypr_ipc import hyprctl_json, move_focus, move_window_exact_lua, focus_window, batch_async
 
 PROTECTED_APPS = ['brave-browser', 'chromium', 'chromium-browser', 'google-chrome',
                   'firefox', 'firefoxdeveloperedition', 'librewolf', 'vivaldi',
@@ -129,7 +129,7 @@ def pan_to_window(floating, target_addr, center_x, center_y):
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
-        print("Usage: navigate_windows.py <left|right|up|down>")
+        print("Usage: dxrice_navigate_windows.py <left|right|up|down>")
         sys.exit(1)
 
     direction = sys.argv[1]

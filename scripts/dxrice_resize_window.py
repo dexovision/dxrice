@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-resize_window.py
+dxrice_resize_window.py
 Resizes the active floating window 90px from the right/bottom edge.
 
 left/right -> changes width
 up/down    -> changes height
 
-Usage: python3 resize_window.py <left|right|up|down>
+Usage: python3 dxrice_resize_window.py <left|right|up|down>
 """
 
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hypr_ipc import hyprctl_json, resize_window_exact
+from dxrice_hypr_ipc import hyprctl_json, resize_window_exact
 
 STEP = 90
 MIN_SIZE = 100
@@ -21,7 +21,7 @@ MIN_SIZE = 100
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
-        print("Usage: resize_window.py <left|right|up|down>")
+        print("Usage: dxrice_resize_window.py <left|right|up|down>")
         sys.exit(1)
 
     direction = sys.argv[1]

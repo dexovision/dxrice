@@ -2,7 +2,7 @@ import sys, struct, threading, time, subprocess, json, os
 from evdev import InputDevice, list_devices, ecodes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hypr_ipc import move_window_exact_lua, batch_async
+from dxrice_hypr_ipc import move_window_exact_lua, batch_async
 
 speed = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
 

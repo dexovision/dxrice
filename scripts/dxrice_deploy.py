@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploys repo files into ~/.config and ~/scripts, guarded by rice_manifest
+"""Deploys repo files into ~/.config and ~/scripts, guarded by dxrice_manifest
 so a file you've hand-edited since the last deploy is never clobbered.
 
 Used by install.sh for both the first install and `install.sh update`.
@@ -7,16 +7,16 @@ hyprland.lua is intentionally excluded from the generic guard below: it's
 the most hand-edited file in the rice (keybinds, autostart, monitor setup),
 so it is only ever copied in on a brand new install (when no live copy
 exists yet) and otherwise left completely alone. Theme colors still reach
-it via apply_theme.py's narrow, line-level patch -- not this script.
+it via dxrice_apply_theme.py's narrow, line-level patch -- not this script.
 
-Usage: rice_deploy.py <repo_dir>
+Usage: dxrice_deploy.py <repo_dir>
 """
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import rice_manifest
+import dxrice_manifest
 
 HOME = Path.home()
 
@@ -38,7 +38,7 @@ def deploy_scripts(repo_dir: Path, manifest: dict, results: dict):
         if src.suffix not in (".py", ".sh"):
             continue
         dst = dst_dir / src.name
-        result = rice_manifest.deploy_file(dst, src.read_bytes(), manifest)
+        result = dxrice_manifest.deploy_file(dst, src.read_bytes(), manifest)
         results[str(dst)] = result
         if result != "skipped-modified":
             dst.chmod(0o755)
@@ -49,7 +49,7 @@ def deploy_static(repo_dir: Path, manifest: dict, results: dict):
         src = repo_dir / rel
         if not src.is_file():
             continue
-        result = rice_manifest.deploy_file(dst, src.read_bytes(), manifest)
+        result = dxrice_manifest.deploy_file(dst, src.read_bytes(), manifest)
         results[str(dst)] = result
 
 
@@ -63,7 +63,7 @@ def deploy_hyprland_lua(repo_dir: Path, manifest: dict, results: dict):
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_bytes(src.read_bytes())
-    rice_manifest.mark_deployed(dst, manifest)
+    dxrice_manifest.mark_deployed(dst, manifest)
     results[str(dst)] = "installed"
 
 
@@ -97,18 +97,18 @@ def print_summary(results: dict):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: rice_deploy.py <repo_dir>", file=sys.stderr)
+        print("Usage: dxrice_deploy.py <repo_dir>", file=sys.stderr)
         sys.exit(1)
     repo_dir = Path(sys.argv[1]).expanduser().resolve()
 
-    manifest = rice_manifest.load_manifest()
+    manifest = dxrice_manifest.load_manifest()
     results = {}
 
     deploy_hyprland_lua(repo_dir, manifest, results)
     deploy_static(repo_dir, manifest, results)
     deploy_scripts(repo_dir, manifest, results)
 
-    rice_manifest.save_manifest(manifest)
+    dxrice_manifest.save_manifest(manifest)
     print_summary(results)
 
 

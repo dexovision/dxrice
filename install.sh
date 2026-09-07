@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installer / updater for the hyprland-rice dotfiles.
+# Installer / updater for the DXrice dotfiles.
 #
 #   ./install.sh            fresh install: deps, input group, monitor
 #                            detection, deploy everything
@@ -23,9 +23,9 @@ PACMAN_PACKAGES=(hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-
     python-gobject gtk4 libadwaita)
 AUR_PACKAGES=(nwg-look)
 
-if [ "$REPO_DIR" != "$HOME/dotfiles-rice" ]; then
-    echo "WARNING: this checkout is at $REPO_DIR, not ~/dotfiles-rice."
-    echo "The theme engine (apply_theme.py, theme_gui.py) assumes ~/dotfiles-rice"
+if [ "$REPO_DIR" != "$HOME/dxrice" ]; then
+    echo "WARNING: this checkout is at $REPO_DIR, not ~/dxrice."
+    echo "The theme engine (dxrice_apply_theme.py, dxrice_theme_gui.py) assumes ~/dxrice"
     echo "and will not find your templates/theme.json from anywhere else."
     echo ""
 fi
@@ -104,11 +104,11 @@ PYEOF
 do_deploy() {
     echo "==> Deploying configs (anything you've hand-edited is protected)..."
     mkdir -p ~/.config/{hypr,kitty,waybar,mako,wofi} ~/scripts
-    python3 "$REPO_DIR/scripts/rice_deploy.py" "$REPO_DIR"
+    python3 "$REPO_DIR/scripts/dxrice_deploy.py" "$REPO_DIR"
 
     echo ""
     echo "==> Rendering theme (waybar/wofi/mako/kitty/hyprlock from theme.json)..."
-    python3 "$REPO_DIR/scripts/apply_theme.py" "$REPO_DIR/theme/theme.json" || true
+    python3 "$REPO_DIR/scripts/dxrice_apply_theme.py" "$REPO_DIR/theme/theme.json" || true
 }
 
 do_install() {

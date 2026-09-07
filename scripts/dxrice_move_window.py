@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-move_window.py
+dxrice_move_window.py
 Moves the active floating window 90px in the given direction.
 If it hits a monitor edge, pushes the other windows the opposite way.
 
-Usage: python3 move_window.py <left|right|up|down>
+Usage: python3 dxrice_move_window.py <left|right|up|down>
 """
 
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hypr_ipc import hyprctl_json, move_window_exact_lua, batch_async, dispatch
+from dxrice_hypr_ipc import hyprctl_json, move_window_exact_lua, batch_async, dispatch
 
 STEP = 90
 
@@ -39,7 +39,7 @@ def get_floating_windows(workspace_id):
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
-        print("Usage: move_window.py <left|right|up|down>")
+        print("Usage: dxrice_move_window.py <left|right|up|down>")
         sys.exit(1)
 
     direction = sys.argv[1]
