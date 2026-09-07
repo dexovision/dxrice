@@ -39,10 +39,6 @@ button {
 
 /* Base style for modules matching taskbar/clock */
 #clock,
-#pulseaudio,
-#network,
-#cpu,
-#memory,
 #tray,
 #image,
 .modules-left widget > * {
@@ -60,6 +56,37 @@ button {
    corner radius as everything else, sized to match icon shortcuts. */
 #image {
     padding: 2px;
+}
+
+/* Quick Settings cluster: volume/wifi/cpu/ram grouped into one pill
+   instead of four separate floating chips, clicking any segment opens
+   the dxrice_quick_settings.py panel. */
+#quicksettings {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+    border-radius: ${RADIUS}px;
+    margin: 2px 2px;
+    padding: 0 2px;
+    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+#quicksettings widget > * {
+    background: none;
+    border: none;
+    color: ${TEXT_COLOR};
+    padding: 4px 10px;
+    margin: 2px 0;
+    transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+#quicksettings widget > *:hover {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.15);
+    border-radius: ${ENTRY_RADIUS}px;
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+#quicksettings:hover {
+    border-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE});
 }
 
 /* Force active/focused GTK button states to stay dark */

@@ -30,7 +30,7 @@ PACMAN_PACKAGES=(hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-
     networkmanager network-manager-applet bluez bluez-utils blueman
     ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent
     python python-evdev jq brightnessctl playerctl
-    python-gobject gtk4 libadwaita)
+    python-gobject gtk4 libadwaita gtk4-layer-shell)
 AUR_PACKAGES=(nwg-look)
 
 SKIP_DEPS=0
@@ -317,6 +317,7 @@ verify_deploy() {
         "$REPO_DIR/scripts/dxrice_taskbar_gui.py"
         "$REPO_DIR/scripts/dxrice_theme_gui.py"
         "$REPO_DIR/scripts/dxrice_apply_theme.py"
+        "$REPO_DIR/scripts/dxrice_quick_settings.py"
     )
     local all_ok=1
     for f in "${required[@]}"; do

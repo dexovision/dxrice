@@ -19,12 +19,18 @@
         "clock"
     ],
     "modules-right": [
-        "pulseaudio",
-        "network",
-        "cpu",
-        "memory",
+        "group/quicksettings",
         "tray"
     ],
+    "group/quicksettings": {
+        "orientation": "horizontal",
+        "modules": [
+            "pulseaudio",
+            "network",
+            "cpu",
+            "memory"
+        ]
+    },
     "custom/launcher": {
         "format": "\udb82\udcc7",
         "on-click": "wofi --show drun",
@@ -64,19 +70,21 @@
     "pulseaudio": {
         "format": "Vol {volume}%",
         "format-muted": "Muted",
-        "on-click": "pavucontrol"
+        "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
     },
     "network": {
         "format-wifi": "Wifi {signalStrength}%",
         "format-ethernet": "Ethernet",
         "format-disconnected": "Offline",
-        "on-click": "nm-connection-editor"
+        "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
     },
     "cpu": {
-        "format": "CPU {usage}%"
+        "format": "CPU {usage}%",
+        "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
     },
     "memory": {
-        "format": "RAM {percentage}%"
+        "format": "RAM {percentage}%",
+        "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
     },
     "custom/sober": {
         "format": "\uf11b",

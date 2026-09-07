@@ -116,7 +116,15 @@ python3 <repo>/scripts/dxrice_apply_theme.py
 * **Add shortcut:** the `+` button opens a searchable list of every installed `.desktop` app (scanned from `/usr/share/applications` and `~/.local/share/applications`) -- click one to add it, with the real command pulled straight from the `.desktop` file. There's also a plain name + command field underneath for anything not in that list.
 * **Show icons toggle:** an Options switch at the top of the window. On, every shortcut shows a real Nerd Font glyph (via `<repo>/scripts/dxrice_icons.py`, matched against the app's name/command), falling back to a generic glyph for anything unrecognized. Off, every shortcut shows its plain name as text instead -- flipping it re-derives every existing shortcut immediately, no need to re-add them.
 * Reorder shortcuts with the up/down arrows on each row, or remove one with the trash icon. The app launcher shortcut itself is pinned and can't be reordered or removed.
+* **Per-shortcut icon mode:** expand any shortcut's row for a dropdown -- Automatic (follows the global switch above), Text label (always plain text), or Custom image. Custom image renders as a real waybar `image#` picture module (waybar's text-based shortcuts can't show pictures), copied into `~/.config/waybar/icons/` so it survives the original file moving.
+* **System Modules section:** edit left/right-click commands on the clock/volume/network/CPU/RAM modules directly, plus a "Mic mute button" switch that adds/removes a real mute toggle using `wpctl`.
 * Taskbar window switching and reordering work dynamically across tiled and floating workspace layouts.
+
+### Quick Settings Panel
+
+Clicking the volume/wifi/CPU/RAM cluster on the right side of the bar (grouped into one pill) opens `dxrice_quick_settings.py` -- a control-center-style panel docked under the top-right corner via `gtk4-layer-shell` (an extra dependency `install.sh` installs) instead of a normal window. Clicking the cluster again closes it instead of opening a duplicate.
+
+Sections: output volume + device picker, microphone volume + mute + device picker, screen brightness (only shown if a backlight actually exists), Wi-Fi (toggle, network list, click to connect -- prompts for a password only for a network with no saved connection yet), Bluetooth (toggle, paired device list with connect/disconnect), live CPU/RAM/disk usage, and power actions (lock, logout, reboot, shutdown -- the last three ask for confirmation first).
 
 ### Wallpaper Management
 * Default image location: `~/Pictures/Wallpapers/default.png`
