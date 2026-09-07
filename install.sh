@@ -241,6 +241,22 @@ check_stale_hyprland_lua() {
     fi
 }
 
+# Narrower companion to check_stale_hyprland_lua: a hyprland.lua already on
+# the current repo-path scheme (so the check above leaves it alone) can
+# still predate a later change to one specific bind -- e.g. the taskbar
+# manager moving from a kitty-terminal script to a GUI. Patches just that
+# one line in place, leaving every other keybind/customization untouched.
+migrate_taskbar_bind() {
+    local f="$HOME/.config/hypr/hyprland.lua"
+    [ -f "$f" ] || return 0
+    grep -q "dxrice-manage-taskbar.sh" "$f" 2>/dev/null || return 0
+
+    info "Updating your SUPER+SHIFT+A bind to the new taskbar GUI..."
+    sed -i -E \
+        's#hl\.dsp\.exec_cmd\("kitty -e " \.\. repo \.\. "/scripts/dxrice-manage-taskbar\.sh"\)#hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_taskbar_gui.py")#' \
+        "$f"
+}
+
 detect_monitor() {
     local target="$HOME/.config/hypr/hyprland.lua"
     command -v hyprctl >/dev/null 2>&1 || { warn "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
@@ -298,7 +314,7 @@ verify_deploy() {
         "$HOME/.config/hypr/hyprland.lua"
         "$STATE_DIR/repo_path"
         "$REPO_DIR/scripts/dxrice_infinite_desktop_core.py"
-        "$REPO_DIR/scripts/dxrice-manage-taskbar.sh"
+        "$REPO_DIR/scripts/dxrice_taskbar_gui.py"
         "$REPO_DIR/scripts/dxrice_theme_gui.py"
         "$REPO_DIR/scripts/dxrice_apply_theme.py"
     )
@@ -354,6 +370,7 @@ do_install() {
 
     step "Step 4/4 -- Deploying your rice"
     check_stale_hyprland_lua
+    migrate_taskbar_bind
     local hypr_existed=0
     [ -f "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
 
@@ -436,6 +453,7 @@ do_update() {
 
     step "Redeploying"
     check_stale_hyprland_lua
+    migrate_taskbar_bind
     local hypr_existed=0
     [ -s "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
 

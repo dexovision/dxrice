@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nerd Font glyph lookup for common desktop apps, used by manage-taskbar.sh
+"""Nerd Font glyph lookup for common desktop apps, used by dxrice_taskbar_gui.py
 to show real icons on taskbar shortcuts instead of plain text labels."""
 
 ICON_TABLE = [

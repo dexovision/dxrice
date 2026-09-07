@@ -168,7 +168,7 @@ end
 hl.window_rule({ name = "kitty-glass", match = { class = "kitty" }, opacity = "0.82 override 0.75 override" })
 hl.window_rule({ name = "float-everything", match = { class = ".*" }, float = true })
 
-hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("kitty -e " .. repo .. "/scripts/dxrice-manage-taskbar.sh"))
+hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_taskbar_gui.py"))
 hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_theme_gui.py"))
 
 hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "-1" }))

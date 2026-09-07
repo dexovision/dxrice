@@ -112,10 +112,10 @@ python3 <repo>/scripts/dxrice_apply_theme.py
 ## Customization & Tweaks
 
 ### Taskbar & Window Management
-* `dxrice-manage-taskbar.sh` (`SUPER + Shift + A`) manages the waybar app shortcuts on the left side of the bar. It always syncs its changes back into `<repo>/waybar/config` so they survive an `install.sh update`.
-* **Add app shortcut (browse installed apps):** scans `/usr/share/applications` and `~/.local/share/applications`, lets you search/pick by name, and pulls the real command straight from the `.desktop` file -- no typing exec paths by hand.
-* **Icons, not text labels:** every shortcut shows a real Nerd Font glyph (via `<repo>/scripts/dxrice_icons.py`, matched against the app's name/command) instead of a plain text button, with the app name shown on hover as a tooltip. Falls back to a generic window icon for anything unrecognized.
-* **Fix icons on existing shortcuts:** a one-shot menu option that re-derives icons for shortcuts you already added under the old text-label behavior.
+* `dxrice_taskbar_gui.py` (`SUPER + Shift + A`) is a native GTK4/Adwaita settings window -- the same style as the theme GUI below -- for managing the waybar app shortcuts on the left side of the bar. Every change (add, remove, reorder, the icons toggle) applies and restarts waybar immediately, and is synced back into `<repo>/waybar/config` so it survives an `install.sh update`.
+* **Add shortcut:** the `+` button opens a searchable list of every installed `.desktop` app (scanned from `/usr/share/applications` and `~/.local/share/applications`) -- click one to add it, with the real command pulled straight from the `.desktop` file. There's also a plain name + command field underneath for anything not in that list.
+* **Show icons toggle:** an Options switch at the top of the window. On, every shortcut shows a real Nerd Font glyph (via `<repo>/scripts/dxrice_icons.py`, matched against the app's name/command), falling back to a generic glyph for anything unrecognized. Off, every shortcut shows its plain name as text instead -- flipping it re-derives every existing shortcut immediately, no need to re-add them.
+* Reorder shortcuts with the up/down arrows on each row, or remove one with the trash icon. The app launcher shortcut itself is pinned and can't be reordered or removed.
 * Taskbar window switching and reordering work dynamically across tiled and floating workspace layouts.
 
 ### Wallpaper Management
