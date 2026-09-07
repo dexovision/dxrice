@@ -503,41 +503,117 @@ def get_cached_workspace_id():
             pass
     return _cached_workspace_id
 
+# Cache de posiciones de ventanas flotantes durante el arrastre.
+
+# Antes: se llamaba 'hyprctl clients -j' de forma SINCRONA en cada frame (60/seg),
+
+# lo cual satura el socket IPC de Hyprland bajo carga y causa freezes de un
+
+# segundo al arrastrar. Ahora se cachean posiciones localmente y solo se
+
+# re-consulta hyprctl cada DRAG_CACHE_REFRESH segundos.
+
+DRAG_CACHE_REFRESH = 0.2  # segundos
+
+_drag_cache = {}
+
+_drag_cache_workspace = None
+
+_drag_cache_last_refresh = 0.0
+
+def refresh_drag_cache(workspace_id, force=False):
+
+    global _drag_cache, _drag_cache_workspace, _drag_cache_last_refresh
+
+    now = time.time()
+
+    if (not force
+
+            and workspace_id == _drag_cache_workspace
+
+            and (now - _drag_cache_last_refresh) < DRAG_CACHE_REFRESH):
+
+        return
+
+    try:
+
+        r = subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True, text=True, timeout=0.1)
+
+        clients = json.loads(r.stdout)
+
+        _drag_cache = {
+
+            w['address']: [w['at'][0], w['at'][1]]
+
+            for w in clients
+
+            if w.get('floating') and w.get('workspace', {}).get('id') == workspace_id
+
+        }
+
+        _drag_cache_workspace = workspace_id
+
+        _drag_cache_last_refresh = now
+
+    except Exception:
+
+        pass
+
 # Loop principal para arrastre de escritorio
+
 while True:
+
     time.sleep(0.016)
 
     with lock:
+
         active_drag = super_pressed and alt_pressed
+
         dx = acc_x
+
         dy = acc_y
+
         acc_x = 0.0
+
         acc_y = 0.0
 
     if not active_drag:
+
+        _drag_cache_workspace = None  # forzar refresh limpio en el proximo arrastre
+
         continue
 
     idx = int(round(dx))
+
     idy = int(round(dy))
 
-    if idx == 0 and idy == 0:
-        continue
-
     try:
+
         workspace_id = get_cached_workspace_id()
+
         if workspace_id is None:
+
             continue
 
-        r = subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True, text=True, timeout=0.1)
-        clients = json.loads(r.stdout)
+        refresh_drag_cache(workspace_id)
+
+        if idx == 0 and idy == 0:
+
+            continue
 
         exprs = []
-        for w in clients:
-            if w.get('floating') and w.get('workspace', {}).get('id') == workspace_id:
-                nx = w['at'][0] + idx
-                ny = w['at'][1] + idy
-                exprs.append(move_window_exact_lua(nx, ny, w['address']))
+
+        for addr, pos in _drag_cache.items():
+
+            pos[0] += idx
+
+            pos[1] += idy
+
+            exprs.append(move_window_exact_lua(pos[0], pos[1], addr))
 
         batch_async(exprs)
-    except Exception as e:
+
+    except Exception:
+
         pass
+
