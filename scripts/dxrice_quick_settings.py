@@ -38,10 +38,17 @@ def _ensure_layer_shell_preloaded():
     os.execvpe(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:], env)
 
 
+# Called here, before `import gi` below, so the (common) case of a missing
+# preload re-execs immediately instead of first paying for a full GTK/Adwaita
+# import in this doomed process and then paying it again in the real one.
+if __name__ == "__main__":
+    _ensure_layer_shell_preloaded()
+
 import re
 import shutil
 import signal
 import subprocess
+import threading
 import time
 
 import gi
@@ -300,6 +307,76 @@ def action_shutdown():
 
 
 # ---------------------------------------------------------------------------
+# Idle inhibit ("Keep Awake")
+# ---------------------------------------------------------------------------
+
+IDLE_INHIBIT_PID_FILE = "/tmp/dxrice-idle-inhibit.pid"
+
+
+def idle_inhibit_active():
+    try:
+        with open(IDLE_INHIBIT_PID_FILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def set_idle_inhibit(enabled):
+    """Holds (or releases) a systemd-logind idle/sleep inhibitor by keeping
+    a systemd-inhibit-wrapped `sleep infinity` alive -- killing that process
+    is systemd-inhibit's normal way of releasing the lock (verified: the
+    inhibitor disappears from `systemd-inhibit --list` right after)."""
+    if enabled:
+        if idle_inhibit_active():
+            return
+        proc = subprocess.Popen(
+            ["systemd-inhibit", "--what=idle:sleep", "--who=DXrice",
+             "--why=Quick Settings Keep Awake", "sleep", "infinity"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        with open(IDLE_INHIBIT_PID_FILE, "w") as f:
+            f.write(str(proc.pid))
+    else:
+        try:
+            with open(IDLE_INHIBIT_PID_FILE) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, signal.SIGTERM)
+        except (OSError, ValueError):
+            pass
+        try:
+            os.remove(IDLE_INHIBIT_PID_FILE)
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Screenshots (grim + slurp)
+# ---------------------------------------------------------------------------
+
+SCREENSHOT_DIR = os.path.join(HOME, "Pictures", "Screenshots")
+
+
+def _screenshot_path():
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    return os.path.join(SCREENSHOT_DIR, f"Screenshot-{time.strftime('%Y%m%d-%H%M%S')}.png")
+
+
+def screenshot_region():
+    path = _screenshot_path()
+    subprocess.Popen(
+        f'geom="$(slurp)" && [ -n "$geom" ] && grim -g "$geom" "{path}" && wl-copy < "{path}"',
+        shell=True,
+    )
+
+
+def screenshot_full():
+    path = _screenshot_path()
+    subprocess.Popen(f'grim "{path}" && wl-copy < "{path}"', shell=True)
+
+
+# ---------------------------------------------------------------------------
 # Media controls (playerctl)
 # ---------------------------------------------------------------------------
 
@@ -384,12 +461,18 @@ def set_dnd(enabled):
 # UI helpers
 # ---------------------------------------------------------------------------
 
-def _label(text, css_class=None, ellipsize=True, xalign=0.0):
+def _label(text, css_class=None, ellipsize=True, xalign=0.0, max_width_chars=22):
     lbl = Gtk.Label(label=text, xalign=xalign)
     if ellipsize:
         lbl.set_ellipsize(Pango.EllipsizeMode.END)
         lbl.set_hexpand(True)
         lbl.set_halign(Gtk.Align.FILL)
+        # Ellipsize alone only lets GTK's size negotiation shrink this
+        # label below its natural size -- it doesn't reduce what that
+        # natural size IS, so a long clipboard preview or media title
+        # still reports its full, un-truncated width as "natural" and
+        # drags the whole panel wider with it. max_width_chars caps that.
+        lbl.set_max_width_chars(max_width_chars)
     if css_class:
         lbl.add_css_class(css_class)
     return lbl
@@ -399,6 +482,32 @@ def make_card():
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
     box.add_css_class("qs-card")
     return box
+
+
+def run_async(fn, on_done):
+    """Runs fn() off the main thread, then calls on_done(result) back on
+    the GTK main loop. For anything that shells out to a subprocess whose
+    latency scales with real-world state (a wifi scan, one bluetoothctl
+    round-trip per paired device) -- without this, opening the panel
+    blocks until that call returns instead of appearing instantly."""
+    def worker():
+        result = fn()
+        GLib.idle_add(on_done, result)
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def clear_rows(card, rows):
+    for row in rows:
+        card.remove(row)
+    rows.clear()
+
+
+def show_loading(card, rows, text):
+    row = Gtk.Box()
+    row.add_css_class("qs-list-row")
+    row.append(_label(text, "qs-row-subtitle", ellipsize=False))
+    card.append(row)
+    rows.append(row)
 
 
 def make_icon_button(icon_name, tooltip=None):
@@ -432,6 +541,25 @@ def make_toggle_button(icon_name, label_text, active, on_toggled):
         on_toggled(b.get_active())
 
     btn.connect("toggled", _on_toggled)
+    return btn
+
+
+def make_action_button(icon_name, label_text, on_clicked):
+    """Compact icon-over-label button for a one-shot action (as opposed to
+    make_toggle_button's persistent on/off state). Kept to the same
+    vertical layout rather than Adw.ButtonContent's horizontal icon+label
+    -- a longer label ("Full Screen") in a 2-3 column homogeneous row
+    needs real width for a horizontal layout and forces the whole panel
+    wider; stacked, it doesn't."""
+    btn = Gtk.Button()
+    btn.add_css_class("qs-toggle")
+    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, halign=Gtk.Align.CENTER)
+    inner.append(Gtk.Image.new_from_icon_name(icon_name))
+    lbl = Gtk.Label(label=label_text)
+    lbl.add_css_class("caption")
+    inner.append(lbl)
+    btn.set_child(inner)
+    btn.connect("clicked", lambda b: on_clicked())
     return btn
 
 
@@ -489,13 +617,32 @@ def make_slider_row(icon_on, icon_off, initial, muted, on_change, on_mute, devic
     scale.set_range(0, 100)
     scale.set_value(initial)
     scale.set_draw_value(False)
-    scale.connect("value-changed", lambda s: on_change(int(s.get_value())))
     row.append(scale)
 
     pct_label = _label(f"{initial}%", ellipsize=False)
     pct_label.set_width_chars(4)
     pct_label.set_xalign(1.0)
     row.append(pct_label)
+
+    # Debounced: the label/scale still update on every tick while dragging,
+    # but wpctl only actually gets called ~80ms after motion pauses, so a
+    # fast drag doesn't spawn a subprocess per pixel.
+    debounce_id = [None]
+
+    def _on_value_changed(s):
+        v = int(s.get_value())
+        pct_label.set_label(f"{v}%")
+        if debounce_id[0] is not None:
+            GLib.source_remove(debounce_id[0])
+
+        def apply_change():
+            on_change(v)
+            debounce_id[0] = None
+            return False
+
+        debounce_id[0] = GLib.timeout_add(80, apply_change)
+
+    scale.connect("value-changed", _on_value_changed)
 
     if devices and len(devices) > 1 and on_device:
         row.append(make_device_menu_button(devices, on_device))
@@ -533,7 +680,7 @@ class PasswordDialog(Adw.Window):
 # Main panel
 # ---------------------------------------------------------------------------
 
-PANEL_WIDTH = 320
+PANEL_WIDTH = 390
 
 
 class QuickSettingsWindow(Adw.ApplicationWindow):
@@ -588,6 +735,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         self._build_wifi_card(content)
         self._build_bluetooth_card(content)
         self._build_clipboard_card(content)
+        self._build_screenshot_card(content)
         self._build_stats_card(content)
         self._build_power_card(content)
 
@@ -603,6 +751,8 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
                                        wifi_radio_enabled(), self._on_wifi_toggle))
         box.append(make_toggle_button("bluetooth-active-symbolic", "Bluetooth",
                                        bluetooth_powered(), self._on_bt_toggle))
+        box.append(make_toggle_button("weather-clear-night-symbolic", "Awake",
+                                       idle_inhibit_active(), self._on_idle_inhibit_toggle))
         self._mako_available = mako_running()
         if self._mako_available:
             box.append(make_toggle_button("notifications-disabled-symbolic", "DND",
@@ -620,6 +770,21 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
 
     def _on_dnd_toggle(self, active):
         set_dnd(active)
+
+    def _on_idle_inhibit_toggle(self, active):
+        set_idle_inhibit(active)
+
+    # ---- screenshots ----
+
+    def _build_screenshot_card(self, content):
+        card = make_card()
+        box = Gtk.Box(spacing=6, homogeneous=True)
+        box.append(make_action_button("edit-cut-symbolic", "Region",
+                                       lambda: (self.close(), screenshot_region())))
+        box.append(make_action_button("view-fullscreen-symbolic", "Full Screen",
+                                       lambda: (self.close(), screenshot_full())))
+        card.append(box)
+        content.append(card)
 
     # ---- media (playerctl) ----
 
@@ -706,8 +871,29 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         scale.set_range(1, 100)
         scale.set_value(get_brightness_percent())
         scale.set_draw_value(False)
-        scale.connect("value-changed", lambda s: set_brightness_percent(int(s.get_value())))
         row.append(scale)
+
+        pct_label = _label(f"{get_brightness_percent()}%", ellipsize=False)
+        pct_label.set_width_chars(4)
+        pct_label.set_xalign(1.0)
+        row.append(pct_label)
+
+        debounce_id = [None]
+
+        def _on_value_changed(s):
+            v = int(s.get_value())
+            pct_label.set_label(f"{v}%")
+            if debounce_id[0] is not None:
+                GLib.source_remove(debounce_id[0])
+
+            def apply_change():
+                set_brightness_percent(v)
+                debounce_id[0] = None
+                return False
+
+            debounce_id[0] = GLib.timeout_add(80, apply_change)
+
+        scale.connect("value-changed", _on_value_changed)
         card.append(row)
         content.append(card)
 
@@ -724,14 +910,20 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         return False
 
     def _rebuild_wifi_card(self):
-        for w in self._wifi_row_widgets:
-            self.wifi_card.remove(w)
-        self._wifi_row_widgets = []
+        clear_rows(self.wifi_card, self._wifi_row_widgets)
         enabled = wifi_radio_enabled()
         self.wifi_card.set_visible(enabled)
         if not enabled:
             return
-        for ssid, sig, security, connected in list_wifi_networks()[:8]:
+        # A wifi scan can take a real amount of time -- show a placeholder
+        # and fetch the list off the main thread so the window still opens
+        # instantly instead of freezing until nmcli returns.
+        show_loading(self.wifi_card, self._wifi_row_widgets, "Scanning...")
+        run_async(lambda: list_wifi_networks()[:8], self._on_wifi_networks_ready)
+
+    def _on_wifi_networks_ready(self, networks):
+        clear_rows(self.wifi_card, self._wifi_row_widgets)
+        for ssid, sig, security, connected in networks:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             row.add_css_class("qs-list-row")
             icon_name = ("network-wireless-signal-excellent-symbolic" if sig > 70 else
@@ -749,6 +941,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
                 row.append(btn)
             self.wifi_card.append(row)
             self._wifi_row_widgets.append(row)
+        return False
 
     def _on_wifi_connect_clicked(self, ssid, security):
         needs_password = bool(security and security != "--") and not has_saved_connection(ssid)
@@ -775,21 +968,26 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         return False
 
     def _rebuild_bt_card(self):
-        for w in self._bt_row_widgets:
-            self.bt_card.remove(w)
-        self._bt_row_widgets = []
+        clear_rows(self.bt_card, self._bt_row_widgets)
         enabled = bluetooth_powered()
         self.bt_card.set_visible(enabled)
         if not enabled:
             return
-        devices = list_bluetooth_devices()
+        # list_bluetooth_devices() runs a separate `bluetoothctl info` per
+        # paired device -- with several devices that's easily a
+        # multi-second block if done synchronously during window setup.
+        show_loading(self.bt_card, self._bt_row_widgets, "Loading devices...")
+        run_async(list_bluetooth_devices, self._on_bt_devices_ready)
+
+    def _on_bt_devices_ready(self, devices):
+        clear_rows(self.bt_card, self._bt_row_widgets)
         if not devices:
             row = Gtk.Box()
             row.add_css_class("qs-list-row")
             row.append(_label("No paired devices", "qs-row-subtitle"))
             self.bt_card.append(row)
             self._bt_row_widgets.append(row)
-            return
+            return False
         for mac, name, connected in devices:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             row.add_css_class("qs-list-row")
@@ -801,6 +999,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
             row.append(btn)
             self.bt_card.append(row)
             self._bt_row_widgets.append(row)
+        return False
 
     def _on_bt_connect_clicked(self, mac, currently_connected):
         bluetooth_connect(mac, connect=not currently_connected)
@@ -985,5 +1184,4 @@ def main():
 
 
 if __name__ == "__main__":
-    _ensure_layer_shell_preloaded()
     main()
