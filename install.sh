@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # Installer / updater for the DXrice dotfiles.
 #
-#   ./install.sh            fresh install: deps, input group, monitor
-#                            detection, deploy everything
+#   ./install.sh            fresh install: sanity checks, deps, input group,
+#                            monitor detection, deploy everything
 #   ./install.sh update     git pull (auto-stashing local repo edits like
 #                            theme.json tweaks), then re-deploy -- any file
 #                            you've hand-edited in ~/.config or ~/scripts
 #                            since the last deploy is left alone, not
 #                            overwritten
-set -e
+#   ./install.sh help       show this usage text
+#
+# Can be cloned to any path/name you like -- it records its own location in
+# ~/.local/state/dxrice/repo_path so the theme engine and taskbar manager
+# can find it later, wherever that ends up being.
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+REPO_DIR="$SCRIPT_DIR"
+STATE_DIR="$HOME/.local/state/dxrice"
 MODE="${1:-install}"
 
 PACMAN_PACKAGES=(hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland
@@ -23,27 +29,116 @@ PACMAN_PACKAGES=(hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-
     python-gobject gtk4 libadwaita)
 AUR_PACKAGES=(nwg-look)
 
-if [ "$REPO_DIR" != "$HOME/dxrice" ]; then
-    echo "WARNING: this checkout is at $REPO_DIR, not ~/dxrice."
-    echo "The theme engine (dxrice_apply_theme.py, dxrice_theme_gui.py) assumes ~/dxrice"
-    echo "and will not find your templates/theme.json from anywhere else."
-    echo ""
+SKIP_DEPS=0
+INPUT_GROUP_JUST_ADDED=0
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
+    C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_CYAN=$'\033[36m'
+else
+    C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_CYAN=""
 fi
 
+step() { echo ""; echo "${C_BOLD}${C_CYAN}==> $*${C_RESET}"; }
+ok()   { echo "${C_GREEN}  [OK]${C_RESET}    $*"; }
+warn() { echo "${C_YELLOW}  [!]${C_RESET}     $*"; }
+err()  { echo "${C_RED}  [ERROR]${C_RESET}  $*" >&2; }
+info() { echo "  $*"; }
+
+banner() {
+    echo "${C_BOLD}${C_CYAN}DXrice${C_RESET} ${C_DIM}-- Hyprland rice installer${C_RESET}"
+    echo "${C_DIM}Checkout: $REPO_DIR${C_RESET}"
+}
+
+usage() {
+    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+# ask_yes_no "prompt" DEFAULT   (DEFAULT is Y or N)
+ask_yes_no() {
+    local prompt="$1" default="$2" suffix reply
+    if [ "$default" = "Y" ]; then suffix="[Y/n]"; else suffix="[y/N]"; fi
+    if [ ! -t 0 ]; then
+        info "$prompt $suffix -> no terminal attached, defaulting to '$default'"
+        reply="$default"
+    else
+        read -rp "$prompt $suffix " reply
+        reply="${reply:-$default}"
+    fi
+    [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# ---------------------------------------------------------------------------
+# Sanity checks
+# ---------------------------------------------------------------------------
+
+require_repo_layout() {
+    if [ ! -d "$REPO_DIR/scripts" ] || [ ! -d "$REPO_DIR/theme" ]; then
+        err "This doesn't look like a full DXrice checkout."
+        info "Expected to find '$REPO_DIR/scripts' and '$REPO_DIR/theme' next to install.sh,"
+        info "but at least one is missing. If you only downloaded install.sh by itself"
+        info "(e.g. via a raw-file link), that won't work -- clone the whole repository:"
+        info ""
+        info "  git clone <repo-url> dxrice"
+        info "  cd dxrice"
+        info "  ./install.sh"
+        exit 1
+    fi
+}
+
+check_not_root() {
+    if [ "$(id -u)" = "0" ]; then
+        err "Don't run this as root."
+        info "It deploys into your own \$HOME and only calls sudo for the specific"
+        info "pacman/usermod commands that actually need it."
+        exit 1
+    fi
+}
+
+check_platform() {
+    if ! command -v pacman >/dev/null 2>&1; then
+        warn "pacman not found -- this installer targets Arch Linux (or an Arch-based distro)."
+        info "You can still continue: dependency checks/installs will just be skipped, and"
+        info "you'll need to make sure Hyprland, waybar, wofi, mako, kitty, python-gobject,"
+        info "gtk4, libadwaita, etc. are already installed yourself."
+        if ! ask_yes_no "Continue anyway?" N; then
+            exit 1
+        fi
+        SKIP_DEPS=1
+    fi
+}
+
+record_repo_path() {
+    mkdir -p "$STATE_DIR"
+    printf '%s\n' "$REPO_DIR" > "$STATE_DIR/repo_path"
+}
+
+# ---------------------------------------------------------------------------
+# Install steps
+# ---------------------------------------------------------------------------
+
 check_dependencies() {
-    echo "==> Checking pacman dependencies..."
+    if [ "$SKIP_DEPS" = "1" ]; then
+        warn "Skipping dependency check (no pacman on this system)."
+        return
+    fi
+
+    info "Checking pacman dependencies..."
     local missing=()
     for pkg in "${PACMAN_PACKAGES[@]}"; do
         pacman -Qi "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
     done
     if [ "${#missing[@]}" -gt 0 ]; then
-        echo "Missing: ${missing[*]}"
-        read -rp "Install them now with pacman? [Y/n] " REPLY
-        if [[ ! "$REPLY" =~ ^[Nn]$ ]]; then
-            sudo pacman -S --needed "${missing[@]}" || echo "pacman install failed or was cancelled; continuing anyway."
+        warn "Missing: ${missing[*]}"
+        if ask_yes_no "Install them now with pacman?" Y; then
+            sudo pacman -S --needed "${missing[@]}" || warn "pacman install failed or was cancelled; continuing anyway."
         fi
     else
-        echo "All pacman dependencies present."
+        ok "All pacman dependencies present."
     fi
 
     local missing_aur=()
@@ -51,26 +146,29 @@ check_dependencies() {
         pacman -Qi "$pkg" >/dev/null 2>&1 || missing_aur+=("$pkg")
     done
     if [ "${#missing_aur[@]}" -gt 0 ]; then
-        echo "AUR packages not installed, install manually with yay/paru: ${missing_aur[*]}"
+        warn "AUR packages not installed (install manually with yay/paru): ${missing_aur[*]}"
     fi
 }
 
 check_input_group() {
-    echo "==> Checking 'input' group membership (required for the infinite desktop)..."
+    info "Checking 'input' group membership (required for the infinite desktop)..."
     if id -nG "$USER" | grep -qw input; then
-        echo "Already in the 'input' group."
+        ok "Already in the 'input' group."
     else
-        read -rp "Add $USER to the 'input' group now? [Y/n] " REPLY
-        if [[ ! "$REPLY" =~ ^[Nn]$ ]]; then
-            sudo usermod -aG input "$USER" || echo "usermod failed; add yourself to 'input' manually."
-            echo "Added. You must log out and back in (or reboot) for this to take effect."
+        if ask_yes_no "Add $USER to the 'input' group now?" Y; then
+            if sudo usermod -aG input "$USER"; then
+                ok "Added. You must log out and back in (or reboot) for this to take effect."
+                INPUT_GROUP_JUST_ADDED=1
+            else
+                warn "usermod failed; add yourself to 'input' manually."
+            fi
         fi
     fi
 }
 
 detect_monitor() {
     local target="$HOME/.config/hypr/hyprland.lua"
-    command -v hyprctl >/dev/null 2>&1 || { echo "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
+    command -v hyprctl >/dev/null 2>&1 || { warn "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
     python3 - "$target" <<'PYEOF'
 import json, re, subprocess, sys
 
@@ -102,19 +200,33 @@ PYEOF
 }
 
 do_deploy() {
-    echo "==> Deploying configs (anything you've hand-edited is protected)..."
+    info "Deploying configs (anything you've hand-edited is protected)..."
     mkdir -p ~/.config/{hypr,kitty,waybar,mako,wofi} ~/scripts
     python3 "$REPO_DIR/scripts/dxrice_deploy.py" "$REPO_DIR"
 
     echo ""
-    echo "==> Rendering theme (waybar/wofi/mako/kitty/hyprlock from theme.json)..."
+    info "Rendering theme (waybar/wofi/mako/kitty/hyprlock from theme.json)..."
     python3 "$REPO_DIR/scripts/dxrice_apply_theme.py" "$REPO_DIR/theme/theme.json" || true
 }
 
 do_install() {
+    banner
+    check_not_root
+    require_repo_layout
+    check_platform
+
+    step "Step 1/4 -- Recording repo location"
+    record_repo_path
+    ok "This checkout is now the source of truth for theming and updates:"
+    info "$REPO_DIR"
+
+    step "Step 2/4 -- Dependencies"
     check_dependencies
+
+    step "Step 3/4 -- Permissions"
     check_input_group
 
+    step "Step 4/4 -- Deploying your rice"
     local hypr_existed=0
     [ -f "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
 
@@ -122,42 +234,77 @@ do_install() {
 
     if [ "$hypr_existed" = "0" ]; then
         echo ""
-        echo "==> Detecting your monitor for hyprland.lua..."
+        info "Detecting your monitor for hyprland.lua..."
         detect_monitor
     fi
 
     echo ""
-    echo "[OK] Fresh install complete."
-    echo "If you were just added to the 'input' group, log out and back in (or reboot)."
-    echo "Then log out/in once more so autostart (waybar, mako, swaybg, etc.) picks everything up."
+    echo "${C_BOLD}${C_GREEN}Install complete.${C_RESET}"
+    info "Useful keybinds:"
+    info "  SUPER + SHIFT + T   theme settings GUI"
+    info "  SUPER + SHIFT + A   taskbar app manager"
+    info "  SUPER + D           floating/tile toggle"
+    if [ "$INPUT_GROUP_JUST_ADDED" = "1" ]; then
+        warn "You were just added to the 'input' group -- log out and back in (or reboot) before the infinite desktop will work."
+    fi
+    info "Log out and back in once so autostart (waybar, mako, swaybg, etc.) picks everything up."
+    info "Later, pull updates with: ./install.sh update"
 }
 
 do_update() {
-    echo "==> Pulling latest from git..."
+    banner
+    require_repo_layout
     cd "$REPO_DIR"
+
+    step "Checking repo status"
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        echo "Not a git repository -- skipping git pull, deploying what's on disk."
+        warn "Not a git repository -- skipping git pull, deploying what's on disk."
     else
         local stashed=0
         if [ -n "$(git status --porcelain)" ]; then
-            echo "Stashing your local repo changes (e.g. theme.json edits from the GUI) before pulling..."
-            git stash push -m "rice-update-autostash" >/dev/null
+            info "Stashing your local repo edits (e.g. theme.json tweaks from the GUI)..."
+            git stash push -u -m "dxrice-update-autostash" >/dev/null
             stashed=1
         fi
-        git pull --ff-only || echo "git pull failed -- resolve manually (merge conflict, diverged branch?), then re-run './install.sh update'."
+
+        if ! git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+            warn "Current branch has no upstream tracking branch -- skipping git pull."
+        else
+            info "Pulling latest changes..."
+            if ! git pull --ff-only; then
+                err "git pull --ff-only failed."
+                info "This usually means your local branch has diverged from the remote"
+                info "(e.g. you made local commits, or the remote history was rewritten)."
+                info "Resolve it by hand, then re-run './install.sh update':"
+                info "  git fetch && git status     # see how far you've diverged"
+                info "  git pull --rebase           # replay local commits on top, if you want to keep them"
+                if [ "$stashed" = "1" ]; then
+                    info "Restoring your stashed local edits first..."
+                    git stash pop || warn "Could not auto-restore stashed changes; recover with 'git stash list' / 'git stash pop'."
+                fi
+                exit 1
+            fi
+            ok "Repo up to date."
+        fi
+
         if [ "$stashed" = "1" ]; then
-            echo "Restoring your local repo changes..."
-            git stash pop || echo "Could not auto-restore your stashed changes cleanly -- run 'git stash list' / 'git stash pop' by hand to recover them."
+            info "Restoring your local repo edits..."
+            git stash pop || warn "Could not auto-restore stashed changes cleanly -- run 'git stash list' / 'git stash pop' by hand to recover them."
         fi
     fi
 
+    step "Redeploying"
+    record_repo_path
     do_deploy
+
     echo ""
-    echo "[OK] Update complete. Anything hand-edited in ~/.config or ~/scripts was left alone -- see above."
+    echo "${C_BOLD}${C_GREEN}Update complete.${C_RESET}"
+    info "Anything hand-edited in ~/.config or ~/scripts was left alone (see above)."
 }
 
 case "$MODE" in
     install|"") do_install ;;
     update) do_update ;;
-    *) echo "Usage: $0 [install|update]"; exit 1 ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
 esac

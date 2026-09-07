@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """GTK4/Adwaita settings app for the rice's theme.json.
 
-Edits ~/dxrice/theme/theme.json and calls dxrice_apply_theme.py to render +
-hot-reload waybar/wofi/mako/kitty/hyprlock/hyprland.lua.
+Edits <repo>/theme/theme.json and calls dxrice_apply_theme.py to render +
+hot-reload waybar/wofi/mako/kitty/hyprlock/hyprland.lua. <repo> is resolved
+the same dynamic way as dxrice_apply_theme.py (see dxrice_manifest.get_repo_dir).
 """
 import copy
 import json
 import os
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dxrice_manifest
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -17,7 +21,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 HOME = os.path.expanduser("~")
-REPO = os.path.join(HOME, "dxrice")
+REPO = str(dxrice_manifest.get_repo_dir())
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = os.path.join(THEME_DIR, "theme.json")
 PRESETS_DIR = os.path.join(THEME_DIR, "presets")

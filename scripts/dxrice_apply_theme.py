@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Renders theme.json into every app's real config and hot-reloads them.
 
-Single source of truth: ~/dxrice/theme/theme.json
-Templates:              ~/dxrice/theme/*.template  (string.Template ${TOKENS})
+Single source of truth: <repo>/theme/theme.json
+Templates:              <repo>/theme/*.template  (string.Template ${TOKENS})
+<repo> is wherever install.sh last recorded the checkout (see
+dxrice_manifest.get_repo_dir); defaults to ~/dxrice if that was never run.
 Usage: dxrice_apply_theme.py [path/to/theme.json]
 """
 import json
@@ -16,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_manifest
 
 HOME = os.path.expanduser("~")
-REPO = os.path.join(HOME, "dxrice")
+REPO = str(dxrice_manifest.get_repo_dir())
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = os.path.join(THEME_DIR, "theme.json")
 

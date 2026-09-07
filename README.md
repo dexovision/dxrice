@@ -22,7 +22,7 @@ yay -S --needed nwg-look
 
 ## Quick Start Installation
 
-Clone the repository (it must land at `~/dxrice` -- the theme engine hardcodes that path) and run the installer:
+Clone the repository -- it can go anywhere, under any folder name; `install.sh` records its own location on first run so nothing needs to be hardcoded to `~/dxrice` -- and run the installer:
 
 ```bash
 git clone https://github.com/dexovision/dxrice.git ~/dxrice
@@ -31,11 +31,14 @@ chmod +x install.sh
 ./install.sh
 ```
 
+Important: install the whole repository this way, not just `install.sh` by itself (e.g. from a raw-file download link) -- the installer needs the sibling `scripts/` and `theme/` directories to exist next to it, and will refuse to run with a clear error if they're missing.
+
 What `./install.sh` does on a fresh machine:
-1. **Dependency check:** checks every pacman package this rice needs (including `python-gobject`, `gtk4`, `libadwaita` for the theme GUI) and offers to install anything missing; lists AUR packages (`nwg-look`) separately since it won't assume you have an AUR helper.
-2. **`input` group:** checks whether you're in it (required for the infinite-desktop's raw-input reader) and offers to add you if not -- you'll need to log out/in or reboot afterward for it to take effect.
-3. **Monitor auto-detection:** the very first time `hyprland.lua` is deployed (i.e. it doesn't exist yet at `~/.config/hypr/hyprland.lua`), runs `hyprctl monitors -j` and writes your real output name/resolution/position into it. Skipped if Hyprland isn't running yet or the file already exists -- see "Updating" below for why it's never touched again after that.
-4. **Deploys everything** (configs, scripts, theme engine) and renders the theme once so waybar/wofi/mako/kitty/hyprlock all come up themed immediately.
+1. **Records the repo location** in `~/.local/state/dxrice/repo_path`, so the theme engine (`dxrice_apply_theme.py`, `dxrice_theme_gui.py`) and the taskbar manager can always find it later, wherever it actually lives.
+2. **Dependency check:** checks every pacman package this rice needs (including `python-gobject`, `gtk4`, `libadwaita` for the theme GUI) and offers to install anything missing; lists AUR packages (`nwg-look`) separately since it won't assume you have an AUR helper. Skipped gracefully on non-Arch systems (no `pacman`).
+3. **`input` group:** checks whether you're in it (required for the infinite-desktop's raw-input reader) and offers to add you if not -- you'll need to log out/in or reboot afterward for it to take effect.
+4. **Monitor auto-detection:** the very first time `hyprland.lua` is deployed (i.e. it doesn't exist yet at `~/.config/hypr/hyprland.lua`), runs `hyprctl monitors -j` and writes your real output name/resolution/position into it. Skipped if Hyprland isn't running yet or the file already exists -- see "Updating" below for why it's never touched again after that.
+5. **Deploys everything** (configs, scripts, theme engine) and renders the theme once so waybar/wofi/mako/kitty/hyprlock all come up themed immediately.
 
 ## Updating
 
@@ -85,7 +88,7 @@ The custom Infinite Desktop navigation engine and taskbar management are powered
 
 ## Theming (GUI Settings App)
 
-Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, and wallpaper — is controlled from one place: `~/dxrice/theme/theme.json`. Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`~/scripts/dxrice_theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
+Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, and wallpaper — is controlled from one place: `<repo>/theme/theme.json` (`<repo>` being wherever you cloned this, as recorded by `install.sh`). Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`~/scripts/dxrice_theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
 
 How it works:
 * `theme/theme.json` is the single source of truth for every themeable value.
@@ -104,7 +107,7 @@ python3 ~/scripts/dxrice_apply_theme.py
 ## Customization & Tweaks
 
 ### Taskbar & Window Management
-* `dxrice-manage-taskbar.sh` (`SUPER + Shift + A`) manages the waybar app shortcuts on the left side of the bar. It always syncs its changes back into `~/dxrice/waybar/config` so they survive an `install.sh update`.
+* `dxrice-manage-taskbar.sh` (`SUPER + Shift + A`) manages the waybar app shortcuts on the left side of the bar. It always syncs its changes back into `<repo>/waybar/config` so they survive an `install.sh update`.
 * **Add app shortcut (browse installed apps):** scans `/usr/share/applications` and `~/.local/share/applications`, lets you search/pick by name, and pulls the real command straight from the `.desktop` file -- no typing exec paths by hand.
 * **Icons, not text labels:** every shortcut shows a real Nerd Font glyph (via `~/scripts/dxrice_icons.py`, matched against the app's name/command) instead of a plain text button, with the app name shown on hover as a tooltip. Falls back to a generic window icon for anything unrecognized.
 * **Fix icons on existing shortcuts:** a one-shot menu option that re-derives icons for shortcuts you already added under the old text-label behavior.

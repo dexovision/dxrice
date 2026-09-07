@@ -16,6 +16,33 @@ HOME = Path.home()
 STATE_DIR = HOME / ".local" / "state" / "dxrice"
 MANIFEST_PATH = STATE_DIR / "manifest.json"
 BACKUP_DIR = STATE_DIR / "backups"
+REPO_PATH_FILE = STATE_DIR / "repo_path"
+
+
+def get_repo_dir() -> Path:
+    """Where the dxrice git checkout actually lives.
+
+    Resolution order: $DXRICE_REPO env var, then the path install.sh last
+    recorded in REPO_PATH_FILE (so the repo can be cloned/renamed anywhere),
+    falling back to ~/dxrice for a machine that has never run install.sh's
+    new path-recording step yet.
+    """
+    env = os.environ.get("DXRICE_REPO")
+    if env:
+        return Path(env).expanduser().resolve()
+    try:
+        stored = REPO_PATH_FILE.read_text().strip()
+        if stored:
+            return Path(stored).expanduser().resolve()
+    except OSError:
+        pass
+    return HOME / "dxrice"
+
+
+def set_repo_dir(path) -> None:
+    """Record the live repo location so deployed scripts can find it later."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    REPO_PATH_FILE.write_text(str(Path(path).expanduser().resolve()) + "\n")
 
 
 def _sha256(data: bytes) -> str:
