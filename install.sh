@@ -209,6 +209,49 @@ do_deploy() {
     python3 "$REPO_DIR/scripts/dxrice_apply_theme.py" "$REPO_DIR/theme/theme.json" || true
 }
 
+hyprland_is_running() {
+    [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || pgrep -x Hyprland >/dev/null 2>&1
+}
+
+# Confirms the files the keybinds/infinite-desktop actually depend on made
+# it to their real, live locations -- rather than leaving you to guess
+# whether "deploy" silently no-op'd.
+verify_deploy() {
+    echo ""
+    info "Verifying deployed files..."
+    local required=(
+        "$HOME/.config/hypr/hyprland.lua"
+        "$HOME/scripts/dxrice_infinite_desktop_core.py"
+        "$HOME/scripts/dxrice-manage-taskbar.sh"
+        "$HOME/scripts/dxrice_theme_gui.py"
+        "$HOME/scripts/dxrice_apply_theme.py"
+    )
+    local all_ok=1
+    for f in "${required[@]}"; do
+        if [ -s "$f" ]; then
+            ok "$f"
+        else
+            err "MISSING: $f"
+            all_ok=0
+        fi
+    done
+    if [ "$all_ok" = "0" ]; then
+        warn "One or more required files didn't make it to their live location."
+        info "Re-run './install.sh update' from inside $REPO_DIR and check the"
+        info "output above it for python errors -- nothing else will work until"
+        info "these exist."
+        return 1
+    fi
+    ok "Everything the keybinds depend on is in place."
+
+    if [ -f "$HOME/.config/hypr/hyprland.conf" ]; then
+        warn "You also have a leftover ~/.config/hypr/hyprland.conf."
+        info "Hyprland prefers hyprland.lua when both exist, so this is harmless,"
+        info "but it's dead weight -- safe to delete if you don't need it for anything else."
+    fi
+    return 0
+}
+
 do_install() {
     banner
     check_not_root
@@ -231,6 +274,7 @@ do_install() {
     [ -f "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
 
     do_deploy
+    verify_deploy || true
 
     if [ "$hypr_existed" = "0" ]; then
         echo ""
@@ -240,14 +284,27 @@ do_install() {
 
     echo ""
     echo "${C_BOLD}${C_GREEN}Install complete.${C_RESET}"
-    info "Useful keybinds:"
+    info "Useful keybinds (once hyprland.lua is actually loaded -- see below):"
     info "  SUPER + SHIFT + T   theme settings GUI"
     info "  SUPER + SHIFT + A   taskbar app manager"
     info "  SUPER + D           floating/tile toggle"
     if [ "$INPUT_GROUP_JUST_ADDED" = "1" ]; then
         warn "You were just added to the 'input' group -- log out and back in (or reboot) before the infinite desktop will work."
     fi
-    info "Log out and back in once so autostart (waybar, mako, swaybg, etc.) picks everything up."
+
+    if [ "$hypr_existed" = "0" ] && hyprland_is_running; then
+        echo ""
+        warn "${C_BOLD}Hyprland is currently running -- your keybinds will NOT work yet.${C_RESET}"
+        info "Hyprland decides whether to load hyprland.conf or hyprland.lua only"
+        info "ONCE, when it starts. Since it was already running before hyprland.lua"
+        info "existed, this session is still using whatever it loaded at boot (almost"
+        info "certainly a bare default with none of this rice's binds)."
+        info "A 'hyprctl reload' does NOT fix this -- you must fully log out of this"
+        info "Hyprland session (or reboot) and log back in for the binds and the"
+        info "infinite desktop to appear."
+    else
+        info "Log out and back in once so autostart (waybar, mako, swaybg, etc.) picks everything up."
+    fi
     info "Later, pull updates with: ./install.sh update"
 }
 
@@ -294,12 +351,25 @@ do_update() {
     fi
 
     step "Redeploying"
+    local hypr_existed=0
+    [ -s "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
+
     record_repo_path
     do_deploy
+    verify_deploy || true
 
     echo ""
     echo "${C_BOLD}${C_GREEN}Update complete.${C_RESET}"
     info "Anything hand-edited in ~/.config or ~/scripts was left alone (see above)."
+
+    if [ "$hypr_existed" = "0" ] && hyprland_is_running; then
+        echo ""
+        warn "${C_BOLD}hyprland.lua was just created for the first time, and Hyprland is running.${C_RESET}"
+        info "Hyprland only decides between hyprland.conf and hyprland.lua once, at"
+        info "startup -- this session is still on whatever it loaded at boot, so"
+        info "keybinds and the infinite desktop will NOT appear until you fully log"
+        info "out (or reboot) and back in. 'hyprctl reload' is not enough here."
+    fi
 }
 
 case "$MODE" in
