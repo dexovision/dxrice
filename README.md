@@ -25,7 +25,7 @@ yay -S --needed nwg-look
 Clone the repository and run the automated interactive installer:
 
 ```bash
-git clone https://github.com/dexovision/dotfiles-rice.git ~/dotfiles-rice
+git clone [https://github.com/dexovision/dotfiles-rice.git](https://github.com/dexovision/dotfiles-rice.git) ~/dotfiles-rice
 cd ~/dotfiles-rice
 chmod +x install.sh
 ./install.sh
@@ -71,7 +71,7 @@ The custom Infinite Desktop navigation engine and taskbar management are powered
 ## Customization & Tweaks
 
 ### Taskbar & Window Management
-* Active taskbar and window placement scripts live inside `~/scripts/`.
+* Active taskbar (`manage-taskbar.sh`) and window placement scripts live inside `~/scripts/`.
 * Taskbar window switching and reordering work dynamically across tiled and floating workspace layouts.
 
 ### Wallpaper Management
