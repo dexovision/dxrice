@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 resize_window.py
-Redimensiona la ventana flotante activa 90px desde el lado derecho/inferior.
+Resizes the active floating window 90px from the right/bottom edge.
 
-left/right → cambia el ancho
-up/down    → cambia el alto
+left/right -> changes width
+up/down    -> changes height
 
-Uso: python3 resize_window.py <left|right|up|down>
+Usage: python3 resize_window.py <left|right|up|down>
 """
 
 import sys
@@ -16,12 +16,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hypr_ipc import hyprctl_json, resize_window_exact
 
 STEP = 90
-MIN_SIZE = 100  # tamaño mínimo para no colapsar la ventana
+MIN_SIZE = 100
 
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
-        print("Uso: resize_window.py <left|right|up|down>")
+        print("Usage: resize_window.py <left|right|up|down>")
         sys.exit(1)
 
     direction = sys.argv[1]

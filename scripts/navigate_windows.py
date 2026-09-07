@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
 navigate_windows.py
-Navega entre ventanas del workspace activo usando Super+flechas.
+Navigates between windows in the active workspace using Super+arrows.
 
-- Flotante: mueve todas las ventanas para centrar la objetivo (infinite canvas)
-- Tileado master: movefocus l/r/u/d
-- Tileado dwindle: movefocus left/right/up/down
+- Floating: moves all windows to center the target (infinite canvas)
+- Tiled master: movefocus l/r/u/d
+- Tiled dwindle: movefocus left/right/up/down
 
-Uso: python3 navigate_windows.py <left|right|up|down>
+Usage: python3 navigate_windows.py <left|right|up|down>
 """
 
-import subprocess
 import sys
 import os
 
@@ -25,8 +24,6 @@ DIR_SHORT = {"left": "l", "right": "r", "up": "u", "down": "d"}
 
 
 def movefocus(direction):
-    # La wiki documenta el selector de direccion de hl.dsp.focus como l/r/u/d
-    # sin importar el layout.
     move_focus(DIR_SHORT[direction])
 
 
@@ -132,7 +129,7 @@ def pan_to_window(floating, target_addr, center_x, center_y):
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
-        print("Uso: navigate_windows.py <left|right|up|down>")
+        print("Usage: navigate_windows.py <left|right|up|down>")
         sys.exit(1)
 
     direction = sys.argv[1]
@@ -146,12 +143,10 @@ def main():
     ws_clients = [w for w in clients if w.get("workspace", {}).get("id") == workspace_id]
     floating = [w for w in ws_clients if w.get("floating")]
 
-    # ── modo mosaico ──────────────────────────────────────────────────────────
     if not floating:
         movefocus(direction)
         return
 
-    # ── modo flotante ──────────────────────────────────────
     if len(floating) <= 1:
         return
 

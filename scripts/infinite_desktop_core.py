@@ -1,68 +1,49 @@
 import sys, struct, threading, time, subprocess, json, os
-import fcntl
-import select
-import math
 from evdev import InputDevice, list_devices, ecodes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hypr_ipc import move_window_exact_lua, batch_async
 
-#ruta deseada /home/usuario/scripts/
-
-# Ya no se pasan rutas de dispositivo a mano: se autodetectan por capacidades.
-# Uso: infinite_desktop_core.py [speed]
 speed = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
 
-DEVICE_RESCAN_INTERVAL = 3.0  # segundos entre escaneos de nuevos/removidos dispositivos
+DEVICE_RESCAN_INTERVAL = 3.0
 
 EVENT_SIZE = struct.calcsize('llHHi')
-EV_KEY=1; EV_REL=2; REL_X=0; REL_Y=1
-KEY_LEFTMETA=125; KEY_RIGHTMETA=126
-KEY_LEFTALT=56; KEY_RIGHTALT=100
-KEY_LEFTCTRL=29; KEY_RIGHTCTRL=97
-KEY_LEFT=105; KEY_RIGHT=106
-KEY_UP=103; KEY_DOWN=108
-BTN_LEFT=272
+EV_KEY = 1; EV_REL = 2; REL_X = 0; REL_Y = 1
+KEY_LEFTMETA = 125; KEY_RIGHTMETA = 126
+KEY_LEFTALT = 56; KEY_RIGHTALT = 100
+KEY_LEFTCTRL = 29; KEY_RIGHTCTRL = 97
+BTN_LEFT = 272
 
 STATE_FILE = "/tmp/infinite-desktop-state"
-PROTECTED_APPS = ['brave-browser', 'chromium', 'chromium-browser', 'google-chrome', 
-                  'firefox', 'firefoxdeveloperedition', 'librewolf', 'vivaldi', 
+PROTECTED_APPS = ['brave-browser', 'chromium', 'chromium-browser', 'google-chrome',
+                  'firefox', 'firefoxdeveloperedition', 'librewolf', 'vivaldi',
                   'opera', 'microsoft-edge']
 
 lock = threading.Lock()
-super_pressed=False; alt_pressed=False; ctrl_pressed=False; btn_left=False
-acc_x=0.0; acc_y=0.0
-frame_held_hidden=False  # último estado notificado a quickshell (evita spam de llamadas ipc)
+super_pressed = False; alt_pressed = False; ctrl_pressed = False; btn_left = False
+acc_x = 0.0; acc_y = 0.0
 
-# Variables para arrastre de ventanas
 window_drag_active = False
-last_window_pos = None
 last_window_bounds = None
 mouse_rel_x = 0
 mouse_rel_y = 0
 
-# Paso de movimiento con teclado
-KEY_MOVE_STEP = 20
+_inverted_cache = False
+_inverted_last_check = 0.0
+INVERTED_CACHE_TTL = 0.5
 
-def read_inverted():
-    try:
-        with open(STATE_FILE) as f:
-            return f.read().strip() == 'inverse'
-    except:
-        return False
-
-def notify_quickshell_hold(state):
-    """Avisa a quickshell (IpcHandler target='frame') que esconda/muestre
-    el marco. No bloqueante: se lanza en su propio hilo para no meter
-    latencia en el loop de lectura de teclado. Silenciosa si quickshell
-    no está corriendo (p.ej. durante un reload)."""
-    try:
-        subprocess.run(
-            ['qs', 'ipc', 'call', 'frame', 'setHeldHidden', 'true' if state else 'false'],
-            capture_output=True, timeout=1.0
-        )
-    except Exception:
-        pass
+def get_cached_inverted():
+    global _inverted_cache, _inverted_last_check
+    now = time.time()
+    if now - _inverted_last_check > INVERTED_CACHE_TTL:
+        try:
+            with open(STATE_FILE) as f:
+                _inverted_cache = f.read().strip() == 'inverse'
+        except Exception:
+            _inverted_cache = False
+        _inverted_last_check = now
+    return _inverted_cache
 
 def get_monitor_bounds():
     try:
@@ -72,23 +53,17 @@ def get_monitor_bounds():
             for m in monitors:
                 if m.get('focused', False):
                     return {
-                        'left': m['x'],
-                        'right': m['x'] + m['width'],
-                        'top': m['y'],
-                        'bottom': m['y'] + m['height'],
-                        'width': m['width'],
-                        'height': m['height']
+                        'left': m['x'], 'right': m['x'] + m['width'],
+                        'top': m['y'], 'bottom': m['y'] + m['height'],
+                        'width': m['width'], 'height': m['height']
                     }
             m = monitors[0]
             return {
-                'left': m['x'],
-                'right': m['x'] + m['width'],
-                'top': m['y'],
-                'bottom': m['y'] + m['height'],
-                'width': m['width'],
-                'height': m['height']
+                'left': m['x'], 'right': m['x'] + m['width'],
+                'top': m['y'], 'bottom': m['y'] + m['height'],
+                'width': m['width'], 'height': m['height']
             }
-    except:
+    except Exception:
         pass
     return {'left': 0, 'right': 1920, 'top': 0, 'bottom': 1080, 'width': 1920, 'height': 1080}
 
@@ -96,53 +71,26 @@ def get_floating_windows(workspace_id):
     try:
         r = subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True, text=True, timeout=0.1)
         clients = json.loads(r.stdout)
-        floating = []
-        for w in clients:
-            if w.get('floating') and w.get('workspace', {}).get('id') == workspace_id:
-                floating.append(w)
-        return floating
-    except:
+        return [w for w in clients if w.get('floating') and w.get('workspace', {}).get('id') == workspace_id]
+    except Exception:
         return []
 
 def get_focused_window():
     try:
         r = subprocess.run(['hyprctl', 'activewindow', '-j'], capture_output=True, text=True, timeout=0.1)
         return json.loads(r.stdout)
-    except:
+    except Exception:
         return None
-
-def is_protected_app(window):
-    if not window:
-        return False
-    window_class = window.get('class', '').lower()
-    return any(app in window_class for app in PROTECTED_APPS)
-
-def get_window_center(window):
-    return (window['at'][0] + window['size'][0] // 2,
-            window['at'][1] + window['size'][1] // 2)
 
 def get_window_bounds(window):
     x, y = window['at'][0], window['at'][1]
     w, h = window['size'][0], window['size'][1]
     return {
-        'left': x,
-        'right': x + w,
-        'top': y,
-        'bottom': y + h,
-        'center_x': x + w // 2,
-        'center_y': y + h // 2
+        'left': x, 'right': x + w, 'top': y, 'bottom': y + h,
+        'center_x': x + w // 2, 'center_y': y + h // 2
     }
 
-def windows_overlap_horizontally(bounds1, bounds2):
-    return not (bounds1['right'] <= bounds2['left'] or bounds1['left'] >= bounds2['right'])
-
-def windows_overlap_vertically(bounds1, bounds2):
-    return not (bounds1['bottom'] <= bounds2['top'] or bounds1['top'] >= bounds2['bottom'])
-
-
-
 def pan_other_windows(excluded_addr, dx, dy, workspace_id):
-    """Mueve todas las ventanas EXCEPTO la especificada en un solo batch"""
     if dx == 0 and dy == 0:
         return
     try:
@@ -154,28 +102,25 @@ def pan_other_windows(excluded_addr, dx, dy, workspace_id):
                 ny = int(w['at'][1] + dy)
                 exprs.append(move_window_exact_lua(nx, ny, w['address']))
         batch_async(exprs)
-    except:
+    except Exception:
         pass
-
-def get_monitor_center():
-    """Devuelve el centro del monitor enfocado."""
-    try:
-        r = subprocess.run(['hyprctl', 'monitors', '-j'], capture_output=True, text=True, timeout=0.1)
-        monitors = json.loads(r.stdout)
-        for m in monitors:
-            if m.get('focused', False):
-                return m['x'] + m['width'] // 2, m['y'] + m['height'] // 2
-    except:
-        pass
-    return 960, 540
-
 
 def monitor_window_drag():
-    """Monitorea si se esta arrastrando una ventana y aplica empuje en bordes"""
     global window_drag_active, last_window_bounds, mouse_rel_x, mouse_rel_y
-    
+
     dragged_window_addr = None
-    
+    _last_focused_poll = 0.0
+    _cached_focused = None
+    DRAG_POLL_INTERVAL = 0.1
+
+    def poll_focused_throttled():
+        nonlocal _last_focused_poll, _cached_focused
+        now = time.time()
+        if now - _last_focused_poll >= DRAG_POLL_INTERVAL:
+            _cached_focused = get_focused_window()
+            _last_focused_poll = now
+        return _cached_focused
+
     while True:
         try:
             with lock:
@@ -184,120 +129,62 @@ def monitor_window_drag():
                 mouse_dy = mouse_rel_y
                 mouse_rel_x = 0
                 mouse_rel_y = 0
-            
+
             if is_dragging and not window_drag_active:
                 focused = get_focused_window()
                 if focused and focused.get('address'):
                     dragged_window_addr = focused['address']
                     window_drag_active = True
                     last_window_bounds = get_window_bounds(focused)
-            
+                    _last_focused_poll = time.time()
+                    _cached_focused = focused
+
             elif not is_dragging and window_drag_active:
                 window_drag_active = False
                 dragged_window_addr = None
                 last_window_bounds = None
-            
+
             if window_drag_active and dragged_window_addr:
-                window = get_focused_window()
+                window = poll_focused_throttled()
                 if window and window.get('address') == dragged_window_addr:
                     current_bounds = get_window_bounds(window)
                     monitor = get_monitor_bounds()
                     MARGIN = 10
-                    
-                    touch_left   = current_bounds['left']   <= monitor['left']   + MARGIN
-                    touch_right  = current_bounds['right']  >= monitor['right']  - MARGIN
-                    touch_top    = current_bounds['top']    <= monitor['top']    + MARGIN
+
+                    touch_left = current_bounds['left'] <= monitor['left'] + MARGIN
+                    touch_right = current_bounds['right'] >= monitor['right'] - MARGIN
+                    touch_top = current_bounds['top'] <= monitor['top'] + MARGIN
                     touch_bottom = current_bounds['bottom'] >= monitor['bottom'] - MARGIN
-                    
+
                     if (touch_left or touch_right or touch_top or touch_bottom) and (mouse_dx != 0 or mouse_dy != 0):
                         pan_dx = 0
                         pan_dy = 0
-                        
+
                         if touch_right and mouse_dx > 0:
                             pan_dx = -mouse_dx
                         elif touch_left and mouse_dx < 0:
                             pan_dx = -mouse_dx
-                        
+
                         if touch_bottom and mouse_dy > 0:
                             pan_dy = -mouse_dy
                         elif touch_top and mouse_dy < 0:
                             pan_dy = -mouse_dy
-                        
+
                         if pan_dx != 0 or pan_dy != 0:
-                            r = subprocess.run(['hyprctl', 'activeworkspace', '-j'], 
-                                             capture_output=True, text=True, timeout=0.1)
-                            ws = json.loads(r.stdout)
-                            workspace_id = ws['id']
-                            pan_other_windows(dragged_window_addr, int(pan_dx), int(pan_dy), workspace_id)
-                    
+                            workspace_id = get_cached_workspace_id()
+                            if workspace_id is not None:
+                                pan_other_windows(dragged_window_addr, int(pan_dx), int(pan_dy), workspace_id)
+
                     last_window_bounds = current_bounds
                 else:
                     window_drag_active = False
                     dragged_window_addr = None
-            
+
             time.sleep(0.016)
-        except Exception as e:
+        except Exception:
             time.sleep(0.1)
 
-
-def move_active_window(direction):
-    """Mueve la ventana activa KEY_MOVE_STEP px en la direccion indicada.
-    Si toca el borde del monitor, empuja las demas ventanas en sentido contrario."""
-    try:
-        r = subprocess.run(['hyprctl', 'activeworkspace', '-j'], capture_output=True, text=True, timeout=0.1)
-        ws = json.loads(r.stdout)
-        workspace_id = ws['id']
-
-        window = get_focused_window()
-        if not window or not window.get('floating'):
-            return
-
-        monitor = get_monitor_bounds()
-        bounds = get_window_bounds(window)
-        addr = window['address']
-
-        dx, dy = 0, 0
-        if direction == 'left':
-            dx = -KEY_MOVE_STEP
-        elif direction == 'right':
-            dx = KEY_MOVE_STEP
-        elif direction == 'up':
-            dy = -KEY_MOVE_STEP
-        elif direction == 'down':
-            dy = KEY_MOVE_STEP
-
-        new_x = window['at'][0] + dx
-        new_y = window['at'][1] + dy
-
-        # Detectar si toca borde DESPUÉS del movimiento
-        new_bounds_left   = new_x
-        new_bounds_right  = new_x + window['size'][0]
-        new_bounds_top    = new_y
-        new_bounds_bottom = new_y + window['size'][1]
-
-        hits_left   = new_bounds_left   <= monitor['left']
-        hits_right  = new_bounds_right  >= monitor['right']
-        hits_top    = new_bounds_top    <= monitor['top']
-        hits_bottom = new_bounds_bottom >= monitor['bottom']
-
-        hitting_edge = (dx < 0 and hits_left) or (dx > 0 and hits_right) or                        (dy < 0 and hits_top)  or (dy > 0 and hits_bottom)
-
-        # Mover la ventana activa
-        subprocess.run(['hyprctl', 'dispatch', move_window_exact_lua(new_x, new_y, addr)],
-                       capture_output=True, timeout=0.2)
-
-        # Si toca borde, empujar las demas en sentido contrario
-        if hitting_edge:
-            pan_other_windows(addr, -dx, -dy, workspace_id)
-
-    except Exception as e:
-        print(f"Error en move_active_window: {e}", flush=True)
-
-
 def classify_device(path):
-    """Devuelve 'mouse', 'keyboard' o None segun las capacidades reales del dispositivo,
-    sin importar el nombre/marca. Esto es lo que permite que funcione con cualquier
-    mouse o teclado (alambrico, inalambrico, el que sea)."""
     try:
         dev = InputDevice(path)
         caps = dev.capabilities()
@@ -308,13 +195,9 @@ def classify_device(path):
     keys = set(caps.get(ecodes.EV_KEY, []))
     rels = set(caps.get(ecodes.EV_REL, []))
 
-    is_mouse = (ecodes.REL_X in rels and ecodes.REL_Y in rels and ecodes.BTN_LEFT in keys)
-    if is_mouse:
+    if ecodes.REL_X in rels and ecodes.REL_Y in rels and ecodes.BTN_LEFT in keys:
         return 'mouse'
 
-    # Un teclado "real" tiene el rango completo de teclas alfanumericas y las teclas Meta,
-    # esto excluye las interfaces auxiliares (Consumer Control, System Control) que
-    # muchos recievers 2.4G tambien exponen.
     is_keyboard = (
         ecodes.KEY_A in keys and ecodes.KEY_Z in keys and ecodes.KEY_LEFTSHIFT in keys
         and (ecodes.KEY_LEFTMETA in keys or ecodes.KEY_RIGHTMETA in keys)
@@ -323,7 +206,6 @@ def classify_device(path):
         return 'keyboard'
 
     return None
-
 
 def scan_devices():
     keyboards, mice = [], []
@@ -335,10 +217,8 @@ def scan_devices():
             keyboards.append(path)
     return keyboards, mice
 
-
 def kbd_reader_device(path):
-    """Lee eventos de UN teclado especifico. Se lanza un hilo por cada teclado detectado."""
-    global super_pressed, alt_pressed, ctrl_pressed, frame_held_hidden
+    global super_pressed, alt_pressed, ctrl_pressed
     try:
         fd = open(path, 'rb')
     except Exception:
@@ -357,7 +237,6 @@ def kbd_reader_device(path):
         if value == 2:
             continue
 
-        notify_state = None
         with lock:
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
                 super_pressed = (value == 1)
@@ -366,26 +245,12 @@ def kbd_reader_device(path):
             elif code in (KEY_LEFTCTRL, KEY_RIGHTCTRL):
                 ctrl_pressed = (value == 1)
 
-            combo = super_pressed and alt_pressed
-            if combo != frame_held_hidden:
-                frame_held_hidden = combo
-                notify_state = combo
-
-        # La llamada IPC (subprocess) se hace FUERA del lock y en su
-        # propio hilo: qs ipc call puede tardar unos ms y no queremos
-        # bloquear la lectura de eventos ni a otros hilos de teclado
-        # esperando el mismo lock.
-        if notify_state is not None:
-            threading.Thread(target=notify_quickshell_hold, args=(notify_state,), daemon=True).start()
-
     try:
         fd.close()
     except Exception:
         pass
 
-
 def mouse_reader_device(path):
-    """Lee eventos de UN mouse especifico. Se lanza un hilo por cada mouse detectado."""
     global acc_x, acc_y, btn_left, mouse_rel_x, mouse_rel_y
     try:
         fd = open(path, 'rb')
@@ -411,7 +276,7 @@ def mouse_reader_device(path):
                     mouse_rel_y += value
 
                 if super_pressed and alt_pressed:
-                    sign = -1 if read_inverted() else 1
+                    sign = -1 if get_cached_inverted() else 1
                     if code == REL_X:
                         acc_x += value * speed * sign
                     elif code == REL_Y:
@@ -425,19 +290,10 @@ def mouse_reader_device(path):
     except Exception:
         pass
 
-
 _active_kbd_threads = {}
 _active_mouse_threads = {}
 
 def device_manager():
-    """Escanea periodicamente /dev/input buscando teclados y mouses nuevos
-    (o reconectados) y lanza un hilo lector para cada uno. Si un dispositivo
-    se desconecta, su hilo simplemente termina solo al fallar el read().
-
-    Los primeros segundos (WARMUP_DURATION) escanea mucho mas seguido
-    (WARMUP_INTERVAL) porque justo al iniciar sesion, dongles inalambricos
-    a veces tardan unos segundos en terminar de enumerar sus interfaces USB.
-    Despues de ese periodo baja al intervalo normal para no gastar CPU."""
     WARMUP_DURATION = 20.0
     WARMUP_INTERVAL = 0.5
     start_time = time.time()
@@ -452,7 +308,7 @@ def device_manager():
                     nt = threading.Thread(target=kbd_reader_device, args=(path,), daemon=True)
                     nt.start()
                     _active_kbd_threads[path] = nt
-                    print(f"[+] Teclado detectado: {path}", flush=True)
+                    print(f"[+] Keyboard detected: {path}", flush=True)
 
             for path in mice:
                 t = _active_mouse_threads.get(path)
@@ -460,31 +316,29 @@ def device_manager():
                     nt = threading.Thread(target=mouse_reader_device, args=(path,), daemon=True)
                     nt.start()
                     _active_mouse_threads[path] = nt
-                    print(f"[+] Mouse detectado: {path}", flush=True)
+                    print(f"[+] Mouse detected: {path}", flush=True)
         except Exception as e:
-            print(f"Error en device_manager: {e}", flush=True)
+            print(f"Error in device_manager: {e}", flush=True)
 
         elapsed = time.time() - start_time
         interval = WARMUP_INTERVAL if elapsed < WARMUP_DURATION else DEVICE_RESCAN_INTERVAL
         time.sleep(interval)
 
-# PRECARGAR
-print("Precargando...", flush=True)
+print("Preloading...", flush=True)
 try:
     subprocess.run(['hyprctl', 'activeworkspace', '-j'], capture_output=True, text=True, timeout=0.5)
     subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True, text=True, timeout=0.5)
-except:
+except Exception:
     pass
 
 threading.Thread(target=device_manager, daemon=True).start()
 threading.Thread(target=monitor_window_drag, daemon=True).start()
-print("Infinite Desktop activo (deteccion automatica de dispositivos)", flush=True)
-print("Super+click: Arrastrar ventana (al tocar borde, el raton mueve el resto)", flush=True)
-print("Super+Alt+mouse: Arrastrar todo el escritorio", flush=True)
-print("Super+flechas: Navegacion via hyprland bind", flush=True)
-print("Super+Shift+flechas: Mover ventana activa via hyprland bind", flush=True)
+print("Infinite Desktop active (automatic device detection)", flush=True)
+print("Super+click: drag window (pushes others when it hits an edge)", flush=True)
+print("Super+Alt+mouse: pan the whole desktop", flush=True)
+print("Super+arrows: navigate via Hyprland bind", flush=True)
+print("Super+Shift+arrows: move active window via Hyprland bind", flush=True)
 
-# Caché del workspace activo (se refresca cada 2s para no llamar hyprctl cada frame)
 _cached_workspace_id = None
 _last_workspace_check = 0
 WORKSPACE_CACHE_TTL = 2.0
@@ -499,16 +353,11 @@ def get_cached_workspace_id():
             ws = json.loads(r.stdout)
             _cached_workspace_id = ws['id']
             _last_workspace_check = now
-        except:
+        except Exception:
             pass
     return _cached_workspace_id
 
-# Cache de posiciones de ventanas flotantes durante el arrastre.
-# Antes: se llamaba 'hyprctl clients -j' de forma SINCRONA en cada frame (60/seg),
-# lo cual satura el socket IPC de Hyprland bajo carga y causa freezes de un
-# segundo al arrastrar. Ahora se cachean posiciones localmente y solo se
-# re-consulta hyprctl cada DRAG_CACHE_REFRESH segundos.
-DRAG_CACHE_REFRESH = 0.2  # segundos
+DRAG_CACHE_REFRESH = 0.2
 _drag_cache = {}
 _drag_cache_workspace = None
 _drag_cache_last_refresh = 0.0
@@ -533,7 +382,11 @@ def refresh_drag_cache(workspace_id, force=False):
     except Exception:
         pass
 
-# Loop principal para arrastre de escritorio
+BATCH_SEND_EVERY_N = 3
+_pending_dx = 0
+_pending_dy = 0
+_frame_count = 0
+
 while True:
     time.sleep(0.016)
 
@@ -545,11 +398,24 @@ while True:
         acc_y = 0.0
 
     if not active_drag:
-        _drag_cache_workspace = None  # forzar refresh limpio en el proximo arrastre
+        _drag_cache_workspace = None
+        _pending_dx = 0
+        _pending_dy = 0
+        _frame_count = 0
         continue
 
-    idx = int(round(dx))
-    idy = int(round(dy))
+    _pending_dx += dx
+    _pending_dy += dy
+    _frame_count += 1
+
+    if _frame_count < BATCH_SEND_EVERY_N:
+        continue
+    _frame_count = 0
+
+    idx = int(round(_pending_dx))
+    idy = int(round(_pending_dy))
+    _pending_dx -= idx
+    _pending_dy -= idy
 
     try:
         workspace_id = get_cached_workspace_id()

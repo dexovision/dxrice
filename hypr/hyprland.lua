@@ -1,6 +1,3 @@
-------------------
----- MONITORS ----
-------------------
 hl.monitor({
     output = "eDP-1",
     mode = "1920x1080@144.03",
@@ -8,21 +5,14 @@ hl.monitor({
     scale = 1.0,
 })
 
----------------------
----- MY PROGRAMS ----
----------------------
 local terminal    = os.getenv("TERMINAL") or "kitty"
 local fileManager = "nautilus"
 local menu        = "wofi --show drun"
 
--------------------
----- AUTOSTART ----
--------------------
 hl.on("hyprland.start", function()
     local home = os.getenv("HOME")
     hl.exec_cmd("waybar")
-    
-    -- Dynamic Wallpaper Setup
+
     local bg_path = os.getenv("BG_WALLPAPER") or (home .. "/Pictures/Wallpapers/default.png")
     hl.exec_cmd("swaybg -i " .. bg_path .. " -m fill")
 
@@ -32,21 +22,14 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("/usr/lib/polkit-kde-agent-1")
     hl.exec_cmd("wl-paste --type text --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
-    
-    -- Core Python Script Execution using absolute user paths
+
     hl.exec_cmd("python3 " .. home .. "/scripts/infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
 end)
 
--------------------------------
----- ENVIRONMENT VARIABLES ----
--------------------------------
 hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")
 hl.env("XCURSOR_SIZE", "24")
 hl.env("HYPRCURSOR_SIZE", "24")
 
------------------------
----- LOOK AND FEEL ----
------------------------
 hl.config({
     general = {
         gaps_in = 5,
@@ -101,9 +84,6 @@ hl.config({
 hl.layer_rule({ name = "waybar-blur", match = { namespace = "waybar" }, blur = true, ignore_alpha = 0.6 })
 hl.layer_rule({ name = "wofi-blur",   match = { namespace = "wofi" },   blur = true, ignore_alpha = 0.6 })
 
----------------
----- INPUT ----
----------------
 hl.config({
     input = {
         kb_layout = "us",
@@ -115,9 +95,6 @@ hl.config({
 
 hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
 
----------------------
----- KEYBINDINGS ----
----------------------
 local mainMod = "SUPER"
 
 hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal))
@@ -157,9 +134,6 @@ hl.bind(mainMod .. " + SHIFT + V", hl.dsp.exec_cmd("cliphist list | wofi --dmenu
 hl.bind(mainMod .. " + SHIFT + C", hl.dsp.exec_cmd("kitty --class cava -e cava"))
 hl.bind(mainMod .. " + SHIFT + R", hl.dsp.exec_cmd("hyprctl reload"))
 
---------------------------------
----- WINDOW RULES ----
---------------------------------
 hl.window_rule({
     name = "suppress-maximize-events",
     match = { class = ".*" },
@@ -177,16 +151,10 @@ for _, class in ipairs(float_apps) do
 end
 
 hl.window_rule({ name = "kitty-glass", match = { class = "kitty" }, opacity = "0.82 override 0.75 override" })
-
-
-
 hl.window_rule({ name = "float-everything", match = { class = ".*" }, float = true })
 
-
 hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("kitty -e ~/scripts/manage-taskbar.sh"))
-hl.bind(mainMod .. " + SHIFT + O", hl.dsp.exec_cmd("kitty -e ~/scripts/reorder-taskbar.sh"))
 
--- Infinite Desktop Keybindings
 hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "-1" }))
 hl.bind(mainMod .. " + X", hl.dsp.focus({ workspace = "+1" }))
 hl.bind(mainMod .. " + SHIFT + Z", hl.dsp.window.move({ workspace = "-1" }))

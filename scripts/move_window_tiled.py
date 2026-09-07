@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-
-
 import subprocess
 import sys
 import os
@@ -24,7 +22,7 @@ def get_layout():
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
-        print("Uso: move_window_tiled.py <left|right|up|down>")
+        print("Usage: move_window_tiled.py <left|right|up|down>")
         sys.exit(1)
 
     direction = sys.argv[1]

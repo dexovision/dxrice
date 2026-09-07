@@ -35,7 +35,7 @@ PYEOF
 }
 
 add_app() {
-    read -rp "App name or Nerd Font Icon (e.g. 󰄛 or Kitty): " LABEL
+    read -rp "App name or Nerd Font Icon (e.g.  or Kitty): " LABEL
     [ -z "$LABEL" ] && { echo "No name entered, cancelled."; return; }
 
     read -rp "Command to run (e.g. kitty, firefox): " CMD
