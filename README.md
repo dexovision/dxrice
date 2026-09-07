@@ -22,21 +22,34 @@ yay -S --needed nwg-look
 
 ## Quick Start Installation
 
-Clone the repository and run the automated interactive installer:
+Clone the repository (it must land at `~/dotfiles-rice` -- the theme engine hardcodes that path) and run the installer:
 
 ```bash
-git clone [https://github.com/dexovision/dotfiles-rice.git](https://github.com/dexovision/dotfiles-rice.git) ~/dotfiles-rice
+git clone https://github.com/dexovision/hyprland-rice.git ~/dotfiles-rice
 cd ~/dotfiles-rice
 chmod +x install.sh
 ./install.sh
 ```
 
-What `install.sh` Does Automatically:
-1. **Dependency Verification:** Prompts to auto-install missing packages via pacman.
-2. **Wallpaper Setup:** Guides wallpaper setup and defaults to `~/Pictures/Wallpapers/default.png`. Accepts custom paths with automatic `~` tilde expansion.
-3. **Monitor Auto-Detection:** Uses `hyprctl monitors` to detect your active screen output and configures `hyprland.lua` dynamically.
-4. **Configuration Safety Backups:** Automatically backs up existing `~/.config/hypr` setups with timestamped folders.
-5. **Permissions Management:** Checks and adds your user to the `input` group for Infinite Desktop core capabilities.
+What `./install.sh` does on a fresh machine:
+1. **Dependency check:** checks every pacman package this rice needs (including `python-gobject`, `gtk4`, `libadwaita` for the theme GUI) and offers to install anything missing; lists AUR packages (`nwg-look`) separately since it won't assume you have an AUR helper.
+2. **`input` group:** checks whether you're in it (required for the infinite-desktop's raw-input reader) and offers to add you if not -- you'll need to log out/in or reboot afterward for it to take effect.
+3. **Monitor auto-detection:** the very first time `hyprland.lua` is deployed (i.e. it doesn't exist yet at `~/.config/hypr/hyprland.lua`), runs `hyprctl monitors -j` and writes your real output name/resolution/position into it. Skipped if Hyprland isn't running yet or the file already exists -- see "Updating" below for why it's never touched again after that.
+4. **Deploys everything** (configs, scripts, theme engine) and renders the theme once so waybar/wofi/mako/kitty/hyprlock all come up themed immediately.
+
+## Updating
+
+```bash
+cd ~/dotfiles-rice
+./install.sh update
+```
+
+This pulls the latest commit (auto-stashing and restoring any uncommitted local changes in the repo, e.g. `theme.json` edits made through the GUI, around the pull so they aren't lost or blocked) and then re-deploys. The re-deploy is guarded by a small manifest at `~/.local/state/hyprland-rice/manifest.json` that remembers the hash of every file it last wrote:
+
+* If a live file (in `~/.config/...` or `~/scripts/`) still matches what was last deployed, it's safely updated to the new version.
+* If you've hand-edited that file since -- it's **left alone** and reported as skipped, never silently overwritten. The output tells you exactly which files were skipped so you can diff and merge by hand if you want the new version.
+* The very first deploy of a pre-existing, unmanaged file (e.g. running the installer on a machine that already had a `~/.config/waybar/config` from something else) backs the old one up under `~/.local/state/hyprland-rice/backups/` before taking it over.
+* `hyprland.lua` is a special case: it's the most hand-edited file in the whole rice (keybinds, autostart, monitor setup), so it is **only ever copied in once**, on a completely fresh install where no live copy exists yet. After that, `update` never touches it -- new theme colors/blur values still reach it through `apply_theme.py`'s narrow, line-by-line patch (see Theming below), but nothing else about it is ever auto-changed. If a rice update adds new default keybinds, check the repo's `hypr/hyprland.lua` by hand and copy over what you want.
 
 ---
 
@@ -44,9 +57,9 @@ What `install.sh` Does Automatically:
 
 The custom Infinite Desktop navigation engine and taskbar management are powered by Python scripts located in `~/scripts/` using `python-evdev` and `hyprctl`.
 
-* **Group Permissions Requirement:** The installer automatically runs:
+* **Group Permissions Requirement:** The installer checks for and can add you to the `input` group:
   `sudo usermod -aG input $USER`
-* **Reboot Required:** You **MUST** reboot your computer after adding your user to the `input` group for raw input device access to take effect.
+* **Reboot Required:** You **MUST** log out/in or reboot after being added to the `input` group for raw input device access to take effect.
 
 ---
 
@@ -91,7 +104,10 @@ python3 ~/scripts/apply_theme.py
 ## Customization & Tweaks
 
 ### Taskbar & Window Management
-* Active taskbar (`manage-taskbar.sh`) and window placement scripts live inside `~/scripts/`.
+* `manage-taskbar.sh` (`SUPER + Shift + A`) manages the waybar app shortcuts on the left side of the bar. It always syncs its changes back into `~/dotfiles-rice/waybar/config` so they survive an `install.sh update`.
+* **Add app shortcut (browse installed apps):** scans `/usr/share/applications` and `~/.local/share/applications`, lets you search/pick by name, and pulls the real command straight from the `.desktop` file -- no typing exec paths by hand.
+* **Icons, not text labels:** every shortcut shows a real Nerd Font glyph (via `~/scripts/rice_icons.py`, matched against the app's name/command) instead of a plain text button, with the app name shown on hover as a tooltip. Falls back to a generic window icon for anything unrecognized.
+* **Fix icons on existing shortcuts:** a one-shot menu option that re-derives icons for shortcuts you already added under the old text-label behavior.
 * Taskbar window switching and reordering work dynamically across tiled and floating workspace layouts.
 
 ### Wallpaper Management

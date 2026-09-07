@@ -12,6 +12,9 @@ import subprocess
 import sys
 from string import Template
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rice_manifest
+
 HOME = os.path.expanduser("~")
 REPO = os.path.join(HOME, "dotfiles-rice")
 THEME_DIR = os.path.join(REPO, "theme")
@@ -88,13 +91,22 @@ def build_vars(theme):
 
 def render_templates(theme):
     tvars = build_vars(theme)
+    manifest = rice_manifest.load_manifest()
+    results = {}
     for template_name, target_path in TARGETS.items():
         src = os.path.join(THEME_DIR, template_name)
         with open(src) as f:
             rendered = Template(f.read()).safe_substitute(tvars)
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        with open(target_path, "w") as f:
-            f.write(rendered)
+        result = rice_manifest.deploy_file(target_path, rendered.encode(), manifest)
+        results[target_path] = result
+    rice_manifest.save_manifest(manifest)
+
+    skipped = [p for p, r in results.items() if r == "skipped-modified"]
+    if skipped:
+        print("Skipped (hand-edited since last Apply, left untouched):")
+        for p in skipped:
+            print(f"  - {p}")
+    return results
 
 
 def _sub(content, pattern, replacement_fn, flags=0):

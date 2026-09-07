@@ -7,7 +7,12 @@
     "margin-right": 14,
     "spacing": 10,
     "modules-left": [
-        "custom/launcher"
+        "custom/launcher",
+        "custom/firefox",
+        "custom/discord",
+        "custom/sober",
+        "custom/terminal",
+        "custom/files"
     ],
     "modules-center": [
         "hyprland/workspaces",
@@ -25,6 +30,24 @@
         "on-click": "wofi --show drun",
         "tooltip": true,
         "tooltip-format": "App Launcher"
+    },
+    "custom/firefox": {
+        "format": "\uf269",
+        "on-click": "sh -c '/usr/lib/firefox/firefox >/dev/null 2>&1 &'",
+        "tooltip": true,
+        "tooltip-format": "Firefox"
+    },
+    "custom/discord": {
+        "format": "\udb81\ude6f",
+        "on-click": "discord",
+        "tooltip": true,
+        "tooltip-format": "Discord"
+    },
+    "custom/files": {
+        "format": "\uf07b",
+        "on-click": "nautilus",
+        "tooltip": true,
+        "tooltip-format": "Files"
     },
     "hyprland/workspaces": {
         "disable-scroll": true,
@@ -50,5 +73,17 @@
     },
     "memory": {
         "format": "RAM {percentage}%"
+    },
+    "custom/sober": {
+        "format": "\uf11b",
+        "on-click": "sh -c 'flatpak run org.vinegarhq.Sober >/dev/null 2>&1 &'",
+        "tooltip": true,
+        "tooltip-format": "Sober"
+    },
+    "custom/terminal": {
+        "format": "\uf120",
+        "on-click": "sh -c 'kitty >/dev/null 2>&1 &'",
+        "tooltip": true,
+        "tooltip-format": "Terminal"
     }
 }
