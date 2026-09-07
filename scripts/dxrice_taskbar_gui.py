@@ -33,6 +33,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_icons import icon_for
+import dxrice_manifest
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SCRIPTS_DIR)
@@ -94,6 +95,13 @@ def load_config():
 def save_config(cfg):
     atomic_write_json(CONFIG_PATH, cfg)
     atomic_write_json(REPO_CONFIG_PATH, cfg)
+    # Without this, install.sh's deploy guard sees this file's hash no
+    # longer matches what it last wrote and treats it as hand-edited --
+    # permanently skipping it on every future `install.sh update`, even
+    # though it was this rice's own tool that touched it, not the user.
+    manifest = dxrice_manifest.load_manifest()
+    dxrice_manifest.mark_deployed(CONFIG_PATH, manifest)
+    dxrice_manifest.save_manifest(manifest)
 
 
 def restart_waybar():
