@@ -3,11 +3,19 @@
 you've hand-edited since the last deploy is never clobbered.
 
 Used by install.sh for both the first install and `install.sh update`.
-hyprland.lua is intentionally excluded from the generic guard below: it's
-the most hand-edited file in the rice (keybinds, autostart, monitor setup),
-so it is only ever copied in on a brand new install (when no live copy
-exists yet) and otherwise left completely alone. Theme colors still reach
-it via dxrice_apply_theme.py's narrow, line-level patch -- not this script.
+hyprland.lua and waybar/config are excluded from the generic hash-guard
+below and copied in only once, on a brand new install (when no live copy
+exists yet), then left completely alone forever -- both are places you're
+expected to make them your own (keybinds/autostart for one, taskbar app
+shortcuts for the other), and a byte-hash guard doesn't fit that: dxrice_
+taskbar_gui.py's own edits would otherwise look, to a hash comparison,
+identical to "untouched since the last deploy" and a later structural
+change to the repo's default (like a new default module) would silently
+overwrite your shortcuts instead of being left for you to merge by hand --
+which is exactly what already happens with hyprland.lua's keybinds if a
+rice update adds new defaults (see the README). Theme colors still reach
+hyprland.lua via dxrice_apply_theme.py's narrow, line-level patch, not
+this script.
 
 .py/.sh scripts are NOT copied anywhere -- they run straight out of the
 repo checkout (see hyprland.lua's keybinds and dxrice_theme_gui.py), so
@@ -25,11 +33,13 @@ import dxrice_manifest
 HOME = Path.home()
 
 STATIC_FILES = [
-    ("waybar/config", HOME / ".config/waybar/config"),
     ("wofi/config", HOME / ".config/wofi/config"),
 ]
 
-HYPRLAND_LUA = ("hypr/hyprland.lua", HOME / ".config/hypr/hyprland.lua")
+COPY_ONCE_FILES = [
+    ("hypr/hyprland.lua", HOME / ".config/hypr/hyprland.lua"),
+    ("waybar/config", HOME / ".config/waybar/config"),
+]
 
 LEGACY_SCRIPTS_DIR = HOME / "scripts"
 
@@ -74,18 +84,18 @@ def deploy_static(repo_dir: Path, manifest: dict, results: dict):
         results[str(dst)] = result
 
 
-def deploy_hyprland_lua(repo_dir: Path, manifest: dict, results: dict):
-    rel, dst = HYPRLAND_LUA
-    src = repo_dir / rel
-    if not src.is_file():
-        return
-    if dst.exists():
-        results[str(dst)] = "left-alone (never auto-overwritten)"
-        return
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_bytes(src.read_bytes())
-    dxrice_manifest.mark_deployed(dst, manifest)
-    results[str(dst)] = "installed"
+def deploy_copy_once(repo_dir: Path, manifest: dict, results: dict):
+    for rel, dst in COPY_ONCE_FILES:
+        src = repo_dir / rel
+        if not src.is_file():
+            continue
+        if dst.exists():
+            results[str(dst)] = "left-alone (never auto-overwritten)"
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+        dxrice_manifest.mark_deployed(dst, manifest)
+        results[str(dst)] = "installed"
 
 
 def print_summary(results: dict):
@@ -131,7 +141,7 @@ def main():
     manifest = dxrice_manifest.load_manifest()
     results = {}
 
-    deploy_hyprland_lua(repo_dir, manifest, results)
+    deploy_copy_once(repo_dir, manifest, results)
     deploy_static(repo_dir, manifest, results)
     cleanup_legacy_scripts(manifest, results)
 

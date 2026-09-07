@@ -33,13 +33,11 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_icons import icon_for
-import dxrice_manifest
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SCRIPTS_DIR)
 HOME = os.path.expanduser("~")
 CONFIG_PATH = os.path.join(HOME, ".config", "waybar", "config")
-REPO_CONFIG_PATH = os.path.join(REPO, "waybar", "config")
 ICONS_DIR = os.path.join(HOME, ".config", "waybar", "icons")
 
 LAUNCHER_ID = "custom/launcher"
@@ -93,15 +91,20 @@ def load_config():
 
 
 def save_config(cfg):
+    # Deliberately does NOT also write <repo>/waybar/config: your own
+    # shortcuts are yours, kept only in the live config, never synced into
+    # the tracked repo file. That used to be the plan ("survives an
+    # install.sh update"), but it meant every personal shortcut you added
+    # showed up as an uncommitted change in your own checkout, and for
+    # anyone syncing that repo copy to GitHub, permanently marked the live
+    # file "hand-edited" the moment they used this GUI even once -- exactly
+    # the bug that got someone stuck on an old waybar/config structure.
+    #
+    # No manifest bookkeeping needed either: dxrice_deploy.py now treats
+    # waybar/config like hyprland.lua -- copied in once on a fresh install,
+    # then never auto-overwritten again, regardless of hash. That's what
+    # actually makes your shortcuts survive an update, not a hash match.
     atomic_write_json(CONFIG_PATH, cfg)
-    atomic_write_json(REPO_CONFIG_PATH, cfg)
-    # Without this, install.sh's deploy guard sees this file's hash no
-    # longer matches what it last wrote and treats it as hand-edited --
-    # permanently skipping it on every future `install.sh update`, even
-    # though it was this rice's own tool that touched it, not the user.
-    manifest = dxrice_manifest.load_manifest()
-    dxrice_manifest.mark_deployed(CONFIG_PATH, manifest)
-    dxrice_manifest.save_manifest(manifest)
 
 
 def restart_waybar():
