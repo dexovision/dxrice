@@ -4,20 +4,10 @@ set -euo pipefail
 CONFIG="$HOME/.config/waybar/config"
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# This script gets deployed to ~/scripts/dxrice-manage-taskbar.sh, so its own
-# location can't tell us where the actual git checkout lives -- that path is
-# recorded by install.sh (see dxrice_manifest.set_repo_dir) since the repo
-# can be cloned/renamed anywhere. Fall back to ~/dxrice if install.sh has
-# never run its path-recording step yet.
-REPO_PATH_FILE="$HOME/.local/state/dxrice/repo_path"
-if [ -n "${DXRICE_REPO:-}" ]; then
-    REPO_DIR="$DXRICE_REPO"
-elif [ -r "$REPO_PATH_FILE" ]; then
-    REPO_DIR="$(cat "$REPO_PATH_FILE")"
-else
-    REPO_DIR="$HOME/dxrice"
-fi
-REPO_CONFIG="$REPO_DIR/waybar/config"
+# This script runs straight out of the git checkout (scripts/ subfolder),
+# never copied elsewhere, so its own location always tells us where the
+# repo's waybar/config lives -- no separate path lookup needed.
+REPO_CONFIG="$(dirname "$SCRIPTS_DIR")/waybar/config"
 
 restart_waybar() {
     pkill -x waybar 2>/dev/null || true

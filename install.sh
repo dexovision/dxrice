@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 # Installer / updater for the DXrice dotfiles.
 #
-#   ./install.sh            fresh install: sanity checks, deps, input group,
-#                            monitor detection, deploy everything
+#   ./install.sh            fresh install: asks where to put everything,
+#                            sanity checks, deps, input group, monitor
+#                            detection, deploy
 #   ./install.sh update     git pull (auto-stashing local repo edits like
 #                            theme.json tweaks), then re-deploy -- any file
-#                            you've hand-edited in ~/.config or ~/scripts
-#                            since the last deploy is left alone, not
-#                            overwritten
+#                            you've hand-edited in ~/.config since the last
+#                            deploy is left alone, not overwritten
 #   ./install.sh help       show this usage text
 #
-# Can be cloned to any path/name you like -- it records its own location in
-# ~/.local/state/dxrice/repo_path so the theme engine and taskbar manager
-# can find it later, wherever that ends up being.
+# Everything this rice needs beyond real app config files (which have to
+# live where each app expects, e.g. ~/.config/waybar/) stays inside one
+# folder -- wherever you choose to put this checkout. Scripts run straight
+# out of it; nothing gets copied loose into $HOME. install.sh records that
+# folder's location in ~/.local/state/dxrice/repo_path so hyprland.lua's
+# keybinds (a plain text/Lua file deployed to a fixed dotfile path) can
+# still find it after it's moved.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,7 +59,7 @@ banner() {
 }
 
 usage() {
-    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # ask_yes_no "prompt" DEFAULT   (DEFAULT is Y or N)
@@ -115,6 +119,42 @@ check_platform() {
 record_repo_path() {
     mkdir -p "$STATE_DIR"
     printf '%s\n' "$REPO_DIR" > "$STATE_DIR/repo_path"
+}
+
+# Lets a fresh install put the checkout wherever the user actually wants it,
+# instead of silently assuming wherever they happened to `git clone` it to.
+# Re-execs install.sh from the new location if it moves, so the rest of the
+# script never has to think about REPO_DIR changing mid-run.
+choose_install_location() {
+    if [ "${DXRICE_LOCATION_CONFIRMED:-0}" = "1" ]; then
+        ok "Using $REPO_DIR"
+        return
+    fi
+
+    echo ""
+    info "DXrice keeps everything (scripts, theme engine, state) in one folder --"
+    info "only real app config files still go to their usual ~/.config/<app> spot."
+    local default="$REPO_DIR" answer
+    if [ -t 0 ]; then
+        read -rp "Where should that folder be? [$default] " answer
+    fi
+    answer="${answer:-$default}"
+    answer="${answer/#\~/$HOME}"
+    answer="$(realpath -m "$answer")"
+
+    if [ "$answer" = "$REPO_DIR" ]; then
+        ok "Using $REPO_DIR"
+        return
+    fi
+    if [ -e "$answer" ]; then
+        err "'$answer' already exists -- pick an empty or nonexistent path."
+        exit 1
+    fi
+
+    info "Moving checkout to $answer ..."
+    mkdir -p "$(dirname "$answer")"
+    mv "$REPO_DIR" "$answer"
+    DXRICE_LOCATION_CONFIRMED=1 exec "$answer/install.sh" "$MODE"
 }
 
 # ---------------------------------------------------------------------------
@@ -201,7 +241,7 @@ PYEOF
 
 do_deploy() {
     info "Deploying configs (anything you've hand-edited is protected)..."
-    mkdir -p ~/.config/{hypr,kitty,waybar,mako,wofi} ~/scripts
+    mkdir -p ~/.config/{hypr,kitty,waybar,mako,wofi}
     python3 "$REPO_DIR/scripts/dxrice_deploy.py" "$REPO_DIR"
 
     echo ""
@@ -213,18 +253,19 @@ hyprland_is_running() {
     [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || pgrep -x Hyprland >/dev/null 2>&1
 }
 
-# Confirms the files the keybinds/infinite-desktop actually depend on made
-# it to their real, live locations -- rather than leaving you to guess
-# whether "deploy" silently no-op'd.
+# Confirms the files the keybinds/infinite-desktop actually depend on exist
+# where they need to -- rather than leaving you to guess whether "deploy"
+# silently no-op'd or the checkout itself is incomplete.
 verify_deploy() {
     echo ""
     info "Verifying deployed files..."
     local required=(
         "$HOME/.config/hypr/hyprland.lua"
-        "$HOME/scripts/dxrice_infinite_desktop_core.py"
-        "$HOME/scripts/dxrice-manage-taskbar.sh"
-        "$HOME/scripts/dxrice_theme_gui.py"
-        "$HOME/scripts/dxrice_apply_theme.py"
+        "$STATE_DIR/repo_path"
+        "$REPO_DIR/scripts/dxrice_infinite_desktop_core.py"
+        "$REPO_DIR/scripts/dxrice-manage-taskbar.sh"
+        "$REPO_DIR/scripts/dxrice_theme_gui.py"
+        "$REPO_DIR/scripts/dxrice_apply_theme.py"
     )
     local all_ok=1
     for f in "${required[@]}"; do
@@ -249,6 +290,12 @@ verify_deploy() {
         info "Hyprland prefers hyprland.lua when both exist, so this is harmless,"
         info "but it's dead weight -- safe to delete if you don't need it for anything else."
     fi
+    if [ -d "$HOME/scripts" ]; then
+        info "Note: ~/scripts still exists -- check the deploy output above for"
+        info "anything it says was left alone there (an old hand-edited copy, or a"
+        info "file this rice doesn't recognize). Anything it silently removed is"
+        info "already gone."
+    fi
     return 0
 }
 
@@ -258,9 +305,10 @@ do_install() {
     require_repo_layout
     check_platform
 
-    step "Step 1/4 -- Recording repo location"
+    step "Step 1/4 -- Where should this live?"
+    choose_install_location
     record_repo_path
-    ok "This checkout is now the source of truth for theming and updates:"
+    ok "This folder is now the source of truth for theming and updates:"
     info "$REPO_DIR"
 
     step "Step 2/4 -- Dependencies"

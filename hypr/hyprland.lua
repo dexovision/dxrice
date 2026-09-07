@@ -9,8 +9,23 @@ local terminal    = os.getenv("TERMINAL") or "kitty"
 local fileManager = "nautilus"
 local menu        = "wofi --show drun"
 
+-- DXrice's scripts live inside the git checkout itself, not scattered into
+-- $HOME -- install.sh records that checkout's location here so this file
+-- (which is only ever deployed once, then yours to hand-edit) keeps working
+-- no matter where the repo was cloned or later moved to.
+local home = os.getenv("HOME")
+local function dxrice_repo()
+    local f = io.open(home .. "/.local/state/dxrice/repo_path", "r")
+    if f then
+        local line = f:read("*l")
+        f:close()
+        if line and line ~= "" then return line end
+    end
+    return home .. "/dxrice"
+end
+local repo = dxrice_repo()
+
 hl.on("hyprland.start", function()
-    local home = os.getenv("HOME")
     hl.exec_cmd("waybar")
 
     local bg_path = os.getenv("BG_WALLPAPER") or (home .. "/Pictures/Wallpapers/default.png")
@@ -23,7 +38,7 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("wl-paste --type text --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
 
-    hl.exec_cmd("python3 " .. home .. "/scripts/dxrice_infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
+    hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
 end)
 
 hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")
@@ -153,29 +168,29 @@ end
 hl.window_rule({ name = "kitty-glass", match = { class = "kitty" }, opacity = "0.82 override 0.75 override" })
 hl.window_rule({ name = "float-everything", match = { class = ".*" }, float = true })
 
-hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("kitty -e ~/scripts/dxrice-manage-taskbar.sh"))
-hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("python3 ~/scripts/dxrice_theme_gui.py"))
+hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("kitty -e " .. repo .. "/scripts/dxrice-manage-taskbar.sh"))
+hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_theme_gui.py"))
 
 hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "-1" }))
 hl.bind(mainMod .. " + X", hl.dsp.focus({ workspace = "+1" }))
 hl.bind(mainMod .. " + SHIFT + Z", hl.dsp.window.move({ workspace = "-1" }))
 hl.bind(mainMod .. " + SHIFT + X", hl.dsp.window.move({ workspace = "+1" }))
-hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("python3 ~/scripts/dxrice_floating_tile_toggle.py"))
+hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_floating_tile_toggle.py"))
 
-hl.bind(mainMod .. " + left",  hl.dsp.exec_cmd("python3 ~/scripts/dxrice_navigate_windows.py left"))
-hl.bind(mainMod .. " + right", hl.dsp.exec_cmd("python3 ~/scripts/dxrice_navigate_windows.py right"))
-hl.bind(mainMod .. " + up",    hl.dsp.exec_cmd("python3 ~/scripts/dxrice_navigate_windows.py up"))
-hl.bind(mainMod .. " + down",  hl.dsp.exec_cmd("python3 ~/scripts/dxrice_navigate_windows.py down"))
+hl.bind(mainMod .. " + left",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py left"))
+hl.bind(mainMod .. " + right", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py right"))
+hl.bind(mainMod .. " + up",    hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py up"))
+hl.bind(mainMod .. " + down",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py down"))
 
-hl.bind(mainMod .. " + SHIFT + left",  hl.dsp.exec_cmd("python3 ~/scripts/dxrice_move_window.py left"),  { repeating = true })
-hl.bind(mainMod .. " + SHIFT + right", hl.dsp.exec_cmd("python3 ~/scripts/dxrice_move_window.py right"), { repeating = true })
-hl.bind(mainMod .. " + SHIFT + up",    hl.dsp.exec_cmd("python3 ~/scripts/dxrice_move_window.py up"),    { repeating = true })
-hl.bind(mainMod .. " + SHIFT + down",  hl.dsp.exec_cmd("python3 ~/scripts/dxrice_move_window.py down"),  { repeating = true })
+hl.bind(mainMod .. " + SHIFT + left",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_move_window.py left"),  { repeating = true })
+hl.bind(mainMod .. " + SHIFT + right", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_move_window.py right"), { repeating = true })
+hl.bind(mainMod .. " + SHIFT + up",    hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_move_window.py up"),    { repeating = true })
+hl.bind(mainMod .. " + SHIFT + down",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_move_window.py down"),  { repeating = true })
 
-hl.bind(mainMod .. " + CTRL + left",  hl.dsp.exec_cmd("python3 ~/scripts/dxrice_resize_window.py left"),  { repeating = true })
-hl.bind(mainMod .. " + CTRL + right", hl.dsp.exec_cmd("python3 ~/scripts/dxrice_resize_window.py right"), { repeating = true })
-hl.bind(mainMod .. " + CTRL + up",    hl.dsp.exec_cmd("python3 ~/scripts/dxrice_resize_window.py up"),    { repeating = true })
-hl.bind(mainMod .. " + CTRL + down",  hl.dsp.exec_cmd("python3 ~/scripts/dxrice_resize_window.py down"),  { repeating = true })
+hl.bind(mainMod .. " + CTRL + left",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_resize_window.py left"),  { repeating = true })
+hl.bind(mainMod .. " + CTRL + right", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_resize_window.py right"), { repeating = true })
+hl.bind(mainMod .. " + CTRL + up",    hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_resize_window.py up"),    { repeating = true })
+hl.bind(mainMod .. " + CTRL + down",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_resize_window.py down"),  { repeating = true })
 
 hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("firefox"))
 hl.bind(mainMod .. " + SHIFT + D", hl.dsp.exec_cmd("discord"))

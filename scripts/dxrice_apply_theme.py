@@ -3,8 +3,9 @@
 
 Single source of truth: <repo>/theme/theme.json
 Templates:              <repo>/theme/*.template  (string.Template ${TOKENS})
-<repo> is wherever install.sh last recorded the checkout (see
-dxrice_manifest.get_repo_dir); defaults to ~/dxrice if that was never run.
+<repo> is this script's own parent-of-parent directory -- it runs straight
+out of the git checkout (never copied elsewhere), so it always finds its
+own theme/ folder no matter where that checkout lives.
 Usage: dxrice_apply_theme.py [path/to/theme.json]
 """
 import json
@@ -14,11 +15,12 @@ import subprocess
 import sys
 from string import Template
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPTS_DIR)
 import dxrice_manifest
 
 HOME = os.path.expanduser("~")
-REPO = str(dxrice_manifest.get_repo_dir())
+REPO = os.path.dirname(SCRIPTS_DIR)
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = os.path.join(THEME_DIR, "theme.json")
 
