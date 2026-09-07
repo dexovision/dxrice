@@ -199,3 +199,7 @@ hl.bind(mainMod .. " + CTRL + down",  hl.dsp.exec_cmd("python3 ~/scripts/resize_
 
 
 hl.window_rule({ name = "float-everything", match = { class = ".*" }, float = true })
+
+
+hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("kitty -e ~/scripts/manage-taskbar.sh"))
+hl.bind(mainMod .. " + SHIFT + O", hl.dsp.exec_cmd("kitty -e ~/scripts/reorder-taskbar.sh"))

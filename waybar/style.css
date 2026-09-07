@@ -6,39 +6,8 @@
     border-radius: 0;
 }
 
-/* Kill the big continuous bar — make the outer window fully transparent */
 window#waybar {
     background: transparent;
-}
-
-/* Every module becomes its own separate floating pill */
-#custom-launcher,
-#custom-firefox,
-#custom-discord,
-#custom-kitty,
-#custom-files,
-#workspaces,
-#clock,
-#pulseaudio,
-#network,
-#cpu,
-#memory,
-#tray {
-    background: rgba(18, 20, 26, 0.55);
-    color: #e6e6e6;
-    padding: 4px 12px;
-    margin: 2px 0;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-#custom-launcher:hover,
-#custom-firefox:hover,
-#custom-discord:hover,
-#custom-kitty:hover,
-#custom-files:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
 }
 
 #workspaces button {
@@ -55,9 +24,50 @@ window#waybar {
 #clock {
     font-weight: 600;
     color: #ffffff;
+    background: rgba(18, 20, 26, 0.55);
+    padding: 4px 12px;
+    margin: 2px 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#pulseaudio,
+#network,
+#cpu,
+#memory,
+#tray {
+    background: rgba(18, 20, 26, 0.55);
+    color: #e6e6e6;
+    padding: 4px 12px;
+    margin: 2px 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 #tray > .needs-attention {
     background: rgba(230, 120, 120, 0.4);
     border-radius: 8px;
+}
+
+#custom-launcher,
+#custom-firefox,
+#custom-discord,
+#custom-files,
+#custom-sober,
+#custom-terminal {
+    background: rgba(18, 20, 26, 0.55);
+    color: #e6e6e6;
+    padding: 4px 12px;
+    margin: 2px 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+#custom-launcher:hover,
+#custom-firefox:hover,
+#custom-discord:hover,
+#custom-files:hover,
+#custom-sober:hover,
+#custom-terminal:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
 }

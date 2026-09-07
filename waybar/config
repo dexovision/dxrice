@@ -6,13 +6,27 @@
     "margin-left": 14,
     "margin-right": 14,
     "spacing": 10,
-
-    "modules-left": ["custom/launcher", "custom/firefox", "custom/discord", "custom/kitty", "custom/files"],
-    "modules-center": ["hyprland/workspaces", "clock"],
-    "modules-right": ["pulseaudio", "network", "cpu", "memory", "tray"],
-
+    "modules-left": [
+        "custom/launcher",
+        "custom/firefox",
+        "custom/discord",
+        "custom/sober",
+        "custom/terminal",
+        "custom/files"
+    ],
+    "modules-center": [
+        "hyprland/workspaces",
+        "clock"
+    ],
+    "modules-right": [
+        "pulseaudio",
+        "network",
+        "cpu",
+        "memory",
+        "tray"
+    ],
     "custom/launcher": {
-        "format": "󰣇",
+        "format": "\udb82\udcc7",
         "on-click": "wofi --show drun",
         "tooltip": true,
         "tooltip-format": "App Launcher"
@@ -27,17 +41,11 @@
         "on-click": "discord",
         "tooltip": false
     },
-    "custom/kitty": {
-        "format": "Terminal",
-        "on-click": "kitty",
-        "tooltip": false
-    },
     "custom/files": {
         "format": "Files",
         "on-click": "nautilus",
         "tooltip": false
     },
-
     "hyprland/workspaces": {
         "disable-scroll": true,
         "all-outputs": true,
@@ -62,5 +70,15 @@
     },
     "memory": {
         "format": "RAM {percentage}%"
+    },
+    "custom/sober": {
+        "format": "Sober",
+        "on-click": "sh -c 'flatpak run org.vinegarhq.Sober >/dev/null 2>&1 &'",
+        "tooltip": false
+    },
+    "custom/terminal": {
+        "format": "Terminal",
+        "on-click": "sh -c 'kitty >/dev/null 2>&1 &'",
+        "tooltip": false
     }
 }
