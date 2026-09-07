@@ -154,21 +154,29 @@ def patch_hyprland_lua(theme):
         f.write(content)
 
 
+def _run_guarded(args, timeout=3):
+    """Run a reload command with a hard timeout so one hung/contended
+    command (e.g. hyprctl under IPC load) can never freeze the whole
+    Apply -- each reload step is independent and best-effort."""
+    try:
+        subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
 def reload_apps(reload_wallpaper):
-    subprocess.run(["pkill", "-x", "waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _run_guarded(["pkill", "-x", "waybar"])
     subprocess.Popen(["setsid", "waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                       stdin=subprocess.DEVNULL, start_new_session=True)
 
-    subprocess.run(["makoctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    subprocess.run(["pkill", "-SIGUSR1", "-x", "kitty"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    subprocess.run(["hyprctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _run_guarded(["makoctl", "reload"])
+    _run_guarded(["pkill", "-SIGUSR1", "-x", "kitty"])
+    _run_guarded(["hyprctl", "reload"])
 
     if reload_wallpaper:
         wallpaper = os.path.expanduser(theme_data.get("wallpaper", ""))
         if wallpaper and os.path.exists(wallpaper):
-            subprocess.run(["pkill", "-x", "swaybg"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _run_guarded(["pkill", "-x", "swaybg"])
             subprocess.Popen(["setsid", "swaybg", "-i", wallpaper, "-m", "fill"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
@@ -176,8 +184,15 @@ def reload_apps(reload_wallpaper):
 def main():
     global theme_data
     theme_path = sys.argv[1] if len(sys.argv) > 1 else THEME_JSON
-    with open(theme_path) as f:
-        theme_data = json.load(f)
+    try:
+        with open(theme_path) as f:
+            theme_data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"Could not read {theme_path}: {e}", file=sys.stderr)
+        print("Fix or restore it (theme_gui.py writes atomically and self-heals a corrupt "
+              "theme.json, so opening the GUI once will also fix this) before re-running.",
+              file=sys.stderr)
+        sys.exit(1)
 
     render_templates(theme_data)
     patch_hyprland_lua(theme_data)

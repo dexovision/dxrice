@@ -116,6 +116,59 @@ SPIN_FIELDS = {
 }
 
 
+DEFAULT_THEME = {
+    "glass_bg": "12141a", "glass_bg_active": "232630",
+    "glass_text": "e6e6e6", "glass_text_active": "ffffff",
+    "glass_border": "ffffff", "accent": "e67878",
+    "opacity_idle": 0.55, "opacity_active": 0.85,
+    "border_opacity_idle": 0.08, "border_opacity_active": 0.25,
+    "radius": 12,
+    "font_family": "JetBrainsMono Nerd Font",
+    "font_size_waybar": 13, "font_size_wofi": 14, "font_size_mako": 11,
+    "kitty_opacity": 0.7643,
+    "hypr_gaps_in": 5, "hypr_gaps_out": 12, "hypr_border_size": 2,
+    "hypr_active_border_1": "8090a0", "hypr_active_border_2": "c0a0b0",
+    "hypr_active_border_angle": 45, "hypr_inactive_border": "1d2021",
+    "hypr_rounding": 12, "hypr_active_opacity": 0.92, "hypr_inactive_opacity": 0.85,
+    "hypr_blur_size": 6, "hypr_blur_passes": 3, "hypr_blur_vibrancy": 0.2,
+    "lock_blur_passes": 3, "lock_blur_size": 8, "lock_blur_vibrancy": 0.1696,
+    "lock_bg_opacity": 0.7,
+    "wallpaper": "~/Pictures/Wallpapers/default.png",
+}
+
+
+def atomic_write_json(path, data):
+    """Write via a temp file + os.replace so a crash/kill mid-write can
+    never leave a truncated, unparseable theme.json on disk."""
+    tmp_path = f"{path}.tmp{os.getpid()}"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f, indent=4)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
+def load_theme(path):
+    """Load theme.json, self-healing if it's missing or corrupted instead
+    of crashing the window mid-construction (which used to leave a blank,
+    unpainted GTK surface -- a silent white-screen hang)."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        if os.path.exists(path):
+            corrupt_path = path + ".corrupt"
+            try:
+                os.replace(path, corrupt_path)
+                print(f"theme.json was invalid ({e}); backed up to {corrupt_path} and reset to defaults.",
+                      file=sys.stderr)
+            except OSError:
+                pass
+        theme = dict(DEFAULT_THEME)
+        atomic_write_json(path, theme)
+        return theme
+
+
 def hex_to_rgba(h):
     h = h.lstrip("#")
     r, g, b = (int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
@@ -135,8 +188,16 @@ class ThemeWindow(Adw.ApplicationWindow):
         super().__init__(application=app, title="Rice Theme")
         self.set_default_size(560, 720)
 
-        with open(THEME_JSON) as f:
-            self.theme = json.load(f)
+        # Super+C (this rice's WM close-window keybind) force-kills the
+        # Wayland surface at the compositor level without the normal
+        # xdg_toplevel close handshake, so GTK's close-request signal never
+        # fires and the process is left running invisibly. Escape gives a
+        # guaranteed clean close from inside the app instead.
+        escape_controller = Gtk.EventControllerKey()
+        escape_controller.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(escape_controller)
+
+        self.theme = load_theme(THEME_JSON)
         self.dirty = False
         self.color_widgets = {}
         self.spin_widgets = {}
@@ -285,8 +346,7 @@ class ThemeWindow(Adw.ApplicationWindow):
             if not name:
                 return
             path = os.path.join(PRESETS_DIR, name + ".json")
-            with open(path, "w") as f:
-                json.dump(self.theme, f, indent=4)
+            atomic_write_json(path, self.theme)
             self.preset_model.append(name)
             save_row.set_text("")
 
@@ -322,21 +382,28 @@ class ThemeWindow(Adw.ApplicationWindow):
             self.font_row.set_text(self.theme["font_family"])
         self.wallpaper_row.set_subtitle(self.theme["wallpaper"])
 
+    def _on_key_pressed(self, _controller, keyval, _keycode, _state):
+        if keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        return False
+
     def on_revert(self, _btn):
-        with open(THEME_JSON) as f:
-            self.theme = json.load(f)
+        self.theme = load_theme(THEME_JSON)
         self.dirty = False
         self.apply_btn.set_label("Apply")
         self.sync_ui_from_theme()
 
     def on_apply(self, _btn):
-        with open(THEME_JSON, "w") as f:
-            json.dump(self.theme, f, indent=4)
+        atomic_write_json(THEME_JSON, self.theme)
         self.apply_btn.set_sensitive(False)
         self.apply_btn.set_label("Applying...")
 
         def run():
-            subprocess.run([sys.executable, APPLY_SCRIPT, THEME_JSON])
+            try:
+                subprocess.run([sys.executable, APPLY_SCRIPT, THEME_JSON], timeout=15)
+            except subprocess.TimeoutExpired:
+                pass
             GLib.idle_add(self.on_applied)
 
         import threading
@@ -351,13 +418,25 @@ class ThemeWindow(Adw.ApplicationWindow):
 
 class ThemeApp(Adw.Application):
     def __init__(self):
-        super().__init__(application_id="dev.dexo.RiceTheme")
+        # NON_UNIQUE: this is launched ad-hoc from a keybind, not a
+        # session-integrated single-instance app. Without this flag, a
+        # window force-closed by the compositor (e.g. Super+C) while a
+        # background reload is still running can leave a stuck instance
+        # registered on the session bus -- the next launch then silently
+        # reactivates that dead instance instead of opening a fresh one.
+        super().__init__(application_id="dev.dexo.RiceTheme",
+                          flags=Gio.ApplicationFlags.NON_UNIQUE)
 
     def do_activate(self):
         win = self.props.active_window
         if not win:
             win = ThemeWindow(self)
+            win.connect("close-request", self._on_close_request)
         win.present()
+
+    def _on_close_request(self, _win):
+        self.quit()
+        return False
 
 
 if __name__ == "__main__":
