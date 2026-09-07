@@ -88,3 +88,10 @@ yay -S linux-wallpaperengine-git
 
 Replace the `swaybg` line in `~/.config/hypr/hyprland.lua` under autostart:
 `exec_once = "linux-wallpaperengine --screen-root <YOUR_MONITOR> <WORKSHOP_ID>"`
+
+### Credits
+* https://github.com/sarodscommits/hyprland-infinitie-desktop-v2:
+  Made the hyprland infinite-canvas scripts.
+
+* @gentoolarp on tiktok:
+  Gave reference for customization and looks.
