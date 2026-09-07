@@ -10,3 +10,6 @@ default-timeout=5000
 [urgency=critical]
 border-color=#${ACCENT_HEX}
 text-color=#${TEXT_ACTIVE_HEX}
+
+[mode=dnd]
+invisible=1

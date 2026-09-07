@@ -29,6 +29,7 @@ TARGETS = {
     "wofi_style.css.template": os.path.join(HOME, ".config/wofi/style.css"),
     "mako_config.template": os.path.join(HOME, ".config/mako/config"),
     "kitty.conf.template": os.path.join(HOME, ".config/kitty/kitty.conf"),
+    "quick_settings_style.css.template": os.path.join(HOME, ".config/dxrice/quick_settings_style.css"),
     "hyprlock.conf.template": os.path.join(HOME, ".config/hypr/hyprlock.conf"),
 }
 

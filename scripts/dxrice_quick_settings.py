@@ -49,10 +49,23 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Gtk4LayerShell
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Gtk4LayerShell, Pango
 
 HOME = os.path.expanduser("~")
 PID_FILE = "/tmp/dxrice-quick-settings.pid"
+CSS_PATH = os.path.join(HOME, ".config", "dxrice", "quick_settings_style.css")
+
+
+def load_css():
+    provider = Gtk.CssProvider()
+    try:
+        provider.load_from_path(CSS_PATH)
+    except GLib.Error as e:
+        print(f"Could not load {CSS_PATH}: {e}", file=sys.stderr)
+        return
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
 
 
 def run(args, timeout=3):
@@ -287,27 +300,213 @@ def action_shutdown():
 
 
 # ---------------------------------------------------------------------------
+# Media controls (playerctl)
+# ---------------------------------------------------------------------------
+
+def player_available():
+    return run_ok(["playerctl", "status"], timeout=2)
+
+
+def player_metadata():
+    r = run(["playerctl", "metadata", "--format", "{{title}}\t{{artist}}\t{{status}}"], timeout=2)
+    if not r or r.returncode != 0:
+        return None
+    parts = r.stdout.rstrip("\n").split("\t")
+    if len(parts) < 3:
+        return None
+    title, artist, status = parts
+    return {"title": title or "Unknown", "artist": artist, "playing": status == "Playing"}
+
+
+def player_play_pause():
+    run_ok(["playerctl", "play-pause"], timeout=2)
+
+
+def player_next():
+    run_ok(["playerctl", "next"], timeout=2)
+
+
+def player_previous():
+    run_ok(["playerctl", "previous"], timeout=2)
+
+
+# ---------------------------------------------------------------------------
+# Clipboard history (cliphist)
+# ---------------------------------------------------------------------------
+
+def list_clipboard_history(limit=15):
+    """Returns [(raw_line, preview), ...] -- raw_line is what cliphist decode
+    actually expects on stdin (the whole "<id>\\t<preview>" line, not just
+    the id -- confirmed against this rice's real cliphist, a bare id fails)."""
+    r = run(["cliphist", "list"], timeout=3)
+    if not r or r.returncode != 0:
+        return []
+    entries = []
+    for line in r.stdout.splitlines()[:limit]:
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            entries.append((line, parts[1]))
+    return entries
+
+
+def copy_clipboard_entry(raw_line):
+    try:
+        decode = subprocess.run(["cliphist", "decode"], input=raw_line.encode(),
+                                 capture_output=True, timeout=3)
+    except (subprocess.TimeoutExpired, OSError):
+        return
+    if decode.returncode != 0:
+        return
+    try:
+        subprocess.run(["wl-copy"], input=decode.stdout, timeout=3)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Do Not Disturb (mako)
+# ---------------------------------------------------------------------------
+
+def mako_running():
+    return run_ok(["pgrep", "-x", "mako"], timeout=2)
+
+
+def dnd_active():
+    r = run(["makoctl", "mode"], timeout=2)
+    return bool(r and r.returncode == 0 and "dnd" in r.stdout.split())
+
+
+def set_dnd(enabled):
+    run_ok(["makoctl", "mode", "-a" if enabled else "-r", "dnd"], timeout=2)
+
+
+# ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
 
-def make_slider_row(title, initial, on_change):
-    row = Adw.ActionRow(title=title)
-    scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL)
+def _label(text, css_class=None, ellipsize=True, xalign=0.0):
+    lbl = Gtk.Label(label=text, xalign=xalign)
+    if ellipsize:
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        lbl.set_hexpand(True)
+        lbl.set_halign(Gtk.Align.FILL)
+    if css_class:
+        lbl.add_css_class(css_class)
+    return lbl
+
+
+def make_card():
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    box.add_css_class("qs-card")
+    return box
+
+
+def make_icon_button(icon_name, tooltip=None):
+    btn = Gtk.Button(icon_name=icon_name)
+    btn.add_css_class("qs-icon-btn")
+    btn.set_valign(Gtk.Align.CENTER)
+    if tooltip:
+        btn.set_tooltip_text(tooltip)
+    return btn
+
+
+def make_toggle_button(icon_name, label_text, active, on_toggled):
+    """Compact icon-over-label toggle, GNOME-quick-settings style."""
+    btn = Gtk.ToggleButton()
+    btn.add_css_class("qs-toggle")
+    btn.set_active(active)
+    if active:
+        btn.add_css_class("active")
+    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, halign=Gtk.Align.CENTER)
+    inner.append(Gtk.Image.new_from_icon_name(icon_name))
+    lbl = Gtk.Label(label=label_text)
+    lbl.add_css_class("caption")
+    inner.append(lbl)
+    btn.set_child(inner)
+
+    def _on_toggled(b):
+        if b.get_active():
+            b.add_css_class("active")
+        else:
+            b.remove_css_class("active")
+        on_toggled(b.get_active())
+
+    btn.connect("toggled", _on_toggled)
+    return btn
+
+
+def make_device_menu_button(devices, on_select):
+    """A small "..." button that opens a popover listing audio devices --
+    kept in a popover (not the main panel's fixed-width layout) so a long
+    device name can never force the whole panel wider."""
+    menu_btn = Gtk.MenuButton(icon_name="view-more-symbolic")
+    menu_btn.add_css_class("qs-icon-btn")
+    menu_btn.set_valign(Gtk.Align.CENTER)
+
+    listbox = Gtk.ListBox()
+    listbox.add_css_class("boxed-list")
+    for devid, name, is_default in devices:
+        row = Gtk.Label(label=name, xalign=0)
+        row.set_ellipsize(Pango.EllipsizeMode.END)
+        row.set_max_width_chars(30)
+        row.set_margin_top(6)
+        row.set_margin_bottom(6)
+        row.set_margin_start(10)
+        row.set_margin_end(10)
+        listbox.append(row)
+
+    def on_row_activated(_lb, row):
+        idx = row.get_index()
+        on_select(devices[idx][0])
+        popover.popdown()
+
+    listbox.connect("row-activated", on_row_activated)
+    popover = Gtk.Popover()
+    popover.set_child(listbox)
+    menu_btn.set_popover(popover)
+    return menu_btn
+
+
+def make_slider_row(icon_on, icon_off, initial, muted, on_change, on_mute, devices=None, on_device=None):
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    row.add_css_class("qs-row")
+
+    mute_btn = Gtk.ToggleButton()
+    mute_btn.set_icon_name(icon_off if muted else icon_on)
+    mute_btn.add_css_class("qs-icon-btn")
+    mute_btn.add_css_class("flat")
+    mute_btn.set_active(muted)
+    mute_btn.set_valign(Gtk.Align.CENTER)
+
+    def _on_mute_toggled(b):
+        on_mute()
+        b.set_icon_name(icon_off if b.get_active() else icon_on)
+
+    mute_btn.connect("toggled", _on_mute_toggled)
+    row.append(mute_btn)
+
+    scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True)
     scale.set_range(0, 100)
     scale.set_value(initial)
-    scale.set_draw_value(True)
-    scale.set_size_request(160, -1)
-    scale.set_valign(Gtk.Align.CENTER)
+    scale.set_draw_value(False)
     scale.connect("value-changed", lambda s: on_change(int(s.get_value())))
-    row.add_suffix(scale)
-    row.scale = scale
-    return row
+    row.append(scale)
+
+    pct_label = _label(f"{initial}%", ellipsize=False)
+    pct_label.set_width_chars(4)
+    pct_label.set_xalign(1.0)
+    row.append(pct_label)
+
+    if devices and len(devices) > 1 and on_device:
+        row.append(make_device_menu_button(devices, on_device))
+
+    return row, scale, pct_label
 
 
 class PasswordDialog(Adw.Window):
     def __init__(self, parent, ssid, on_submit):
         super().__init__(transient_for=parent, modal=True, title=f"Connect to {ssid}")
-        self.set_default_size(360, -1)
+        self.set_default_size(320, -1)
         toolbar_view = Adw.ToolbarView()
         toolbar_view.add_top_bar(Adw.HeaderBar())
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -334,12 +533,17 @@ class PasswordDialog(Adw.Window):
 # Main panel
 # ---------------------------------------------------------------------------
 
+PANEL_WIDTH = 320
+
+
 class QuickSettingsWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Quick Settings")
-        self.set_default_size(380, -1)
+        self.set_default_size(PANEL_WIDTH, -1)
+        self.set_resizable(False)
 
         Gtk4LayerShell.init_for_window(self)
+        Gtk4LayerShell.set_namespace(self, "dxrice-quicksettings")
         Gtk4LayerShell.set_layer(self, Gtk4LayerShell.Layer.OVERLAY)
         Gtk4LayerShell.set_keyboard_mode(self, Gtk4LayerShell.KeyboardMode.ON_DEMAND)
         Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.TOP, True)
@@ -351,258 +555,347 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         escape_controller.connect("key-pressed", self._on_key_pressed)
         self.add_controller(escape_controller)
 
-        toolbar_view = Adw.ToolbarView()
-        toolbar_view.add_top_bar(Adw.HeaderBar())
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        root.add_css_class("qs-root")
+        root.set_size_request(PANEL_WIDTH, -1)
+        self.set_content(root)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        header.add_css_class("qs-header")
+        header.append(_label("Quick Settings", ellipsize=False))
+        close_btn = Gtk.Button(icon_name="window-close-symbolic")
+        close_btn.add_css_class("qs-close")
+        close_btn.connect("clicked", lambda b: self.close())
+        header.append(close_btn)
+        root.append(header)
+
         scroller = Gtk.ScrolledWindow()
-        scroller.set_max_content_height(700)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_max_content_height(640)
         scroller.set_propagate_natural_height(True)
-        page = Adw.PreferencesPage()
-        scroller.set_child(page)
-        toolbar_view.set_content(scroller)
-        self.set_content(toolbar_view)
+        root.append(scroller)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        scroller.set_child(content)
 
         self.cpu_monitor = CpuMonitor()
 
-        self._build_stats_group(page)
-        self._build_volume_group(page)
-        self._build_mic_group(page)
+        self._build_toggles_card(content)
+        self._build_media_card(content)
+        self._build_audio_card(content)
         if has_backlight():
-            self._build_brightness_group(page)
-        self._build_wifi_group(page)
-        self._build_bluetooth_group(page)
-        self._build_power_group(page)
+            self._build_brightness_card(content)
+        self._build_wifi_card(content)
+        self._build_bluetooth_card(content)
+        self._build_clipboard_card(content)
+        self._build_stats_card(content)
+        self._build_power_card(content)
 
         GLib.timeout_add(1500, self._tick)
+        GLib.timeout_add(2000, self._tick_media)
 
-    # ---- live stats ----
+    # ---- quick toggles (wifi / bluetooth / dnd) ----
 
-    def _build_stats_group(self, page):
-        group = Adw.PreferencesGroup(title="System")
-        page.add(group)
-        self.cpu_bar = Gtk.LevelBar()
-        self.cpu_row = Adw.ActionRow(title="CPU")
-        self.cpu_row.add_suffix(self.cpu_bar)
-        self.cpu_bar.set_size_request(140, -1)
-        self.cpu_bar.set_valign(Gtk.Align.CENTER)
-        group.add(self.cpu_row)
+    def _build_toggles_card(self, content):
+        card = make_card()
+        box = Gtk.Box(spacing=6, homogeneous=True)
+        box.append(make_toggle_button("network-wireless-symbolic", "Wi-Fi",
+                                       wifi_radio_enabled(), self._on_wifi_toggle))
+        box.append(make_toggle_button("bluetooth-active-symbolic", "Bluetooth",
+                                       bluetooth_powered(), self._on_bt_toggle))
+        self._mako_available = mako_running()
+        if self._mako_available:
+            box.append(make_toggle_button("notifications-disabled-symbolic", "DND",
+                                           dnd_active(), self._on_dnd_toggle))
+        card.append(box)
+        content.append(card)
 
-        self.mem_bar = Gtk.LevelBar()
-        self.mem_row = Adw.ActionRow(title="Memory")
-        self.mem_row.add_suffix(self.mem_bar)
-        self.mem_bar.set_size_request(140, -1)
-        self.mem_bar.set_valign(Gtk.Align.CENTER)
-        group.add(self.mem_row)
+    def _on_wifi_toggle(self, active):
+        set_wifi_radio(active)
+        GLib.timeout_add(800, self._rebuild_wifi_card_once)
 
-        self.disk_bar = Gtk.LevelBar()
-        self.disk_row = Adw.ActionRow(title="Disk (/)")
-        self.disk_row.add_suffix(self.disk_bar)
-        self.disk_bar.set_size_request(140, -1)
-        self.disk_bar.set_valign(Gtk.Align.CENTER)
-        group.add(self.disk_row)
+    def _on_bt_toggle(self, active):
+        set_bluetooth_power(active)
+        GLib.timeout_add(800, self._rebuild_bt_card_once)
 
-        self._refresh_stats()
+    def _on_dnd_toggle(self, active):
+        set_dnd(active)
 
-    def _refresh_stats(self):
-        cpu = self.cpu_monitor.sample()
-        self.cpu_bar.set_value(cpu / 100)
-        self.cpu_row.set_subtitle(f"{cpu:.0f}%")
+    # ---- media (playerctl) ----
 
-        mem = mem_percent()
-        self.mem_bar.set_value(mem / 100)
-        self.mem_row.set_subtitle(f"{mem:.0f}%")
+    def _build_media_card(self, content):
+        self.media_card = make_card()
+        content.append(self.media_card)
+        self._media_widgets = []
+        self._refresh_media()
 
-        disk = disk_percent()
-        self.disk_bar.set_value(disk / 100)
-        self.disk_row.set_subtitle(f"{disk:.0f}%")
+    def _refresh_media(self):
+        for w in self._media_widgets:
+            self.media_card.remove(w)
+        self._media_widgets = []
 
-    def _tick(self):
-        self._refresh_stats()
+        meta = player_metadata()
+        self.media_card.set_visible(meta is not None)
+        if meta is None:
+            return
+
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, hexpand=True)
+        text_box.append(_label(meta["title"], "qs-row-title"))
+        if meta["artist"]:
+            text_box.append(_label(meta["artist"], "qs-row-subtitle"))
+
+        controls = Gtk.Box(spacing=4)
+        prev_btn = make_icon_button("media-skip-backward-symbolic", "Previous")
+        prev_btn.connect("clicked", lambda b: player_previous())
+        play_btn = make_icon_button(
+            "media-playback-pause-symbolic" if meta["playing"] else "media-playback-start-symbolic",
+            "Play/Pause")
+        play_btn.connect("clicked", lambda b: player_play_pause())
+        next_btn = make_icon_button("media-skip-forward-symbolic", "Next")
+        next_btn.connect("clicked", lambda b: player_next())
+        for b in (prev_btn, play_btn, next_btn):
+            controls.append(b)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.add_css_class("qs-row")
+        row.append(text_box)
+        row.append(controls)
+        self.media_card.append(row)
+        self._media_widgets.append(row)
+
+    def _tick_media(self):
+        self._refresh_media()
         return True
 
-    # ---- volume ----
+    # ---- audio (volume + mic) ----
 
-    def _build_volume_group(self, page):
-        group = Adw.PreferencesGroup(title="Volume")
-        page.add(group)
+    def _build_audio_card(self, content):
+        card = make_card()
+
         vol, muted = get_volume()
-        self.vol_row = make_slider_row("Output", vol, self._on_volume_changed)
-        mute_btn = Gtk.ToggleButton(icon_name="audio-volume-muted-symbolic")
-        mute_btn.set_active(muted)
-        mute_btn.set_valign(Gtk.Align.CENTER)
-        mute_btn.connect("toggled", lambda b: toggle_mute("@DEFAULT_AUDIO_SINK@"))
-        self.vol_row.add_prefix(mute_btn)
-        group.add(self.vol_row)
+        sinks = list_audio_devices("Sinks")
+        vol_row, self.vol_scale, self.vol_pct = make_slider_row(
+            "audio-volume-high-symbolic", "audio-volume-muted-symbolic", vol, muted,
+            lambda p: set_volume("@DEFAULT_AUDIO_SINK@", p),
+            lambda: toggle_mute("@DEFAULT_AUDIO_SINK@"),
+            sinks, set_default_device,
+        )
+        card.append(vol_row)
 
-        devices = list_audio_devices("Sinks")
-        if len(devices) > 1:
-            names = Gtk.StringList.new([d[1] for d in devices])
-            combo = Adw.ComboRow(title="Output device", model=names)
-            for i, d in enumerate(devices):
-                if d[2]:
-                    combo.set_selected(i)
-            combo.connect("notify::selected", lambda c, _p: set_default_device(devices[c.get_selected()][0]))
-            group.add(combo)
+        mic_vol, mic_muted = get_volume("@DEFAULT_AUDIO_SOURCE@")
+        sources = list_audio_devices("Sources")
+        mic_row, self.mic_scale, self.mic_pct = make_slider_row(
+            "microphone-sensitivity-high-symbolic", "microphone-sensitivity-muted-symbolic",
+            mic_vol, mic_muted,
+            lambda p: set_volume("@DEFAULT_AUDIO_SOURCE@", p),
+            lambda: toggle_mute("@DEFAULT_AUDIO_SOURCE@"),
+            sources, set_default_device,
+        )
+        card.append(mic_row)
 
-    def _on_volume_changed(self, percent):
-        set_volume("@DEFAULT_AUDIO_SINK@", percent)
-
-    # ---- microphone ----
-
-    def _build_mic_group(self, page):
-        group = Adw.PreferencesGroup(title="Microphone")
-        page.add(group)
-        vol, muted = get_volume("@DEFAULT_AUDIO_SOURCE@")
-        self.mic_row = make_slider_row("Input", vol, self._on_mic_changed)
-        mute_btn = Gtk.ToggleButton(icon_name="microphone-sensitivity-muted-symbolic")
-        mute_btn.set_active(muted)
-        mute_btn.set_valign(Gtk.Align.CENTER)
-        mute_btn.connect("toggled", lambda b: toggle_mute("@DEFAULT_AUDIO_SOURCE@"))
-        self.mic_row.add_prefix(mute_btn)
-        group.add(self.mic_row)
-
-        devices = list_audio_devices("Sources")
-        if len(devices) > 1:
-            names = Gtk.StringList.new([d[1] for d in devices])
-            combo = Adw.ComboRow(title="Input device", model=names)
-            for i, d in enumerate(devices):
-                if d[2]:
-                    combo.set_selected(i)
-            combo.connect("notify::selected", lambda c, _p: set_default_device(devices[c.get_selected()][0]))
-            group.add(combo)
-
-    def _on_mic_changed(self, percent):
-        set_volume("@DEFAULT_AUDIO_SOURCE@", percent)
+        content.append(card)
 
     # ---- brightness ----
 
-    def _build_brightness_group(self, page):
-        group = Adw.PreferencesGroup(title="Brightness")
-        page.add(group)
-        row = make_slider_row("Screen", get_brightness_percent(),
-                               lambda v: set_brightness_percent(v))
-        group.add(row)
+    def _build_brightness_card(self, content):
+        card = make_card()
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.add_css_class("qs-row")
+        row.append(Gtk.Image.new_from_icon_name("display-brightness-symbolic"))
+        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True)
+        scale.set_range(1, 100)
+        scale.set_value(get_brightness_percent())
+        scale.set_draw_value(False)
+        scale.connect("value-changed", lambda s: set_brightness_percent(int(s.get_value())))
+        row.append(scale)
+        card.append(row)
+        content.append(card)
 
     # ---- wifi ----
 
-    def _build_wifi_group(self, page):
-        self.wifi_group = Adw.PreferencesGroup(title="Wi-Fi")
-        page.add(self.wifi_group)
+    def _build_wifi_card(self, content):
+        self.wifi_card = make_card()
+        content.append(self.wifi_card)
+        self._wifi_row_widgets = []
+        self._rebuild_wifi_card()
 
-        self.wifi_switch_row = Adw.SwitchRow(title="Wi-Fi", active=wifi_radio_enabled())
-        self.wifi_switch_row.connect("notify::active", self._on_wifi_toggled)
-        self.wifi_group.add(self.wifi_switch_row)
-
-        self.wifi_list_group = Adw.PreferencesGroup()
-        page.add(self.wifi_list_group)
-        self._wifi_rows = []
-        self._rebuild_wifi_list()
-
-    def _on_wifi_toggled(self, row, _pspec):
-        set_wifi_radio(row.get_active())
-        GLib.timeout_add(800, self._rebuild_wifi_list_once)
-
-    def _rebuild_wifi_list_once(self):
-        self._rebuild_wifi_list()
+    def _rebuild_wifi_card_once(self):
+        self._rebuild_wifi_card()
         return False
 
-    def _rebuild_wifi_list(self):
-        # Adw.PreferencesGroup.remove() only accepts a row it actually
-        # tracked as added -- walking get_first_child()/get_next_sibling()
-        # can hand back an internal wrapper widget instead and crash with
-        # "tried to remove non-child". Track exactly what we added instead.
-        for row in self._wifi_rows:
-            self.wifi_list_group.remove(row)
-        self._wifi_rows = []
-        if not wifi_radio_enabled():
+    def _rebuild_wifi_card(self):
+        for w in self._wifi_row_widgets:
+            self.wifi_card.remove(w)
+        self._wifi_row_widgets = []
+        enabled = wifi_radio_enabled()
+        self.wifi_card.set_visible(enabled)
+        if not enabled:
             return
         for ssid, sig, security, connected in list_wifi_networks()[:8]:
-            row = Adw.ActionRow(title=GLib.markup_escape_text(ssid),
-                                 subtitle=f"{sig}%  {'secured' if security and security != '--' else 'open'}")
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.add_css_class("qs-list-row")
+            icon_name = ("network-wireless-signal-excellent-symbolic" if sig > 70 else
+                         "network-wireless-signal-good-symbolic" if sig > 40 else
+                         "network-wireless-signal-weak-symbolic")
+            row.append(Gtk.Image.new_from_icon_name(icon_name))
+            row.append(_label(ssid))
             if connected:
-                row.add_suffix(Gtk.Image.new_from_icon_name("object-select-symbolic"))
-                row.set_activatable(False)
+                row.append(Gtk.Image.new_from_icon_name("object-select-symbolic"))
             else:
-                row.set_activatable(True)
-                row.connect("activated", self._on_wifi_row_activated, ssid, security)
-            self.wifi_list_group.add(row)
-            self._wifi_rows.append(row)
+                btn = Gtk.Button(label="Connect")
+                btn.add_css_class("flat")
+                btn.set_valign(Gtk.Align.CENTER)
+                btn.connect("clicked", lambda b, s=ssid, sec=security: self._on_wifi_connect_clicked(s, sec))
+                row.append(btn)
+            self.wifi_card.append(row)
+            self._wifi_row_widgets.append(row)
 
-    def _on_wifi_row_activated(self, row, ssid, security):
+    def _on_wifi_connect_clicked(self, ssid, security):
         needs_password = bool(security and security != "--") and not has_saved_connection(ssid)
         if needs_password:
             PasswordDialog(self, ssid, self._connect_wifi_with_password).present()
         else:
             connect_wifi(ssid)
-            GLib.timeout_add(1000, self._rebuild_wifi_list_once)
+            GLib.timeout_add(1000, self._rebuild_wifi_card_once)
 
     def _connect_wifi_with_password(self, ssid, password):
         connect_wifi(ssid, password)
-        GLib.timeout_add(1000, self._rebuild_wifi_list_once)
+        GLib.timeout_add(1000, self._rebuild_wifi_card_once)
 
     # ---- bluetooth ----
 
-    def _build_bluetooth_group(self, page):
-        self.bt_group = Adw.PreferencesGroup(title="Bluetooth")
-        page.add(self.bt_group)
-        self.bt_switch_row = Adw.SwitchRow(title="Bluetooth", active=bluetooth_powered())
-        self.bt_switch_row.connect("notify::active", self._on_bt_toggled)
-        self.bt_group.add(self.bt_switch_row)
+    def _build_bluetooth_card(self, content):
+        self.bt_card = make_card()
+        content.append(self.bt_card)
+        self._bt_row_widgets = []
+        self._rebuild_bt_card()
 
-        self.bt_list_group = Adw.PreferencesGroup()
-        page.add(self.bt_list_group)
-        self._bt_rows = []
-        self._rebuild_bt_list()
-
-    def _on_bt_toggled(self, row, _pspec):
-        set_bluetooth_power(row.get_active())
-        GLib.timeout_add(800, self._rebuild_bt_list_once)
-
-    def _rebuild_bt_list_once(self):
-        self._rebuild_bt_list()
+    def _rebuild_bt_card_once(self):
+        self._rebuild_bt_card()
         return False
 
-    def _rebuild_bt_list(self):
-        for row in self._bt_rows:
-            self.bt_list_group.remove(row)
-        self._bt_rows = []
-        if not bluetooth_powered():
+    def _rebuild_bt_card(self):
+        for w in self._bt_row_widgets:
+            self.bt_card.remove(w)
+        self._bt_row_widgets = []
+        enabled = bluetooth_powered()
+        self.bt_card.set_visible(enabled)
+        if not enabled:
             return
-        for mac, name, connected in list_bluetooth_devices():
-            row = Adw.ActionRow(title=GLib.markup_escape_text(name))
+        devices = list_bluetooth_devices()
+        if not devices:
+            row = Gtk.Box()
+            row.add_css_class("qs-list-row")
+            row.append(_label("No paired devices", "qs-row-subtitle"))
+            self.bt_card.append(row)
+            self._bt_row_widgets.append(row)
+            return
+        for mac, name, connected in devices:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.add_css_class("qs-list-row")
+            row.append(_label(name))
             btn = Gtk.Button(label="Disconnect" if connected else "Connect")
+            btn.add_css_class("flat")
             btn.set_valign(Gtk.Align.CENTER)
             btn.connect("clicked", lambda b, m=mac, c=connected: self._on_bt_connect_clicked(m, c))
-            row.add_suffix(btn)
-            self.bt_list_group.add(row)
-            self._bt_rows.append(row)
+            row.append(btn)
+            self.bt_card.append(row)
+            self._bt_row_widgets.append(row)
 
     def _on_bt_connect_clicked(self, mac, currently_connected):
         bluetooth_connect(mac, connect=not currently_connected)
-        GLib.timeout_add(1500, self._rebuild_bt_list_once)
+        GLib.timeout_add(1500, self._rebuild_bt_card_once)
+
+    # ---- clipboard history ----
+
+    def _build_clipboard_card(self, content):
+        self.clip_card = make_card()
+        header_row = Gtk.Box(spacing=6)
+        header_row.append(_label("Clipboard", "qs-row-title", ellipsize=False))
+        refresh_btn = make_icon_button("view-refresh-symbolic", "Refresh")
+        refresh_btn.connect("clicked", lambda b: self._rebuild_clipboard_card())
+        header_row.append(refresh_btn)
+        self.clip_card.append(header_row)
+        content.append(self.clip_card)
+        self._clip_row_widgets = []
+        self._rebuild_clipboard_card()
+
+    def _rebuild_clipboard_card(self):
+        for w in self._clip_row_widgets:
+            self.clip_card.remove(w)
+        self._clip_row_widgets = []
+        entries = list_clipboard_history(8)
+        for raw, preview in entries:
+            btn = Gtk.Button()
+            btn.add_css_class("flat")
+            btn.add_css_class("qs-list-row")
+            btn.set_child(_label(preview.replace("\n", " ")))
+            btn.connect("clicked", lambda b, r=raw: copy_clipboard_entry(r))
+            self.clip_card.append(btn)
+            self._clip_row_widgets.append(btn)
+
+    # ---- live stats ----
+
+    def _build_stats_card(self, content):
+        card = make_card()
+        self.cpu_bar, self.cpu_pct = self._add_stat_row(card, "CPU")
+        self.mem_bar, self.mem_pct = self._add_stat_row(card, "Memory")
+        self.disk_bar, self.disk_pct = self._add_stat_row(card, "Disk")
+        content.append(card)
+        self._refresh_stats()
+
+    def _add_stat_row(self, card, title):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.add_css_class("qs-row")
+        row.append(_label(title, ellipsize=False))
+        bar = Gtk.LevelBar(hexpand=True)
+        bar.set_valign(Gtk.Align.CENTER)
+        row.append(bar)
+        pct = _label("0%", ellipsize=False)
+        pct.set_width_chars(4)
+        pct.set_xalign(1.0)
+        row.append(pct)
+        card.append(row)
+        return bar, pct
+
+    def _refresh_stats(self):
+        cpu = self.cpu_monitor.sample()
+        self.cpu_bar.set_value(cpu / 100)
+        self.cpu_pct.set_label(f"{cpu:.0f}%")
+
+        mem = mem_percent()
+        self.mem_bar.set_value(mem / 100)
+        self.mem_pct.set_label(f"{mem:.0f}%")
+
+        disk = disk_percent()
+        self.disk_bar.set_value(disk / 100)
+        self.disk_pct.set_label(f"{disk:.0f}%")
+
+    def _tick(self):
+        self._refresh_stats()
+        return True
 
     # ---- power ----
 
-    def _build_power_group(self, page):
-        group = Adw.PreferencesGroup(title="Power")
-        page.add(group)
-        box = Gtk.Box(spacing=8, homogeneous=True)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        for label, icon, action, needs_confirm in [
-            ("Lock", "system-lock-screen-symbolic", action_lock, False),
-            ("Logout", "system-log-out-symbolic", action_logout, True),
-            ("Reboot", "system-reboot-symbolic", action_reboot, True),
-            ("Shutdown", "system-shutdown-symbolic", action_shutdown, True),
+    def _build_power_card(self, content):
+        card = make_card()
+        box = Gtk.Box(spacing=6, homogeneous=True)
+        for icon, tooltip, action, destructive in [
+            ("system-lock-screen-symbolic", "Lock", action_lock, False),
+            ("system-log-out-symbolic", "Logout", action_logout, True),
+            ("system-reboot-symbolic", "Reboot", action_reboot, True),
+            ("system-shutdown-symbolic", "Shutdown", action_shutdown, True),
         ]:
-            btn = Gtk.Button()
-            content = Adw.ButtonContent(icon_name=icon, label=label)
-            btn.set_child(content)
-            if needs_confirm:
-                btn.connect("clicked", lambda b, a=action, l=label: self._confirm_power_action(l, a))
+            btn = make_icon_button(icon, tooltip)
+            btn.add_css_class("qs-power-btn")
+            if destructive:
+                btn.add_css_class("destructive")
+                btn.connect("clicked", lambda b, a=action, l=tooltip: self._confirm_power_action(l, a))
             else:
                 btn.connect("clicked", lambda b, a=action: a())
             box.append(btn)
-        group.add(box)
+        card.append(box)
+        content.append(card)
 
     def _confirm_power_action(self, label, action):
         dialog = Adw.AlertDialog(heading=f"{label}?", body=f"This will {label.lower()} the system now.")
@@ -630,6 +923,10 @@ class QuickSettingsApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id="dev.dexo.DXriceQuickSettings",
                           flags=Gio.ApplicationFlags.NON_UNIQUE)
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        load_css()
 
     def do_activate(self):
         win = self.props.active_window

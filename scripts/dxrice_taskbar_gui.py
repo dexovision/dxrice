@@ -45,8 +45,11 @@ LAUNCHER_ID = "custom/launcher"
 ICON_MODES = ["auto", "text", "image"]
 ICON_MODE_LABELS = ["Automatic icon", "Text label", "Custom image"]
 
-MIC_MUTE_MODID = "custom/micmute"
-MIC_MUTE_CMD = "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
+# Mic mute now lives in the Quick Settings panel (dxrice_quick_settings.py)
+# -- a real mute toggle with live state, not a plain waybar text button.
+# Removed here since a standalone taskbar shortcut for it was redundant
+# and didn't belong in "manage app shortcuts" conceptually.
+_LEGACY_MIC_MUTE_MODID = "custom/micmute"
 
 SYSTEM_MODULE_LABELS = {
     "clock": "Clock",
@@ -84,6 +87,7 @@ def load_config():
     with open(CONFIG_PATH) as f:
         cfg = json.load(f)
     normalize_legacy_shortcuts(cfg)
+    cleanup_legacy_mic_mute(cfg)
     return cfg
 
 
@@ -307,24 +311,13 @@ def set_module_click(cfg, modid, key, value):
         entry.pop(key, None)
 
 
-def add_mic_mute_module(cfg):
-    if MIC_MUTE_MODID in cfg:
-        return False
-    cfg[MIC_MUTE_MODID] = {
-        "format": "Mic",
-        "on-click": MIC_MUTE_CMD,
-        "tooltip": True,
-        "tooltip-format": "Toggle mic mute",
-    }
-    cfg.setdefault("modules-right", []).insert(0, MIC_MUTE_MODID)
-    return True
-
-
-def remove_mic_mute_module(cfg):
+def cleanup_legacy_mic_mute(cfg):
+    """One-time removal for anyone who toggled on the short-lived
+    standalone mic-mute shortcut before it moved into Quick Settings."""
     mods = cfg.get("modules-right", [])
-    if MIC_MUTE_MODID in mods:
-        mods.remove(MIC_MUTE_MODID)
-    cfg.pop(MIC_MUTE_MODID, None)
+    if _LEGACY_MIC_MUTE_MODID in mods:
+        mods.remove(_LEGACY_MIC_MUTE_MODID)
+    cfg.pop(_LEGACY_MIC_MUTE_MODID, None)
 
 
 # ---------------------------------------------------------------------------
@@ -604,14 +597,6 @@ class TaskbarWindow(Adw.ApplicationWindow):
         )
         page.add(self.system_group)
 
-        self.mic_mute_row = Adw.SwitchRow(
-            title="Mic mute button",
-            subtitle="Adds a button to the right side that toggles your microphone",
-            active=MIC_MUTE_MODID in self.cfg,
-        )
-        self.mic_mute_row.connect("notify::active", self.on_mic_mute_toggled)
-        self.system_group.add(self.mic_mute_row)
-
         self._system_rows = {}
         self.rebuild_system_rows()
 
@@ -702,13 +687,6 @@ class TaskbarWindow(Adw.ApplicationWindow):
 
     def on_system_click_changed(self, modid, key, value):
         set_module_click(self.cfg, modid, key, value)
-        self.persist()
-
-    def on_mic_mute_toggled(self, row, _pspec):
-        if row.get_active():
-            add_mic_mute_module(self.cfg)
-        else:
-            remove_mic_mute_module(self.cfg)
         self.persist()
 
     # ---- window ----
