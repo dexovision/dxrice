@@ -141,11 +141,18 @@ def atomic_write_json(path, data):
     """Write via a temp file + os.replace so a crash/kill mid-write can
     never leave a truncated, unparseable theme.json on disk."""
     tmp_path = f"{path}.tmp{os.getpid()}"
-    with open(tmp_path, "w") as f:
-        json.dump(data, f, indent=4)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump(data, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def load_theme(path):
@@ -263,7 +270,7 @@ class ThemeWindow(Adw.ApplicationWindow):
             row = Adw.SpinRow(title=name, adjustment=adj, digits=digits)
             row.set_value(self.theme[key])
 
-            def on_changed(r, key=key):
+            def on_changed(r, _pspec, key=key):
                 self.theme[key] = round(r.get_value(), 4)
                 self.mark_dirty()
 
@@ -395,7 +402,12 @@ class ThemeWindow(Adw.ApplicationWindow):
         self.sync_ui_from_theme()
 
     def on_apply(self, _btn):
-        atomic_write_json(THEME_JSON, self.theme)
+        try:
+            atomic_write_json(THEME_JSON, self.theme)
+        except Exception as e:
+            print(f"Could not save theme.json: {e}", file=sys.stderr)
+            self.apply_btn.set_label("Apply (save failed, see log)")
+            return
         self.apply_btn.set_sensitive(False)
         self.apply_btn.set_label("Applying...")
 
