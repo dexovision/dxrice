@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
+# Visual formatting
 BOLD="\033[1m"
 GREEN="\033[0;32m"
 YELLOW="\033[0;33m"
@@ -10,9 +11,13 @@ RESET="\033[0m"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo -e "${BOLD}${CYAN}=== Hyprland Dotfiles & Rice Installer ===${RESET}\n"
+echo -e "${BOLD}${CYAN}===============================================${RESET}"
+echo -e "${BOLD}${CYAN}    Hyprland Dotfiles & Rice Installer        ${RESET}"
+echo -e "${BOLD}${CYAN}===============================================${RESET}\n"
 
-# 1. Dependency Check
+# -------------------------------------------------------------
+# 1. Dependency Check & Interactive Auto-Install
+# -------------------------------------------------------------
 echo -e "${BOLD}[1/5] Checking dependencies...${RESET}"
 REQUIRED="hyprland hyprlock hypridle hyprpaper swaybg waybar wofi mako kitty nautilus grim slurp cliphist python-evdev"
 MISSING=""
@@ -22,41 +27,58 @@ for pkg in $REQUIRED; do
 done
 
 if [ -n "$MISSING" ]; then
-    echo -e "${RED}Missing required packages:${RESET}$MISSING"
-    echo -e "Please install them first with: ${YELLOW}sudo pacman -S --needed$MISSING${RESET}"
-    exit 1
+    echo -e "${YELLOW}Missing packages detected:${RESET}$MISSING"
+    read -rp "Would you like to install missing dependencies with pacman now? [Y/n]: " INSTALL_PKG
+    INSTALL_PKG=${INSTALL_PKG:-Y}
+    if [[ "$INSTALL_PKG" =~ ^[Yy]$ ]]; then
+        sudo pacman -S --needed $MISSING
+    else
+        echo -e "${RED}Aborting installer. Please install missing packages manually and re-run.${RESET}"
+        exit 1
+    fi
 else
     echo -e "${GREEN}All required system packages are installed.${RESET}"
 fi
 
-# 2. Wallpaper Setup
+# -------------------------------------------------------------
+# 2. Wallpaper Configuration
+# -------------------------------------------------------------
 echo -e "\n${BOLD}[2/5] Wallpaper Setup${RESET}"
 WP_DIR="$HOME/Pictures/Wallpapers"
-WP_PATH="$WP_DIR/wallpaper.png"
 mkdir -p "$WP_DIR"
 
-echo -e "Wallpapers are expected at: ${CYAN}$WP_PATH${RESET}"
+echo -e "Default wallpaper path: ${CYAN}$WP_DIR/default.png${RESET}"
+read -rp "Enter path to custom wallpaper image (press Enter for default): " USER_WP
+
+if [ -n "$USER_WP" ]; then
+    # Automatically expand ~ tilde to full $HOME path
+    WP_PATH="${USER_WP/#\~/$HOME}"
+else
+    WP_PATH="$WP_DIR/default.png"
+fi
 
 if [ -f "$WP_PATH" ]; then
-    echo -e "${GREEN}Found wallpaper image at $WP_PATH!${RESET}"
+    echo -e "${GREEN}Found wallpaper at ${WP_PATH}${RESET}"
 else
-    echo -e "${YELLOW}No image found at $WP_PATH.${RESET}"
-    echo -e "${BOLD}Please place your desired wallpaper image at:${RESET} ${CYAN}$WP_PATH${RESET}"
-    
-    # Check if hk_static.png or any fallback exists to copy over temporarily
-    if [ -f "$WP_DIR/hk_static.png" ]; then
-        cp "$WP_DIR/hk_static.png" "$WP_PATH"
-        echo -e "${GREEN}Copied hk_static.png to wallpaper.png as default.${RESET}"
-    elif [ -f "$WP_DIR/default.png" ]; then
-        cp "$WP_DIR/default.png" "$WP_PATH"
-        echo -e "${GREEN}Copied default.png to wallpaper.png as default.${RESET}"
+    echo -e "${YELLOW}No wallpaper found at ${WP_PATH}.${RESET}"
+    if [ -f "$WP_DIR/wallpaper.png" ]; then
+        cp "$WP_DIR/wallpaper.png" "$WP_DIR/default.png"
+        WP_PATH="$WP_DIR/default.png"
+        echo -e "${GREEN}Copied wallpaper.png -> default.png${RESET}"
+    elif [ -f "$WP_DIR/hk_static.png" ]; then
+        cp "$WP_DIR/hk_static.png" "$WP_DIR/default.png"
+        WP_PATH="$WP_DIR/default.png"
+        echo -e "${GREEN}Copied hk_static.png -> default.png${RESET}"
     else
-        echo -e "Creating black placeholder image at ${CYAN}$WP_PATH${RESET}..."
-        convert -size 1920x1080 canvas:black "$WP_PATH" 2>/dev/null || touch "$WP_PATH"
+        echo -e "Creating a placeholder image at ${CYAN}$WP_DIR/default.png${RESET}..."
+        convert -size 1920x1080 canvas:black "$WP_DIR/default.png" 2>/dev/null || touch "$WP_DIR/default.png"
+        WP_PATH="$WP_DIR/default.png"
     fi
 fi
 
-# 3. Monitor Setup
+# -------------------------------------------------------------
+# 3. Monitor Auto-Detection
+# -------------------------------------------------------------
 echo -e "\n${BOLD}[3/5] Monitor Setup${RESET}"
 ACTIVE_MONITOR=""
 if command -v hyprctl &>/dev/null; then
@@ -64,13 +86,26 @@ if command -v hyprctl &>/dev/null; then
 fi
 
 if [ -n "$ACTIVE_MONITOR" ]; then
-    echo -e "Detected active monitor output: ${CYAN}${ACTIVE_MONITOR}${RESET}"
+    echo -e "Detected active monitor: ${CYAN}${ACTIVE_MONITOR}${RESET}"
     sed -i "s/output = \".*\"/output = \"${ACTIVE_MONITOR}\"/" "$SCRIPT_DIR/hypr/hyprland.lua"
-    echo -e "${GREEN}Updated monitor in hyprland.lua to ${ACTIVE_MONITOR}${RESET}"
+    echo -e "${GREEN}Configured hyprland.lua to use ${ACTIVE_MONITOR}${RESET}"
+else
+    echo -e "${YELLOW}Hyprland not currently running; keeping default monitor settings.${RESET}"
 fi
 
-# 4. Deploy Configuration Files
+# -------------------------------------------------------------
+# 4. Safe Configuration Deployment (with Backups)
+# -------------------------------------------------------------
 echo -e "\n${BOLD}[4/5] Deploying configuration files...${RESET}"
+
+# Create backup of existing config if present
+BACKUP_DIR="$HOME/.config/hypr_backup_$(date +%Y%m%d_%H%M%S)"
+if [ -d "$HOME/.config/hypr" ]; then
+    echo -e "Creating safety backup at ${CYAN}${BACKUP_DIR}${RESET}"
+    mkdir -p "$BACKUP_DIR"
+    cp -r ~/.config/hypr ~/.config/kitty ~/.config/waybar ~/.config/mako "$BACKUP_DIR/" 2>/dev/null || true
+fi
+
 mkdir -p ~/.config/{hypr,kitty,waybar,mako} ~/scripts
 
 cp -r "$SCRIPT_DIR/hypr/"* ~/.config/hypr/
@@ -80,25 +115,46 @@ cp -r "$SCRIPT_DIR/mako/"* ~/.config/mako/ 2>/dev/null || true
 cp -r "$SCRIPT_DIR/scripts/"* ~/scripts/ 2>/dev/null || true
 chmod +x ~/scripts/*.py ~/scripts/*.sh 2>/dev/null || true
 
-# Update wallpaper environment variable
+# Set wallpaper environment variable
 ENV_FILE="$HOME/.config/hypr/env_vars.conf"
 echo "BG_WALLPAPER=\"$WP_PATH\"" > "$ENV_FILE"
 
+# -------------------------------------------------------------
 # 5. User Group Permissions
+# -------------------------------------------------------------
 echo -e "\n${BOLD}[5/5] Checking User Group Permissions${RESET}"
 if groups "$USER" | grep &>/dev/null '\binput\b'; then
-    echo -e "${GREEN}User is already in the 'input' group.${RESET}"
+    echo -e "${GREEN}User '$USER' is in the 'input' group.${RESET}"
 else
-    echo -e "${YELLOW}User '$USER' is not in the 'input' group (required for Infinite Desktop).${RESET}"
+    echo -e "${YELLOW}Adding '$USER' to the 'input' group (required for Infinite Desktop)...${RESET}"
     sudo usermod -aG input "$USER"
-    echo -e "${GREEN}Added $USER to the 'input' group.${RESET}"
+    echo -e "${GREEN}Successfully added $USER to 'input' group.${RESET}"
 fi
 
-# Completion Summary
-echo -e "\n${BOLD}${GREEN}=== Setup Complete! ===${RESET}"
-echo -e "Summary of actions:"
-echo -e "  • Config files copied to ${CYAN}~/.config/${RESET}"
-echo -e "  • Scripts installed to ${CYAN}~/scripts/${RESET}"
-echo -e "  • Wallpaper path set to: ${CYAN}$WP_PATH${RESET}"
-echo -e "\n${YELLOW}NOTE:${RESET} Place your wallpaper image at ${CYAN}~/Pictures/Wallpapers/wallpaper.png${RESET}"
-echo -e "Then reload Hyprland using: ${BOLD}hyprctl reload${RESET}"
+# -------------------------------------------------------------
+# Summary & User Help Reference
+# -------------------------------------------------------------
+echo -e "\n${BOLD}${GREEN}===============================================${RESET}"
+echo -e "${BOLD}${GREEN}          Installation Complete!              ${RESET}"
+echo -e "${BOLD}${GREEN}===============================================${RESET}"
+
+echo -e "\n${BOLD}${CYAN}--- Installed Directories ---${RESET}"
+echo -e "  • Configs : ${CYAN}~/.config/{hypr, kitty, waybar, mako}${RESET}"
+echo -e "  • Helpers : ${CYAN}~/scripts/${RESET}"
+echo -e "  • Wallpaper: ${CYAN}${WP_PATH}${RESET}"
+
+echo -e "\n${BOLD}${CYAN}--- Essential Keybindings Cheat Sheet ---${RESET}"
+echo -e "  • ${BOLD}SUPER + Q${RESET}              : Open Kitty Terminal"
+echo -e "  • ${BOLD}SUPER + R${RESET}              : App Launcher (Wofi)"
+echo -e "  • ${BOLD}SUPER + E${RESET}              : File Manager (Nautilus)"
+echo -e "  • ${BOLD}SUPER + C${RESET}              : Close Active Window"
+echo -e "  • ${BOLD}SUPER + V${RESET}              : Toggle Floating Mode"
+echo -e "  • ${BOLD}SUPER + Arrow Keys${RESET}     : Move Window Focus"
+echo -e "  • ${BOLD}SUPER + Shift + Arrows${RESET} : Move Floating Window (90px)"
+echo -e "  • ${BOLD}SUPER + Ctrl + Arrows${RESET}  : Resize Floating Window"
+echo -e "  • ${BOLD}SUPER + Shift + S${RESET}      : Area Screenshot"
+
+echo -e "\n${YELLOW}NOTE:${RESET} Default wallpaper is expected at ${CYAN}~/Pictures/Wallpapers/default.png${RESET}"
+echo -e "${YELLOW}NEXT STEPS:${RESET}"
+echo -e "  1. Reload Hyprland to apply changes: ${BOLD}hyprctl reload${RESET}"
+echo -e "  2. If group permissions changed, ${YELLOW}log out and back in${RESET} for Infinite Desktop.\n"

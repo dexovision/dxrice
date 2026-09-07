@@ -7,12 +7,7 @@
     "margin-right": 14,
     "spacing": 10,
     "modules-left": [
-        "custom/launcher",
-        "custom/firefox",
-        "custom/discord",
-        "custom/sober",
-        "custom/terminal",
-        "custom/files"
+        "custom/launcher"
     ],
     "modules-center": [
         "hyprland/workspaces",
@@ -30,21 +25,6 @@
         "on-click": "wofi --show drun",
         "tooltip": true,
         "tooltip-format": "App Launcher"
-    },
-    "custom/firefox": {
-        "format": "Firefox",
-        "on-click": "firefox",
-        "tooltip": false
-    },
-    "custom/discord": {
-        "format": "Discord",
-        "on-click": "discord",
-        "tooltip": false
-    },
-    "custom/files": {
-        "format": "Files",
-        "on-click": "nautilus",
-        "tooltip": false
     },
     "hyprland/workspaces": {
         "disable-scroll": true,
@@ -70,15 +50,5 @@
     },
     "memory": {
         "format": "RAM {percentage}%"
-    },
-    "custom/sober": {
-        "format": "Sober",
-        "on-click": "sh -c 'flatpak run org.vinegarhq.Sober >/dev/null 2>&1 &'",
-        "tooltip": false
-    },
-    "custom/terminal": {
-        "format": "Terminal",
-        "on-click": "sh -c 'kitty >/dev/null 2>&1 &'",
-        "tooltip": false
     }
 }
