@@ -206,6 +206,41 @@ check_input_group() {
     fi
 }
 
+# hyprland.lua is only ever copied in once, then left as yours to hand-edit
+# (see do_deploy/dxrice_deploy.py) -- which means a machine that got a
+# broken/ancient copy from a much older version of this rice (old script
+# names, no dxrice_ prefix, hardcoded ~/scripts) is stuck with it forever,
+# silently, even after every other bug in this repo gets fixed. Detect that
+# specific case and offer a backed-up replacement -- never touches a
+# hyprland.lua that isn't recognizably an old copy of this rice's own file.
+check_stale_hyprland_lua() {
+    local f="$HOME/.config/hypr/hyprland.lua"
+    [ -f "$f" ] || return 0
+
+    if grep -q "dxrice_repo" "$f" 2>/dev/null; then
+        return 0
+    fi
+    # (dxrice_/dxrice-)? because even older copies of this rice, from before
+    # scripts were renamed with that prefix, still used these same base names.
+    if ! grep -qE "(dxrice[-_])?(manage-taskbar\.sh|infinite_desktop_core\.py|theme_gui\.py|floating_tile_toggle\.py)" "$f" 2>/dev/null; then
+        return 0
+    fi
+
+    warn "Your ~/.config/hypr/hyprland.lua is from a much older version of this rice."
+    info "It still points at script names/locations that don't exist anymore, so"
+    info "keybinds and the infinite desktop cannot work with it as it is now."
+    if ask_yes_no "Back it up and replace it with the current version?" Y; then
+        mkdir -p "$STATE_DIR/backups"
+        local backup="$STATE_DIR/backups/hyprland.lua.$(date +%s).bak"
+        cp "$f" "$backup"
+        rm -f "$f"
+        ok "Backed up to $backup and removed the live copy -- deploying the current version next."
+    else
+        warn "Leaving it as-is -- binds and the infinite desktop will keep not working until"
+        info "you either fix it by hand or re-run install and say yes to replacing it."
+    fi
+}
+
 detect_monitor() {
     local target="$HOME/.config/hypr/hyprland.lua"
     command -v hyprctl >/dev/null 2>&1 || { warn "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
@@ -318,6 +353,7 @@ do_install() {
     check_input_group
 
     step "Step 4/4 -- Deploying your rice"
+    check_stale_hyprland_lua
     local hypr_existed=0
     [ -f "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
 
@@ -399,12 +435,19 @@ do_update() {
     fi
 
     step "Redeploying"
+    check_stale_hyprland_lua
     local hypr_existed=0
     [ -s "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
 
     record_repo_path
     do_deploy
     verify_deploy || true
+
+    if [ "$hypr_existed" = "0" ]; then
+        echo ""
+        info "Detecting your monitor for the freshly-deployed hyprland.lua..."
+        detect_monitor
+    fi
 
     echo ""
     echo "${C_BOLD}${C_GREEN}Update complete.${C_RESET}"
