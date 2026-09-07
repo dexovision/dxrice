@@ -125,15 +125,21 @@ def patch_hyprland_lua(theme):
     with open(path) as f:
         content = f.read()
 
-    content = _sub(content, r"(gaps_in\s*=\s*)\d+",
+    # [\d.]+ rather than \d+ on the whole-number fields below: a theme.json
+    # value that was ever stored as e.g. 12.0 (see dxrice_theme_gui.py) would
+    # otherwise only have its "12" replaced, leaving a stray ".0" that then
+    # compounds into an invalid Lua literal ("14.0.0") on the next Apply.
+    # Matching the whole numeral -- however malformed a previous run left it
+    # -- and always writing back a clean int string self-heals that.
+    content = _sub(content, r"(gaps_in\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_gaps_in"]))
-    content = _sub(content, r"(gaps_out\s*=\s*)\d+",
+    content = _sub(content, r"(gaps_out\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_gaps_out"]))
-    content = _sub(content, r"(border_size\s*=\s*)\d+",
+    content = _sub(content, r"(border_size\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_border_size"]))
     content = _sub(
         content,
-        r'(active_border\s*=\s*\{\s*colors\s*=\s*\{)"rgba\([0-9a-fA-F]+\)",\s*"rgba\([0-9a-fA-F]+\)"(\}\s*,\s*angle\s*=\s*)\d+',
+        r'(active_border\s*=\s*\{\s*colors\s*=\s*\{)"rgba\([0-9a-fA-F]+\)",\s*"rgba\([0-9a-fA-F]+\)"(\}\s*,\s*angle\s*=\s*)[\d.]+',
         lambda m: (m.group(1)
                    + f'"rgba({theme["hypr_active_border_1"]}ee)", "rgba({theme["hypr_active_border_2"]}ee)"'
                    + m.group(2) + str(theme["hypr_active_border_angle"]))
@@ -142,15 +148,15 @@ def patch_hyprland_lua(theme):
         content, r'(inactive_border\s*=\s*)"rgba\([0-9a-fA-F]+\)"',
         lambda m: m.group(1) + f'"rgba({theme["hypr_inactive_border"]}aa)"'
     )
-    content = _sub(content, r"(decoration\s*=\s*\{[^}]*?rounding\s*=\s*)\d+",
+    content = _sub(content, r"(decoration\s*=\s*\{[^}]*?rounding\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_rounding"]), flags=re.DOTALL)
     content = _sub(content, r"(active_opacity\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_active_opacity"]))
     content = _sub(content, r"(inactive_opacity\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_inactive_opacity"]))
-    content = _sub(content, r"(blur\s*=\s*\{[^}]*?size\s*=\s*)\d+",
+    content = _sub(content, r"(blur\s*=\s*\{[^}]*?size\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_blur_size"]), flags=re.DOTALL)
-    content = _sub(content, r"(blur\s*=\s*\{[^}]*?passes\s*=\s*)\d+",
+    content = _sub(content, r"(blur\s*=\s*\{[^}]*?passes\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_blur_passes"]), flags=re.DOTALL)
     content = _sub(content, r"(blur\s*=\s*\{[^}]*?vibrancy\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_blur_vibrancy"]), flags=re.DOTALL)

@@ -276,8 +276,12 @@ class ThemeWindow(Adw.ApplicationWindow):
             row = Adw.SpinRow(title=name, adjustment=adj, digits=digits)
             row.set_value(self.theme[key])
 
-            def on_changed(r, _pspec, key=key):
-                self.theme[key] = round(r.get_value(), 4)
+            def on_changed(r, _pspec, key=key, digits=digits):
+                # int(), not round(): a stray "12.0" here compounds into an
+                # invalid Lua literal ("14.0.0") once apply_theme's \d+-only
+                # regex re-patches it against its own previous output.
+                value = r.get_value()
+                self.theme[key] = int(round(value)) if digits == 0 else round(value, 4)
                 self.mark_dirty()
 
             row.connect("notify::value", on_changed)

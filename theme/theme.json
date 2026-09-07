@@ -9,7 +9,7 @@
     "border_opacity_idle": 0.08,
     "border_opacity_active": 0.25,
     "accent": "e67878",
-    "radius": 12.0,
+    "radius": 12,
     "font_family": "JetBrainsMono Nerd Font",
     "font_size_waybar": 13,
     "font_size_wofi": 14,
