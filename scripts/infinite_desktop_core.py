@@ -67,6 +67,18 @@ def get_monitor_bounds():
         pass
     return {'left': 0, 'right': 1920, 'top': 0, 'bottom': 1080, 'width': 1920, 'height': 1080}
 
+_monitor_bounds_cache = None
+_monitor_bounds_last_check = 0.0
+MONITOR_BOUNDS_CACHE_TTL = 1.0
+
+def get_cached_monitor_bounds():
+    global _monitor_bounds_cache, _monitor_bounds_last_check
+    now = time.time()
+    if _monitor_bounds_cache is None or (now - _monitor_bounds_last_check) > MONITOR_BOUNDS_CACHE_TTL:
+        _monitor_bounds_cache = get_monitor_bounds()
+        _monitor_bounds_last_check = now
+    return _monitor_bounds_cache
+
 def get_floating_windows(workspace_id):
     try:
         r = subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True, text=True, timeout=0.1)
@@ -148,7 +160,7 @@ def monitor_window_drag():
                 window = poll_focused_throttled()
                 if window and window.get('address') == dragged_window_addr:
                     current_bounds = get_window_bounds(window)
-                    monitor = get_monitor_bounds()
+                    monitor = get_cached_monitor_bounds()
                     MARGIN = 10
 
                     touch_left = current_bounds['left'] <= monitor['left'] + MARGIN

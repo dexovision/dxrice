@@ -154,6 +154,7 @@ hl.window_rule({ name = "kitty-glass", match = { class = "kitty" }, opacity = "0
 hl.window_rule({ name = "float-everything", match = { class = ".*" }, float = true })
 
 hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("kitty -e ~/scripts/manage-taskbar.sh"))
+hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("python3 ~/scripts/theme_gui.py"))
 
 hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "-1" }))
 hl.bind(mainMod .. " + X", hl.dsp.focus({ workspace = "+1" }))
@@ -175,3 +176,12 @@ hl.bind(mainMod .. " + CTRL + left",  hl.dsp.exec_cmd("python3 ~/scripts/resize_
 hl.bind(mainMod .. " + CTRL + right", hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py right"), { repeating = true })
 hl.bind(mainMod .. " + CTRL + up",    hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py up"),    { repeating = true })
 hl.bind(mainMod .. " + CTRL + down",  hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py down"),  { repeating = true })
+
+hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("firefox"))
+hl.bind(mainMod .. " + SHIFT + D", hl.dsp.exec_cmd("discord"))
+hl.bind(mainMod .. " + SHIFT + M", hl.dsp.exec_cmd("pavucontrol"))
+hl.bind(mainMod .. " + SHIFT + B", hl.dsp.exec_cmd("blueman-manager"))
+hl.bind(mainMod .. " + N", hl.dsp.exec_cmd("nm-connection-editor"))
+hl.bind(mainMod .. " + I", hl.dsp.exec_cmd("nwg-look"))
+hl.bind(mainMod .. " + U", hl.dsp.exec_cmd("qt6ct"))
+hl.bind(mainMod .. " + SHIFT + K", hl.dsp.exec_cmd("hyprctl kill"))

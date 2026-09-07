@@ -1,0 +1,43 @@
+* {
+    font-family: "${FONT_FAMILY}", sans-serif;
+    font-size: ${FONT_SIZE_WOFI}px;
+}
+
+window {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    border-radius: ${RADIUS}px;
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+}
+
+#input {
+    margin: 8px;
+    padding: 8px 12px;
+    border-radius: ${RADIUS}px;
+    background-color: rgba(${ACTIVE_R}, ${ACTIVE_G}, ${ACTIVE_B}, ${OPACITY_ACTIVE});
+    color: ${TEXT_ACTIVE_COLOR};
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE});
+}
+
+#outer-box {
+    margin: 8px;
+    background-color: transparent;
+}
+
+#inner-box {
+    background-color: transparent;
+}
+
+#scroll {
+    margin: 4px;
+}
+
+#entry {
+    padding: 6px 10px;
+    border-radius: ${ENTRY_RADIUS}px;
+    color: ${TEXT_COLOR};
+}
+
+#entry:selected {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.12);
+    color: ${TEXT_ACTIVE_COLOR};
+}

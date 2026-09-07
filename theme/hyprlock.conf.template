@@ -1,0 +1,60 @@
+general {
+    disable_loading_bar = true
+    grace = 0
+    hide_cursor = true
+    no_fade_in = false
+}
+
+background {
+    monitor =
+    path = screenshot
+    blur_passes = ${LOCK_BLUR_PASSES}
+    blur_size = ${LOCK_BLUR_SIZE}
+    noise = 0.0117
+    contrast = 0.8916
+    brightness = 0.8172
+    vibrancy = ${LOCK_BLUR_VIBRANCY}
+    vibrancy_darkness = 0.0
+}
+
+input-field {
+    monitor =
+    size = 250, 60
+    outline_thickness = 2
+    dots_size = 0.26
+    dots_spacing = 0.35
+    dots_center = true
+    outer_color = rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE})
+    inner_color = rgba(${BG_R}, ${BG_G}, ${BG_B}, ${LOCK_BG_OPACITY})
+    font_color = rgb(${TEXT_R}, ${TEXT_G}, ${TEXT_B})
+    fade_on_empty = false
+    placeholder_text = <i>Password...</i>
+    hide_input = false
+    rounding = ${RADIUS}
+    fail_color = rgb(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B})
+    position = 0, -20
+    halign = center
+    valign = center
+}
+
+label {
+    monitor =
+    text = cmd[update:1000] echo "$(date +"%H:%M")"
+    color = rgba(${TEXT_ACTIVE_R}, ${TEXT_ACTIVE_G}, ${TEXT_ACTIVE_B}, 0.9)
+    font_size = 64
+    font_family = ${FONT_FAMILY}
+    position = 0, 160
+    halign = center
+    valign = center
+}
+
+label {
+    monitor =
+    text = cmd[update:60000] echo "$(date +"%A, %B %d")"
+    color = rgba(${TEXT_R}, ${TEXT_G}, ${TEXT_B}, 0.8)
+    font_size = 18
+    font_family = ${FONT_FAMILY}
+    position = 0, 90
+    halign = center
+    valign = center
+}

@@ -1,0 +1,85 @@
+* {
+    font-family: "${FONT_FAMILY}", sans-serif;
+    font-size: ${FONT_SIZE_WAYBAR}px;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    text-shadow: none;
+}
+
+window#waybar {
+    background: transparent;
+}
+
+/* Master container transparency */
+#hyprland-workspaces,
+#workspaces {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0 4px;
+}
+
+/* Strip native GTK button rendering engine styles */
+#hyprland-workspaces button,
+#workspaces button,
+button {
+    background-image: none;
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    color: ${TEXT_COLOR};
+    padding: 4px 12px;
+    margin: 2px 2px;
+    border-radius: ${RADIUS}px;
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+    box-shadow: none;
+    text-shadow: none;
+}
+
+/* Base style for modules matching taskbar/clock */
+#clock,
+#pulseaudio,
+#network,
+#cpu,
+#memory,
+#tray,
+.modules-left widget > * {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    background-image: none;
+    color: ${TEXT_COLOR};
+    padding: 4px 12px;
+    margin: 2px 2px;
+    border-radius: ${RADIUS}px;
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+}
+
+/* Force active/focused GTK button states to stay dark */
+#hyprland-workspaces button.active,
+#hyprland-workspaces button.focused,
+#hyprland-workspaces button:checked,
+#workspaces button.active,
+#workspaces button.focused,
+#workspaces button:checked,
+button:checked,
+button.active {
+    background-image: none;
+    background-color: rgba(${ACTIVE_R}, ${ACTIVE_G}, ${ACTIVE_B}, ${OPACITY_ACTIVE});
+    color: ${TEXT_ACTIVE_COLOR};
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE});
+    box-shadow: none;
+    text-shadow: none;
+}
+
+/* Hover effect */
+#hyprland-workspaces button:hover,
+#workspaces button:hover,
+.modules-left widget > *:hover {
+    background-image: none;
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.12);
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+#tray > .needs-attention {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.4);
+    border-radius: 8px;
+}

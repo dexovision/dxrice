@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Renders theme.json into every app's real config and hot-reloads them.
+
+Single source of truth: ~/dotfiles-rice/theme/theme.json
+Templates:              ~/dotfiles-rice/theme/*.template  (string.Template ${TOKENS})
+Usage: apply_theme.py [path/to/theme.json]
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+from string import Template
+
+HOME = os.path.expanduser("~")
+REPO = os.path.join(HOME, "dotfiles-rice")
+THEME_DIR = os.path.join(REPO, "theme")
+THEME_JSON = os.path.join(THEME_DIR, "theme.json")
+
+TARGETS = {
+    "waybar_style.css.template": os.path.join(HOME, ".config/waybar/style.css"),
+    "wofi_style.css.template": os.path.join(HOME, ".config/wofi/style.css"),
+    "mako_config.template": os.path.join(HOME, ".config/mako/config"),
+    "kitty.conf.template": os.path.join(HOME, ".config/kitty/kitty.conf"),
+    "hyprlock.conf.template": os.path.join(HOME, ".config/hypr/hyprlock.conf"),
+}
+
+
+def hex_to_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def opacity_to_hex(o):
+    return format(round(max(0.0, min(1.0, o)) * 255), "02x")
+
+
+def build_vars(theme):
+    bg_r, bg_g, bg_b = hex_to_rgb(theme["glass_bg"])
+    active_r, active_g, active_b = hex_to_rgb(theme["glass_bg_active"])
+    border_r, border_g, border_b = hex_to_rgb(theme["glass_border"])
+    accent_r, accent_g, accent_b = hex_to_rgb(theme["accent"])
+    text_r, text_g, text_b = hex_to_rgb(theme["glass_text"])
+    text_active_r, text_active_g, text_active_b = hex_to_rgb(theme["glass_text_active"])
+
+    return {
+        "FONT_FAMILY": theme["font_family"],
+        "FONT_SIZE_WAYBAR": theme["font_size_waybar"],
+        "FONT_SIZE_WOFI": theme["font_size_wofi"],
+        "FONT_SIZE_MAKO": theme["font_size_mako"],
+
+        "BG_R": bg_r, "BG_G": bg_g, "BG_B": bg_b, "BG_HEX": theme["glass_bg"],
+        "ACTIVE_R": active_r, "ACTIVE_G": active_g, "ACTIVE_B": active_b,
+        "ACTIVE_HEX": theme["glass_bg_active"],
+        "BORDER_R": border_r, "BORDER_G": border_g, "BORDER_B": border_b,
+        "BORDER_HEX": theme["glass_border"],
+        "ACCENT_R": accent_r, "ACCENT_G": accent_g, "ACCENT_B": accent_b,
+        "ACCENT_HEX": theme["accent"],
+        "TEXT_R": text_r, "TEXT_G": text_g, "TEXT_B": text_b,
+        "TEXT_COLOR": "#" + theme["glass_text"], "TEXT_HEX": theme["glass_text"],
+        "TEXT_ACTIVE_R": text_active_r, "TEXT_ACTIVE_G": text_active_g,
+        "TEXT_ACTIVE_B": text_active_b,
+        "TEXT_ACTIVE_COLOR": "#" + theme["glass_text_active"],
+        "TEXT_ACTIVE_HEX": theme["glass_text_active"],
+
+        "OPACITY_IDLE": theme["opacity_idle"],
+        "OPACITY_ACTIVE": theme["opacity_active"],
+        "BORDER_OPACITY_IDLE": theme["border_opacity_idle"],
+        "BORDER_OPACITY_ACTIVE": theme["border_opacity_active"],
+        "BG_ALPHA_HEX": opacity_to_hex(theme["opacity_active"]),
+        "BORDER_ALPHA_HEX": opacity_to_hex(theme["border_opacity_active"]),
+
+        "RADIUS": theme["radius"],
+        "ENTRY_RADIUS": max(0, theme["radius"] - 2),
+
+        "KITTY_OPACITY": theme["kitty_opacity"],
+
+        "HYPR_BLUR_SIZE": theme["hypr_blur_size"],
+        "HYPR_BLUR_PASSES": theme["hypr_blur_passes"],
+        "HYPR_BLUR_VIBRANCY": theme["hypr_blur_vibrancy"],
+
+        "LOCK_BLUR_PASSES": theme["lock_blur_passes"],
+        "LOCK_BLUR_SIZE": theme["lock_blur_size"],
+        "LOCK_BLUR_VIBRANCY": theme["lock_blur_vibrancy"],
+        "LOCK_BG_OPACITY": theme["lock_bg_opacity"],
+    }
+
+
+def render_templates(theme):
+    tvars = build_vars(theme)
+    for template_name, target_path in TARGETS.items():
+        src = os.path.join(THEME_DIR, template_name)
+        with open(src) as f:
+            rendered = Template(f.read()).safe_substitute(tvars)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        with open(target_path, "w") as f:
+            f.write(rendered)
+
+
+def _sub(content, pattern, replacement_fn, flags=0):
+    return re.sub(pattern, lambda m: replacement_fn(m), content, count=1, flags=flags)
+
+
+def patch_hyprland_lua(theme):
+    path = os.path.join(HOME, ".config/hypr/hyprland.lua")
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        content = f.read()
+
+    content = _sub(content, r"(gaps_in\s*=\s*)\d+",
+                    lambda m: m.group(1) + str(theme["hypr_gaps_in"]))
+    content = _sub(content, r"(gaps_out\s*=\s*)\d+",
+                    lambda m: m.group(1) + str(theme["hypr_gaps_out"]))
+    content = _sub(content, r"(border_size\s*=\s*)\d+",
+                    lambda m: m.group(1) + str(theme["hypr_border_size"]))
+    content = _sub(
+        content,
+        r'(active_border\s*=\s*\{\s*colors\s*=\s*\{)"rgba\([0-9a-fA-F]+\)",\s*"rgba\([0-9a-fA-F]+\)"(\}\s*,\s*angle\s*=\s*)\d+',
+        lambda m: (m.group(1)
+                   + f'"rgba({theme["hypr_active_border_1"]}ee)", "rgba({theme["hypr_active_border_2"]}ee)"'
+                   + m.group(2) + str(theme["hypr_active_border_angle"]))
+    )
+    content = _sub(
+        content, r'(inactive_border\s*=\s*)"rgba\([0-9a-fA-F]+\)"',
+        lambda m: m.group(1) + f'"rgba({theme["hypr_inactive_border"]}aa)"'
+    )
+    content = _sub(content, r"(decoration\s*=\s*\{[^}]*?rounding\s*=\s*)\d+",
+                    lambda m: m.group(1) + str(theme["hypr_rounding"]), flags=re.DOTALL)
+    content = _sub(content, r"(active_opacity\s*=\s*)[\d.]+",
+                    lambda m: m.group(1) + str(theme["hypr_active_opacity"]))
+    content = _sub(content, r"(inactive_opacity\s*=\s*)[\d.]+",
+                    lambda m: m.group(1) + str(theme["hypr_inactive_opacity"]))
+    content = _sub(content, r"(blur\s*=\s*\{[^}]*?size\s*=\s*)\d+",
+                    lambda m: m.group(1) + str(theme["hypr_blur_size"]), flags=re.DOTALL)
+    content = _sub(content, r"(blur\s*=\s*\{[^}]*?passes\s*=\s*)\d+",
+                    lambda m: m.group(1) + str(theme["hypr_blur_passes"]), flags=re.DOTALL)
+    content = _sub(content, r"(blur\s*=\s*\{[^}]*?vibrancy\s*=\s*)[\d.]+",
+                    lambda m: m.group(1) + str(theme["hypr_blur_vibrancy"]), flags=re.DOTALL)
+
+    with open(path, "w") as f:
+        f.write(content)
+
+
+def reload_apps(reload_wallpaper):
+    subprocess.run(["pkill", "-x", "waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(["setsid", "waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                      stdin=subprocess.DEVNULL, start_new_session=True)
+
+    subprocess.run(["makoctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    subprocess.run(["pkill", "-SIGUSR1", "-x", "kitty"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    subprocess.run(["hyprctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    if reload_wallpaper:
+        wallpaper = os.path.expanduser(theme_data.get("wallpaper", ""))
+        if wallpaper and os.path.exists(wallpaper):
+            subprocess.run(["pkill", "-x", "swaybg"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["setsid", "swaybg", "-i", wallpaper, "-m", "fill"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def main():
+    global theme_data
+    theme_path = sys.argv[1] if len(sys.argv) > 1 else THEME_JSON
+    with open(theme_path) as f:
+        theme_data = json.load(f)
+
+    render_templates(theme_data)
+    patch_hyprland_lua(theme_data)
+    reload_apps(reload_wallpaper=True)
+    print("Theme applied.")
+
+
+if __name__ == "__main__":
+    main()

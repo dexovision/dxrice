@@ -10,7 +10,7 @@ Install all system core, audio, font, and runtime dependencies before running th
 
 Official Packages (pacman):
 ```bash
-sudo pacman -S --needed hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol networkmanager network-manager-applet bluez bluez-utils blueman ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent python python-evdev jq brightnessctl playerctl
+sudo pacman -S --needed hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol networkmanager network-manager-applet bluez bluez-utils blueman ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent python python-evdev jq brightnessctl playerctl python-gobject gtk4 libadwaita
 ```
 
 AUR Packages (yay / paru):
@@ -65,6 +65,26 @@ The custom Infinite Desktop navigation engine and taskbar management are powered
 | `SUPER + Alt + F` | Toggle Workspace Floating/Tiled Mode |
 | `SUPER + Shift + S` | Capture Area Screenshot |
 | `SUPER + TAB` | Toggle Taskbar Manager / Window Overview |
+| `SUPER + Shift + A` | Open Taskbar Manager (add/remove/reorder apps) |
+| `SUPER + Shift + T` | Open Theme Settings (GUI) |
+
+---
+
+## Theming (GUI Settings App)
+
+Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, and wallpaper — is controlled from one place: `~/dotfiles-rice/theme/theme.json`. Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`~/scripts/theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
+
+How it works:
+* `theme/theme.json` is the single source of truth for every themeable value.
+* `theme/*.template` files (waybar, wofi, mako, kitty, hyprlock) are plain configs with `${TOKEN}` placeholders.
+* `~/scripts/apply_theme.py` renders those templates into the real `~/.config/...` files, patches the color/decoration block of `hyprland.lua` in place (regex, so your keybinds and autostart are untouched), and hot-reloads waybar, mako, kitty, and Hyprland — no session restart needed.
+* The GUI is just a front-end over that same script: tweak a color/slider, hit **Apply**, everything reloads live.
+* **Presets:** four built-in looks (Glass Charcoal, Nord, Dracula, Sunset) plus save/load your own from the Presets section at the top of the settings window.
+
+To theme by hand instead of via the GUI, edit `theme/theme.json` directly and run:
+```bash
+python3 ~/scripts/apply_theme.py
+```
 
 ---
 

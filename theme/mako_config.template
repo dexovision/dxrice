@@ -1,0 +1,12 @@
+background-color=#${BG_HEX}${BG_ALPHA_HEX}
+text-color=#${TEXT_HEX}
+border-color=#${BORDER_HEX}${BORDER_ALPHA_HEX}
+border-radius=${RADIUS}
+border-size=1
+padding=10
+font=${FONT_FAMILY} ${FONT_SIZE_MAKO}
+default-timeout=5000
+
+[urgency=critical]
+border-color=#${ACCENT_HEX}
+text-color=#${TEXT_ACTIVE_HEX}

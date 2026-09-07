@@ -1,0 +1,9 @@
+background_opacity ${KITTY_OPACITY}
+dynamic_background_opacity yes
+hide_window_decorations yes
+
+background #${BG_HEX}
+foreground #${TEXT_HEX}
+selection_background #${ACTIVE_HEX}
+selection_foreground #${TEXT_ACTIVE_HEX}
+cursor #${TEXT_HEX}
