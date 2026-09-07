@@ -8,9 +8,6 @@
     "spacing": 10,
     "modules-left": [
         "custom/launcher",
-        "custom/firefox",
-        "custom/discord",
-        "custom/sober",
         "custom/terminal",
         "custom/files"
     ],
@@ -36,20 +33,6 @@
         "on-click": "wofi --show drun",
         "tooltip": true,
         "tooltip-format": "App Launcher",
-        "class": "app-icon"
-    },
-    "custom/firefox": {
-        "format": "\uf269",
-        "on-click": "sh -c '/usr/lib/firefox/firefox >/dev/null 2>&1 &'",
-        "tooltip": true,
-        "tooltip-format": "Firefox",
-        "class": "app-icon"
-    },
-    "custom/discord": {
-        "format": "\udb81\ude6f",
-        "on-click": "discord",
-        "tooltip": true,
-        "tooltip-format": "Discord",
         "class": "app-icon"
     },
     "custom/files": {
@@ -85,13 +68,6 @@
     "memory": {
         "format": "RAM {percentage}%",
         "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
-    },
-    "custom/sober": {
-        "format": "\uf11b",
-        "on-click": "sh -c 'flatpak run org.vinegarhq.Sober >/dev/null 2>&1 &'",
-        "tooltip": true,
-        "tooltip-format": "Sober",
-        "class": "app-icon"
     },
     "custom/terminal": {
         "format": "\uf120",

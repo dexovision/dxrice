@@ -121,6 +121,34 @@ record_repo_path() {
     printf '%s\n' "$REPO_DIR" > "$STATE_DIR/repo_path"
 }
 
+# Adds a `dxrice-update` shell function so updating doesn't require
+# remembering where the checkout lives or cd-ing into it first. Reads
+# repo_path at call time (not baked in), so it keeps working if the
+# checkout is later moved. Idempotent -- checks for its own marker line
+# before appending, safe to call on every install/update.
+install_shell_alias() {
+    local marker="# dxrice-update (added by DXrice's install.sh)"
+    local block
+    block=$(cat <<'BLOCK'
+# dxrice-update (added by DXrice's install.sh)
+dxrice-update() {
+    "$(cat "$HOME/.local/state/dxrice/repo_path" 2>/dev/null || echo "$HOME/dxrice")/install.sh" update
+}
+BLOCK
+)
+    local added=0
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        [ -f "$rc" ] || continue
+        grep -qF "$marker" "$rc" 2>/dev/null && continue
+        printf '\n%s\n' "$block" >> "$rc"
+        ok "Added the 'dxrice-update' command to $rc"
+        added=1
+    done
+    if [ "$added" = "1" ]; then
+        info "Open a new terminal (or run 'source ~/.bashrc'/'source ~/.zshrc') to start using it."
+    fi
+}
+
 # Lets a fresh install put the checkout wherever the user actually wants it,
 # instead of silently assuming wherever they happened to `git clone` it to.
 # Re-execs install.sh from the new location if it moves, so the rest of the
@@ -360,6 +388,7 @@ do_install() {
     step "Step 1/4 -- Where should this live?"
     choose_install_location
     record_repo_path
+    install_shell_alias
     ok "This folder is now the source of truth for theming and updates:"
     info "$REPO_DIR"
 
@@ -459,6 +488,7 @@ do_update() {
     [ -s "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
 
     record_repo_path
+    install_shell_alias
     do_deploy
     verify_deploy || true
 

@@ -51,6 +51,8 @@ cd ~/dxrice   # or wherever you installed it
 ./install.sh update
 ```
 
+Or, from anywhere, just run `dxrice-update` -- install.sh adds that as a shell function to `~/.bashrc`/`~/.zshrc` (whichever you have) so you don't need to remember or `cd` into the install path. Open a new terminal after your first install/update for it to show up.
+
 This pulls the latest commit (auto-stashing and restoring any uncommitted local changes in the repo, e.g. `theme.json` edits made through the GUI, around the pull so they aren't lost or blocked) and then re-deploys. The re-deploy is guarded by a small manifest at `~/.local/state/dxrice/manifest.json` that remembers the hash of every file it last wrote:
 
 * If a live file in `~/.config/...` still matches what was last deployed, it's safely updated to the new version.
