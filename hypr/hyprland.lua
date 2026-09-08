@@ -39,6 +39,7 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
 
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
+    hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_window_memory.py > /tmp/window-memory.log 2>&1")
 end)
 
 hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")
@@ -113,7 +114,10 @@ hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
 local mainMod = "SUPER"
 
 hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal))
-hl.bind(mainMod .. " + C", hl.dsp.window.close())
+-- Plain killactive just sends a polite close request, which apps like
+-- Discord/Steam/Slack intercept to hide to tray instead of quitting. Signal
+-- the active window's actual process so SUPER+C always ends the app.
+hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("bash -c 'pid=$(hyprctl activewindow -j | jq -r .pid); if [ -n \"$pid\" ] && [ \"$pid\" != \"null\" ]; then kill \"$pid\" 2>/dev/null; sleep 0.3; kill -0 \"$pid\" 2>/dev/null && kill -9 \"$pid\" 2>/dev/null; fi'"))
 hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager))
 hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }))
 hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu))
