@@ -24,8 +24,14 @@ REPO_DIR="$SCRIPT_DIR"
 STATE_DIR="$HOME/.local/state/dxrice"
 MODE="${1:-install}"
 
-PACMAN_PACKAGES=(hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland
-    waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct
+# The Hyprland ecosystem itself needs distro-specific handling (see
+# install_hypr_ecosystem): native on Arch and openSUSE, third-party COPR on
+# Fedora, no reliable path on Ubuntu/Debian (see that function for why).
+# Everything else below is packaged natively pretty much everywhere, just
+# under different names.
+HYPR_PACKAGES=(hyprland hyprlock hypridle hyprpaper xdg-desktop-portal-hyprland)
+
+GENERAL_PACMAN=(swaybg waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct
     pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol
     networkmanager network-manager-applet bluez bluez-utils blueman
     ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent
@@ -33,7 +39,37 @@ PACMAN_PACKAGES=(hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-
     python-gobject gtk4 libadwaita gtk4-layer-shell)
 AUR_PACKAGES=(nwg-look)
 
+GENERAL_DNF=(swaybg waybar wofi mako kitty nautilus grim slurp qt5ct qt6ct
+    pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol
+    NetworkManager network-manager-applet bluez blueman
+    fontawesome-fonts google-noto-fonts-common polkit-kde
+    python3 python3-evdev jq brightnessctl playerctl
+    python3-gobject gtk4 libadwaita gtk4-layer-shell)
+
+GENERAL_APT=(swaybg waybar wofi mako-notifier kitty nautilus grim slurp qt5ct qt6ct
+    pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol
+    network-manager network-manager-gnome bluez bluez-tools blueman
+    fonts-font-awesome fonts-noto polkit-kde-agent-1
+    python3 python3-evdev jq brightnessctl playerctl
+    python3-gi libgtk-4-1 libadwaita-1-0 libgtk4-layer-shell0)
+# cliphist has no apt package as of this writing -- handled as a manual
+# note in check_dependencies instead of guessing a name that doesn't exist.
+
+GENERAL_ZYPPER=(swaybg waybar wofi mako kitty nautilus grim slurp qt5ct qt6ct
+    pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol
+    NetworkManager NetworkManager-applet bluez blueman
+    fontawesome-fonts noto-sans-fonts polkit-kde-authentication-agent-1
+    python3 python3-evdev jq brightnessctl playerctl
+    python3-gobject gtk4 libadwaita-1-0 gtk4-layer-shell)
+
+# JetBrains Mono Nerd Font isn't a real package almost anywhere outside
+# Arch's community repo -- fetched straight from the Nerd Fonts project's
+# own releases for every other package manager (see
+# install_nerd_font_fallback).
+NERD_FONT_RELEASE_URL="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip"
+
 SKIP_DEPS=0
+PKG_MANAGER=""
 INPUT_GROUP_JUST_ADDED=0
 
 # ---------------------------------------------------------------------------
@@ -104,16 +140,30 @@ check_not_root() {
 }
 
 check_platform() {
-    if ! command -v pacman >/dev/null 2>&1; then
-        warn "pacman not found -- this installer targets Arch Linux (or an Arch-based distro)."
-        info "You can still continue: dependency checks/installs will just be skipped, and"
-        info "you'll need to make sure Hyprland, waybar, wofi, mako, kitty, python-gobject,"
-        info "gtk4, libadwaita, etc. are already installed yourself."
+    if command -v pacman >/dev/null 2>&1; then
+        PKG_MANAGER="pacman"
+    elif command -v dnf >/dev/null 2>&1; then
+        PKG_MANAGER="dnf"
+    elif command -v apt-get >/dev/null 2>&1; then
+        PKG_MANAGER="apt"
+    elif command -v zypper >/dev/null 2>&1; then
+        PKG_MANAGER="zypper"
+    else
+        PKG_MANAGER="unknown"
+    fi
+
+    if [ "$PKG_MANAGER" = "unknown" ]; then
+        warn "Couldn't find pacman, dnf, apt, or zypper -- this installer doesn't know how to"
+        info "install dependencies automatically here. You can still continue: you'll need to"
+        info "make sure Hyprland, waybar, wofi, mako, kitty, python-gobject, gtk4, libadwaita,"
+        info "etc. are already installed yourself."
         if ! ask_yes_no "Continue anyway?" N; then
             exit 1
         fi
         SKIP_DEPS=1
+        return
     fi
+    ok "Detected package manager: $PKG_MANAGER"
 }
 
 record_repo_path() {
@@ -189,33 +239,162 @@ choose_install_location() {
 # Install steps
 # ---------------------------------------------------------------------------
 
+_pkg_installed() {
+    case "$PKG_MANAGER" in
+        pacman) pacman -Qi "$1" >/dev/null 2>&1 ;;
+        apt) dpkg -s "$1" >/dev/null 2>&1 ;;
+        dnf|zypper) rpm -q "$1" >/dev/null 2>&1 ;;
+    esac
+}
+
+_pkg_install() {
+    case "$PKG_MANAGER" in
+        pacman) sudo pacman -S --needed "$@" ;;
+        dnf) sudo dnf install -y "$@" ;;
+        apt) sudo apt-get update && sudo apt-get install -y "$@" ;;
+        zypper) sudo zypper install -y "$@" ;;
+    esac
+}
+
 check_dependencies() {
     if [ "$SKIP_DEPS" = "1" ]; then
-        warn "Skipping dependency check (no pacman on this system)."
+        warn "Skipping dependency check (no supported package manager found)."
         return
     fi
 
-    info "Checking pacman dependencies..."
+    info "Checking dependencies via $PKG_MANAGER..."
+    local -a general
+    case "$PKG_MANAGER" in
+        pacman) general=("${GENERAL_PACMAN[@]}") ;;
+        dnf) general=("${GENERAL_DNF[@]}") ;;
+        apt) general=("${GENERAL_APT[@]}") ;;
+        zypper) general=("${GENERAL_ZYPPER[@]}") ;;
+    esac
+
     local missing=()
-    for pkg in "${PACMAN_PACKAGES[@]}"; do
-        pacman -Qi "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+    for pkg in "${general[@]}"; do
+        _pkg_installed "$pkg" || missing+=("$pkg")
     done
     if [ "${#missing[@]}" -gt 0 ]; then
         warn "Missing: ${missing[*]}"
-        if ask_yes_no "Install them now with pacman?" Y; then
-            sudo pacman -S --needed "${missing[@]}" || warn "pacman install failed or was cancelled; continuing anyway."
+        if ask_yes_no "Install them now?" Y; then
+            _pkg_install "${missing[@]}" || warn "Install failed or was cancelled; continuing anyway."
         fi
     else
-        ok "All pacman dependencies present."
+        ok "All dependencies present."
     fi
 
-    local missing_aur=()
-    for pkg in "${AUR_PACKAGES[@]}"; do
-        pacman -Qi "$pkg" >/dev/null 2>&1 || missing_aur+=("$pkg")
-    done
-    if [ "${#missing_aur[@]}" -gt 0 ]; then
-        warn "AUR packages not installed (install manually with yay/paru): ${missing_aur[*]}"
+    if [ "$PKG_MANAGER" = "pacman" ]; then
+        local missing_aur=()
+        for pkg in "${AUR_PACKAGES[@]}"; do
+            pacman -Qi "$pkg" >/dev/null 2>&1 || missing_aur+=("$pkg")
+        done
+        if [ "${#missing_aur[@]}" -gt 0 ]; then
+            warn "AUR packages not installed (install manually with yay/paru): ${missing_aur[*]}"
+        fi
+    else
+        warn "nwg-look (theme picker helper) isn't packaged outside Arch -- build it yourself"
+        info "from https://github.com/nwg-piotr/nwg-look if you want it; everything else in"
+        info "this rice works fine without it."
+        if ! command -v cliphist >/dev/null 2>&1; then
+            warn "cliphist (clipboard history) doesn't have a package on most non-Arch distros."
+            info "Grab a release binary from https://github.com/sentriz/cliphist if you want it."
+        fi
     fi
+
+    install_hypr_ecosystem
+    [ "$PKG_MANAGER" != "pacman" ] && install_nerd_font_fallback
+}
+
+# Hyprland itself needs distro-specific handling: officially packaged on
+# Arch and openSUSE, only reachable via a third-party COPR on Fedora (which
+# can and does go stale -- solopasha/hyprland, the most commonly referenced
+# one, is unmaintained as of this writing), and with no reliable package on
+# Ubuntu/Debian at all -- Hyprland's own community advises against running
+# it on point-release distros since it needs newer wlroots/graphics stack
+# versions than their stable base ships. See https://wiki.hypr.land for
+# whatever the current recommended path is before trusting any of this
+# blindly on Fedora specifically.
+install_hypr_ecosystem() {
+    local missing=()
+    for pkg in "${HYPR_PACKAGES[@]}"; do
+        _pkg_installed "$pkg" || missing+=("$pkg")
+    done
+    if [ "${#missing[@]}" -eq 0 ]; then
+        ok "Hyprland ecosystem present."
+        return
+    fi
+
+    case "$PKG_MANAGER" in
+        pacman|zypper)
+            warn "Missing Hyprland packages: ${missing[*]}"
+            if ask_yes_no "Install them now?" Y; then
+                _pkg_install "${missing[@]}" || warn "Install failed or was cancelled; continuing anyway."
+            fi
+            ;;
+        dnf)
+            warn "Fedora doesn't ship Hyprland in its official repos -- it needs a third-party COPR."
+            info "solopasha/hyprland is the most commonly referenced one, but it's unmaintained as"
+            info "of this writing -- check https://wiki.hypr.land for whatever's currently"
+            info "recommended before trusting this."
+            if ask_yes_no "Try enabling solopasha/hyprland and installing from it now?" N; then
+                sudo dnf copr enable -y solopasha/hyprland || warn "Could not enable that COPR."
+                sudo dnf install -y "${missing[@]}" || warn "Install failed -- that COPR may be stale; check the Hyprland wiki for a current alternative."
+            else
+                info "Skipped -- install Hyprland yourself (https://wiki.hypr.land/Getting-Started/Installation/) and re-run this."
+            fi
+            ;;
+        apt)
+            warn "Hyprland has no reliable Ubuntu/Debian package. Its own community advises"
+            info "against running it on point-release distros like Ubuntu for this reason. If you"
+            info "want to try anyway, see https://wiki.hypr.land/Getting-Started/Installation/ for"
+            info "building from source. Skipping automatic install of: ${missing[*]}"
+            ;;
+    esac
+}
+
+# JetBrainsMono Nerd Font (the glyphs throughout this whole rice -- waybar
+# icons, kitty, etc.) isn't a real package almost anywhere outside Arch's
+# community repo. Fetched directly from the Nerd Fonts project's own
+# releases instead of guessing a distro package name that doesn't exist.
+install_nerd_font_fallback() {
+    if fc-list 2>/dev/null | grep -qi "JetBrainsMono Nerd Font"; then
+        ok "JetBrainsMono Nerd Font already installed."
+        return
+    fi
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        warn "Need curl or wget to fetch the Nerd Font -- install one and re-run, or grab it"
+        info "yourself from $NERD_FONT_RELEASE_URL"
+        return
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        warn "Need 'unzip' to install the Nerd Font -- install it and re-run, or fetch/unzip"
+        info "$NERD_FONT_RELEASE_URL into ~/.local/share/fonts yourself."
+        return
+    fi
+    if ! ask_yes_no "JetBrainsMono Nerd Font isn't packaged here -- download and install it now?" Y; then
+        return
+    fi
+
+    local tmp
+    tmp="$(mktemp -d)"
+    info "Downloading JetBrainsMono Nerd Font..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$NERD_FONT_RELEASE_URL" -o "$tmp/JetBrainsMono.zip"
+    else
+        wget -q "$NERD_FONT_RELEASE_URL" -O "$tmp/JetBrainsMono.zip"
+    fi
+    if [ ! -s "$tmp/JetBrainsMono.zip" ]; then
+        warn "Download failed -- install the font yourself from $NERD_FONT_RELEASE_URL"
+        rm -rf "$tmp"
+        return
+    fi
+
+    mkdir -p "$HOME/.local/share/fonts"
+    unzip -oq "$tmp/JetBrainsMono.zip" -d "$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+    rm -rf "$tmp"
+    command -v fc-cache >/dev/null 2>&1 && fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1
+    ok "Installed JetBrainsMono Nerd Font."
 }
 
 check_input_group() {

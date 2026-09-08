@@ -4,19 +4,37 @@ A fully configured, Lua-based Hyprland environment optimized for performance, mo
 
 ---
 
-## Package Dependencies (Arch Linux)
+## Package Dependencies
 
-Install all system core, audio, font, and runtime dependencies before running the installer:
+`install.sh` detects your package manager (pacman, dnf, apt, or zypper) and installs everything it can automatically -- you don't need to run any of this by hand unless you want to. It's listed here mainly for reference, or for installing manually first if you'd rather review what's going on.
 
-Official Packages (pacman):
+**Arch Linux** (pacman) -- fully supported, including Hyprland itself:
 ```bash
-sudo pacman -S --needed hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol networkmanager network-manager-applet bluez bluez-utils blueman ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent python python-evdev jq brightnessctl playerctl python-gobject gtk4 libadwaita
+sudo pacman -S --needed hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol networkmanager network-manager-applet bluez bluez-utils blueman ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent python python-evdev jq brightnessctl playerctl python-gobject gtk4 libadwaita gtk4-layer-shell
+```
+AUR (yay / paru): `yay -S --needed nwg-look` (a theme picker helper, entirely optional).
+
+**openSUSE** (zypper) -- fully supported, including Hyprland itself, which openSUSE packages officially:
+```bash
+sudo zypper install hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol NetworkManager NetworkManager-applet bluez blueman fontawesome-fonts noto-sans-fonts polkit-kde-authentication-agent-1 python3 python3-evdev jq brightnessctl playerctl python3-gobject gtk4 libadwaita-1-0 gtk4-layer-shell
 ```
 
-AUR Packages (yay / paru):
+**Fedora** (dnf) -- everything except Hyprland itself is officially packaged. Hyprland needs a third-party COPR (Fedora doesn't carry it officially); `install.sh` will offer to enable one, with a clear warning that COPRs are unofficial and can go stale -- check [wiki.hypr.land](https://wiki.hypr.land) for whatever's currently recommended before trusting any specific one blindly:
 ```bash
-yay -S --needed nwg-look
+sudo dnf install swaybg waybar wofi mako kitty nautilus grim slurp qt5ct qt6ct pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol NetworkManager network-manager-applet bluez blueman fontawesome-fonts google-noto-fonts-common polkit-kde python3 python3-evdev jq brightnessctl playerctl python3-gobject gtk4 libadwaita gtk4-layer-shell
+sudo dnf copr enable solopasha/hyprland   # or whatever's current -- see wiki.hypr.land
+sudo dnf install hyprland hyprlock hypridle hyprpaper xdg-desktop-portal-hyprland
 ```
+
+**Ubuntu / Debian** (apt) -- everything except Hyprland itself is officially packaged. Hyprland has no reliable Ubuntu/Debian package, and its own community advises against running it on point-release distros like Ubuntu (it needs newer wlroots/graphics stack versions than their stable base ships). `install.sh` installs everything else and skips Hyprland with an explanation rather than guessing something broken -- see [wiki.hypr.land](https://wiki.hypr.land/Getting-Started/Installation/) if you want to build it from source anyway:
+```bash
+sudo apt install swaybg waybar wofi mako-notifier kitty nautilus grim slurp qt5ct qt6ct pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol network-manager network-manager-gnome bluez bluez-tools blueman fonts-font-awesome fonts-noto polkit-kde-agent-1 python3 python3-evdev jq brightnessctl playerctl python3-gi libgtk-4-1 libadwaita-1-0 libgtk4-layer-shell0
+```
+
+**Not packaged almost anywhere outside Arch**, on any of the above:
+* `cliphist` (clipboard history) -- grab a release binary from its [GitHub](https://github.com/sentriz/cliphist) if you want it; everything else works without it.
+* `nwg-look` (theme picker helper, Arch's AUR-only even there) -- build it yourself from its [GitHub](https://github.com/nwg-piotr/nwg-look) if you want it.
+* JetBrainsMono Nerd Font -- `install.sh` downloads and installs this one automatically on non-Arch systems (from the [Nerd Fonts releases](https://github.com/ryanoasis/nerd-fonts/releases)), since it's what every icon glyph throughout this rice actually renders with.
 
 ---
 
@@ -37,7 +55,7 @@ DXrice keeps everything -- scripts, the theme engine, its own state -- inside th
 
 What `./install.sh` does on a fresh machine:
 1. **Asks where you want it installed** (default: wherever you cloned it) and moves the checkout there if you pick somewhere else, then records that location in `~/.local/state/dxrice/repo_path` so `hyprland.lua`'s keybinds -- a plain dotfile deployed to a fixed path -- can always find it later.
-2. **Dependency check:** checks every pacman package this rice needs (including `python-gobject`, `gtk4`, `libadwaita` for the theme GUI) and offers to install anything missing; lists AUR packages (`nwg-look`) separately since it won't assume you have an AUR helper. Skipped gracefully on non-Arch systems (no `pacman`).
+2. **Dependency check:** detects pacman/dnf/apt/zypper and installs everything it can with whichever one is present (see "Package Dependencies" above for exactly what and the per-distro caveats around Hyprland itself); AUR packages are listed separately on Arch since it won't assume you have an AUR helper. Skipped gracefully if none of those four are found.
 3. **`input` group:** checks whether you're in it (required for the infinite-desktop's raw-input reader) and offers to add you if not -- you'll need to log out/in or reboot afterward for it to take effect.
 4. **Monitor auto-detection:** the very first time `hyprland.lua` is deployed (i.e. it doesn't exist yet at `~/.config/hypr/hyprland.lua`), runs `hyprctl monitors -j` and writes your real output name/resolution/position into it. Skipped if Hyprland isn't running yet or the file already exists -- see "Updating" below for why it's never touched again after that.
 5. **Deploys everything** (app configs, `hyprland.lua`, theme engine) and renders the theme once so waybar/wofi/mako/kitty/hyprlock all come up themed immediately, then verifies every file the keybinds depend on actually exists before declaring success.
