@@ -115,9 +115,11 @@ local mainMod = "SUPER"
 
 hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal))
 -- Plain killactive just sends a polite close request, which apps like
--- Discord/Steam/Slack intercept to hide to tray instead of quitting. Signal
--- the active window's actual process so SUPER+C always ends the app.
-hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("bash -c 'pid=$(hyprctl activewindow -j | jq -r .pid); if [ -n \"$pid\" ] && [ \"$pid\" != \"null\" ]; then kill \"$pid\" 2>/dev/null; sleep 0.3; kill -0 \"$pid\" 2>/dev/null && kill -9 \"$pid\" 2>/dev/null; fi'"))
+-- Discord/Steam/Slack intercept to hide to tray instead of quitting.
+-- dxrice_force_close_window.py signals the active window's whole process
+-- tree instead of just the one PID hyprctl reports (see its docstring for
+-- why a plain process-group kill isn't safe here).
+hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_force_close_window.py"))
 hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager))
 hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }))
 hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu))
