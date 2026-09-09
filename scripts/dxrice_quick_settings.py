@@ -58,21 +58,12 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Gtk4LayerShell, Pango
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dxrice_gtk_widgets import label as _label, load_css, make_card, make_debounced
+
 HOME = os.path.expanduser("~")
 PID_FILE = "/tmp/dxrice-quick-settings.pid"
-CSS_PATH = os.path.join(HOME, ".config", "dxrice", "quick_settings_style.css")
-
-
-def load_css():
-    provider = Gtk.CssProvider()
-    try:
-        provider.load_from_path(CSS_PATH)
-    except GLib.Error as e:
-        print(f"Could not load {CSS_PATH}: {e}", file=sys.stderr)
-        return
-    Gtk.StyleContext.add_provider_for_display(
-        Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-    )
+CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
 
 
 def run(args, timeout=3):
@@ -467,29 +458,6 @@ def set_dnd(enabled):
 # UI helpers
 # ---------------------------------------------------------------------------
 
-def _label(text, css_class=None, ellipsize=True, xalign=0.0, max_width_chars=22):
-    lbl = Gtk.Label(label=text, xalign=xalign)
-    if ellipsize:
-        lbl.set_ellipsize(Pango.EllipsizeMode.END)
-        lbl.set_hexpand(True)
-        lbl.set_halign(Gtk.Align.FILL)
-        # Ellipsize alone only lets GTK's size negotiation shrink this
-        # label below its natural size -- it doesn't reduce what that
-        # natural size IS, so a long clipboard preview or media title
-        # still reports its full, un-truncated width as "natural" and
-        # drags the whole panel wider with it. max_width_chars caps that.
-        lbl.set_max_width_chars(max_width_chars)
-    if css_class:
-        lbl.add_css_class(css_class)
-    return lbl
-
-
-def make_card():
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-    box.add_css_class("qs-card")
-    return box
-
-
 def run_async(fn, on_done):
     """Runs fn() off the main thread, then calls on_done(result) back on
     the GTK main loop. For anything that shells out to a subprocess whose
@@ -510,15 +478,15 @@ def clear_rows(card, rows):
 
 def show_loading(card, rows, text):
     row = Gtk.Box()
-    row.add_css_class("qs-list-row")
-    row.append(_label(text, "qs-row-subtitle", ellipsize=False))
+    row.add_css_class("dx-list-row")
+    row.append(_label(text, "dx-row-subtitle", ellipsize=False))
     card.append(row)
     rows.append(row)
 
 
 def make_icon_button(icon_name, tooltip=None):
     btn = Gtk.Button(icon_name=icon_name)
-    btn.add_css_class("qs-icon-btn")
+    btn.add_css_class("dx-icon-btn")
     btn.set_valign(Gtk.Align.CENTER)
     if tooltip:
         btn.set_tooltip_text(tooltip)
@@ -528,7 +496,7 @@ def make_icon_button(icon_name, tooltip=None):
 def make_toggle_button(icon_name, label_text, active, on_toggled):
     """Compact icon-over-label toggle, GNOME-quick-settings style."""
     btn = Gtk.ToggleButton()
-    btn.add_css_class("qs-toggle")
+    btn.add_css_class("dx-toggle")
     btn.set_active(active)
     if active:
         btn.add_css_class("active")
@@ -558,7 +526,7 @@ def make_action_button(icon_name, label_text, on_clicked):
     needs real width for a horizontal layout and forces the whole panel
     wider; stacked, it doesn't."""
     btn = Gtk.Button()
-    btn.add_css_class("qs-toggle")
+    btn.add_css_class("dx-toggle")
     inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, halign=Gtk.Align.CENTER)
     inner.append(Gtk.Image.new_from_icon_name(icon_name))
     lbl = Gtk.Label(label=label_text)
@@ -574,7 +542,7 @@ def make_device_menu_button(devices, on_select):
     kept in a popover (not the main panel's fixed-width layout) so a long
     device name can never force the whole panel wider."""
     menu_btn = Gtk.MenuButton(icon_name="view-more-symbolic")
-    menu_btn.add_css_class("qs-icon-btn")
+    menu_btn.add_css_class("dx-icon-btn")
     menu_btn.set_valign(Gtk.Align.CENTER)
 
     listbox = Gtk.ListBox()
@@ -601,33 +569,13 @@ def make_device_menu_button(devices, on_select):
     return menu_btn
 
 
-def make_debounced(fn, delay_ms=80):
-    """Wraps fn so rapid repeated calls (e.g. every tick of a dragged
-    slider) only actually invoke it once, ~delay_ms after the last call --
-    used to keep a slider from spawning a subprocess per pixel of motion."""
-    state = {"id": None}
-
-    def wrapped(*args):
-        if state["id"] is not None:
-            GLib.source_remove(state["id"])
-
-        def apply_call():
-            fn(*args)
-            state["id"] = None
-            return False
-
-        state["id"] = GLib.timeout_add(delay_ms, apply_call)
-
-    return wrapped
-
-
 def make_slider_row(icon_on, icon_off, initial, muted, on_change, on_mute, devices=None, on_device=None):
     row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-    row.add_css_class("qs-row")
+    row.add_css_class("dx-row")
 
     mute_btn = Gtk.ToggleButton()
     mute_btn.set_icon_name(icon_off if muted else icon_on)
-    mute_btn.add_css_class("qs-icon-btn")
+    mute_btn.add_css_class("dx-icon-btn")
     mute_btn.add_css_class("flat")
     mute_btn.set_active(muted)
     mute_btn.set_valign(Gtk.Align.CENTER)
@@ -672,22 +620,44 @@ class PasswordDialog(Adw.Window):
     def __init__(self, parent, ssid, on_submit):
         super().__init__(transient_for=parent, modal=True, title=f"Connect to {ssid}")
         self.set_default_size(320, -1)
-        toolbar_view = Adw.ToolbarView()
-        toolbar_view.add_top_bar(Adw.HeaderBar())
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
-        entry = Adw.PasswordEntryRow(title="Password")
-        entry.connect("entry-activated", lambda e: self._submit(ssid, entry, on_submit))
-        box.append(entry)
+
+        escape_controller = Gtk.EventControllerKey()
+        escape_controller.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(escape_controller)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root.add_css_class("dx-root")
+        self.set_content(root)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("dx-header")
+        title_lbl = _label(f"Connect to {ssid}", "dx-header-title", max_width_chars=26)
+        header.append(title_lbl)
+        close_btn = Gtk.Button(icon_name="window-close-symbolic")
+        close_btn.add_css_class("dx-close")
+        close_btn.connect("clicked", lambda _b: self.close())
+        header.append(close_btn)
+        root.append(header)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        body.add_css_class("dx-body")
+        root.append(body)
+
+        entry = Gtk.PasswordEntry(show_peek_icon=True, placeholder_text="Password")
+        entry.add_css_class("dx-entry")
+        entry.connect("activate", lambda e: self._submit(ssid, entry, on_submit))
+        body.append(entry)
+
         btn = Gtk.Button(label="Connect")
-        btn.add_css_class("suggested-action")
+        btn.add_css_class("dx-btn-primary")
         btn.connect("clicked", lambda b: self._submit(ssid, entry, on_submit))
-        box.append(btn)
-        toolbar_view.set_content(box)
-        self.set_content(toolbar_view)
+        body.append(btn)
+
+    def _on_key_pressed(self, _controller, keyval, _keycode, _state):
+        if keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        return False
 
     def _submit(self, ssid, entry, on_submit):
         on_submit(ssid, entry.get_text())
@@ -721,15 +691,17 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         self.add_controller(escape_controller)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        root.add_css_class("qs-root")
+        root.add_css_class("dx-root")
         root.set_size_request(PANEL_WIDTH, -1)
         self.set_content(root)
 
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        header.add_css_class("qs-header")
-        header.append(_label("Quick Settings", ellipsize=False))
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("dx-header")
+        title_lbl = _label("Quick Settings", "dx-header-title", ellipsize=False, xalign=0.0)
+        title_lbl.set_hexpand(True)
+        header.append(title_lbl)
         close_btn = Gtk.Button(icon_name="window-close-symbolic")
-        close_btn.add_css_class("qs-close")
+        close_btn.add_css_class("dx-close")
         close_btn.connect("clicked", lambda b: self.close())
         header.append(close_btn)
         root.append(header)
@@ -836,9 +808,9 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
             return
 
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, hexpand=True)
-        text_box.append(_label(meta["title"], "qs-row-title"))
+        text_box.append(_label(meta["title"], "dx-row-title", max_width_chars=22))
         if meta["artist"]:
-            text_box.append(_label(meta["artist"], "qs-row-subtitle"))
+            text_box.append(_label(meta["artist"], "dx-row-subtitle", max_width_chars=22))
 
         controls = Gtk.Box(spacing=4)
         prev_btn = make_icon_button("media-skip-backward-symbolic", "Previous")
@@ -853,7 +825,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
             controls.append(b)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.add_css_class("qs-row")
+        row.add_css_class("dx-row")
         row.append(text_box)
         row.append(controls)
         self.media_card.append(row)
@@ -896,7 +868,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
     def _build_brightness_card(self, content):
         card = make_card()
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        row.add_css_class("qs-row")
+        row.add_css_class("dx-row")
         row.append(Gtk.Image.new_from_icon_name("display-brightness-symbolic"))
 
         brightness = get_brightness_percent()
@@ -958,12 +930,12 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         clear_rows(self.wifi_card, self._wifi_row_widgets)
         for ssid, sig, security, connected in networks:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row.add_css_class("qs-list-row")
+            row.add_css_class("dx-list-row")
             icon_name = ("network-wireless-signal-excellent-symbolic" if sig > 70 else
                          "network-wireless-signal-good-symbolic" if sig > 40 else
                          "network-wireless-signal-weak-symbolic")
             row.append(Gtk.Image.new_from_icon_name(icon_name))
-            row.append(_label(ssid))
+            row.append(_label(ssid, max_width_chars=22))
             if connected:
                 row.append(Gtk.Image.new_from_icon_name("object-select-symbolic"))
             else:
@@ -1024,15 +996,15 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         clear_rows(self.bt_card, self._bt_row_widgets)
         if not devices:
             row = Gtk.Box()
-            row.add_css_class("qs-list-row")
-            row.append(_label("No paired devices", "qs-row-subtitle"))
+            row.add_css_class("dx-list-row")
+            row.append(_label("No paired devices", "dx-row-subtitle"))
             self.bt_card.append(row)
             self._bt_row_widgets.append(row)
             return False
         for mac, name, connected in devices:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row.add_css_class("qs-list-row")
-            row.append(_label(name))
+            row.add_css_class("dx-list-row")
+            row.append(_label(name, max_width_chars=22))
             btn = Gtk.Button(label="Disconnect" if connected else "Connect")
             btn.add_css_class("flat")
             btn.set_valign(Gtk.Align.CENTER)
@@ -1051,7 +1023,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
     def _build_clipboard_card(self, content):
         self.clip_card = make_card()
         header_row = Gtk.Box(spacing=6)
-        header_row.append(_label("Clipboard", "qs-row-title", ellipsize=False))
+        header_row.append(_label("Clipboard", "dx-row-title", ellipsize=False))
         refresh_btn = make_icon_button("view-refresh-symbolic", "Refresh")
         refresh_btn.connect("clicked", lambda b: self._rebuild_clipboard_card())
         header_row.append(refresh_btn)
@@ -1066,8 +1038,8 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
         for raw, preview in entries:
             btn = Gtk.Button()
             btn.add_css_class("flat")
-            btn.add_css_class("qs-list-row")
-            btn.set_child(_label(preview.replace("\n", " ")))
+            btn.add_css_class("dx-list-row")
+            btn.set_child(_label(preview.replace("\n", " "), max_width_chars=22))
             btn.connect("clicked", lambda b, r=raw: copy_clipboard_entry(r))
             self.clip_card.append(btn)
             self._clip_row_widgets.append(btn)
@@ -1084,7 +1056,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
 
     def _add_stat_row(self, card, title):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.add_css_class("qs-row")
+        row.add_css_class("dx-row")
         row.append(_label(title, ellipsize=False))
         bar = Gtk.LevelBar(hexpand=True)
         bar.set_valign(Gtk.Align.CENTER)
@@ -1125,7 +1097,7 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
             ("system-shutdown-symbolic", "Shutdown", action_shutdown, True),
         ]:
             btn = make_icon_button(icon, tooltip)
-            btn.add_css_class("qs-power-btn")
+            btn.add_css_class("dx-power-btn")
             if destructive:
                 btn.add_css_class("destructive")
                 btn.connect("clicked", lambda b, a=action, l=tooltip: self._confirm_power_action(l, a))
@@ -1164,7 +1136,7 @@ class QuickSettingsApp(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
-        load_css()
+        load_css(CSS_PATH)
 
     def do_activate(self):
         win = self.props.active_window

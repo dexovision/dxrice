@@ -113,14 +113,16 @@ The custom Infinite Desktop navigation engine and taskbar management are powered
 
 ## Theming (GUI Settings App)
 
-Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, and wallpaper — is controlled from one place: `<repo>/theme/theme.json` (`<repo>` being wherever you cloned this, as recorded by `install.sh`). Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`<repo>/scripts/dxrice_theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
+Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, wallpaper, animation speed, and settings-app spacing — is controlled from one place: `<repo>/theme/theme.json` (`<repo>` being wherever you cloned this, as recorded by `install.sh`). Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`<repo>/scripts/dxrice_theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
 
 How it works:
 * `theme/theme.json` is the single source of truth for every themeable value.
-* `theme/*.template` files (waybar, wofi, mako, kitty, hyprlock) are plain configs with `${TOKEN}` placeholders.
+* `theme/*.template` files (waybar, wofi, mako, kitty, hyprlock, and the shared GTK stylesheet) are plain configs with `${TOKEN}` placeholders.
 * `<repo>/scripts/dxrice_apply_theme.py` renders those templates into the real `~/.config/...` files, patches the color/decoration block of `hyprland.lua` in place (regex, so your keybinds and autostart are untouched), and hot-reloads waybar, mako, kitty, and Hyprland — no session restart needed.
-* The GUI is just a front-end over that same script: tweak a color/slider, hit **Apply**, everything reloads live.
-* **Presets:** four built-in looks (Glass Charcoal, Nord, Dracula, Sunset) plus save/load your own from the Presets section at the top of the settings window.
+* The GUI is just a front-end over that same script: tweak a color/slider, watch the live preview mockup update instantly, hit **Apply**, everything reloads for real.
+* **Presets:** four built-in looks (Glass Charcoal, Nord, Dracula, Sunset), shown as a swatch grid, plus save/load your own from the Presets section at the top of the settings window.
+* **Experience settings:** `anim_duration_ms` controls how snappy hover/expand/reveal transitions feel across every DXrice GTK app (Theme, Taskbar, Quick Settings), and `ui_density` scales their internal padding tighter or looser to taste.
+* Theme, Taskbar, and Quick Settings all share one design system (`theme/dxrice_gtk_style.css.template`, rendered to `~/.config/dxrice/gtk_style.css`) and one widget-helper module (`<repo>/scripts/dxrice_gtk_widgets.py`), so they actually look and animate like parts of the same rice instead of three unrelated stock-Adwaita tools.
 
 To theme by hand instead of via the GUI, edit `theme/theme.json` directly and run:
 ```bash
@@ -132,12 +134,13 @@ python3 <repo>/scripts/dxrice_apply_theme.py
 ## Customization & Tweaks
 
 ### Taskbar & Window Management
-* `dxrice_taskbar_gui.py` (`SUPER + Shift + A`) is a native GTK4/Adwaita settings window -- the same style as the theme GUI below -- for managing the waybar app shortcuts on the left side of the bar. Every change (add, remove, reorder, the icons toggle) applies and restarts waybar immediately, and is synced back into `<repo>/waybar/config` so it survives an `install.sh update`.
+* `dxrice_taskbar_gui.py` (`SUPER + Shift + A`) is a native GTK4/Adwaita settings window -- same design system as the Theme GUI -- for managing the waybar app shortcuts on the left side of the bar. Every change (add, remove, reorder, the icons toggle) applies and restarts waybar immediately. Your shortcuts live only in `~/.config/waybar/config`, never synced back into the repo, so they're never at risk of being overwritten (or of showing up as noise in your own commits) by an `install.sh update`.
 * **Add shortcut:** the `+` button opens a searchable list of every installed `.desktop` app (scanned from `/usr/share/applications` and `~/.local/share/applications`) -- click one to add it, with the real command pulled straight from the `.desktop` file. There's also a plain name + command field underneath for anything not in that list.
 * **Show icons toggle:** an Options switch at the top of the window. On, every shortcut shows a real Nerd Font glyph (via `<repo>/scripts/dxrice_icons.py`, matched against the app's name/command), falling back to a generic glyph for anything unrecognized. Off, every shortcut shows its plain name as text instead -- flipping it re-derives every existing shortcut immediately, no need to re-add them.
-* Reorder shortcuts with the up/down arrows on each row, or remove one with the trash icon. The app launcher shortcut itself is pinned and can't be reordered or removed.
-* **Per-shortcut icon mode:** expand any shortcut's row for a dropdown -- Automatic (follows the global switch above), Text label (always plain text), or Custom image. Custom image renders as a real waybar `image#` picture module (waybar's text-based shortcuts can't show pictures), copied into `~/.config/waybar/icons/` so it survives the original file moving.
-* **System Modules section:** edit left/right-click commands on the clock/volume/network/CPU/RAM modules directly.
+* **Custom icon size:** a slider in Options controls the pixel size of any shortcut using a custom image icon.
+* **Reorder:** drag any shortcut by its handle to reposition it, or use the up/down arrows -- both call the same reorder logic, so the fallback is always available if you'd rather not drag. Remove a shortcut with the trash icon. The app launcher shortcut itself is pinned and can't be dragged, reordered, or removed.
+* **Per-shortcut icon mode:** expand any shortcut's row (smoothly, via a real GTK reveal animation) for Automatic (follows the global switch above), Text label (always plain text), or Custom image. Custom image renders as a real waybar `image#` picture module (waybar's text-based shortcuts can't show pictures), copied into `~/.config/waybar/icons/` so it survives the original file moving.
+* **System Modules section:** edit left/right-click commands on the clock/volume/network/CPU/RAM modules directly, each in its own expandable card.
 * Taskbar window switching and reordering work dynamically across tiled and floating workspace layouts.
 
 ### Quick Settings Panel

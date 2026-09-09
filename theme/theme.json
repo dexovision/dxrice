@@ -33,5 +33,7 @@
     "lock_blur_vibrancy": 0.1696,
     "lock_bg_opacity": 0.7,
     "wallpaper": "~/Pictures/Wallpapers/default.png",
-    "font_size_waybar_icons": 22
+    "font_size_waybar_icons": 22,
+    "anim_duration_ms": 150,
+    "ui_density": 1.0
 }

@@ -1,0 +1,345 @@
+/* Shared design system for every DXrice GTK4/Adwaita tool (theme editor,
+   taskbar manager, quick settings). One stylesheet, one set of .dx-*
+   classes, so all three actually look like parts of the same rice instead
+   of three unrelated apps -- driven entirely by theme.json, the same as
+   waybar/wofi/mako/kitty. */
+
+* {
+    font-family: "${FONT_FAMILY}", sans-serif;
+    font-size: ${FONT_SIZE_WAYBAR}px;
+    -gtk-icon-shadow: none;
+}
+
+window {
+    background: transparent;
+}
+
+/* ---- window chrome ------------------------------------------------- */
+
+.dx-root {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_ACTIVE});
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE});
+    border-radius: ${RADIUS}px;
+    color: ${TEXT_COLOR};
+}
+
+.dx-header {
+    padding: ${PAD_MD}px ${PAD_LG}px;
+    border-bottom: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+}
+
+.dx-header-title {
+    font-weight: bold;
+    font-size: 1.15em;
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+.dx-header-subtitle {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.dx-close {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0;
+    border-radius: ${ENTRY_RADIUS}px;
+    background: transparent;
+    color: ${TEXT_COLOR};
+    border: none;
+    transition: background-color ${ANIM_MS}ms ease-out, color ${ANIM_MS}ms ease-out;
+}
+
+.dx-close:hover {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.85);
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+.dx-body {
+    padding: ${PAD_LG}px;
+}
+
+.dx-section-title {
+    font-weight: bold;
+    font-size: 0.95em;
+    opacity: 0.85;
+    padding: ${PAD_MD}px ${PAD_SM}px ${PAD_SM}px ${PAD_SM}px;
+    letter-spacing: 0.02em;
+}
+
+/* ---- cards & rows ---------------------------------------------------- */
+
+.dx-card {
+    background-color: rgba(${ACTIVE_R}, ${ACTIVE_G}, ${ACTIVE_B}, ${OPACITY_IDLE});
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+    border-radius: ${ENTRY_RADIUS}px;
+    padding: ${PAD_MD}px;
+    margin-bottom: ${PAD_MD}px;
+    transition: border-color ${ANIM_MS}ms ease-out;
+}
+
+.dx-card:last-child {
+    margin-bottom: 0;
+}
+
+.dx-row {
+    padding: ${PAD_SM}px ${PAD_SM}px;
+    color: ${TEXT_COLOR};
+}
+
+.dx-row-title {
+    font-weight: 600;
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+.dx-row-subtitle {
+    font-size: 0.9em;
+    opacity: 0.7;
+}
+
+/* A clickable row, e.g. inside a boxed list -- lifts slightly on hover */
+.dx-list-row {
+    padding: ${PAD_SM}px ${PAD_SM}px;
+    border-radius: ${ENTRY_RADIUS}px;
+    transition: background-color ${ANIM_MS}ms ease-out;
+}
+
+.dx-list-row:hover {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.12);
+}
+
+/* Drag handle shown on a reorderable row */
+.dx-drag-handle {
+    color: ${TEXT_COLOR};
+    opacity: 0.45;
+    transition: opacity ${ANIM_MS}ms ease-out;
+}
+
+.dx-list-row:hover .dx-drag-handle {
+    opacity: 0.85;
+}
+
+.dx-drop-target {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.18);
+    border: 1px dashed rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.8);
+    border-radius: ${ENTRY_RADIUS}px;
+}
+
+/* Applied to a card while its own drag is in flight (via a DragSource on
+   its handle), so the item being moved reads as "lifted" instead of
+   looking untouched while every other card reflows around it. */
+.dx-dragging {
+    opacity: 0.45;
+}
+
+/* ---- toggles & buttons ------------------------------------------------ */
+
+.dx-toggle {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+    border-radius: ${ENTRY_RADIUS}px;
+    color: ${TEXT_COLOR};
+    padding: ${PAD_MD}px ${PAD_SM}px;
+    transition: background-color ${ANIM_MS}ms ease-out, border-color ${ANIM_MS}ms ease-out,
+                color ${ANIM_MS}ms ease-out;
+}
+
+.dx-toggle:hover {
+    border-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE});
+}
+
+.dx-toggle.active {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.85);
+    border-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 1);
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+.dx-icon-btn {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+    border-radius: ${ENTRY_RADIUS}px;
+    color: ${TEXT_COLOR};
+    padding: ${PAD_SM}px;
+    transition: background-color ${ANIM_MS}ms ease-out, color ${ANIM_MS}ms ease-out;
+}
+
+.dx-icon-btn:hover {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.18);
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+.dx-icon-btn.destructive:hover {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.85);
+    border-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 1);
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+/* A bigger, squarer variant of .dx-icon-btn for a small row of primary
+   actions (Quick Settings' power row: lock/logout/reboot/shutdown) -- a
+   taller hit target than the "..." menu buttons it shares .dx-icon-btn's
+   hover/destructive behavior with. */
+.dx-power-btn {
+    min-height: 40px;
+    padding: ${PAD_MD}px;
+}
+
+.dx-btn-primary {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.9);
+    color: ${TEXT_ACTIVE_COLOR};
+    border: 1px solid rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 1);
+    border-radius: ${ENTRY_RADIUS}px;
+    padding: ${PAD_SM}px ${PAD_LG}px;
+    font-weight: 600;
+    transition: background-color ${ANIM_MS}ms ease-out, opacity ${ANIM_MS}ms ease-out;
+}
+
+.dx-btn-primary:hover {
+    opacity: 0.88;
+}
+
+.dx-btn-primary:disabled {
+    opacity: 0.5;
+}
+
+.dx-btn-secondary {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    color: ${TEXT_COLOR};
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+    border-radius: ${ENTRY_RADIUS}px;
+    padding: ${PAD_SM}px ${PAD_LG}px;
+    transition: background-color ${ANIM_MS}ms ease-out, border-color ${ANIM_MS}ms ease-out;
+}
+
+.dx-btn-secondary:hover {
+    border-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE});
+}
+
+.dx-muted {
+    color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 1);
+}
+
+.dx-pill {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.85);
+    color: ${TEXT_ACTIVE_COLOR};
+    border-radius: 999px;
+    padding: 1px ${PAD_SM}px;
+    font-size: 0.8em;
+    font-weight: 600;
+}
+
+/* ---- preset swatches (theme editor) ----------------------------------- */
+
+.dx-swatch {
+    border-radius: ${ENTRY_RADIUS}px;
+    border: 2px solid transparent;
+    padding: ${PAD_SM}px;
+    transition: border-color ${ANIM_MS}ms ease-out, background-color ${ANIM_MS}ms ease-out;
+}
+
+.dx-swatch:hover {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.12);
+}
+
+.dx-swatch.selected {
+    border-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 1);
+}
+
+.dx-swatch-preview {
+    border-radius: ${ENTRY_RADIUS}px;
+    min-width: 26px;
+    min-height: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.dx-swatch-label {
+    font-size: 0.78em;
+    opacity: 0.85;
+}
+
+/* ---- live preview mockup (theme editor) -------------------------------- */
+
+.dx-preview-frame {
+    border-radius: ${ENTRY_RADIUS}px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: ${PAD_MD}px;
+}
+
+/* ---- text entries -------------------------------------------------- */
+
+entry, .dx-entry {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    color: ${TEXT_COLOR};
+    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
+    border-radius: ${ENTRY_RADIUS}px;
+    padding: ${PAD_SM}px ${PAD_MD}px;
+    transition: border-color ${ANIM_MS}ms ease-out;
+}
+
+entry:focus-within, .dx-entry:focus-within {
+    border-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 1);
+}
+
+/* ---- sliders --------------------------------------------------------- */
+
+scale trough {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.25);
+    border-radius: ${ENTRY_RADIUS}px;
+    min-height: 6px;
+}
+
+scale trough highlight {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.9);
+    border-radius: ${ENTRY_RADIUS}px;
+}
+
+scale slider {
+    background-color: ${TEXT_ACTIVE_COLOR};
+    border-radius: 50%;
+    min-width: 14px;
+    min-height: 14px;
+    margin: 0;
+    transition: background-color ${ANIM_MS}ms ease-out;
+}
+
+/* ---- level bars (CPU / RAM / disk usage) ------------------------------ */
+
+levelbar block {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.25);
+    border-radius: ${ENTRY_RADIUS}px;
+    min-height: 6px;
+}
+
+levelbar block.filled {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.9);
+    transition: background-color ${ANIM_MS}ms ease-out;
+}
+
+/* ---- switches ---------------------------------------------------------- */
+
+switch {
+    border-radius: ${ENTRY_RADIUS}px;
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.25);
+    transition: background-color ${ANIM_MS}ms ease-out;
+}
+
+switch:checked {
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.9);
+}
+
+switch slider {
+    background-color: ${TEXT_ACTIVE_COLOR};
+    border-radius: 50%;
+}
+
+/* ---- scrollbars (kept slim + on-theme instead of stock GTK gray) ------- */
+
+scrollbar slider {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.35);
+    border-radius: 999px;
+    min-width: 6px;
+    min-height: 6px;
+}
+
+scrollbar slider:hover {
+    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.55);
+}

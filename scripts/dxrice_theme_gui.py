@@ -6,12 +6,17 @@ hot-reload waybar/wofi/mako/kitty/hyprlock/hyprland.lua. <repo> is this
 script's own parent-of-parent directory -- it runs straight out of the git
 checkout (never copied elsewhere), so it always finds its own files no
 matter where that checkout lives.
+
+Shares the same .dx-* CSS design system (theme/dxrice_gtk_style.css.template)
+as dxrice_taskbar_gui.py and dxrice_quick_settings.py, loaded from
+~/.config/dxrice/gtk_style.css, so this app actually looks like the theme
+it edits instead of stock GNOME Adwaita.
 """
-import copy
 import json
 import os
 import subprocess
 import sys
+import threading
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -20,15 +25,22 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPTS_DIR)
+import dxrice_apply_theme as apply_theme
+from dxrice_gtk_widgets import (
+    label as _label, load_css, make_card, make_debounced, make_row, make_section_title,
+)
+
 HOME = os.path.expanduser("~")
 REPO = os.path.dirname(SCRIPTS_DIR)
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = os.path.join(THEME_DIR, "theme.json")
 PRESETS_DIR = os.path.join(THEME_DIR, "presets")
 APPLY_SCRIPT = os.path.join(SCRIPTS_DIR, "dxrice_apply_theme.py")
+CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
 
 BUILTIN_PRESETS = {
-    "Glass Charcoal (default)": {
+    "Glass Charcoal": {
         "glass_bg": "12141a", "glass_bg_active": "232630",
         "glass_text": "e6e6e6", "glass_text_active": "ffffff",
         "glass_border": "ffffff", "accent": "e67878",
@@ -76,17 +88,17 @@ COLOR_FIELDS = [
     ("glass_text", "Text", "Base text color"),
     ("glass_text_active", "Active text", "Text on focused/selected elements"),
     ("glass_border", "Panel border", "Hairline border around panels"),
-    ("accent", "Accent", "Critical notifications, tray alerts, lock failure"),
+    ("accent", "Accent", "Critical notifications, tray alerts, mute/destructive actions"),
 ]
 
 HYPR_COLOR_FIELDS = [
-    ("hypr_active_border_1", "Active border - color 1", "Focused window border gradient start"),
-    ("hypr_active_border_2", "Active border - color 2", "Focused window border gradient end"),
+    ("hypr_active_border_1", "Active border -- color 1", "Focused window border gradient start"),
+    ("hypr_active_border_2", "Active border -- color 2", "Focused window border gradient end"),
     ("hypr_inactive_border", "Inactive border", "Unfocused window border"),
 ]
 
-SPIN_FIELDS = {
-    "Transparency and Blur": [
+SLIDER_GROUPS = [
+    ("Transparency and Blur", [
         ("opacity_idle", "Panel opacity (idle)", 0, 1, 0.01, 2),
         ("opacity_active", "Panel opacity (active)", 0, 1, 0.01, 2),
         ("border_opacity_idle", "Border opacity (idle)", 0, 1, 0.01, 2),
@@ -95,8 +107,8 @@ SPIN_FIELDS = {
         ("hypr_blur_size", "Window blur size", 0, 20, 1, 0),
         ("hypr_blur_passes", "Window blur passes", 0, 10, 1, 0),
         ("hypr_blur_vibrancy", "Window blur vibrancy", 0, 1, 0.01, 2),
-    ],
-    "Layout": [
+    ]),
+    ("Layout", [
         ("radius", "Panel corner radius", 0, 30, 1, 0),
         ("hypr_rounding", "Window corner rounding", 0, 30, 1, 0),
         ("hypr_gaps_in", "Gaps between windows", 0, 40, 1, 0),
@@ -105,20 +117,24 @@ SPIN_FIELDS = {
         ("hypr_active_opacity", "Focused window opacity", 0, 1, 0.01, 2),
         ("hypr_inactive_opacity", "Unfocused window opacity", 0, 1, 0.01, 2),
         ("hypr_active_border_angle", "Active border gradient angle", 0, 360, 1, 0),
-    ],
-    "Lock Screen": [
+    ]),
+    ("Lock Screen", [
         ("lock_blur_passes", "Blur passes", 0, 10, 1, 0),
         ("lock_blur_size", "Blur size", 0, 20, 1, 0),
         ("lock_blur_vibrancy", "Blur vibrancy", 0, 1, 0.01, 4),
         ("lock_bg_opacity", "Input field background opacity", 0, 1, 0.01, 2),
-    ],
-    "Fonts": [
-        ("font_size_waybar", "Taskbar text size (clock, volume, wifi, etc)", 8, 24, 1, 0),
+    ]),
+    ("Fonts", [
+        ("font_size_waybar", "Taskbar text size", 8, 24, 1, 0),
         ("font_size_waybar_icons", "Taskbar app icon size", 8, 40, 1, 0),
         ("font_size_wofi", "App launcher font size", 8, 24, 1, 0),
         ("font_size_mako", "Notification font size", 8, 24, 1, 0),
-    ],
-}
+    ]),
+    ("Experience", [
+        ("anim_duration_ms", "Animation speed (ms, lower = snappier)", 0, 500, 10, 0),
+        ("ui_density", "Settings app spacing", 0.5, 1.5, 0.05, 2),
+    ]),
+]
 
 
 DEFAULT_THEME = {
@@ -140,12 +156,19 @@ DEFAULT_THEME = {
     "lock_blur_passes": 3, "lock_blur_size": 8, "lock_blur_vibrancy": 0.1696,
     "lock_bg_opacity": 0.7,
     "wallpaper": "~/Pictures/Wallpapers/default.png",
+    "anim_duration_ms": 150,
+    "ui_density": 1.0,
 }
 
+
+# ---------------------------------------------------------------------------
+# Data helpers
+# ---------------------------------------------------------------------------
 
 def atomic_write_json(path, data):
     """Write via a temp file + os.replace so a crash/kill mid-write can
     never leave a truncated, unparseable theme.json on disk."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp_path = f"{path}.tmp{os.getpid()}"
     try:
         with open(tmp_path, "w") as f:
@@ -164,10 +187,13 @@ def atomic_write_json(path, data):
 def load_theme(path):
     """Load theme.json, self-healing if it's missing or corrupted instead
     of crashing the window mid-construction (which used to leave a blank,
-    unpainted GTK surface -- a silent white-screen hang)."""
+    unpainted GTK surface -- a silent white-screen hang). Missing newer
+    fields (added after a user's theme.json was created) are backfilled
+    from DEFAULT_THEME rather than KeyError-ing the first time a slider
+    reads them."""
     try:
         with open(path) as f:
-            return json.load(f)
+            theme = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         if os.path.exists(path):
             corrupt_path = path + ".corrupt"
@@ -177,9 +203,15 @@ def load_theme(path):
                       file=sys.stderr)
             except OSError:
                 pass
-        theme = dict(DEFAULT_THEME)
+        theme = {}
+    changed = False
+    for key, value in DEFAULT_THEME.items():
+        if key not in theme:
+            theme[key] = value
+            changed = True
+    if changed:
         atomic_write_json(path, theme)
-        return theme
+    return theme
 
 
 def hex_to_rgba(h):
@@ -196,10 +228,157 @@ def rgba_to_hex(rgba):
     )
 
 
+def render_preview_css(theme):
+    """Builds a tiny CSS string for the live-preview mockup using the exact
+    same token math as the real theme pipeline (dxrice_apply_theme.build_vars),
+    so the preview never quietly drifts from what Apply will actually
+    produce. Scoped to the preview widget only (see PreviewPanel), not
+    loaded globally -- it must never affect this app's own chrome, which
+    stays on the last *applied* theme until you actually hit Apply."""
+    v = apply_theme.build_vars(theme)
+    gap = theme.get("hypr_gaps_in", 5)
+    return f"""
+    .dx-preview-bar {{
+        background-color: rgba({v['BG_R']}, {v['BG_G']}, {v['BG_B']}, {v['OPACITY_ACTIVE']});
+        border: 1px solid rgba({v['BORDER_R']}, {v['BORDER_G']}, {v['BORDER_B']}, {v['BORDER_OPACITY_ACTIVE']});
+        border-radius: {v['RADIUS']}px;
+        color: {v['TEXT_COLOR']};
+        padding: 6px 10px;
+    }}
+    .dx-preview-bar-chip {{
+        background-color: rgba({v['ACTIVE_R']}, {v['ACTIVE_G']}, {v['ACTIVE_B']}, {v['OPACITY_ACTIVE']});
+        color: {v['TEXT_ACTIVE_COLOR']};
+        border-radius: {v['ENTRY_RADIUS']}px;
+        padding: 2px 8px;
+    }}
+    .dx-preview-gradient-border {{
+        background-image: linear-gradient({theme.get('hypr_active_border_angle', 45)}deg,
+            #{theme['hypr_active_border_1']}, #{theme['hypr_active_border_2']});
+        border-radius: {theme.get('hypr_rounding', 12)}px;
+        padding: {max(1, theme.get('hypr_border_size', 2))}px;
+    }}
+    .dx-preview-window {{
+        background-color: rgba({v['ACTIVE_R']}, {v['ACTIVE_G']}, {v['ACTIVE_B']}, {theme.get('hypr_active_opacity', 0.92)});
+        border-radius: {max(0, theme.get('hypr_rounding', 12) - 1)}px;
+        color: {v['TEXT_COLOR']};
+        min-height: 64px;
+        padding: {gap}px;
+    }}
+    .dx-preview-notif {{
+        background-color: rgba({v['BG_R']}, {v['BG_G']}, {v['BG_B']}, {v['OPACITY_ACTIVE']});
+        border: 1px solid #{theme['accent']};
+        border-radius: {v['RADIUS']}px;
+        color: {v['TEXT_COLOR']};
+        padding: 6px 10px;
+    }}
+    .dx-preview-accent-dot {{
+        background-color: #{theme['accent']};
+        border-radius: 999px;
+        min-width: 8px;
+        min-height: 8px;
+    }}
+    """
+
+
+# ---------------------------------------------------------------------------
+# UI helpers (shared style with dxrice_taskbar_gui.py / dxrice_quick_settings.py)
+# ---------------------------------------------------------------------------
+
+def make_color_button(initial_hex, on_change):
+    btn = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog())
+    btn.set_rgba(hex_to_rgba(initial_hex))
+    btn.set_valign(Gtk.Align.CENTER)
+    btn.connect("notify::rgba", lambda b, _p: on_change(rgba_to_hex(b.get_rgba())))
+    return btn
+
+
+def make_slider_control(initial, minv, maxv, step, digits, on_change):
+    scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True)
+    scale.set_range(minv, maxv)
+    scale.set_value(initial)
+    scale.set_draw_value(False)
+    scale.set_size_request(90, -1)
+
+    fmt = f"{{:.{digits}f}}" if digits else "{:.0f}"
+    val_label = _label(fmt.format(initial), ellipsize=False)
+    val_label.set_width_chars(5)
+    val_label.set_xalign(1.0)
+
+    debounced = make_debounced(on_change)
+
+    def _on_value_changed(s):
+        v = s.get_value()
+        val_label.set_label(fmt.format(v))
+        debounced(v)
+
+    scale.connect("value-changed", _on_value_changed)
+
+    box = Gtk.Box(spacing=8)
+    box.append(scale)
+    box.append(val_label)
+    return box, scale, val_label
+
+
+class PreviewPanel(Gtk.Box):
+    """A small mockup of a waybar-like bar, a focused window's border, and
+    a notification -- restyled live from *draft* theme values via a CSS
+    provider scoped to just this widget, so editing sliders shows the
+    effect immediately without ever touching the real, applied theme
+    until Apply is actually pressed."""
+
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.add_css_class("dx-preview-frame")
+        self._provider = Gtk.CssProvider()
+        self.get_style_context().add_provider(self._provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        bar = Gtk.Box(spacing=8)
+        bar.add_css_class("dx-preview-bar")
+        launcher = _label("", ellipsize=False)
+        bar.append(launcher)
+        chip = _label("Firefox", "dx-preview-bar-chip", ellipsize=False)
+        bar.append(chip)
+        clock = _label("12:34", ellipsize=False)
+        clock.set_hexpand(True)
+        clock.set_xalign(0.5)
+        bar.append(clock)
+        vol = _label("Vol 72%", "dx-preview-bar-chip", ellipsize=False)
+        bar.append(vol)
+        self.append(bar)
+
+        gradient_wrap = Gtk.Box()
+        gradient_wrap.add_css_class("dx-preview-gradient-border")
+        window_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
+        window_box.add_css_class("dx-preview-window")
+        window_box.append(_label("Focused Window", ellipsize=False))
+        gradient_wrap.append(window_box)
+        self.append(gradient_wrap)
+
+        notif = Gtk.Box(spacing=8)
+        notif.add_css_class("dx-preview-notif")
+        dot = Gtk.Box()
+        dot.add_css_class("dx-preview-accent-dot")
+        dot.set_valign(Gtk.Align.CENTER)
+        notif.append(dot)
+        notif.append(_label("Notification -- new message", ellipsize=False))
+        self.append(notif)
+
+    def update(self, theme):
+        css = render_preview_css(theme)
+        self._provider.load_from_data(css.encode())
+
+
+# ---------------------------------------------------------------------------
+# Main window
+# ---------------------------------------------------------------------------
+
+PANEL_WIDTH = 460
+
+
 class ThemeWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="DXrice Theme")
-        self.set_default_size(560, 720)
+        self.set_default_size(PANEL_WIDTH, 780)
 
         # Super+C (this rice's WM close-window keybind) force-kills the
         # Wayland surface at the compositor level without the normal
@@ -212,107 +391,138 @@ class ThemeWindow(Adw.ApplicationWindow):
 
         self.theme = load_theme(THEME_JSON)
         self.dirty = False
-        self.color_widgets = {}
-        self.spin_widgets = {}
-        self.font_row = None
+        self.color_buttons = {}
+        self.slider_controls = {}
+        self.font_entry = None
 
-        toolbar_view = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        toolbar_view.add_top_bar(header)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root.add_css_class("dx-root")
+        self.set_content(root)
 
-        self.apply_btn = Gtk.Button(label="Apply")
-        self.apply_btn.add_css_class("suggested-action")
-        self.apply_btn.connect("clicked", self.on_apply)
-        header.pack_end(self.apply_btn)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("dx-header")
+        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        title_box.append(_label("Theme", "dx-header-title", ellipsize=False))
+        title_box.append(_label("Applies to waybar, wofi, mako, kitty, hyprlock, and Hyprland itself",
+                                 "dx-header-subtitle", max_width_chars=34))
+        header.append(title_box)
 
         revert_btn = Gtk.Button(label="Revert")
+        revert_btn.add_css_class("dx-btn-secondary")
         revert_btn.connect("clicked", self.on_revert)
-        header.pack_start(revert_btn)
+        header.append(revert_btn)
+
+        self.apply_btn = Gtk.Button(label="Apply")
+        self.apply_btn.add_css_class("dx-btn-primary")
+        self.apply_btn.connect("clicked", self.on_apply)
+        header.append(self.apply_btn)
+
+        close_btn = Gtk.Button(icon_name="window-close-symbolic")
+        close_btn.add_css_class("dx-close")
+        close_btn.connect("clicked", lambda b: self.close())
+        header.append(close_btn)
+
+        root.append(header)
 
         scroller = Gtk.ScrolledWindow()
-        page = Adw.PreferencesPage()
-        scroller.set_child(page)
-        toolbar_view.set_content(scroller)
-        self.set_content(toolbar_view)
+        scroller.set_vexpand(True)
+        root.append(scroller)
 
-        self.build_presets_group(page)
-        self.build_colors_group(page, "Glass Palette", COLOR_FIELDS)
-        self.build_colors_group(page, "Window Border Gradient", HYPR_COLOR_FIELDS)
-        for title, fields in SPIN_FIELDS.items():
-            self.build_spin_group(page, title, fields)
-        self.build_font_group(page)
-        self.build_wallpaper_group(page)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.add_css_class("dx-body")
+        scroller.set_child(body)
 
-    # ---- generic row builders ----
+        body.append(make_section_title("Live Preview"))
+        self.preview = PreviewPanel()
+        preview_card = make_card()
+        preview_card.append(self.preview)
+        body.append(preview_card)
+
+        body.append(make_section_title("Presets"))
+        body.append(self.build_presets_card())
+
+        body.append(make_section_title("Glass Palette"))
+        body.append(self.build_colors_card(COLOR_FIELDS))
+
+        body.append(make_section_title("Window Border Gradient"))
+        body.append(self.build_colors_card(HYPR_COLOR_FIELDS))
+
+        for title, fields in SLIDER_GROUPS:
+            body.append(make_section_title(title))
+            body.append(self.build_sliders_card(fields))
+
+        body.append(make_section_title("Font"))
+        body.append(self.build_font_card())
+
+        body.append(make_section_title("Wallpaper"))
+        body.append(self.build_wallpaper_card())
+
+        self.refresh_preview()
+
+    # ---- state ----
 
     def mark_dirty(self):
         self.dirty = True
         self.apply_btn.set_label("Apply*")
 
-    def build_colors_group(self, page, title, fields):
-        group = Adw.PreferencesGroup(title=title)
-        page.add(group)
+    def refresh_preview(self):
+        self.preview.update(self.theme)
+
+    def on_field_changed(self, key, value):
+        self.theme[key] = value
+        self.mark_dirty()
+        self.refresh_preview()
+
+    # ---- cards ----
+
+    def build_colors_card(self, fields):
+        card = make_card()
         for key, name, subtitle in fields:
-            row = Adw.ActionRow(title=name, subtitle=subtitle)
-            btn = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog())
-            btn.set_rgba(hex_to_rgba(self.theme[key]))
-            btn.set_valign(Gtk.Align.CENTER)
+            row, _ = make_row(name, subtitle)
+            btn = make_color_button(self.theme[key], lambda hexval, k=key: self.on_field_changed(k, hexval))
+            row.append(btn)
+            card.append(row)
+            self.color_buttons[key] = btn
+        return card
 
-            def on_notify(b, _pspec, key=key):
-                self.theme[key] = rgba_to_hex(b.get_rgba())
-                self.mark_dirty()
-
-            btn.connect("notify::rgba", on_notify)
-            row.add_suffix(btn)
-            group.add(row)
-            self.color_widgets[key] = btn
-
-    def build_spin_group(self, page, title, fields):
-        group = Adw.PreferencesGroup(title=title)
-        page.add(group)
+    def build_sliders_card(self, fields):
+        card = make_card()
         for key, name, minv, maxv, step, digits in fields:
-            adj = Gtk.Adjustment(value=self.theme[key], lower=minv, upper=maxv,
-                                  step_increment=step, page_increment=step * 5)
-            row = Adw.SpinRow(title=name, adjustment=adj, digits=digits)
-            row.set_value(self.theme[key])
+            row, _ = make_row(name)
 
-            def on_changed(r, _pspec, key=key, digits=digits):
-                # int(), not round(): a stray "12.0" here compounds into an
-                # invalid Lua literal ("14.0.0") once apply_theme's \d+-only
-                # regex re-patches it against its own previous output.
-                value = r.get_value()
-                self.theme[key] = int(round(value)) if digits == 0 else round(value, 4)
-                self.mark_dirty()
+            def _on_change(v, k=key, d=digits):
+                self.on_field_changed(k, int(round(v)) if d == 0 else round(v, 4))
 
-            row.connect("notify::value", on_changed)
-            group.add(row)
-            self.spin_widgets[key] = row
+            control, scale, val_label = make_slider_control(
+                self.theme[key], minv, maxv, step, digits, _on_change)
+            row.append(control)
+            card.append(row)
+            self.slider_controls[key] = (scale, val_label, digits)
+        return card
 
-    def build_font_group(self, page):
-        group = Adw.PreferencesGroup(title="Font")
-        page.add(group)
-        row = Adw.EntryRow(title="Font family")
-        row.set_text(self.theme["font_family"])
+    def build_font_card(self):
+        card = make_card()
+        row, _ = make_row("Font family")
+        entry = Gtk.Entry()
+        entry.add_css_class("dx-entry")
+        entry.set_text(self.theme["font_family"])
+        entry.set_hexpand(True)
+        entry.connect("changed", lambda e: self.on_field_changed("font_family", e.get_text()))
+        row.append(entry)
+        card.append(row)
+        self.font_entry = entry
+        return card
 
-        def on_changed(r):
-            self.theme["font_family"] = r.get_text()
-            self.mark_dirty()
-
-        row.connect("changed", on_changed)
-        group.add(row)
-        self.font_row = row
-
-    def build_wallpaper_group(self, page):
-        group = Adw.PreferencesGroup(title="Wallpaper")
-        page.add(group)
-        self.wallpaper_row = Adw.ActionRow(
-            title="Current wallpaper", subtitle=self.theme["wallpaper"]
-        )
+    def build_wallpaper_card(self):
+        card = make_card()
+        row, self.wallpaper_text = make_row("Current wallpaper", self.theme["wallpaper"])
         btn = Gtk.Button(label="Choose...")
+        btn.add_css_class("dx-btn-secondary")
         btn.set_valign(Gtk.Align.CENTER)
         btn.connect("clicked", self.on_choose_wallpaper)
-        self.wallpaper_row.add_suffix(btn)
-        group.add(self.wallpaper_row)
+        row.append(btn)
+        card.append(row)
+        return card
 
     def on_choose_wallpaper(self, _btn):
         dialog = Gtk.FileDialog(title="Choose wallpaper")
@@ -332,72 +542,100 @@ class ThemeWindow(Adw.ApplicationWindow):
             if gfile:
                 path = gfile.get_path()
                 self.theme["wallpaper"] = path
-                self.wallpaper_row.set_subtitle(path)
+                self.wallpaper_text.get_last_child().set_label(path)
                 self.mark_dirty()
 
         dialog.open(self, None, on_done)
 
-    def build_presets_group(self, page):
-        group = Adw.PreferencesGroup(title="Presets")
-        page.add(group)
+    def build_presets_card(self):
+        card = make_card()
 
-        names = list(BUILTIN_PRESETS.keys())
+        flow = Gtk.FlowBox()
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_max_children_per_line(2)
+        flow.set_min_children_per_line(1)
+        flow.set_row_spacing(8)
+        flow.set_column_spacing(8)
+        flow.set_homogeneous(True)
+
+        self.preset_swatch_buttons = []
+
+        def add_swatch(name, colors):
+            btn = Gtk.Button()
+            btn.add_css_class("dx-swatch")
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            swatch_row = Gtk.Box(spacing=2, homogeneous=True)
+            for hexcol in (colors["glass_bg"], colors["accent"], colors["hypr_active_border_1"]):
+                chip = Gtk.Box()
+                chip.add_css_class("dx-swatch-preview")
+                chip.get_style_context().add_provider(
+                    _solid_color_provider(hexcol), Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                swatch_row.append(chip)
+            inner.append(swatch_row)
+            inner.append(_label(name, "dx-swatch-label", ellipsize=False))
+            btn.set_child(inner)
+            btn.connect("clicked", lambda b, c=colors: self.on_preset_selected(c))
+            flow.append(btn)
+            self.preset_swatch_buttons.append(btn)
+
+        for name, colors in BUILTIN_PRESETS.items():
+            add_swatch(name, colors)
+
         os.makedirs(PRESETS_DIR, exist_ok=True)
         for fname in sorted(os.listdir(PRESETS_DIR)):
             if fname.endswith(".json"):
-                names.append(fname[:-5])
+                name = fname[:-5]
+                try:
+                    with open(os.path.join(PRESETS_DIR, fname)) as f:
+                        colors = json.load(f)
+                    add_swatch(name, colors)
+                except (OSError, json.JSONDecodeError, KeyError):
+                    continue
 
-        self.preset_model = Gtk.StringList.new(names)
-        combo = Adw.ComboRow(title="Load preset", model=self.preset_model)
-        combo.connect("notify::selected", self.on_preset_selected)
-        group.add(combo)
-        self.preset_combo = combo
+        card.append(flow)
 
-        save_row = Adw.EntryRow(title="Save current theme as...")
+        save_row = Gtk.Box(spacing=8)
+        save_row.set_margin_top(8)
+        save_entry = Gtk.Entry(placeholder_text="Save current theme as...")
+        save_entry.add_css_class("dx-entry")
+        save_entry.set_hexpand(True)
+        save_row.append(save_entry)
         save_btn = Gtk.Button(icon_name="document-save-symbolic")
+        save_btn.add_css_class("dx-icon-btn")
         save_btn.set_valign(Gtk.Align.CENTER)
-        save_btn.add_css_class("flat")
 
         def on_save(_btn):
-            name = save_row.get_text().strip()
+            name = save_entry.get_text().strip()
             if not name:
                 return
             path = os.path.join(PRESETS_DIR, name + ".json")
             atomic_write_json(path, self.theme)
-            self.preset_model.append(name)
-            save_row.set_text("")
+            save_entry.set_text("")
 
         save_btn.connect("clicked", on_save)
-        save_row.add_suffix(save_btn)
-        group.add(save_row)
+        save_row.append(save_btn)
+        card.append(save_row)
 
-    def on_preset_selected(self, combo, _pspec):
-        idx = combo.get_selected()
-        if idx == Gtk.INVALID_LIST_POSITION:
-            return
-        name = self.preset_model.get_string(idx)
-        if name in BUILTIN_PRESETS:
-            overrides = BUILTIN_PRESETS[name]
-        else:
-            path = os.path.join(PRESETS_DIR, name + ".json")
-            if not os.path.exists(path):
-                return
-            with open(path) as f:
-                overrides = json.load(f)
+        return card
+
+    def on_preset_selected(self, overrides):
         self.theme.update(overrides)
         self.sync_ui_from_theme()
         self.mark_dirty()
+        self.refresh_preview()
 
     def sync_ui_from_theme(self):
-        for key, btn in self.color_widgets.items():
+        for key, btn in self.color_buttons.items():
             if key in self.theme:
                 btn.set_rgba(hex_to_rgba(self.theme[key]))
-        for key, row in self.spin_widgets.items():
+        for key, (scale, val_label, digits) in self.slider_controls.items():
             if key in self.theme:
-                row.set_value(self.theme[key])
-        if self.font_row is not None:
-            self.font_row.set_text(self.theme["font_family"])
-        self.wallpaper_row.set_subtitle(self.theme["wallpaper"])
+                scale.set_value(self.theme[key])
+                fmt = f"{{:.{digits}f}}" if digits else "{:.0f}"
+                val_label.set_label(fmt.format(self.theme[key]))
+        if self.font_entry is not None:
+            self.font_entry.set_text(self.theme["font_family"])
+        self.wallpaper_text.get_last_child().set_label(self.theme["wallpaper"])
 
     def _on_key_pressed(self, _controller, keyval, _keycode, _state):
         if keyval == Gdk.KEY_Escape:
@@ -410,6 +648,7 @@ class ThemeWindow(Adw.ApplicationWindow):
         self.dirty = False
         self.apply_btn.set_label("Apply")
         self.sync_ui_from_theme()
+        self.refresh_preview()
 
     def on_apply(self, _btn):
         try:
@@ -428,7 +667,6 @@ class ThemeWindow(Adw.ApplicationWindow):
                 pass
             GLib.idle_add(self.on_applied)
 
-        import threading
         threading.Thread(target=run, daemon=True).start()
 
     def on_applied(self):
@@ -436,6 +674,12 @@ class ThemeWindow(Adw.ApplicationWindow):
         self.apply_btn.set_sensitive(True)
         self.apply_btn.set_label("Apply")
         return False
+
+
+def _solid_color_provider(hexcol):
+    provider = Gtk.CssProvider()
+    provider.load_from_data(f"box {{ background-color: #{hexcol}; }}".encode())
+    return provider
 
 
 class ThemeApp(Adw.Application):
@@ -448,6 +692,10 @@ class ThemeApp(Adw.Application):
         # reactivates that dead instance instead of opening a fresh one.
         super().__init__(application_id="dev.dexo.DXrice",
                           flags=Gio.ApplicationFlags.NON_UNIQUE)
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        load_css(CSS_PATH)
 
     def do_activate(self):
         win = self.props.active_window

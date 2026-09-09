@@ -6,6 +6,12 @@ native settings window, matching dxrice_theme_gui.py. Edits
 ~/.config/waybar/config directly (mirrored back into <repo>/waybar/config
 so the change survives an `install.sh update`) and restarts waybar.
 
+Shares the same .dx-* CSS design system (theme/dxrice_gtk_style.css.template)
+as dxrice_theme_gui.py and dxrice_quick_settings.py, loaded from
+~/.config/dxrice/gtk_style.css, and the same widget helpers
+(dxrice_gtk_widgets.py), so this app looks and behaves like part of the
+same rice instead of a separate stock-Adwaita tool.
+
 Each shortcut carries its own dxrice_label/dxrice_cmd/dxrice_icon_mode
 metadata (extra keys waybar itself ignores) so it can be edited later
 without having to reverse-engineer waybar's on-click/tooltip-format
@@ -29,16 +35,36 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_icons import icon_for
+from dxrice_gtk_widgets import (
+    label as _label, load_css, make_card, make_row, make_section_title, make_segmented,
+)
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SCRIPTS_DIR)
 HOME = os.path.expanduser("~")
 CONFIG_PATH = os.path.join(HOME, ".config", "waybar", "config")
 ICONS_DIR = os.path.join(HOME, ".config", "waybar", "icons")
+THEME_JSON = os.path.join(REPO, "theme", "theme.json")
+CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
+DEFAULT_ICON_SIZE = 24
+
+
+def _anim_ms():
+    """Reads the user's animation-speed preference straight from
+    theme.json (set in the Theme app) so Revealer expand/collapse here
+    matches the rest of the rice instead of a hardcoded constant."""
+    try:
+        with open(THEME_JSON) as f:
+            return json.load(f).get("anim_duration_ms", 150)
+    except (OSError, json.JSONDecodeError):
+        return 150
+
+
+ANIM_MS = _anim_ms()
 
 LAUNCHER_ID = "custom/launcher"
 ICON_MODES = ["auto", "text", "image"]
@@ -186,7 +212,7 @@ def rebuild_module(cfg, modid):
         cfg[modid] = {
             "dxrice_label": label, "dxrice_cmd": cmd,
             "dxrice_icon_mode": "image", "dxrice_icon_path": meta["dxrice_icon_path"],
-            "path": meta["dxrice_icon_path"], "size": 24,
+            "path": meta["dxrice_icon_path"], "size": cfg.get("dxrice_icon_size", DEFAULT_ICON_SIZE),
             "on-click": on_click,
             "tooltip": False,
             "class": "app-icon",
@@ -249,6 +275,31 @@ def move_shortcut(cfg, modid, direction):
         mods[idx - 1], mods[idx] = mods[idx], mods[idx - 1]
     elif direction == "down" and idx < len(mods) - 1:
         mods[idx + 1], mods[idx] = mods[idx], mods[idx + 1]
+
+
+def move_shortcut_to(cfg, modid, target_index):
+    """Arbitrary reposition, used by drag-and-drop reordering (up/down only
+    moves by one). The launcher is never a drag source/target itself, but
+    this still refuses to place anything before it (index 0 is pinned) so
+    a drop can't accidentally shove a shortcut ahead of it."""
+    mods = cfg.get("modules-left", [])
+    if modid not in mods:
+        return
+    mods.remove(modid)
+    if LAUNCHER_ID in mods:
+        target_index = max(target_index, mods.index(LAUNCHER_ID) + 1)
+    target_index = max(0, min(target_index, len(mods)))
+    mods.insert(target_index, modid)
+
+
+def set_icon_size(cfg, size):
+    """Global custom-image icon size (px). Re-renders every already-image
+    shortcut immediately so the change is visible without re-picking."""
+    cfg["dxrice_icon_size"] = size
+    for modid in cfg.get("modules-left", []):
+        meta = cfg.get(modid)
+        if meta and meta.get("dxrice_icon_mode") == "image":
+            rebuild_module(cfg, modid)
 
 
 def refresh_all_icons(cfg):
@@ -331,6 +382,9 @@ def cleanup_legacy_mic_mute(cfg):
     cfg.pop(_LEGACY_MIC_MUTE_MODID, None)
 
 
+PANEL_WIDTH = 480
+
+
 # ---------------------------------------------------------------------------
 # Add-shortcut dialog
 # ---------------------------------------------------------------------------
@@ -345,47 +399,62 @@ class AddShortcutDialog(Adw.Window):
         escape_controller.connect("key-pressed", self._on_key_pressed)
         self.add_controller(escape_controller)
 
-        toolbar_view = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        toolbar_view.add_top_bar(header)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root.add_css_class("dx-root")
+        self.set_content(root)
 
-        self.search_entry = Gtk.SearchEntry()
-        self.search_entry.set_placeholder_text("Search installed apps...")
-        self.search_entry.connect("search-changed", self.on_search_changed)
-        header.set_title_widget(self.search_entry)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("dx-header")
+        header.append(_label("Add Shortcut", "dx-header-title", ellipsize=False))
+        close_btn = Gtk.Button(icon_name="window-close-symbolic")
+        close_btn.add_css_class("dx-close")
+        close_btn.set_hexpand(True)
+        close_btn.set_halign(Gtk.Align.END)
+        close_btn.connect("clicked", lambda _b: self.close())
+        header.append(close_btn)
+        root.append(header)
 
-        self.all_apps = list_desktop_apps()
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.add_css_class("dx-body")
+        root.append(body)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        outer.set_margin_top(12)
-        outer.set_margin_bottom(12)
-        outer.set_margin_start(12)
-        outer.set_margin_end(12)
+        self.search_entry = Gtk.Entry(placeholder_text="Search installed apps...")
+        self.search_entry.add_css_class("dx-entry")
+        self.search_entry.connect("changed", self.on_search_changed)
+        body.append(self.search_entry)
 
         scroller = Gtk.ScrolledWindow()
         scroller.set_vexpand(True)
-        self.listbox = Gtk.ListBox()
-        self.listbox.add_css_class("boxed-list")
-        self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.listbox.connect("row-activated", self.on_row_activated)
-        scroller.set_child(self.listbox)
-        outer.append(scroller)
+        scroller.set_min_content_height(260)
+        scroller.set_margin_top(8)
+        self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        scroller.set_child(self.list_box)
+        body.append(scroller)
 
-        manual_group = Adw.PreferencesGroup(title="Or add a custom shortcut")
-        self.name_row = Adw.EntryRow(title="Display name")
-        self.cmd_row = Adw.EntryRow(title="Command to run")
-        manual_group.add(self.name_row)
-        manual_group.add(self.cmd_row)
-        outer.append(manual_group)
+        body.append(make_section_title("Or add a custom shortcut"))
+        manual_card = make_card()
+        name_row, _ = make_row("Display name")
+        self.name_entry = Gtk.Entry()
+        self.name_entry.add_css_class("dx-entry")
+        self.name_entry.set_hexpand(True)
+        name_row.append(self.name_entry)
+        manual_card.append(name_row)
+
+        cmd_row, _ = make_row("Command to run")
+        self.cmd_entry = Gtk.Entry()
+        self.cmd_entry.add_css_class("dx-entry")
+        self.cmd_entry.set_hexpand(True)
+        cmd_row.append(self.cmd_entry)
+        manual_card.append(cmd_row)
+        body.append(manual_card)
 
         add_custom_btn = Gtk.Button(label="Add Custom Shortcut")
-        add_custom_btn.add_css_class("suggested-action")
+        add_custom_btn.add_css_class("dx-btn-primary")
+        add_custom_btn.set_margin_top(8)
         add_custom_btn.connect("clicked", self.on_add_custom)
-        outer.append(add_custom_btn)
+        body.append(add_custom_btn)
 
-        toolbar_view.set_content(outer)
-        self.set_content(toolbar_view)
-
+        self.all_apps = list_desktop_apps()
         self.populate_list(self.all_apps)
 
     def _on_key_pressed(self, _controller, keyval, _keycode, _state):
@@ -395,29 +464,32 @@ class AddShortcutDialog(Adw.Window):
         return False
 
     def populate_list(self, apps):
-        child = self.listbox.get_first_child()
+        child = self.list_box.get_first_child()
         while child:
             nxt = child.get_next_sibling()
-            self.listbox.remove(child)
+            self.list_box.remove(child)
             child = nxt
-        for name, cmd, icon_hint in apps:
-            row = Adw.ActionRow(title=name, subtitle=cmd, activatable=True)
-            row.app_data = (name, cmd, icon_hint)
-            self.listbox.append(row)
+        for name, cmd, _icon_hint in apps[:200]:
+            row_btn = Gtk.Button()
+            row_btn.add_css_class("dx-list-row")
+            row_btn.add_css_class("flat")
+            row, _t = make_row(name, cmd)
+            row_btn.set_child(row)
+            row_btn.connect("clicked", lambda _b, n=name, c=cmd: self.on_app_chosen(n, c))
+            self.list_box.append(row_btn)
 
     def on_search_changed(self, entry):
         query = entry.get_text().strip().lower()
         apps = self.all_apps if not query else [a for a in self.all_apps if query in a[0].lower()]
         self.populate_list(apps)
 
-    def on_row_activated(self, _listbox, row):
-        name, cmd, _icon_hint = row.app_data
+    def on_app_chosen(self, name, cmd):
         self.parent_win.add_new_shortcut(name, cmd)
         self.close()
 
     def on_add_custom(self, _btn):
-        name = self.name_row.get_text().strip()
-        cmd = self.cmd_row.get_text().strip()
+        name = self.name_entry.get_text().strip()
+        cmd = self.cmd_entry.get_text().strip()
         if not name or not cmd:
             return
         self.parent_win.add_new_shortcut(name, cmd)
@@ -425,81 +497,122 @@ class AddShortcutDialog(Adw.Window):
 
 
 # ---------------------------------------------------------------------------
-# Shortcut row (expandable: icon mode dropdown + image picker)
+# Shortcut row -- its own draggable, expandable card
 # ---------------------------------------------------------------------------
 
-class ShortcutRow(Adw.ExpanderRow):
-    def __init__(self, modid, entry, pinned, on_change, on_up, on_down, on_remove):
-        label = entry.get("dxrice_label", modid)
-        cmd = entry.get("dxrice_cmd", "")
-        super().__init__(title=GLib.markup_escape_text(label), subtitle=GLib.markup_escape_text(cmd))
+class ShortcutRow(Gtk.Box):
+    def __init__(self, modid, entry, pinned, on_change, on_reorder, on_remove):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add_css_class("dx-card")
         self.modid = modid
+        self.pinned = pinned
         self.on_change = on_change
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("dx-row")
+
+        if pinned:
+            spacer = Gtk.Label(label="")
+            spacer.set_width_chars(2)
+            header.append(spacer)
+        else:
+            handle = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
+            handle.add_css_class("dx-drag-handle")
+            handle.set_cursor_from_name("grab")
+            header.append(handle)
+            self._attach_drag_source(handle)
 
         self.icon_lbl = Gtk.Label()
         self.icon_lbl.add_css_class("title-1")
         self.icon_lbl.set_width_chars(2)
         self.icon_lbl.set_valign(Gtk.Align.CENTER)
-        self.add_prefix(self.icon_lbl)
+        header.append(self.icon_lbl)
 
-        box = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
-        up_btn = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Move up")
-        up_btn.add_css_class("flat")
-        down_btn = Gtk.Button(icon_name="go-down-symbolic", tooltip_text="Move down")
-        down_btn.add_css_class("flat")
-        remove_btn = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove")
-        remove_btn.add_css_class("flat")
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, hexpand=True)
+        self.title_lbl = _label(entry.get("dxrice_label", modid), "dx-row-title", max_width_chars=20)
+        self.sub_lbl = _label(entry.get("dxrice_cmd", ""), "dx-row-subtitle", max_width_chars=28)
+        text_box.append(self.title_lbl)
+        text_box.append(self.sub_lbl)
+        header.append(text_box)
 
         if pinned:
-            up_btn.set_sensitive(False)
-            down_btn.set_sensitive(False)
-            remove_btn.set_sensitive(False)
+            pin_pill = _label("Pinned", "dx-pill", ellipsize=False)
+            pin_pill.set_valign(Gtk.Align.CENTER)
+            header.append(pin_pill)
+            self.revealer = None
         else:
-            up_btn.connect("clicked", lambda _b: on_up(self.modid))
-            down_btn.connect("clicked", lambda _b: on_down(self.modid))
-            remove_btn.connect("clicked", lambda _b: on_remove(self.modid))
+            self.expand_btn = Gtk.Button(icon_name="pan-down-symbolic", tooltip_text="Icon settings")
+            self.expand_btn.add_css_class("dx-icon-btn")
+            self.expand_btn.connect("clicked", self._on_toggle_expand)
+            header.append(self.expand_btn)
 
-        box.append(up_btn)
-        box.append(down_btn)
-        box.append(remove_btn)
-        self.add_suffix(box)
+            remove_btn = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove")
+            remove_btn.add_css_class("dx-icon-btn")
+            remove_btn.add_css_class("destructive")
+            remove_btn.connect("clicked", lambda _b: on_remove(self.modid))
+            header.append(remove_btn)
+
+        self.append(header)
 
         if not pinned:
-            self.mode_model = Gtk.StringList.new(ICON_MODE_LABELS)
-            self.mode_combo = Adw.ComboRow(title="Icon", model=self.mode_model)
-            self.mode_combo.connect("notify::selected", self._on_mode_changed)
-            self.add_row(self.mode_combo)
+            self.revealer = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
+                                          transition_duration=ANIM_MS)
+            expand_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            expand_body.set_margin_top(6)
+            expand_body.set_margin_bottom(4)
 
-            self.image_row = Adw.ActionRow(title="Custom image", subtitle="No image chosen")
+            expand_body.append(_label("Icon", "dx-row-subtitle", ellipsize=False))
+            self.seg = make_segmented(ICON_MODE_LABELS, 0, self._on_mode_selected)
+            expand_body.append(self.seg)
+
+            self.image_row = Gtk.Box(spacing=8)
+            self.image_status = _label("No image chosen", "dx-row-subtitle", max_width_chars=24)
             pick_btn = Gtk.Button(label="Choose...")
-            pick_btn.set_valign(Gtk.Align.CENTER)
+            pick_btn.add_css_class("dx-btn-secondary")
             pick_btn.connect("clicked", self._on_pick_image)
-            self.image_row.add_suffix(pick_btn)
-            self.add_row(self.image_row)
+            self.image_row.append(self.image_status)
+            self.image_row.append(pick_btn)
+            expand_body.append(self.image_row)
 
+            self.revealer.set_child(expand_body)
+            self.append(self.revealer)
+
+        self._attach_drop_target(on_reorder)
         self.refresh(entry)
 
-    def refresh(self, entry):
-        """Repaints this row from the given (fresh) config entry without
-        firing the combo's change handler again."""
-        mode = entry.get("dxrice_icon_mode", "auto")
-        if mode == "image":
-            self.icon_lbl.set_label("🖼")
-        else:
-            self.icon_lbl.set_label(entry.get("format", ""))
+    def _attach_drag_source(self, handle):
+        drag_source = Gtk.DragSource()
+        drag_source.set_actions(Gdk.DragAction.MOVE)
+        drag_source.connect(
+            "prepare",
+            lambda *_a: Gdk.ContentProvider.new_for_value(GObject.Value(str, self.modid)),
+        )
+        drag_source.connect("drag-begin", lambda *_a: self.add_css_class("dx-dragging"))
+        drag_source.connect("drag-end", lambda *_a: self.remove_css_class("dx-dragging"))
+        handle.add_controller(drag_source)
 
-        if hasattr(self, "mode_combo"):
-            self.mode_combo.handler_block_by_func(self._on_mode_changed)
-            self.mode_combo.set_selected(ICON_MODES.index(mode))
-            self.mode_combo.handler_unblock_by_func(self._on_mode_changed)
-            self.image_row.set_visible(mode == "image")
-            path = entry.get("dxrice_icon_path")
-            self.image_row.set_subtitle(path if path else "No image chosen")
+    def _attach_drop_target(self, on_reorder):
+        drop_target = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
 
-    def _on_mode_changed(self, combo, _pspec):
-        idx = combo.get_selected()
-        if idx == Gtk.INVALID_LIST_POSITION:
-            return
+        def _on_drop(_t, value, _x, _y):
+            on_reorder(value, self.modid)
+            return True
+
+        def _on_enter(_t, _x, _y):
+            self.add_css_class("dx-drop-target")
+            return Gdk.DragAction.MOVE
+
+        drop_target.connect("drop", _on_drop)
+        drop_target.connect("enter", _on_enter)
+        drop_target.connect("leave", lambda *_a: self.remove_css_class("dx-drop-target"))
+        self.add_controller(drop_target)
+
+    def _on_toggle_expand(self, _btn):
+        show = not self.revealer.get_reveal_child()
+        self.revealer.set_reveal_child(show)
+        self.expand_btn.set_icon_name("pan-up-symbolic" if show else "pan-down-symbolic")
+
+    def _on_mode_selected(self, idx):
         self.on_change(self.modid, ICON_MODES[idx], None)
 
     def _on_pick_image(self, _btn):
@@ -522,33 +635,87 @@ class ShortcutRow(Adw.ExpanderRow):
 
         dialog.open(self.get_root(), None, on_done)
 
+    def refresh(self, entry):
+        """Repaints this row from the given (fresh) config entry."""
+        self.title_lbl.set_label(entry.get("dxrice_label", self.modid))
+        self.sub_lbl.set_label(entry.get("dxrice_cmd", ""))
+        mode = entry.get("dxrice_icon_mode", "auto")
+        if mode == "image":
+            self.icon_lbl.set_label("\U0001F5BC")
+        else:
+            self.icon_lbl.set_label(entry.get("format", ""))
+
+        if self.pinned:
+            return
+        self.seg.set_selected(ICON_MODES.index(mode))
+        self.image_row.set_visible(mode == "image")
+        path = entry.get("dxrice_icon_path")
+        self.image_status.set_label(path if path else "No image chosen")
+
 
 # ---------------------------------------------------------------------------
 # System module row (on-click / on-click-right editor)
 # ---------------------------------------------------------------------------
 
-class SystemModuleRow(Adw.ExpanderRow):
+class SystemModuleRow(Gtk.Box):
     def __init__(self, modid, entry, on_change):
-        title = SYSTEM_MODULE_LABELS.get(modid, modid)
-        super().__init__(title=title, subtitle=entry.get("on-click", "No click action set"))
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add_css_class("dx-card")
         self.modid = modid
         self.on_change = on_change
 
-        self.left_row = Adw.EntryRow(title="Left click")
-        self.left_row.set_text(entry.get("on-click", ""))
-        self.left_row.connect("changed", lambda r: self._on_edit("on-click", r))
-        self.add_row(self.left_row)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("dx-row")
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, hexpand=True)
+        text_box.append(_label(SYSTEM_MODULE_LABELS.get(modid, modid), "dx-row-title", max_width_chars=20))
+        self.sub_lbl = _label(entry.get("on-click") or "No click action set", "dx-row-subtitle",
+                               max_width_chars=32)
+        text_box.append(self.sub_lbl)
+        header.append(text_box)
 
-        self.right_row = Adw.EntryRow(title="Right click")
-        self.right_row.set_text(entry.get("on-click-right", ""))
-        self.right_row.connect("changed", lambda r: self._on_edit("on-click-right", r))
-        self.add_row(self.right_row)
+        self.expand_btn = Gtk.Button(icon_name="pan-down-symbolic", tooltip_text="Click actions")
+        self.expand_btn.add_css_class("dx-icon-btn")
+        self.expand_btn.connect("clicked", self._on_toggle_expand)
+        header.append(self.expand_btn)
+        self.append(header)
 
-    def _on_edit(self, key, entry_row):
-        value = entry_row.get_text().strip()
+        self.revealer = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
+                                      transition_duration=ANIM_MS)
+        expand_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        expand_body.set_margin_top(6)
+        expand_body.set_margin_bottom(4)
+
+        left_row, _t1 = make_row("Left click")
+        self.left_entry = Gtk.Entry()
+        self.left_entry.add_css_class("dx-entry")
+        self.left_entry.set_hexpand(True)
+        self.left_entry.set_text(entry.get("on-click", ""))
+        self.left_entry.connect("changed", lambda e: self._on_edit("on-click", e))
+        left_row.append(self.left_entry)
+        expand_body.append(left_row)
+
+        right_row, _t2 = make_row("Right click")
+        self.right_entry = Gtk.Entry()
+        self.right_entry.add_css_class("dx-entry")
+        self.right_entry.set_hexpand(True)
+        self.right_entry.set_text(entry.get("on-click-right", ""))
+        self.right_entry.connect("changed", lambda e: self._on_edit("on-click-right", e))
+        right_row.append(self.right_entry)
+        expand_body.append(right_row)
+
+        self.revealer.set_child(expand_body)
+        self.append(self.revealer)
+
+    def _on_toggle_expand(self, _btn):
+        show = not self.revealer.get_reveal_child()
+        self.revealer.set_reveal_child(show)
+        self.expand_btn.set_icon_name("pan-up-symbolic" if show else "pan-down-symbolic")
+
+    def _on_edit(self, key, entry):
+        value = entry.get_text().strip()
         self.on_change(self.modid, key, value)
         if key == "on-click":
-            self.set_subtitle(value or "No click action set")
+            self.sub_lbl.set_label(value or "No click action set")
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +725,7 @@ class SystemModuleRow(Adw.ExpanderRow):
 class TaskbarWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="DXrice Taskbar")
-        self.set_default_size(560, 760)
+        self.set_default_size(PANEL_WIDTH, 780)
 
         # Same rationale as dxrice_theme_gui.py's Escape handler: Super+C
         # force-kills the surface without a close-request signal.
@@ -572,42 +739,78 @@ class TaskbarWindow(Adw.ApplicationWindow):
             self._show_load_error(e)
             self.cfg = {"modules-left": []}
 
-        toolbar_view = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        toolbar_view.add_top_bar(header)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root.add_css_class("dx-root")
+        self.set_content(root)
 
-        add_btn = Gtk.Button(icon_name="list-add-symbolic")
-        add_btn.set_tooltip_text("Add shortcut")
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("dx-header")
+        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        title_box.append(_label("Taskbar", "dx-header-title", ellipsize=False))
+        title_box.append(_label("Shortcuts, icons, and click actions for the bar",
+                                 "dx-header-subtitle", max_width_chars=36))
+        header.append(title_box)
+
+        add_btn = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add shortcut")
+        add_btn.add_css_class("dx-btn-primary")
         add_btn.connect("clicked", self.on_add_clicked)
-        header.pack_end(add_btn)
+        header.append(add_btn)
+
+        close_btn = Gtk.Button(icon_name="window-close-symbolic")
+        close_btn.add_css_class("dx-close")
+        close_btn.connect("clicked", lambda _b: self.close())
+        header.append(close_btn)
+
+        root.append(header)
 
         scroller = Gtk.ScrolledWindow()
-        page = Adw.PreferencesPage()
-        scroller.set_child(page)
-        toolbar_view.set_content(scroller)
-        self.set_content(toolbar_view)
+        scroller.set_vexpand(True)
+        root.append(scroller)
 
-        options_group = Adw.PreferencesGroup(title="Options")
-        page.add(options_group)
-        self.icons_row = Adw.SwitchRow(
-            title="Show icons",
-            subtitle="Applies to shortcuts left on \"Automatic icon\" below",
-            active=icons_enabled(self.cfg),
-        )
-        self.icons_row.connect("notify::active", self.on_icons_toggled)
-        options_group.add(self.icons_row)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.add_css_class("dx-body")
+        scroller.set_child(body)
 
-        self.shortcuts_group = Adw.PreferencesGroup(title="Taskbar Shortcuts")
-        page.add(self.shortcuts_group)
+        body.append(make_section_title("Options"))
+        options_card = make_card()
+
+        icons_row, _t = make_row("Show icons", "Applies to shortcuts left on \"Automatic\"")
+        self.icons_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.icons_switch.set_active(icons_enabled(self.cfg))
+        self.icons_switch.connect("notify::active", self.on_icons_toggled)
+        icons_row.append(self.icons_switch)
+        options_card.append(icons_row)
+
+        size_row, _t2 = make_row("Custom icon size", "Applies to shortcuts using a custom image")
+        self.size_label = _label(str(self.cfg.get("dxrice_icon_size", DEFAULT_ICON_SIZE)),
+                                  ellipsize=False)
+        self.size_label.set_width_chars(3)
+        self.size_label.set_xalign(1.0)
+        size_scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True)
+        size_scale.set_range(16, 48)
+        size_scale.set_increments(1, 4)
+        size_scale.set_value(self.cfg.get("dxrice_icon_size", DEFAULT_ICON_SIZE))
+        size_scale.set_draw_value(False)
+        size_scale.set_size_request(90, -1)
+        size_scale.connect("value-changed", self.on_icon_size_changed)
+        size_row.append(size_scale)
+        size_row.append(self.size_label)
+        options_card.append(size_row)
+
+        body.append(options_card)
+
+        body.append(make_section_title("Taskbar Shortcuts"))
+        self.shortcuts_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        body.append(self.shortcuts_box)
         self._rows = {}
         self.rebuild_shortcut_rows()
 
-        self.system_group = Adw.PreferencesGroup(
-            title="System Modules",
-            description="Click actions for the volume/network/CPU/RAM/clock modules",
-        )
-        page.add(self.system_group)
-
+        body.append(make_section_title("System Modules"))
+        body.append(_label("Click actions for the volume/network/CPU/RAM/clock modules",
+                            "dx-row-subtitle", max_width_chars=44))
+        self.system_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.system_box.set_margin_top(6)
+        body.append(self.system_box)
         self._system_rows = {}
         self.rebuild_system_rows()
 
@@ -618,17 +821,19 @@ class TaskbarWindow(Adw.ApplicationWindow):
     # ---- shortcuts (modules-left) ----
 
     def rebuild_shortcut_rows(self):
-        for row in self._rows.values():
-            self.shortcuts_group.remove(row)
+        child = self.shortcuts_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self.shortcuts_box.remove(child)
+            child = nxt
         self._rows = {}
         for modid in self.cfg.get("modules-left", []):
             entry = self.cfg.get(modid)
             if not entry:
                 continue
             row = ShortcutRow(modid, entry, modid == LAUNCHER_ID,
-                               self.on_icon_mode_changed, self.on_move_up,
-                               self.on_move_down, self.on_remove)
-            self.shortcuts_group.add(row)
+                               self.on_icon_mode_changed, self.on_reorder, self.on_remove)
+            self.shortcuts_box.append(row)
             self._rows[modid] = row
 
     def persist(self):
@@ -639,19 +844,27 @@ class TaskbarWindow(Adw.ApplicationWindow):
             return
         restart_waybar()
 
-    def on_icons_toggled(self, row, _pspec):
-        self.cfg["dxrice_icons_enabled"] = row.get_active()
+    def on_icons_toggled(self, switch, _pspec):
+        self.cfg["dxrice_icons_enabled"] = switch.get_active()
         refresh_all_icons(self.cfg)
         self.persist()
         self.rebuild_shortcut_rows()
 
-    def on_move_up(self, modid):
-        move_shortcut(self.cfg, modid, "up")
+    def on_icon_size_changed(self, scale):
+        size = int(round(scale.get_value()))
+        self.size_label.set_label(str(size))
+        set_icon_size(self.cfg, size)
         self.persist()
         self.rebuild_shortcut_rows()
 
-    def on_move_down(self, modid):
-        move_shortcut(self.cfg, modid, "down")
+    def on_reorder(self, dragged_modid, target_modid):
+        if dragged_modid == target_modid:
+            return
+        mods = self.cfg.get("modules-left", [])
+        if target_modid not in mods:
+            return
+        target_index = mods.index(target_modid)
+        move_shortcut_to(self.cfg, dragged_modid, target_index)
         self.persist()
         self.rebuild_shortcut_rows()
 
@@ -672,7 +885,7 @@ class TaskbarWindow(Adw.ApplicationWindow):
             # for the file picker instead of rebuilding with a blank path.
             self._rows[modid].refresh({**self.cfg[modid], "dxrice_icon_mode": "image"})
             return
-        new_modid = set_icon_mode(self.cfg, modid, new_mode, image_path)
+        set_icon_mode(self.cfg, modid, new_mode, image_path)
         self.persist()
         self.rebuild_shortcut_rows()
 
@@ -687,13 +900,16 @@ class TaskbarWindow(Adw.ApplicationWindow):
     # ---- system modules (modules-right/-center) ----
 
     def rebuild_system_rows(self):
-        for row in self._system_rows.values():
-            self.system_group.remove(row)
+        child = self.system_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self.system_box.remove(child)
+            child = nxt
         self._system_rows = {}
         for modid in system_module_ids(self.cfg):
             entry = self.cfg.get(modid, {})
             row = SystemModuleRow(modid, entry, self.on_system_click_changed)
-            self.system_group.add(row)
+            self.system_box.append(row)
             self._system_rows[modid] = row
 
     def on_system_click_changed(self, modid, key, value):
@@ -717,6 +933,10 @@ class TaskbarApp(Adw.Application):
         # registered instance.
         super().__init__(application_id="dev.dexo.DXriceTaskbar",
                           flags=Gio.ApplicationFlags.NON_UNIQUE)
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        load_css(CSS_PATH)
 
     def do_activate(self):
         win = self.props.active_window

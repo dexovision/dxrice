@@ -29,7 +29,7 @@ TARGETS = {
     "wofi_style.css.template": os.path.join(HOME, ".config/wofi/style.css"),
     "mako_config.template": os.path.join(HOME, ".config/mako/config"),
     "kitty.conf.template": os.path.join(HOME, ".config/kitty/kitty.conf"),
-    "quick_settings_style.css.template": os.path.join(HOME, ".config/dxrice/quick_settings_style.css"),
+    "dxrice_gtk_style.css.template": os.path.join(HOME, ".config/dxrice/gtk_style.css"),
     "hyprlock.conf.template": os.path.join(HOME, ".config/hypr/hyprlock.conf"),
 }
 
@@ -92,6 +92,13 @@ def build_vars(theme):
         "LOCK_BLUR_SIZE": theme["lock_blur_size"],
         "LOCK_BLUR_VIBRANCY": theme["lock_blur_vibrancy"],
         "LOCK_BG_OPACITY": theme["lock_bg_opacity"],
+
+        # Shared by the GTK settings apps (theme/taskbar/quick-settings) --
+        # .get() with a default since older theme.json files predate these.
+        "ANIM_MS": theme.get("anim_duration_ms", 150),
+        "PAD_SM": round(4 * theme.get("ui_density", 1.0)),
+        "PAD_MD": round(8 * theme.get("ui_density", 1.0)),
+        "PAD_LG": round(12 * theme.get("ui_density", 1.0)),
     }
 
 
