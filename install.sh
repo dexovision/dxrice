@@ -10,6 +10,12 @@
 #                            alone, not overwritten. Theme colors and
 #                            taskbar shortcuts live in ~/.config, not the
 #                            repo, so this never touches your personal look.
+#   ./install.sh sddm-theme  deploy the DXrice login theme for SDDM (needs
+#                            sudo; only touches SDDM's own theme dir and
+#                            config -- never installs or enables a display
+#                            manager for you). Re-run any time you change
+#                            your wallpaper/colors and want the login
+#                            screen to match.
 #   ./install.sh help       show this usage text
 #
 # Everything this rice needs beyond real app config files (which have to
@@ -625,6 +631,31 @@ do_install() {
         info "Log out and back in once so autostart (waybar, mako, swaybg, etc.) picks everything up."
     fi
     info "Later, pull updates with: ./install.sh update"
+
+    if command -v sddm >/dev/null 2>&1; then
+        echo ""
+        if ask_yes_no "SDDM is installed -- deploy the matching DXrice login theme too? (needs sudo)" N; then
+            do_sddm_theme
+        else
+            info "Skipped. Run './install.sh sddm-theme' any time you want it."
+        fi
+    fi
+}
+
+# Deploys sddm/ (this repo's login theme) into SDDM's own theme directory
+# and points /etc/sddm.conf.d at it. Never installs or enables SDDM itself
+# -- only offered/run when it's already present. Safe to re-run any time
+# your wallpaper or colors change; see scripts/dxrice_sync_sddm_theme.py
+# for exactly what it touches (only /usr/share/sddm/themes/dxrice and
+# /etc/sddm.conf.d/dxrice.conf) and how to revert it.
+do_sddm_theme() {
+    if ! command -v sddm >/dev/null 2>&1; then
+        err "SDDM doesn't appear to be installed -- this only themes an SDDM you already have."
+        exit 1
+    fi
+    require_repo_layout
+    info "This needs sudo to write to /usr/share/sddm and /etc/sddm.conf.d."
+    sudo python3 "$REPO_DIR/scripts/dxrice_sync_sddm_theme.py"
 }
 
 do_update() {
@@ -703,6 +734,7 @@ do_update() {
 case "$MODE" in
     install|"") do_install ;;
     update) do_update ;;
+    sddm-theme) do_sddm_theme ;;
     help|-h|--help) usage ;;
     *) usage; exit 1 ;;
 esac

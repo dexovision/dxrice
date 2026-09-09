@@ -129,6 +129,18 @@ To theme by hand instead of via the GUI, edit `~/.config/dxrice/theme.json` dire
 python3 <repo>/scripts/dxrice_apply_theme.py
 ```
 
+### Login Screen (SDDM)
+
+If you already have SDDM installed, `<repo>/sddm/` is a matching login theme -- a blurred copy of your current wallpaper behind a glass card, in your current accent color, with the same animation timing as the rest of the rice. It's plain QtQuick (no KDE Plasma dependency), targets the Qt6 greeter specifically (`QtVersion=6` in its metadata.desktop -- a Qt5-only build of SDDM won't have a working `sddm-greeter` binary to fall back to), and the wallpaper is blurred once into a static image at sync time rather than shaded live, so it has no GPU shader dependency either.
+
+This is entirely opt-in and never installs or enables a display manager for you -- it only themes an SDDM you already have:
+* During a fresh `./install.sh`, if SDDM is detected, you'll be asked once (default: no).
+* Any other time: `./install.sh sddm-theme`, or directly: `sudo python3 <repo>/scripts/dxrice_sync_sddm_theme.py`.
+* Re-run it any time you change your wallpaper or theme and want the login screen to match -- it's not automatic, since it needs root (writing to `/usr/share/sddm/themes/` and `/etc/sddm.conf.d/`) and the Theme GUI's own Apply has to stay unprivileged.
+* The Theme app also has a "Sync Now" button under **Login Screen** (only shown if SDDM is installed) that does the same thing via `pkexec`.
+* To preview a change without logging out: `sddm-greeter-qt6 --test-mode --theme /usr/share/sddm/themes/dxrice`.
+* To revert to SDDM's own default theme: `sudo rm /etc/sddm.conf.d/dxrice.conf`.
+
 ---
 
 ## Customization & Tweaks

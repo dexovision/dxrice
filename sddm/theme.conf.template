@@ -1,0 +1,13 @@
+[General]
+Background=${SDDM_BACKGROUND_PATH}
+BackgroundColor=#${BG_HEX}
+CardColor=#${BG_HEX}
+CardOpacity=${OPACITY_ACTIVE}
+BorderColor=#${BORDER_HEX}
+BorderOpacity=${BORDER_OPACITY_ACTIVE}
+AccentColor=#${ACCENT_HEX}
+TextColor=${TEXT_COLOR}
+TextActiveColor=${TEXT_ACTIVE_COLOR}
+Radius=${RADIUS}
+FontFamily=${FONT_FAMILY}
+AnimMs=${ANIM_MS}

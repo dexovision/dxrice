@@ -19,6 +19,7 @@ it edits instead of stock GNOME Adwaita.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -42,6 +43,7 @@ THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = apply_theme.ensure_live_theme()
 PRESETS_DIR = os.path.join(HOME, ".config", "dxrice", "presets")
 APPLY_SCRIPT = os.path.join(SCRIPTS_DIR, "dxrice_apply_theme.py")
+SYNC_SDDM_SCRIPT = os.path.join(SCRIPTS_DIR, "dxrice_sync_sddm_theme.py")
 CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
 
 BUILTIN_PRESETS = {
@@ -462,6 +464,10 @@ class ThemeWindow(Adw.ApplicationWindow):
         body.append(make_section_title("Wallpaper"))
         body.append(self.build_wallpaper_card())
 
+        if shutil.which("sddm"):
+            body.append(make_section_title("Login Screen"))
+            body.append(self.build_sddm_card())
+
         self.refresh_preview()
 
     # ---- state ----
@@ -551,6 +557,49 @@ class ThemeWindow(Adw.ApplicationWindow):
                 self.mark_dirty()
 
         dialog.open(self, None, on_done)
+
+    def build_sddm_card(self):
+        card = make_card()
+        row, _ = make_row("Sync login screen",
+                           "Applies your current colors/wallpaper to the SDDM login theme")
+        self.sddm_sync_btn = Gtk.Button(label="Sync Now")
+        self.sddm_sync_btn.add_css_class("dx-btn-secondary")
+        self.sddm_sync_btn.set_valign(Gtk.Align.CENTER)
+        self.sddm_sync_btn.connect("clicked", self.on_sync_sddm)
+        row.append(self.sddm_sync_btn)
+        card.append(row)
+        return card
+
+    def on_sync_sddm(self, _btn):
+        if not shutil.which("pkexec"):
+            print(f"pkexec not found -- run manually: sudo python3 {SYNC_SDDM_SCRIPT}", file=sys.stderr)
+            self.sddm_sync_btn.set_label("No pkexec -- see log")
+            return
+        self.sddm_sync_btn.set_sensitive(False)
+        self.sddm_sync_btn.set_label("Syncing...")
+
+        def run():
+            try:
+                result = subprocess.run(
+                    ["pkexec", sys.executable, SYNC_SDDM_SCRIPT],
+                    capture_output=True, text=True, timeout=60,
+                )
+                ok = result.returncode == 0
+                if not ok:
+                    print(result.stdout, result.stderr, file=sys.stderr)
+            except (subprocess.TimeoutExpired, OSError) as e:
+                print(f"SDDM sync failed: {e}", file=sys.stderr)
+                ok = False
+            GLib.idle_add(self.on_sddm_synced, ok)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def on_sddm_synced(self, ok):
+        self.sddm_sync_btn.set_sensitive(True)
+        self.sddm_sync_btn.set_label("Synced" if ok else "Failed -- see log")
+        if ok:
+            GLib.timeout_add(2500, lambda: (self.sddm_sync_btn.set_label("Sync Now"), False)[1])
+        return False
 
     def build_presets_card(self):
         card = make_card()

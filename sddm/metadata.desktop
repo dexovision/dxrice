@@ -1,0 +1,12 @@
+[SddmGreeterTheme]
+Name=DXrice
+Description=Glass-morphic login theme matching the DXrice desktop
+Author=dexo
+Copyright=(c) dexo
+License=MIT
+Type=sddm-theme
+Version=1.0
+Website=https://github.com/dexovision/dxrice
+MainScript=Main.qml
+ConfigFile=theme.conf
+QtVersion=6
