@@ -10,6 +10,10 @@
 #                            alone, not overwritten. Theme colors and
 #                            taskbar shortcuts live in ~/.config, not the
 #                            repo, so this never touches your personal look.
+#                            Also offers to set up (or re-sync) the SDDM
+#                            login theme if SDDM is installed -- see
+#                            'sddm-theme' below; same needs-sudo prompt,
+#                            no separate command required.
 #   ./install.sh sddm-theme  deploy the DXrice login theme for SDDM (needs
 #                            sudo; only touches SDDM's own theme dir and
 #                            config -- never installs or enables a display
@@ -635,7 +639,7 @@ do_install() {
     if command -v sddm >/dev/null 2>&1; then
         echo ""
         if ask_yes_no "SDDM is installed -- deploy the matching DXrice login theme too? (needs sudo)" N; then
-            do_sddm_theme
+            do_sddm_theme || warn "SDDM theme sync failed -- re-run './install.sh sddm-theme' to retry (the rest of your install is unaffected)."
         else
             info "Skipped. Run './install.sh sddm-theme' any time you want it."
         fi
@@ -728,6 +732,19 @@ do_update() {
         info "startup -- this session is still on whatever it loaded at boot, so"
         info "keybinds and the infinite desktop will NOT appear until you fully log"
         info "out (or reboot) and back in. 'hyprctl reload' is not enough here."
+    fi
+
+    if command -v sddm >/dev/null 2>&1; then
+        echo ""
+        if [ -f /etc/sddm.conf.d/dxrice.conf ]; then
+            if ask_yes_no "Re-sync the DXrice SDDM login theme with your current wallpaper/colors? (needs sudo)" Y; then
+                do_sddm_theme || warn "SDDM theme re-sync failed -- re-run './install.sh sddm-theme' to retry (the rest of your update is unaffected)."
+            fi
+        elif ask_yes_no "SDDM is installed -- set up the matching DXrice login theme too? (needs sudo)" N; then
+            do_sddm_theme || warn "SDDM theme sync failed -- re-run './install.sh sddm-theme' to retry (the rest of your update is unaffected)."
+        else
+            info "Skipped. Run './install.sh sddm-theme' any time you want it."
+        fi
     fi
 }
 
