@@ -10,9 +10,11 @@ A fully configured, Lua-based Hyprland environment optimized for performance, mo
 
 **Arch Linux** (pacman) -- fully supported, including Hyprland itself:
 ```bash
-sudo pacman -S --needed hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol networkmanager network-manager-applet bluez bluez-utils blueman ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent python python-evdev jq brightnessctl playerctl python-gobject gtk4 libadwaita gtk4-layer-shell
+sudo pacman -S --needed hyprland hyprlock hypridle hyprpaper swaybg xdg-desktop-portal-hyprland waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol networkmanager network-manager-applet bluez bluez-utils blueman ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent python python-evdev jq brightnessctl playerctl python-gobject gtk4 libadwaita gtk4-layer-shell quickshell
 ```
 AUR (yay / paru): `yay -S --needed nwg-look` (a theme picker helper, entirely optional).
+
+`quickshell` is what powers the Theme/Taskbar/Quick Settings UI now (see [Theming](#theming-gui-settings-app) below) -- it's genuinely optional. Every keybind and waybar click that uses it checks for `qs` first and falls straight back to the older, plainer GTK apps if it isn't installed, so skipping it never breaks anything.
 
 **openSUSE** (zypper) -- fully supported, including Hyprland itself, which openSUSE packages officially:
 ```bash
@@ -34,6 +36,7 @@ sudo apt install swaybg waybar wofi mako-notifier kitty nautilus grim slurp qt5c
 **Not packaged almost anywhere outside Arch**, on any of the above:
 * `cliphist` (clipboard history) -- grab a release binary from its [GitHub](https://github.com/sentriz/cliphist) if you want it; everything else works without it.
 * `nwg-look` (theme picker helper, Arch's AUR-only even there) -- build it yourself from its [GitHub](https://github.com/nwg-piotr/nwg-look) if you want it.
+* `quickshell` -- Fedora needs a third-party COPR (`install.sh` offers to enable one); no clean path on Ubuntu/Debian/openSUSE as of this writing. Check [quickshell.org](https://quickshell.org) for whatever's currently recommended. Skipping it is fine -- see above.
 * JetBrainsMono Nerd Font -- `install.sh` downloads and installs this one automatically on non-Arch systems (from the [Nerd Fonts releases](https://github.com/ryanoasis/nerd-fonts/releases)), since it's what every icon glyph throughout this rice actually renders with.
 
 ---
@@ -113,18 +116,26 @@ The custom Infinite Desktop navigation engine and taskbar management are powered
 
 ## Theming (GUI Settings App)
 
-Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, wallpaper, animation speed, and settings-app spacing — is controlled from one place: `~/.config/dxrice/theme.json`. Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`<repo>/scripts/dxrice_theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
+Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, wallpaper, animation speed, and settings-app spacing — is controlled from one place: `~/.config/dxrice/theme.json`. Press `SUPER + Shift + T` to open a settings app instead of hand-editing CSS/config files across five different apps.
 
-How it works:
+### Two UIs, one config, automatic fallback
+
+Theme, Taskbar, and Quick Settings each exist as **two** implementations that read and write the exact same files:
+
+* **Quickshell** (`<repo>/quickshell/`) -- the primary one if [Quickshell](https://quickshell.org) is installed: real spring/GPU-composited animations, native PipeWire/MPRIS bindings (no polling, no subprocess for volume/media), compositor-level backdrop blur via a Hyprland layer rule. One persistent process (`qs -p <repo>/quickshell/shell.qml -d -n`, autostarted alongside waybar), toggled on demand rather than relaunched every time.
+* **GTK4/libadwaita** (`<repo>/scripts/dxrice_*_gui.py`, `dxrice_quick_settings.py`) -- the original, always-available fallback. Same shared `.dx-*` design system (`theme/dxrice_gtk_style.css.template` + `dxrice_gtk_widgets.py`), same feature set, just CSS-transition animations instead of Quickshell's.
+
+Every keybind and every waybar on-click tries `qs ipc call <target> toggle` first and falls straight through to the matching GTK script if that fails (Quickshell not installed, or its daemon isn't running) -- see `hypr/hyprland.lua` and `waybar/config`. You never have to choose one or configure a fallback yourself; it just degrades gracefully per-distro (Quickshell isn't cleanly packaged everywhere yet -- see Package Dependencies above).
+
+How the theming pipeline itself works (shared by both UIs):
 * `~/.config/dxrice/theme.json` is the live source of truth for every themeable value -- it's seeded from `<repo>/theme/theme.json` (the shipped default) the first time anything needs it, and never synced back to the repo after that, so your personal colors/opacity/radius never show up as a locally-modified tracked file and are never at risk from a `dxrice-update`. This is the same separation used for your taskbar shortcuts (`~/.config/waybar/config`).
-* `theme/*.template` files (waybar, wofi, mako, kitty, hyprlock, and the shared GTK stylesheet) are plain configs with `${TOKEN}` placeholders, checked into the repo.
-* `<repo>/scripts/dxrice_apply_theme.py` renders those templates from your live theme.json into the real `~/.config/...` files, patches the color/decoration block of `hyprland.lua` in place (regex, so your keybinds and autostart are untouched), and hot-reloads waybar, mako, kitty, and Hyprland — no session restart needed.
-* The GUI is just a front-end over that same script: tweak a color/slider, watch the live preview mockup update instantly, hit **Apply**, everything reloads for real.
-* **Presets:** four built-in looks (Glass Charcoal, Nord, Dracula, Sunset), shown as a swatch grid, plus save/load your own from `~/.config/dxrice/presets/` via the Presets section at the top of the settings window (also kept out of the repo, for the same reason).
-* **Experience settings:** `anim_duration_ms` controls how snappy hover/expand/reveal transitions feel across every DXrice GTK app (Theme, Taskbar, Quick Settings), and `ui_density` scales their internal padding tighter or looser to taste.
-* Theme, Taskbar, and Quick Settings all share one design system (`theme/dxrice_gtk_style.css.template`, rendered to `~/.config/dxrice/gtk_style.css`) and one widget-helper module (`<repo>/scripts/dxrice_gtk_widgets.py`), so they actually look and animate like parts of the same rice instead of three unrelated stock-Adwaita tools.
+* `theme/*.template` files (waybar, wofi, mako, kitty, hyprlock, and the shared GTK stylesheet) are plain configs with `${TOKEN}` placeholders, checked into the repo. Quickshell's `Theme.qml` reads the same live `theme.json` directly rather than a separate template.
+* `<repo>/scripts/dxrice_apply_theme.py` renders those templates from your live theme.json into the real `~/.config/...` files, patches the color/decoration block of `hyprland.lua` in place (regex, so your keybinds and autostart are untouched), and hot-reloads waybar, mako, kitty, and Hyprland — no session restart needed. The Quickshell Theme editor shells out to this exact same script on Apply, rather than re-implementing the render pipeline.
+* Either Theme app is just a front-end over that script: tweak a color/slider, hit **Apply**, everything reloads for real. The GTK version also has a live preview mockup.
+* **Presets:** four built-in looks (Glass Charcoal, Nord, Dracula, Sunset), plus save/load your own from `~/.config/dxrice/presets/` (also kept out of the repo, for the same reason theme.json is).
+* **Experience settings:** `anim_duration_ms` controls how snappy hover/expand/reveal transitions feel across every DXrice app -- Quickshell's `SpringAnimation`/`NumberAnimation` timings and the GTK apps' CSS transitions alike -- and `ui_density` scales their internal padding tighter or looser to taste.
 
-To theme by hand instead of via the GUI, edit `~/.config/dxrice/theme.json` directly and run:
+To theme by hand instead of via a GUI, edit `~/.config/dxrice/theme.json` directly and run:
 ```bash
 python3 <repo>/scripts/dxrice_apply_theme.py
 ```
@@ -146,18 +157,20 @@ This is entirely opt-in and never installs or enables a display manager for you 
 ## Customization & Tweaks
 
 ### Taskbar & Window Management
-* `dxrice_taskbar_gui.py` (`SUPER + Shift + A`) is a native GTK4/Adwaita settings window -- same design system as the Theme GUI -- for managing the waybar app shortcuts on the left side of the bar. Every change (add, remove, reorder, the icons toggle) applies and restarts waybar immediately. Your shortcuts live only in `~/.config/waybar/config`, never synced back into the repo, so they're never at risk of being overwritten (or of showing up as noise in your own commits) by an `install.sh update`.
-* **Add shortcut:** the `+` button opens a searchable list of every installed `.desktop` app (scanned from `/usr/share/applications` and `~/.local/share/applications`) -- click one to add it, with the real command pulled straight from the `.desktop` file. There's also a plain name + command field underneath for anything not in that list.
+`SUPER + Shift + A` opens the Taskbar manager (Quickshell's `TaskbarManager.qml` if installed, else `dxrice_taskbar_gui.py`) for managing the waybar app shortcuts on the left side of the bar. Every change (add, remove, reorder, the icons toggle) applies and restarts waybar immediately. Your shortcuts live only in `~/.config/waybar/config`, never synced back into the repo, so they're never at risk of being overwritten (or of showing up as noise in your own commits) by an `install.sh update`.
+* **Add shortcut:** opens a searchable list of every installed `.desktop` app (via `dxrice_list_desktop_apps.py`, shared by both UIs, scanned from `/usr/share/applications` and `~/.local/share/applications`) -- click one to add it, with the real command pulled straight from the `.desktop` file. There's also a plain name + command field underneath for anything not in that list.
 * **Show icons toggle:** an Options switch at the top of the window. On, every shortcut shows a real Nerd Font glyph (via `<repo>/scripts/dxrice_icons.py`, matched against the app's name/command), falling back to a generic glyph for anything unrecognized. Off, every shortcut shows its plain name as text instead -- flipping it re-derives every existing shortcut immediately, no need to re-add them.
 * **Custom icon size:** a slider in Options controls the pixel size of any shortcut using a custom image icon.
-* **Reorder:** drag any shortcut by its handle to reposition it, or use the up/down arrows -- both call the same reorder logic, so the fallback is always available if you'd rather not drag. Remove a shortcut with the trash icon. The app launcher shortcut itself is pinned and can't be dragged, reordered, or removed.
-* **Per-shortcut icon mode:** expand any shortcut's row (smoothly, via a real GTK reveal animation) for Automatic (follows the global switch above), Text label (always plain text), or Custom image. Custom image renders as a real waybar `image#` picture module (waybar's text-based shortcuts can't show pictures), copied into `~/.config/waybar/icons/` so it survives the original file moving.
+* **Reorder:** drag any shortcut by its handle to reposition it (Quickshell version), or use the up/down arrows in either version -- both call the same reorder logic, so the button fallback is always available if you'd rather not drag.  Remove a shortcut with the trash icon. The app launcher shortcut itself is pinned and can't be dragged, reordered, or removed.
+* **Per-shortcut icon mode:** expand any shortcut's row (with a real reveal animation) for Automatic (follows the global switch above), Text label (always plain text), or Custom image. Custom image renders as a real waybar `image#` picture module (waybar's text-based shortcuts can't show pictures), copied into `~/.config/waybar/icons/` so it survives the original file moving.
 * **System Modules section:** edit left/right-click commands on the clock/volume/network/CPU/RAM modules directly, each in its own expandable card.
 * Taskbar window switching and reordering work dynamically across tiled and floating workspace layouts.
 
 ### Quick Settings Panel
 
-Clicking the volume/wifi/CPU/RAM cluster on the right side of the bar (grouped into one pill) opens `dxrice_quick_settings.py` -- a control-center-style panel docked under the top-right corner via `gtk4-layer-shell` (an extra dependency `install.sh` installs) instead of a normal window. Clicking the cluster again closes it instead of opening a duplicate. Its look -- colors, opacity, corner radius, animation speed -- comes from the same shared `theme/dxrice_gtk_style.css.template` design system as the Theme and Taskbar GUIs, so all three stay in sync with whatever you set in the theme GUI instead of looking like separate apps.
+Clicking the volume/wifi/CPU/RAM cluster on the right side of the bar (grouped into one pill) opens the Quick Settings panel -- Quickshell's `QuickSettings.qml` if installed (with a real Hyprland compositor blur behind it via a layer rule matching its `dxrice-quicksettings` namespace), else `dxrice_quick_settings.py` via `gtk4-layer-shell` -- docked under the top-right corner instead of a normal window. Clicking the cluster again closes it instead of opening a duplicate.
+
+Sections in both versions: media controls (MPRIS-native in Quickshell, `playerctl` in GTK; only shown while something's actually playing), quick toggles for Wi-Fi/Bluetooth/Keep Awake/Do Not Disturb, output volume + mute + device picker (bound directly to PipeWire in Quickshell -- no polling), microphone volume + mute + device picker, screen brightness (only shown if a backlight exists), Wi-Fi network list (click to connect -- prompts for a password only for a network with no saved connection yet), Bluetooth paired device list, clipboard history (via `cliphist`), screenshot buttons (region or full screen, via `grim`/`slurp`), live CPU/RAM/disk usage, and power actions (lock/logout/reboot/shutdown). Do Not Disturb only appears if `mako` is running; Keep Awake holds a `systemd-inhibit` idle/sleep lock for as long as it's on.
 
 Sections: media controls (play/pause/skip, only shown while something is actually playing, via `playerctl`), quick toggles for Wi-Fi/Bluetooth/Keep Awake/Do Not Disturb, output volume + mute + device picker, microphone volume + mute + device picker, screen brightness (only shown if a backlight actually exists), Wi-Fi network list (click to connect -- prompts for a password only for a network with no saved connection yet), Bluetooth paired device list (connect/disconnect), clipboard history (via `cliphist` -- click an entry to copy it), screenshot buttons (region or full screen, via `grim`/`slurp` -- saved to `~/Pictures/Screenshots/` and copied to the clipboard), live CPU/RAM/disk usage, and power actions (lock, logout, reboot, shutdown -- the last three ask for confirmation first). Do Not Disturb only appears if `mako` is actually running. Keep Awake holds a `systemd-inhibit` idle/sleep lock for as long as it's on.
 

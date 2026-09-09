@@ -53,21 +53,21 @@
     "pulseaudio": {
         "format": "Vol {volume}%",
         "format-muted": "Muted",
-        "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
     },
     "network": {
         "format-wifi": "Wifi {signalStrength}%",
         "format-ethernet": "Ethernet",
         "format-disconnected": "Offline",
-        "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
     },
     "cpu": {
         "format": "CPU {usage}%",
-        "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
     },
     "memory": {
         "format": "RAM {percentage}%",
-        "on-click": "sh -c 'python3 \"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)/scripts/dxrice_quick_settings.py\"'"
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
     },
     "custom/terminal": {
         "format": "\uf120",

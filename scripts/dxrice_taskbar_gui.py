@@ -23,7 +23,6 @@ fields. icon_mode is one of:
 Shortcuts from before this metadata existed (or added by hand) are
 transparently migrated to "auto" the first time this GUI loads them.
 """
-import glob
 import json
 import os
 import re
@@ -43,6 +42,7 @@ from dxrice_gtk_widgets import (
     animate_in, label as _label, load_css, make_card, make_row, make_section_title, make_segmented,
     read_anim_ms,
 )
+from dxrice_list_desktop_apps import list_desktop_apps
 import dxrice_apply_theme as apply_theme
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -317,32 +317,9 @@ def store_icon_image(src_path, label):
     return dst
 
 
-def list_desktop_apps():
-    dirs = ["/usr/share/applications", os.path.join(HOME, ".local/share/applications")]
-    seen = set()
-    entries = []
-    for d in dirs:
-        for path in sorted(glob.glob(os.path.join(d, "*.desktop"))):
-            try:
-                text = open(path, encoding="utf-8", errors="ignore").read()
-            except OSError:
-                continue
-            if "NoDisplay=true" in text:
-                continue
-            name_m = re.search(r"^Name=(.+)$", text, re.MULTILINE)
-            exec_m = re.search(r"^Exec=(.+)$", text, re.MULTILINE)
-            icon_m = re.search(r"^Icon=(.+)$", text, re.MULTILINE)
-            if not name_m or not exec_m:
-                continue
-            name = name_m.group(1).strip()
-            if name in seen:
-                continue
-            seen.add(name)
-            cmd = re.sub(r"%[a-zA-Z]", "", exec_m.group(1)).strip()
-            icon_hint = icon_m.group(1).strip() if icon_m else ""
-            entries.append((name, cmd, icon_hint))
-    entries.sort(key=lambda e: e[0].lower())
-    return entries
+# list_desktop_apps() now lives in dxrice_list_desktop_apps.py, shared
+# with the Quickshell Taskbar manager (which shells out to it, printing
+# JSON, since QML has no directory-listing primitive of its own).
 
 
 # ---------------------------------------------------------------------------

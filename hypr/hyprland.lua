@@ -40,6 +40,13 @@ hl.on("hyprland.start", function()
 
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_window_memory.py > /tmp/window-memory.log 2>&1")
+
+    -- Quickshell (Theme/Taskbar/Quick Settings) if it's installed; a no-op
+    -- otherwise, since it isn't cleanly packaged on every distro yet -- see
+    -- the keybinds/waybar on-click below, which fall back to the old GTK
+    -- apps at the moment they're actually needed if `qs` isn't found, so a
+    -- missing Quickshell here never breaks anything, just skips the nicer UI.
+    hl.exec_cmd("sh -c 'command -v qs >/dev/null 2>&1 && qs -p " .. repo .. "/quickshell/shell.qml -d -n'")
 end)
 
 hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")
@@ -99,6 +106,7 @@ hl.config({
 
 hl.layer_rule({ name = "waybar-blur", match = { namespace = "waybar" }, blur = true, ignore_alpha = 0.6 })
 hl.layer_rule({ name = "wofi-blur",   match = { namespace = "wofi" },   blur = true, ignore_alpha = 0.6 })
+hl.layer_rule({ name = "quicksettings-blur", match = { namespace = "dxrice-quicksettings" }, blur = true, ignore_alpha = 0.6 })
 
 hl.config({
     input = {
@@ -174,8 +182,15 @@ end
 hl.window_rule({ name = "kitty-glass", match = { class = "kitty" }, opacity = "0.82 override 0.75 override" })
 hl.window_rule({ name = "float-everything", match = { class = ".*" }, float = true })
 
-hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_taskbar_gui.py"))
-hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_theme_gui.py"))
+-- Quickshell if it's running (it's toggled, not relaunched, hence the
+-- separate `qs ipc call ... toggle` rather than starting a new process
+-- each press); the old per-invocation GTK app otherwise.
+hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd(
+    "sh -c 'qs -p " .. repo .. "/quickshell/shell.qml ipc call taskbar toggle 2>/dev/null " ..
+    "|| python3 " .. repo .. "/scripts/dxrice_taskbar_gui.py'"))
+hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd(
+    "sh -c 'qs -p " .. repo .. "/quickshell/shell.qml ipc call theme toggle 2>/dev/null " ..
+    "|| python3 " .. repo .. "/scripts/dxrice_theme_gui.py'"))
 
 hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "-1" }))
 hl.bind(mainMod .. " + X", hl.dsp.focus({ workspace = "+1" }))

@@ -87,8 +87,13 @@ def deploy_static(repo_dir: Path, manifest: dict, results: dict):
 
 _QS_MODULES = ["pulseaudio", "network", "cpu", "memory"]
 _QS_OLD_DEFAULT_ON_CLICK = {"pulseaudio": "pavucontrol", "network": "nm-connection-editor"}
-_QS_ON_CLICK = ('sh -c \'python3 "$(cat ~/.local/state/dxrice/repo_path 2>/dev/null '
-                '|| echo ~/dxrice)/scripts/dxrice_quick_settings.py"\'')
+_QS_ON_CLICK_PYTHON_ONLY = ('sh -c \'python3 "$(cat ~/.local/state/dxrice/repo_path 2>/dev/null '
+                            '|| echo ~/dxrice)/scripts/dxrice_quick_settings.py"\'')
+_QS_ON_CLICK = (
+    'sh -c \'r="$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)"; '
+    'qs -p "$r/quickshell/shell.qml" ipc call quicksettings toggle 2>/dev/null '
+    '|| python3 "$r/scripts/dxrice_quick_settings.py"\''
+)
 
 
 def _migrate_waybar_quicksettings(dst: Path) -> bool:
@@ -129,8 +134,30 @@ def _migrate_waybar_quicksettings(dst: Path) -> bool:
     return True
 
 
+def _migrate_quicksettings_to_qs(dst: Path) -> bool:
+    """Upgrades an existing Quick Settings on-click (from before the
+    Quickshell rewrite) to the new qs-first-then-GTK-fallback version, so
+    an already-migrated config still gets the nicer panel once Quickshell
+    is installed, without waiting on the (one-time, already-fired) group
+    migration above. Only touches an on-click that's still exactly the old
+    plain-Python string -- anything you customized since is left alone."""
+    try:
+        cfg = json.loads(dst.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    changed = False
+    for m in _QS_MODULES:
+        entry = cfg.get(m)
+        if entry and entry.get("on-click") == _QS_ON_CLICK_PYTHON_ONLY:
+            entry["on-click"] = _QS_ON_CLICK
+            changed = True
+    if changed:
+        dst.write_text(json.dumps(cfg, indent=4))
+    return changed
+
+
 _COPY_ONCE_MIGRATIONS = {
-    "config": [_migrate_waybar_quicksettings],
+    "config": [_migrate_waybar_quicksettings, _migrate_quicksettings_to_qs],
 }
 
 

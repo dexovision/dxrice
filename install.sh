@@ -315,6 +315,7 @@ check_dependencies() {
     fi
 
     install_hypr_ecosystem
+    install_quickshell
     [ "$PKG_MANAGER" != "pacman" ] && install_nerd_font_fallback
 }
 
@@ -361,6 +362,46 @@ install_hypr_ecosystem() {
             info "against running it on point-release distros like Ubuntu for this reason. If you"
             info "want to try anyway, see https://wiki.hypr.land/Getting-Started/Installation/ for"
             info "building from source. Skipping automatic install of: ${missing[*]}"
+            ;;
+    esac
+}
+
+# Quickshell (the Theme/Taskbar/Quick Settings UI) is fully optional: every
+# keybind and waybar on-click that uses it checks for `qs` first and falls
+# straight back to the older per-invocation GTK app if it isn't found (see
+# hyprland.lua and waybar/config), so skipping this never breaks anything --
+# it just means you get the plainer GTK apps instead of the animated
+# Quickshell ones. Packaged natively on Arch; Fedora needs a third-party
+# COPR; no clean path on Ubuntu/Debian/openSUSE as of this writing --
+# see https://quickshell.org for whatever's current before trusting this.
+install_quickshell() {
+    if _pkg_installed quickshell || command -v qs >/dev/null 2>&1; then
+        ok "Quickshell present."
+        return
+    fi
+
+    case "$PKG_MANAGER" in
+        pacman)
+            if ask_yes_no "Install Quickshell (Theme/Taskbar/Quick Settings UI)?" Y; then
+                _pkg_install quickshell || warn "Install failed or was cancelled; the GTK apps will be used instead."
+            else
+                info "Skipped -- the older GTK apps will be used instead. Install 'quickshell' any time."
+            fi
+            ;;
+        dnf)
+            warn "Fedora doesn't ship Quickshell in its official repos -- it needs a third-party COPR."
+            info "Check https://quickshell.org for the currently recommended one before trusting this."
+            if ask_yes_no "Try enabling errornointernet/quickshell and installing from it now?" N; then
+                sudo dnf copr enable -y errornointernet/quickshell || warn "Could not enable that COPR."
+                sudo dnf install -y quickshell || warn "Install failed -- that COPR may be stale; check quickshell.org for a current alternative."
+            else
+                info "Skipped -- the older GTK apps will be used instead."
+            fi
+            ;;
+        apt|zypper)
+            warn "Quickshell has no packaged path on this distro as of this writing."
+            info "The older GTK apps (Theme/Taskbar/Quick Settings) will be used instead -- see"
+            info "https://quickshell.org if you want to build it from source anyway."
             ;;
     esac
 }
@@ -544,6 +585,13 @@ verify_deploy() {
         "$REPO_DIR/scripts/dxrice_quick_settings.py"
         "$REPO_DIR/scripts/dxrice_force_close_window.py"
         "$REPO_DIR/scripts/dxrice_gtk_widgets.py"
+        "$REPO_DIR/scripts/dxrice_list_desktop_apps.py"
+        "$REPO_DIR/quickshell/shell.qml"
+        "$REPO_DIR/quickshell/qmldir"
+        "$REPO_DIR/quickshell/Theme.qml"
+        "$REPO_DIR/quickshell/QuickSettings.qml"
+        "$REPO_DIR/quickshell/ThemeEditor.qml"
+        "$REPO_DIR/quickshell/TaskbarManager.qml"
     )
     local all_ok=1
     for f in "${required[@]}"; do
