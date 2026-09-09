@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """GTK4/Adwaita settings app for the rice's theme.json.
 
-Edits <repo>/theme/theme.json and calls dxrice_apply_theme.py to render +
-hot-reload waybar/wofi/mako/kitty/hyprlock/hyprland.lua. <repo> is this
-script's own parent-of-parent directory -- it runs straight out of the git
-checkout (never copied elsewhere), so it always finds its own files no
+Edits ~/.config/dxrice/theme.json (seeded from <repo>/theme/theme.json the
+first time it's needed -- see dxrice_apply_theme.ensure_live_theme) and
+calls dxrice_apply_theme.py to render + hot-reload
+waybar/wofi/mako/kitty/hyprlock/hyprland.lua. The repo's own theme.json is
+only ever read as that seed, never written back to, so your color/opacity/
+radius tweaks never show up as a dirty tracked file in your own checkout --
+the same separation used for waybar/config and taskbar shortcuts. <repo> is
+this script's own parent-of-parent directory -- it runs straight out of the
+git checkout (never copied elsewhere), so it always finds its own files no
 matter where that checkout lives.
 
 Shares the same .dx-* CSS design system (theme/dxrice_gtk_style.css.template)
@@ -34,8 +39,8 @@ from dxrice_gtk_widgets import (
 HOME = os.path.expanduser("~")
 REPO = os.path.dirname(SCRIPTS_DIR)
 THEME_DIR = os.path.join(REPO, "theme")
-THEME_JSON = os.path.join(THEME_DIR, "theme.json")
-PRESETS_DIR = os.path.join(THEME_DIR, "presets")
+THEME_JSON = apply_theme.ensure_live_theme()
+PRESETS_DIR = os.path.join(HOME, ".config", "dxrice", "presets")
 APPLY_SCRIPT = os.path.join(SCRIPTS_DIR, "dxrice_apply_theme.py")
 CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
 

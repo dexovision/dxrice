@@ -42,23 +42,25 @@ from dxrice_icons import icon_for
 from dxrice_gtk_widgets import (
     label as _label, load_css, make_card, make_row, make_section_title, make_segmented,
 )
+import dxrice_apply_theme as apply_theme
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SCRIPTS_DIR)
 HOME = os.path.expanduser("~")
 CONFIG_PATH = os.path.join(HOME, ".config", "waybar", "config")
 ICONS_DIR = os.path.join(HOME, ".config", "waybar", "icons")
-THEME_JSON = os.path.join(REPO, "theme", "theme.json")
 CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
 DEFAULT_ICON_SIZE = 24
 
 
 def _anim_ms():
-    """Reads the user's animation-speed preference straight from
-    theme.json (set in the Theme app) so Revealer expand/collapse here
-    matches the rest of the rice instead of a hardcoded constant."""
+    """Reads the user's animation-speed preference straight from the live
+    theme.json (edited by the Theme app; seeded on first use from the
+    repo's default -- see dxrice_apply_theme.ensure_live_theme) so Revealer
+    expand/collapse here matches the rest of the rice instead of a
+    hardcoded constant."""
     try:
-        with open(THEME_JSON) as f:
+        with open(apply_theme.ensure_live_theme()) as f:
             return json.load(f).get("anim_duration_ms", 150)
     except (OSError, json.JSONDecodeError):
         return 150

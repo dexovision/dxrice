@@ -4,10 +4,12 @@
 #   ./install.sh            fresh install: asks where to put everything,
 #                            sanity checks, deps, input group, monitor
 #                            detection, deploy
-#   ./install.sh update     git pull (auto-stashing local repo edits like
-#                            theme.json tweaks), then re-deploy -- any file
-#                            you've hand-edited in ~/.config since the last
-#                            deploy is left alone, not overwritten
+#   ./install.sh update     git pull (auto-stashing any local repo edits),
+#                            then re-deploy -- any file you've hand-edited
+#                            in ~/.config since the last deploy is left
+#                            alone, not overwritten. Theme colors and
+#                            taskbar shortcuts live in ~/.config, not the
+#                            repo, so this never touches your personal look.
 #   ./install.sh help       show this usage text
 #
 # Everything this rice needs beyond real app config files (which have to
@@ -504,7 +506,12 @@ do_deploy() {
 
     echo ""
     info "Rendering theme (waybar/wofi/mako/kitty/hyprlock from theme.json)..."
-    python3 "$REPO_DIR/scripts/dxrice_apply_theme.py" "$REPO_DIR/theme/theme.json" || true
+    # No explicit path: dxrice_apply_theme.py seeds ~/.config/dxrice/theme.json
+    # from the repo's default on a fresh install, then reuses that live copy
+    # on every later run (including `install.sh update`) -- your own color
+    # tweaks never get overwritten by a repo update, and never show up as a
+    # locally-modified tracked file either.
+    python3 "$REPO_DIR/scripts/dxrice_apply_theme.py" || true
 }
 
 hyprland_is_running() {
@@ -631,7 +638,7 @@ do_update() {
     else
         local stashed=0
         if [ -n "$(git status --porcelain)" ]; then
-            info "Stashing your local repo edits (e.g. theme.json tweaks from the GUI)..."
+            info "Stashing your local repo edits..."
             git stash push -u -m "dxrice-update-autostash" >/dev/null
             stashed=1
         fi

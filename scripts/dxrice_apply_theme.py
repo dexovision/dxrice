@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Renders theme.json into every app's real config and hot-reloads them.
 
-Single source of truth: <repo>/theme/theme.json
-Templates:              <repo>/theme/*.template  (string.Template ${TOKENS})
+Live source of truth: ~/.config/dxrice/theme.json -- this is what the Theme
+GUI edits and what gets rendered by default. <repo>/theme/theme.json is only
+the shipped *default*, used to seed the live file the first time it's
+needed (see ensure_live_theme()) and never written to again after that --
+same separation already used for waybar/config and taskbar shortcuts, so a
+personal color/opacity/radius tweak never shows up as a dirty tracked file
+in your own checkout.
+Templates: <repo>/theme/*.template  (string.Template ${TOKENS})
 <repo> is this script's own parent-of-parent directory -- it runs straight
 out of the git checkout (never copied elsewhere), so it always finds its
 own theme/ folder no matter where that checkout lives.
@@ -23,6 +29,22 @@ HOME = os.path.expanduser("~")
 REPO = os.path.dirname(SCRIPTS_DIR)
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = os.path.join(THEME_DIR, "theme.json")
+LIVE_THEME_JSON = os.path.join(HOME, ".config", "dxrice", "theme.json")
+
+
+def ensure_live_theme():
+    """Seeds ~/.config/dxrice/theme.json from the repo's shipped default the
+    first time anything needs it. After that this is never called again for
+    an existing install (the live file already exists), so live edits never
+    touch THEME_JSON again."""
+    if os.path.exists(LIVE_THEME_JSON):
+        return LIVE_THEME_JSON
+    os.makedirs(os.path.dirname(LIVE_THEME_JSON), exist_ok=True)
+    with open(THEME_JSON) as f:
+        default_theme = f.read()
+    with open(LIVE_THEME_JSON, "w") as f:
+        f.write(default_theme)
+    return LIVE_THEME_JSON
 
 TARGETS = {
     "waybar_style.css.template": os.path.join(HOME, ".config/waybar/style.css"),
@@ -202,7 +224,7 @@ def reload_apps(reload_wallpaper):
 
 def main():
     global theme_data
-    theme_path = sys.argv[1] if len(sys.argv) > 1 else THEME_JSON
+    theme_path = sys.argv[1] if len(sys.argv) > 1 else ensure_live_theme()
     try:
         with open(theme_path) as f:
             theme_data = json.load(f)

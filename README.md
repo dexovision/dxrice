@@ -71,7 +71,7 @@ cd ~/dxrice   # or wherever you installed it
 
 Or, from anywhere, just run `dxrice-update` -- install.sh adds that as a shell function to `~/.bashrc`/`~/.zshrc` (whichever you have) so you don't need to remember or `cd` into the install path. Open a new terminal after your first install/update for it to show up.
 
-This pulls the latest commit (auto-stashing and restoring any uncommitted local changes in the repo, e.g. `theme.json` edits made through the GUI, around the pull so they aren't lost or blocked) and then re-deploys. The re-deploy is guarded by a small manifest at `~/.local/state/dxrice/manifest.json` that remembers the hash of every file it last wrote:
+This pulls the latest commit (auto-stashing and restoring any uncommitted local changes in the repo around the pull so they aren't lost or blocked) and then re-deploys. Your theme and taskbar shortcuts live in `~/.config/dxrice/` and `~/.config/waybar/`, not the repo, so this stash almost never has anything of yours to protect -- it's just a safety net for the rare hand-edit inside the checkout itself. The re-deploy is guarded by a small manifest at `~/.local/state/dxrice/manifest.json` that remembers the hash of every file it last wrote:
 
 * If a live file in `~/.config/...` still matches what was last deployed, it's safely updated to the new version.
 * If you've hand-edited that file since -- it's **left alone** and reported as skipped, never silently overwritten. The output tells you exactly which files were skipped so you can diff and merge by hand if you want the new version.
@@ -113,18 +113,18 @@ The custom Infinite Desktop navigation engine and taskbar management are powered
 
 ## Theming (GUI Settings App)
 
-Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, wallpaper, animation speed, and settings-app spacing — is controlled from one place: `<repo>/theme/theme.json` (`<repo>` being wherever you cloned this, as recorded by `install.sh`). Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`<repo>/scripts/dxrice_theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
+Everything visual — colors, transparency, blur, corner radius, gaps, window border gradient, lock screen blur, fonts, wallpaper, animation speed, and settings-app spacing — is controlled from one place: `~/.config/dxrice/theme.json`. Press `SUPER + Shift + T` to open a native GTK4/Adwaita settings app (`<repo>/scripts/dxrice_theme_gui.py`) instead of hand-editing CSS/config files across five different apps.
 
 How it works:
-* `theme/theme.json` is the single source of truth for every themeable value.
-* `theme/*.template` files (waybar, wofi, mako, kitty, hyprlock, and the shared GTK stylesheet) are plain configs with `${TOKEN}` placeholders.
-* `<repo>/scripts/dxrice_apply_theme.py` renders those templates into the real `~/.config/...` files, patches the color/decoration block of `hyprland.lua` in place (regex, so your keybinds and autostart are untouched), and hot-reloads waybar, mako, kitty, and Hyprland — no session restart needed.
+* `~/.config/dxrice/theme.json` is the live source of truth for every themeable value -- it's seeded from `<repo>/theme/theme.json` (the shipped default) the first time anything needs it, and never synced back to the repo after that, so your personal colors/opacity/radius never show up as a locally-modified tracked file and are never at risk from a `dxrice-update`. This is the same separation used for your taskbar shortcuts (`~/.config/waybar/config`).
+* `theme/*.template` files (waybar, wofi, mako, kitty, hyprlock, and the shared GTK stylesheet) are plain configs with `${TOKEN}` placeholders, checked into the repo.
+* `<repo>/scripts/dxrice_apply_theme.py` renders those templates from your live theme.json into the real `~/.config/...` files, patches the color/decoration block of `hyprland.lua` in place (regex, so your keybinds and autostart are untouched), and hot-reloads waybar, mako, kitty, and Hyprland — no session restart needed.
 * The GUI is just a front-end over that same script: tweak a color/slider, watch the live preview mockup update instantly, hit **Apply**, everything reloads for real.
-* **Presets:** four built-in looks (Glass Charcoal, Nord, Dracula, Sunset), shown as a swatch grid, plus save/load your own from the Presets section at the top of the settings window.
+* **Presets:** four built-in looks (Glass Charcoal, Nord, Dracula, Sunset), shown as a swatch grid, plus save/load your own from `~/.config/dxrice/presets/` via the Presets section at the top of the settings window (also kept out of the repo, for the same reason).
 * **Experience settings:** `anim_duration_ms` controls how snappy hover/expand/reveal transitions feel across every DXrice GTK app (Theme, Taskbar, Quick Settings), and `ui_density` scales their internal padding tighter or looser to taste.
 * Theme, Taskbar, and Quick Settings all share one design system (`theme/dxrice_gtk_style.css.template`, rendered to `~/.config/dxrice/gtk_style.css`) and one widget-helper module (`<repo>/scripts/dxrice_gtk_widgets.py`), so they actually look and animate like parts of the same rice instead of three unrelated stock-Adwaita tools.
 
-To theme by hand instead of via the GUI, edit `theme/theme.json` directly and run:
+To theme by hand instead of via the GUI, edit `~/.config/dxrice/theme.json` directly and run:
 ```bash
 python3 <repo>/scripts/dxrice_apply_theme.py
 ```
