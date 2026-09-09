@@ -5,9 +5,23 @@ each app so the `.dx-*` design system, the width-safe label helper, and
 the debounce plumbing live in exactly one place instead of being
 copy-pasted (and re-bugged) into every app.
 """
+import json
 import sys
 
-from gi.repository import Gdk, GLib, Gtk, Pango
+from gi.repository import Adw, Gdk, GLib, Gtk, Pango
+
+
+def read_anim_ms(live_theme_path, default=150):
+    """Reads anim_duration_ms straight from the live theme.json (edited by
+    the Theme app) so an app that doesn't otherwise load the full theme --
+    Taskbar, Quick Settings -- still matches the animation speed the user
+    picked, instead of a hardcoded constant. Safe before the live file
+    exists yet (a fresh install that hasn't opened the Theme app once)."""
+    try:
+        with open(live_theme_path) as f:
+            return json.load(f).get("anim_duration_ms", default)
+    except (OSError, json.JSONDecodeError):
+        return default
 
 
 def load_css(css_path):
@@ -95,6 +109,29 @@ def make_entry(initial="", placeholder=None):
     if initial:
         entry.set_text(initial)
     return entry
+
+
+def animate_in(widget, anim_ms, distance=12):
+    """Fades a just-presented root widget in (opacity 0->1) while it
+    settles down from a small upward offset, via a real Adw.TimedAnimation
+    driven by the widget's own frame clock -- not a plain instant
+    appearance. Called once, right after a window is presented.
+
+    Returns the Adw.Animation; the caller MUST keep a reference to it
+    (e.g. as an attribute on the window) for as long as the window lives --
+    letting it get garbage-collected stops the animation mid-flight, since
+    nothing else holds it once this function returns."""
+    widget.set_opacity(0)
+    base_margin = widget.get_margin_top()
+
+    def on_tick(value, *_args):
+        widget.set_opacity(value)
+        widget.set_margin_top(round(base_margin + distance * (1 - value)))
+
+    target = Adw.CallbackAnimationTarget.new(on_tick)
+    animation = Adw.TimedAnimation.new(widget, 0, 1, max(1, anim_ms * 3), target)
+    animation.play()
+    return animation
 
 
 def make_segmented(labels, selected_index, on_select):

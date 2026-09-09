@@ -40,7 +40,8 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_icons import icon_for
 from dxrice_gtk_widgets import (
-    label as _label, load_css, make_card, make_row, make_section_title, make_segmented,
+    animate_in, label as _label, load_css, make_card, make_row, make_section_title, make_segmented,
+    read_anim_ms,
 )
 import dxrice_apply_theme as apply_theme
 
@@ -52,21 +53,10 @@ ICONS_DIR = os.path.join(HOME, ".config", "waybar", "icons")
 CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
 DEFAULT_ICON_SIZE = 24
 
-
-def _anim_ms():
-    """Reads the user's animation-speed preference straight from the live
-    theme.json (edited by the Theme app; seeded on first use from the
-    repo's default -- see dxrice_apply_theme.ensure_live_theme) so Revealer
-    expand/collapse here matches the rest of the rice instead of a
-    hardcoded constant."""
-    try:
-        with open(apply_theme.ensure_live_theme()) as f:
-            return json.load(f).get("anim_duration_ms", 150)
-    except (OSError, json.JSONDecodeError):
-        return 150
-
-
-ANIM_MS = _anim_ms()
+# The Theme app's own animation-speed setting, so Revealer expand/collapse
+# and the window's entrance animation here match the rest of the rice
+# instead of a hardcoded constant.
+ANIM_MS = read_anim_ms(apply_theme.ensure_live_theme())
 
 LAUNCHER_ID = "custom/launcher"
 ICON_MODES = ["auto", "text", "image"]
@@ -942,10 +932,13 @@ class TaskbarApp(Adw.Application):
 
     def do_activate(self):
         win = self.props.active_window
+        is_new = win is None
         if not win:
             win = TaskbarWindow(self)
             win.connect("close-request", self._on_close_request)
         win.present()
+        if is_new:
+            win._entrance_anim = animate_in(win.get_content(), ANIM_MS)
 
     def _on_close_request(self, _win):
         self.quit()

@@ -59,11 +59,16 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Gtk4LayerShell, Pango
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dxrice_gtk_widgets import label as _label, load_css, make_card, make_debounced
+from dxrice_gtk_widgets import animate_in, label as _label, load_css, make_card, make_debounced, read_anim_ms
+import dxrice_apply_theme as apply_theme
 
 HOME = os.path.expanduser("~")
 PID_FILE = "/tmp/dxrice-quick-settings.pid"
 CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
+
+# The Theme app's own animation-speed setting, so this panel's entrance
+# animation matches the rest of the rice instead of a hardcoded constant.
+ANIM_MS = read_anim_ms(apply_theme.ensure_live_theme())
 
 
 def run(args, timeout=3):
@@ -1140,10 +1145,13 @@ class QuickSettingsApp(Adw.Application):
 
     def do_activate(self):
         win = self.props.active_window
+        is_new = win is None
         if not win:
             win = QuickSettingsWindow(self)
             win.connect("close-request", self._on_close_request)
         win.present()
+        if is_new:
+            win._entrance_anim = animate_in(win.get_content(), ANIM_MS)
 
     def _on_close_request(self, _win):
         self.quit()

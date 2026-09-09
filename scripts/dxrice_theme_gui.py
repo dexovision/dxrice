@@ -34,7 +34,7 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS_DIR)
 import dxrice_apply_theme as apply_theme
 from dxrice_gtk_widgets import (
-    label as _label, load_css, make_card, make_debounced, make_row, make_section_title,
+    animate_in, label as _label, load_css, make_card, make_debounced, make_row, make_section_title,
 )
 
 HOME = os.path.expanduser("~")
@@ -753,10 +753,13 @@ class ThemeApp(Adw.Application):
 
     def do_activate(self):
         win = self.props.active_window
+        is_new = win is None
         if not win:
             win = ThemeWindow(self)
             win.connect("close-request", self._on_close_request)
         win.present()
+        if is_new:
+            win._entrance_anim = animate_in(win.get_content(), win.theme.get("anim_duration_ms", 150))
 
     def _on_close_request(self, _win):
         self.quit()
