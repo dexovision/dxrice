@@ -2,6 +2,7 @@ singleton Theme 1.0 Theme.qml
 
 Card 1.0 Card.qml
 WavyTopRect 1.0 WavyTopRect.qml
+Expandable 1.0 Expandable.qml
 SettingRow 1.0 SettingRow.qml
 GlassButton 1.0 GlassButton.qml
 IconButton 1.0 IconButton.qml
@@ -11,6 +12,7 @@ SliderRow 1.0 SliderRow.qml
 LevelBar 1.0 LevelBar.qml
 
 WifiBackend 1.0 WifiBackend.qml
+AudioDeviceBackend 1.0 AudioDeviceBackend.qml
 BluetoothBackend 1.0 BluetoothBackend.qml
 BrightnessBackend 1.0 BrightnessBackend.qml
 MediaBackend 1.0 MediaBackend.qml

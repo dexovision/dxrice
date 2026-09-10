@@ -42,7 +42,8 @@ Item {
         if (root.pendingMacs.length === 0) {
             const list = [];
             for (const mac in root.results) {
-                list.push({ mac, name: root._pendingNames[mac] || mac, connected: root.results[mac] });
+                const info = root.results[mac];
+                list.push({ mac, name: root._pendingNames[mac] || mac, connected: info.connected, battery: info.battery });
             }
             root.devices = list;
             return;
@@ -58,7 +59,11 @@ Item {
         property string mac: ""
         stdout: StdioCollector {
             onStreamFinished: {
-                root.results[infoProc.mac] = /Connected:\s*yes/.test(this.text);
+                const batteryMatch = this.text.match(/Battery Percentage:.*\((\d+)\)/);
+                root.results[infoProc.mac] = {
+                    connected: /Connected:\s*yes/.test(this.text),
+                    battery: batteryMatch ? Number(batteryMatch[1]) : -1
+                };
                 root._checkNext();
             }
         }
@@ -66,6 +71,11 @@ Item {
 
     function toggleConnect(mac, currentlyConnected) {
         Quickshell.execDetached(["bluetoothctl", currentlyConnected ? "disconnect" : "connect", mac]);
+        refreshTimer.restart();
+    }
+
+    function forget(mac) {
+        Quickshell.execDetached(["bluetoothctl", "remove", mac]);
         refreshTimer.restart();
     }
 

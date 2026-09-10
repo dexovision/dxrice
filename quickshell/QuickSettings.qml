@@ -258,26 +258,37 @@ PanelWindow {
                     width: parent.width - Theme.padLg * 2
                     spacing: Theme.padMd
 
-                    // -- quick toggles --
+                    // -- quick toggles: 2x2 grid so Do Not Disturb fits
+                    // alongside Wi-Fi/Bluetooth/Awake instead of being left
+                    // out entirely (its state/toggle already existed on the
+                    // backend above, just never had a UI control before).
                     Card {
                         width: parent.width
-                        Row {
+                        Grid {
                             width: parent.width
-                            spacing: Theme.padSm
+                            columns: 2
+                            rowSpacing: Theme.padSm
+                            columnSpacing: Theme.padSm
                             ToggleChip {
-                                width: (parent.width - parent.spacing * 2) / 3
+                                width: (parent.width - parent.columnSpacing) / 2
                                 glyph: ""; label: "Wi-Fi"
                                 active: root.wifiEnabled
                                 onToggled: (next) => root.setWifi(next)
                             }
                             ToggleChip {
-                                width: (parent.width - parent.spacing * 2) / 3
+                                width: (parent.width - parent.columnSpacing) / 2
                                 glyph: ""; label: "Bluetooth"
                                 active: root.bluetoothEnabled
                                 onToggled: (next) => root.setBluetooth(next)
                             }
                             ToggleChip {
-                                width: (parent.width - parent.spacing * 2) / 3
+                                width: (parent.width - parent.columnSpacing) / 2
+                                glyph: ""; label: "Do Not Disturb"
+                                active: root.dndActive
+                                onToggled: (next) => root.setDnd(next)
+                            }
+                            ToggleChip {
+                                width: (parent.width - parent.columnSpacing) / 2
                                 glyph: "⏻"; label: "Awake"
                                 active: root.idleInhibited
                                 onToggled: (next) => root.setIdleInhibit(next)
@@ -321,7 +332,9 @@ PanelWindow {
 
                     // -- audio & display: one card, not three, for output
                     // volume / mic / brightness -- three closely related
-                    // sliders don't each need their own floating box.
+                    // sliders dont each need their own floating box. Device
+                    // pickers are expandable sub-sections, not always-shown
+                    // dropdowns, since most opens of this panel dont need them.
                     Card {
                         width: parent.width
                         Row {
@@ -339,6 +352,48 @@ PanelWindow {
                                 onChanged: (v) => { if (root.sink && root.sink.audio) root.sink.audio.volume = v / 100; }
                             }
                         }
+                        Expandable {
+                            title: "Output device"
+                            trailingText: root.sink ? audioDeviceBackend.label(root.sink) : ""
+                            visible: audioDeviceBackend.outputs.length > 1
+                            height: visible ? implicitHeight : 0
+                            Repeater {
+                                model: audioDeviceBackend.outputs
+                                delegate: Rectangle {
+                                    width: parent.width
+                                    height: 30
+                                    radius: Theme.roundingXs
+                                    color: outArea.containsMouse ? Theme.layer2Hover : "transparent"
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: Theme.padSm
+                                        anchors.right: check.left
+                                        text: audioDeviceBackend.label(modelData)
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        id: check
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: Theme.padSm
+                                        visible: root.sink && root.sink.name === modelData.name
+                                        text: "✓"
+                                        color: Theme.accent
+                                    }
+                                    MouseArea {
+                                        id: outArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: audioDeviceBackend.setOutput(modelData)
+                                    }
+                                }
+                            }
+                        }
                         Row {
                             width: parent.width
                             spacing: Theme.padSm
@@ -352,6 +407,48 @@ PanelWindow {
                                 from: 0; to: 100
                                 value: (root.source && root.source.audio) ? Math.round(root.source.audio.volume * 100) : 0
                                 onChanged: (v) => { if (root.source && root.source.audio) root.source.audio.volume = v / 100; }
+                            }
+                        }
+                        Expandable {
+                            title: "Input device"
+                            trailingText: root.source ? audioDeviceBackend.label(root.source) : ""
+                            visible: audioDeviceBackend.inputs.length > 1
+                            height: visible ? implicitHeight : 0
+                            Repeater {
+                                model: audioDeviceBackend.inputs
+                                delegate: Rectangle {
+                                    width: parent.width
+                                    height: 30
+                                    radius: Theme.roundingXs
+                                    color: inArea.containsMouse ? Theme.layer2Hover : "transparent"
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: Theme.padSm
+                                        anchors.right: inCheck.left
+                                        text: audioDeviceBackend.label(modelData)
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        id: inCheck
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: Theme.padSm
+                                        visible: root.source && root.source.name === modelData.name
+                                        text: "✓"
+                                        color: Theme.accent
+                                    }
+                                    MouseArea {
+                                        id: inArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: audioDeviceBackend.setInput(modelData)
+                                    }
+                                }
                             }
                         }
                         Row {
@@ -369,36 +466,61 @@ PanelWindow {
                         }
                     }
 
-                    // -- wifi networks --
+                    // -- wifi networks: collapsed by default once there are
+                    // more than a couple, since a full scan list dumped open
+                    // every time you turn Wi-Fi on is exactly the kind of
+                    // clutter an expanding section is supposed to replace. --
                     Card {
                         width: parent.width
                         visible: root.wifiEnabled && wifiBackend.networks.length > 0
                         height: visible ? implicitHeight : 0
-                        Repeater {
-                            model: wifiBackend.networks
-                            delegate: Row {
-                                width: content.width - Theme.padLg * 2
-                                height: 32
-                                Text {
-                                    text: modelData.ssid
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width - 80
-                                    elide: Text.ElideRight
-                                }
-                                Text {
-                                    visible: modelData.connected
-                                    text: "✓"
-                                    color: Theme.accent
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                GlassButton {
-                                    visible: !modelData.connected
-                                    text: "Connect"
-                                    variant: "secondary"
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    onClicked: wifiBackend.connectTo(modelData.ssid, modelData.security)
+                        Expandable {
+                            title: "Networks"
+                            trailingText: wifiBackend.networks.length + " found"
+                            expanded: wifiBackend.networks.length <= 3
+                            Repeater {
+                                model: wifiBackend.networks
+                                delegate: Row {
+                                    width: parent.width
+                                    height: 32
+                                    Text {
+                                        text: modelData.ssid
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - (modelData.connected ? 130 : 150)
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        text: modelData.signal + "%"
+                                        color: Theme.text
+                                        opacity: 0.55
+                                        font.pixelSize: 11
+                                        width: 34
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        visible: modelData.connected
+                                        text: "✓"
+                                        color: Theme.accent
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 16
+                                    }
+                                    IconButton {
+                                        visible: modelData.known
+                                        glyph: ""
+                                        size: 24
+                                        destructive: true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: wifiBackend.forget(modelData.ssid)
+                                    }
+                                    GlassButton {
+                                        visible: !modelData.connected
+                                        text: "Connect"
+                                        variant: "secondary"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: wifiBackend.connectTo(modelData.ssid, modelData.security)
+                                    }
                                 }
                             }
                         }
@@ -409,24 +531,45 @@ PanelWindow {
                         width: parent.width
                         visible: root.bluetoothEnabled && btBackend.devices.length > 0
                         height: visible ? implicitHeight : 0
-                        Repeater {
-                            model: btBackend.devices
-                            delegate: Row {
-                                width: content.width - Theme.padLg * 2
-                                height: 32
-                                Text {
-                                    text: modelData.name
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width - 90
-                                    elide: Text.ElideRight
-                                }
-                                GlassButton {
-                                    text: modelData.connected ? "Disconnect" : "Connect"
-                                    variant: "secondary"
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    onClicked: btBackend.toggleConnect(modelData.mac, modelData.connected)
+                        Expandable {
+                            title: "Devices"
+                            trailingText: btBackend.devices.length + " paired"
+                            expanded: btBackend.devices.length <= 3
+                            Repeater {
+                                model: btBackend.devices
+                                delegate: Row {
+                                    width: parent.width
+                                    height: 32
+                                    Text {
+                                        text: modelData.name
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - (modelData.battery >= 0 ? 190 : 160)
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        visible: modelData.battery >= 0
+                                        text: modelData.battery + "%"
+                                        color: Theme.text
+                                        opacity: 0.55
+                                        font.pixelSize: 11
+                                        width: 34
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    IconButton {
+                                        glyph: ""
+                                        size: 24
+                                        destructive: true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: btBackend.forget(modelData.mac)
+                                    }
+                                    GlassButton {
+                                        text: modelData.connected ? "Disconnect" : "Connect"
+                                        variant: "secondary"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: btBackend.toggleConnect(modelData.mac, modelData.connected)
+                                    }
                                 }
                             }
                         }
@@ -463,30 +606,34 @@ PanelWindow {
                             }
                             IconButton { glyph: "\uf021"; size: 30; onClicked: clipboardBackend.refresh() }
                         }
-                        Repeater {
-                            model: clipboardBackend.entries
-                            delegate: Rectangle {
-                                width: content.width - Theme.padLg * 2
-                                height: 28
-                                radius: Theme.entryRadius
-                                color: clipArea.containsMouse ? Theme.active : "transparent"
-                                Behavior on color { ColorAnimation { duration: Theme.animMs } }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 6
-                                    width: parent.width - 12
-                                    text: modelData.preview.replace(/\n/g, " ")
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    elide: Text.ElideRight
-                                }
-                                MouseArea {
-                                    id: clipArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: clipboardBackend.copyEntry(modelData.raw)
+                        Expandable {
+                            title: "History"
+                            trailingText: clipboardBackend.entries.length + " items"
+                            Repeater {
+                                model: clipboardBackend.entries
+                                delegate: Rectangle {
+                                    width: parent.width
+                                    height: 28
+                                    radius: Theme.entryRadius
+                                    color: clipArea.containsMouse ? Theme.active : "transparent"
+                                    Behavior on color { ColorAnimation { duration: Theme.animMs } }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 6
+                                        width: parent.width - 12
+                                        text: modelData.preview.replace(/\n/g, " ")
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideRight
+                                    }
+                                    MouseArea {
+                                        id: clipArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: clipboardBackend.copyEntry(modelData.raw)
+                                    }
                                 }
                             }
                         }
@@ -538,6 +685,7 @@ PanelWindow {
         }
     }
     BluetoothBackend { id: btBackend; radioOn: root.bluetoothEnabled }
+    AudioDeviceBackend { id: audioDeviceBackend }
     BrightnessBackend { id: brightnessBackend }
     MediaBackend { id: mediaBackend }
     ClipboardBackend { id: clipboardBackend; Component.onCompleted: refresh() }
