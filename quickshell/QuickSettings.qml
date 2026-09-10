@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -150,16 +151,29 @@ PanelWindow {
     }
 
     // ---- root visuals ----
+    RectangularShadow {
+        anchors.fill: panelSurface
+        radius: panelSurface.radius
+        color: Theme.shadowColor
+        blur: Theme.shadowBlurLg
+        offset.y: 4
+        opacity: panelSurface.opacity
+    }
+
     Rectangle {
+        id: panelSurface
         anchors.fill: parent
-        radius: Theme.radius
+        radius: Theme.roundingXl
         color: Theme.bg
         border.width: 1
         border.color: Theme.border
 
         opacity: 0
-        Behavior on opacity { NumberAnimation { duration: Theme.animMs * 3; easing.type: Easing.OutCubic } }
-        Component.onCompleted: opacity = 1
+        scale: 0.94
+        transformOrigin: Item.Top
+        Behavior on opacity { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
+        Behavior on scale { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
+        Component.onCompleted: { opacity = 1; scale = 1; }
 
         Column {
             id: outer

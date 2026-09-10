@@ -77,4 +77,19 @@ ShellRoot {
         function show(): void { taskbarLoader.active = true; }
         function hide(): void { taskbarLoader.active = false; }
     }
+
+    // Opt-in, not wired to SUPER+L: see LockScreen.qml's own comment for
+    // why a real Wayland session lock is a fundamentally higher-stakes
+    // thing to trust than any of the panels above (fail-secure by design --
+    // a bug here can't be fixed by killing the process the way a broken
+    // panel can). `dx lock` triggers it explicitly; SUPER+L stays on the
+    // already-proven hyprlock until you've tried this yourself and are
+    // comfortable making it the default.
+    LockScreen {
+        id: lockScreen
+    }
+    IpcHandler {
+        target: "lock"
+        function engage(): void { lockScreen.locked = true; }
+    }
 }

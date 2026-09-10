@@ -14,3 +14,4 @@ BluetoothBackend 1.0 BluetoothBackend.qml
 BrightnessBackend 1.0 BrightnessBackend.qml
 MediaBackend 1.0 MediaBackend.qml
 ClipboardBackend 1.0 ClipboardBackend.qml
+LockScreen 1.0 LockScreen.qml

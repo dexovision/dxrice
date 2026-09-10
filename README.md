@@ -74,6 +74,17 @@ cd ~/dxrice   # or wherever you installed it
 
 Or, from anywhere, just run `dxrice-update` -- install.sh adds that as a shell function to `~/.bashrc`/`~/.zshrc` (whichever you have) so you don't need to remember or `cd` into the install path. Open a new terminal after your first install/update for it to show up.
 
+There's also a shorter `dx` command with a few useful subcommands, added to the same shell files:
+```
+dx update      # same as dxrice-update
+dx theme       # open Theme settings (Quickshell if installed, else GTK)
+dx taskbar     # open the Taskbar manager
+dx settings    # open Quick Settings (alias: dx qs)
+dx lock        # try the Quickshell lock screen -- see "Lock Screen" below
+dx sddm-theme  # sync the SDDM login theme (needs sudo)
+```
+`install.sh update` always re-writes this block in place (looking for its own `# BEGIN`/`# END dxrice shell functions` markers, or an older unmarked version if you're updating from before this existed) so a `dxrice-update` always leaves you with the current set of subcommands, never a stale copy.
+
 This pulls the latest commit (auto-stashing and restoring any uncommitted local changes in the repo around the pull so they aren't lost or blocked) and then re-deploys. Your theme and taskbar shortcuts live in `~/.config/dxrice/` and `~/.config/waybar/`, not the repo, so this stash almost never has anything of yours to protect -- it's just a safety net for the rare hand-edit inside the checkout itself. The re-deploy is guarded by a small manifest at `~/.local/state/dxrice/manifest.json` that remembers the hash of every file it last wrote:
 
 * If a live file in `~/.config/...` still matches what was last deployed, it's safely updated to the new version.
@@ -122,7 +133,7 @@ Everything visual — colors, transparency, blur, corner radius, gaps, window bo
 
 Theme, Taskbar, and Quick Settings each exist as **two** implementations that read and write the exact same files:
 
-* **Quickshell** (`<repo>/quickshell/`) -- the primary one if [Quickshell](https://quickshell.org) is installed: real spring/GPU-composited animations, native PipeWire/MPRIS bindings (no polling, no subprocess for volume/media), compositor-level backdrop blur via a Hyprland layer rule. One persistent process (`qs -p <repo>/quickshell/shell.qml -d -n`, autostarted alongside waybar), toggled on demand rather than relaunched every time.
+* **Quickshell** (`<repo>/quickshell/`) -- the primary one if [Quickshell](https://quickshell.org) is installed: real spring/GPU-composited animations, native PipeWire/MPRIS bindings (no polling, no subprocess for volume/media), compositor-level backdrop blur via a Hyprland layer rule. One persistent process (`qs -p <repo>/quickshell/shell.qml -d -n`, autostarted alongside waybar), toggled on demand rather than relaunched every time. Its look is deliberately Material 3 "Expressive"-inspired (the same design language end-4/dots-hyprland and caelestia-dots/shell both draw from): overshoot/spring bezier easing instead of flat ease-out, a varied corner-radius scale, layered surface colors, and real drop shadows for depth -- tunable via a `shadow_intensity` slider in the Theme app's Experience section alongside the existing color/blur/radius controls.
 * **GTK4/libadwaita** (`<repo>/scripts/dxrice_*_gui.py`, `dxrice_quick_settings.py`) -- the original, always-available fallback. Same shared `.dx-*` design system (`theme/dxrice_gtk_style.css.template` + `dxrice_gtk_widgets.py`), same feature set, just CSS-transition animations instead of Quickshell's.
 
 Every keybind and every waybar on-click tries `qs ipc call <target> toggle` first and falls straight through to the matching GTK script if that fails (Quickshell not installed, or its daemon isn't running) -- see `hypr/hyprland.lua` and `waybar/config`. You never have to choose one or configure a fallback yourself; it just degrades gracefully per-distro (Quickshell isn't cleanly packaged everywhere yet -- see Package Dependencies above).
@@ -151,6 +162,16 @@ This is entirely opt-in and never installs or enables a display manager for you 
 * The Theme app also has a "Sync Now" button under **Login Screen** (only shown if SDDM is installed) that does the same thing via `pkexec`.
 * To preview a change without logging out: `sddm-greeter-qt6 --test-mode --theme /usr/share/sddm/themes/dxrice`.
 * To revert to SDDM's own default theme: `sudo rm /etc/sddm.conf.d/dxrice.conf`.
+
+### Lock Screen (Quickshell, opt-in)
+
+`<repo>/quickshell/LockScreen.qml` is a real Wayland session lock (`ext-session-lock-v1`, via Quickshell's `WlSessionLock`) with the same glass-card look as the rest of the Quickshell UI: your blurred wallpaper, a live clock, and a password prompt authenticated against the exact same PAM stack hyprlock already uses (`/etc/pam.d/hyprlock`).
+
+It is **not** bound to `SUPER + L` and never will be by default -- that keybind stays on the already-proven `hyprlock`. Try it deliberately with:
+```bash
+dx lock
+```
+This matters because a Wayland session lock is fail-secure by design: if the locking client crashes or is killed while the screen is locked, a conformant compositor keeps the screen locked rather than exposing your session -- there is no "kill the process" escape hatch the way there is for a normal window. If `dx lock` ever gets stuck or won't accept a correct password, switch to another TTY (`Ctrl+Alt+F3` or similar), log in there, and restart the graphical session (or `loginctl terminate-session`) -- the same recovery path that applies to any Wayland lock client, hyprlock included, if it crashes mid-lock. Only requires Quickshell to be installed; `dx lock` tells you plainly if it isn't reachable and reminds you `SUPER + L` still works either way.
 
 ---
 

@@ -14,12 +14,12 @@ Item {
     property real debounceMs: 80
     signal changed(real value)
 
-    implicitHeight: 28
+    implicitHeight: 32
     width: parent ? parent.width : implicitWidth
 
     Row {
         anchors.fill: parent
-        spacing: Theme.padSm
+        spacing: Theme.padMd
 
         Slider {
             id: slider
@@ -33,25 +33,34 @@ Item {
                 x: slider.leftPadding
                 y: slider.topPadding + slider.availableHeight / 2 - height / 2
                 width: slider.availableWidth
-                height: 6
-                radius: 3
-                color: Qt.rgba(Theme.border.r, Theme.border.g, Theme.border.b, 0.25)
+                height: 8
+                radius: Theme.roundingFull
+                color: Qt.rgba(Theme.border.r, Theme.border.g, Theme.border.b, 0.22)
 
                 Rectangle {
                     width: slider.visualPosition * parent.width
                     height: parent.height
                     radius: parent.radius
-                    color: Theme.accentSoft
+                    color: Theme.accent
                 }
             }
 
             handle: Rectangle {
                 x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
                 y: slider.topPadding + slider.availableHeight / 2 - height / 2
-                width: 14
-                height: 14
-                radius: 7
+                width: slider.pressed ? 20 : 16
+                height: width
+                radius: Theme.roundingFull
                 color: Theme.textActive
+                border.width: slider.pressed ? 4 : 0
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.3)
+
+                Behavior on width {
+                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+                }
+                Behavior on border.width {
+                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+                }
             }
 
             onMoved: {
@@ -66,6 +75,7 @@ Item {
             text: root.decimals > 0 ? root.value.toFixed(root.decimals) : Math.round(root.value) + "%"
             color: Theme.text
             font.family: Theme.fontFamily
+            font.pixelSize: 12
             width: 42
             horizontalAlignment: Text.AlignRight
         }

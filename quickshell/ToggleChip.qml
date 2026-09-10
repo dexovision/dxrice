@@ -13,22 +13,31 @@ Rectangle {
     signal toggled(bool next)
 
     implicitWidth: 72
-    implicitHeight: 56
-    radius: Theme.entryRadius
-    color: root.active ? Theme.accentSoft : (area.containsMouse ? Theme.active : Theme.bgIdle)
-    border.width: 1
-    border.color: root.active ? Theme.accent : Theme.borderIdle
+    implicitHeight: 60
+    radius: Theme.roundingLg
+    scale: area.pressed ? 0.97 : 1.0
+    color: {
+        if (root.active) return area.containsMouse ? Theme.mix(Theme.accentSoft, Qt.rgba(0, 0, 0, 1), 0.06) : Theme.accentSoft;
+        if (area.containsMouse) return Theme.layer2Hover;
+        return Theme.layer1;
+    }
+    border.width: root.active ? 0 : 1
+    border.color: Theme.borderIdle
 
-    Behavior on color { ColorAnimation { duration: Theme.animMs } }
-    Behavior on border.color { ColorAnimation { duration: Theme.animMs } }
+    Behavior on color {
+        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+    }
+    Behavior on scale {
+        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+    }
 
     Column {
         anchors.centerIn: parent
-        spacing: 2
+        spacing: 4
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: root.glyph
-            font.pixelSize: 18
+            font.pixelSize: 19
             color: root.active ? Theme.textActive : Theme.text
         }
         Text {
@@ -36,6 +45,7 @@ Rectangle {
             text: root.label
             font.family: Theme.fontFamily
             font.pixelSize: 11
+            font.weight: Font.Medium
             color: root.active ? Theme.textActive : Theme.text
         }
     }

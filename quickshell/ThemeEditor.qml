@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Dialogs
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 
@@ -61,6 +62,7 @@ FloatingWindow {
 
     property real anim_duration_ms: 150
     property real ui_density: 1.0
+    property real shadow_intensity: 1.0
 
     property string font_family: "JetBrainsMono Nerd Font"
     property string wallpaper: ""
@@ -117,6 +119,7 @@ FloatingWindow {
         { title: "Experience", fields: [
             { key: "anim_duration_ms", label: "Animation speed (ms, lower = snappier)", min: 0, max: 500, decimals: 0 },
             { key: "ui_density", label: "Settings app spacing", min: 0.5, max: 1.5, decimals: 2 },
+            { key: "shadow_intensity", label: "Panel shadow strength (Quickshell only)", min: 0, max: 1.5, decimals: 2 },
         ]},
     ]
     readonly property var presets: ({
@@ -215,16 +218,29 @@ FloatingWindow {
 
     Shortcut { sequence: "Escape"; onActivated: root.closeRequested() }
 
+    RectangularShadow {
+        anchors.fill: panelSurface
+        radius: panelSurface.radius
+        color: Theme.shadowColor
+        blur: Theme.shadowBlurLg
+        offset.y: 4
+        opacity: panelSurface.opacity
+    }
+
     Rectangle {
+        id: panelSurface
         anchors.fill: parent
-        radius: Theme.radius
+        radius: Theme.roundingXl
         color: Theme.bg
         border.width: 1
         border.color: Theme.border
 
         opacity: 0
-        Behavior on opacity { NumberAnimation { duration: Theme.animMs * 3; easing.type: Easing.OutCubic } }
-        Component.onCompleted: opacity = 1
+        scale: 0.94
+        transformOrigin: Item.Top
+        Behavior on opacity { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
+        Behavior on scale { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
+        Component.onCompleted: { opacity = 1; scale = 1; }
 
         Column {
             anchors.fill: parent

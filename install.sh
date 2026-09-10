@@ -189,25 +189,113 @@ record_repo_path() {
 # checkout is later moved. Idempotent -- checks for its own marker line
 # before appending, safe to call on every install/update.
 install_shell_alias() {
-    local marker="# dxrice-update (added by DXrice's install.sh)"
+    # Bracketed by explicit begin/end markers (not just a name check) so
+    # this can always be found and replaced wholesale on a later update --
+    # matching only the function name would miss any *other* change to the
+    # body (e.g. a new dx subcommand) once the marker line itself no longer
+    # differs between versions.
     local block
     block=$(cat <<'BLOCK'
-# dxrice-update (added by DXrice's install.sh)
+# BEGIN dxrice shell functions (added by DXrice's install.sh)
 dxrice-update() {
     "$(cat "$HOME/.local/state/dxrice/repo_path" 2>/dev/null || echo "$HOME/dxrice")/install.sh" update
 }
+dx() {
+    local repo
+    repo="$(cat "$HOME/.local/state/dxrice/repo_path" 2>/dev/null || echo "$HOME/dxrice")"
+    case "$1" in
+        update)
+            "$repo/install.sh" update ;;
+        theme)
+            qs -p "$repo/quickshell/shell.qml" ipc call theme toggle 2>/dev/null \
+                || python3 "$repo/scripts/dxrice_theme_gui.py" ;;
+        taskbar)
+            qs -p "$repo/quickshell/shell.qml" ipc call taskbar toggle 2>/dev/null \
+                || python3 "$repo/scripts/dxrice_taskbar_gui.py" ;;
+        settings|qs)
+            qs -p "$repo/quickshell/shell.qml" ipc call quicksettings toggle 2>/dev/null \
+                || python3 "$repo/scripts/dxrice_quick_settings.py" ;;
+        sddm-theme)
+            "$repo/install.sh" sddm-theme ;;
+        lock)
+            # Deliberately no GTK/hyprlock fallback here -- this is an
+            # explicit try-it-yourself command for the new Quickshell lock
+            # screen (see quickshell/LockScreen.qml), not a replacement for
+            # the SUPER+L keybind, which still goes straight to hyprlock.
+            if ! qs -p "$repo/quickshell/shell.qml" ipc call lock engage 2>&1; then
+                echo "Couldn't reach the Quickshell lock screen (is Quickshell installed and running?)."
+                echo "SUPER+L / 'hyprlock' still works as always."
+            fi
+            ;;
+        *)
+            echo "Usage: dx <update|theme|taskbar|settings|lock|sddm-theme>"
+            echo "  update      pull the latest DXrice and re-deploy (same as dxrice-update)"
+            echo "  theme       open the Theme settings (Quickshell if installed, else GTK)"
+            echo "  taskbar     open the Taskbar manager"
+            echo "  settings    open Quick Settings (alias: qs)"
+            echo "  lock        try the new Quickshell lock screen (SUPER+L still uses hyprlock)"
+            echo "  sddm-theme  sync the SDDM login theme (needs sudo)"
+            return 1
+            ;;
+    esac
+}
+# END dxrice shell functions
 BLOCK
 )
     local added=0
     for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
         [ -f "$rc" ] || continue
-        grep -qF "$marker" "$rc" 2>/dev/null && continue
+
+        local before after
+        before="$(cat "$rc" 2>/dev/null)"
+
+        # Strip out ANY previous version of this block -- old pre-`dx`
+        # single-function form, or a previous begin/end-bracketed form --
+        # so re-running this always leaves exactly one, current copy
+        # instead of silently going stale after the first install.
+        DXRICE_RC_PATH="$rc" python3 - <<'PYEOF'
+import os, re
+path = os.environ["DXRICE_RC_PATH"]
+with open(path) as f:
+    content = f.read()
+
+bracketed = re.compile(
+    r"\n?# BEGIN dxrice shell functions \(added by DXrice's install\.sh\)\n"
+    r"(?:.*\n)*?"
+    r"# END dxrice shell functions\n?"
+)
+content = bracketed.sub("\n", content, count=1)
+
+legacy_v1 = re.compile(
+    r"\n?# dxrice-update \(added by DXrice's install\.sh\)\n"
+    r"dxrice-update\(\) \{\n(?:.*\n)*?\}\n"
+)
+content = legacy_v1.sub("\n", content, count=1)
+
+# The brief window before this got begin/end markers: same "/ dx" marker
+# text as the current block, but no brackets, and both functions inline.
+legacy_v2 = re.compile(
+    r"\n?# dxrice-update / dx \(added by DXrice's install\.sh\)\n"
+    r"dxrice-update\(\) \{\n(?:.*\n)*?\}\n"
+    r"dx\(\) \{\n(?:.*\n)*?\}\n"
+)
+content = legacy_v2.sub("\n", content, count=1)
+
+with open(path, "w") as f:
+    f.write(content)
+PYEOF
+
+        after="$(cat "$rc" 2>/dev/null)"
         printf '\n%s\n' "$block" >> "$rc"
-        ok "Added the 'dxrice-update' command to $rc"
+        if [ "$before" != "$after" ]; then
+            ok "Updated the 'dx' and 'dxrice-update' commands in $rc"
+        else
+            ok "Added the 'dx' and 'dxrice-update' commands to $rc"
+        fi
         added=1
     done
     if [ "$added" = "1" ]; then
-        info "Open a new terminal (or run 'source ~/.bashrc'/'source ~/.zshrc') to start using it."
+        info "Open a new terminal (or run 'source ~/.bashrc'/'source ~/.zshrc') to pick up any changes."
     fi
 }
 

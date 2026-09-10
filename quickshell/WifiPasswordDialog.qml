@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 
 FloatingWindow {
@@ -13,9 +14,18 @@ FloatingWindow {
 
     Shortcut { sequence: "Escape"; onActivated: root.visible = false }
 
+    RectangularShadow {
+        anchors.fill: pwSurface
+        radius: pwSurface.radius
+        color: Theme.shadowColor
+        blur: Theme.shadowBlurLg
+        offset.y: 4
+    }
+
     Rectangle {
+        id: pwSurface
         anchors.fill: parent
-        radius: Theme.radius
+        radius: Theme.roundingXl
         color: Theme.bg
         border.width: 1
         border.color: Theme.border

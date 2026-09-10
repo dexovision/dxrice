@@ -22,7 +22,8 @@ Row {
             text: root.title
             color: Theme.textActive
             font.family: Theme.fontFamily
-            font.weight: Font.DemiBold
+            font.pixelSize: 13
+            font.weight: Font.Medium
             elide: Text.ElideRight
             width: parent.width
         }
@@ -30,9 +31,9 @@ Row {
             visible: root.subtitle.length > 0
             text: root.subtitle
             color: Theme.text
-            opacity: 0.7
+            opacity: 0.65
             font.family: Theme.fontFamily
-            font.pixelSize: 12
+            font.pixelSize: 11
             elide: Text.ElideRight
             width: parent.width
         }
