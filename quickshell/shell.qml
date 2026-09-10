@@ -92,4 +92,11 @@ ShellRoot {
         target: "lock"
         function engage(): void { lockScreen.locked = true; }
     }
+
+    // Always constructed, never lazy -- an OSD has to already be watching
+    // Pipewire/backlight state before the first volume/brightness keypress,
+    // not spun up on first use like the toggleable panels above.
+    OSD {
+        id: osd
+    }
 }
