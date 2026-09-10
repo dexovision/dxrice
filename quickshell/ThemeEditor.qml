@@ -185,6 +185,15 @@ PanelWindow {
         for (const key of allKeys()) {
             if (data[key] !== undefined) root[key] = data[key];
         }
+        // theme.json's own wallpaper field can be empty on an install that
+        // never used the Theme app's own "Choose..." picker (the real
+        // desktop wallpaper is set independently via hyprland.lua's
+        // BG_WALLPAPER) -- fall back to the same shipped-default path
+        // hyprland.lua itself falls back to, so this pane and "Generate
+        // from Wallpaper" have something real to work with immediately.
+        if (!root.wallpaper) {
+            root.wallpaper = Quickshell.env("HOME") + "/Pictures/Wallpapers/default.png";
+        }
         root.dirty = false;
     }
 
@@ -210,6 +219,45 @@ PanelWindow {
         id: applyProc
         command: ["python3", root.repoDir + "/scripts/dxrice_apply_theme.py"]
         onExited: { root.applying = false; }
+    }
+
+    // ---- generate a full color palette from the current wallpaper --
+    // the actual mechanism real end-4/caelestia rices use to make the
+    // theme "match the wallpaper": sample it, derive background/accent/
+    // border tones from what's actually in the image (see the script's own
+    // comment for why this needs no PIL/numpy). Applies to the draft only,
+    // same as a preset button -- still needs Apply to take effect. ----
+    property bool generatingFromWallpaper: false
+    property string wallpaperGenerateError: ""
+    Process {
+        id: generateProc
+        command: ["python3", root.repoDir + "/scripts/dxrice_wallpaper_theme.py", root.wallpaper]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.generatingFromWallpaper = false;
+                try {
+                    const palette = JSON.parse(this.text.trim());
+                    root.applyPreset(palette);
+                    root.wallpaperGenerateError = "";
+                } catch (e) {
+                    root.wallpaperGenerateError = "Could not parse the generated palette.";
+                }
+            }
+        }
+        stderr: StdioCollector {
+            onStreamFinished: {
+                if (this.text.trim().length > 0) root.wallpaperGenerateError = this.text.trim();
+            }
+        }
+    }
+    function generateFromWallpaper() {
+        if (!root.wallpaper) {
+            root.wallpaperGenerateError = "Set a wallpaper first.";
+            return;
+        }
+        root.wallpaperGenerateError = "";
+        root.generatingFromWallpaper = true;
+        generateProc.running = true;
     }
 
     function apply() {
@@ -655,6 +703,35 @@ PanelWindow {
                     title: "Current wallpaper"
                     subtitle: root.wallpaper
                     GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
+                }
+            }
+            Text {
+                text: "Match Theme to Wallpaper"
+                color: Theme.textActive
+                font.family: Theme.fontFamily
+                font.weight: Font.DemiBold
+            }
+            Card {
+                width: parent.width
+                SettingRow {
+                    width: parent.width
+                    title: "Generate colors from the current wallpaper"
+                    subtitle: "Samples it for a background tone and accent -- overwrites the Colors tab below (Apply to keep, Revert to undo)"
+                    GlassButton {
+                        text: root.generatingFromWallpaper ? "Sampling..." : "Generate"
+                        variant: "primary"
+                        enabled: !root.generatingFromWallpaper
+                        onClicked: root.generateFromWallpaper()
+                    }
+                }
+                Text {
+                    visible: root.wallpaperGenerateError.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: root.wallpaperGenerateError
+                    color: Theme.accent
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 12
                 }
             }
         }
