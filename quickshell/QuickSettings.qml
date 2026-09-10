@@ -31,6 +31,7 @@ PanelWindow {
     anchors { top: true; right: true }
     margins { top: 52; right: 14 }
     exclusionMode: ExclusionMode.Ignore
+    aboveWindows: true
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "dxrice-quicksettings"
     focusable: true

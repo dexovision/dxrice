@@ -19,6 +19,7 @@ PanelWindow {
     signal closeRequested()
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
+    aboveWindows: true
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "dxrice-taskbar"
     focusable: true
