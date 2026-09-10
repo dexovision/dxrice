@@ -10,6 +10,12 @@ import Quickshell.Io
 // template rendering + hot-reload -- that pipeline (waybar/wofi/mako/
 // kitty/hyprlock templates, the hyprland.lua patcher) stays exactly as
 // it is; this window only needs to read/write the JSON.
+//
+// Laid out as a real settings app -- a searchable sidebar of categories
+// (icon + title + subtitle) next to a content pane that swaps per
+// category -- instead of every field dumped down one long scrolling
+// column. This is the actual structure end-4/caelestia-style settings
+// apps use; a single flat list is what was reading as "cheap."
 FloatingWindow {
     id: root
     signal closeRequested()
@@ -83,44 +89,42 @@ FloatingWindow {
         { key: "hypr_active_border_2", label: "Active border -- color 2", sub: "Focused window gradient end" },
         { key: "hypr_inactive_border", label: "Inactive border", sub: "Unfocused window border" },
     ]
-    readonly property var sliderGroups: [
-        { title: "Transparency and Blur", fields: [
-            { key: "opacity_idle", label: "Panel opacity (idle)", min: 0, max: 1, decimals: 2 },
-            { key: "opacity_active", label: "Panel opacity (active)", min: 0, max: 1, decimals: 2 },
-            { key: "border_opacity_idle", label: "Border opacity (idle)", min: 0, max: 1, decimals: 2 },
-            { key: "border_opacity_active", label: "Border opacity (active)", min: 0, max: 1, decimals: 2 },
-            { key: "kitty_opacity", label: "Terminal opacity", min: 0, max: 1, decimals: 2 },
-            { key: "hypr_blur_size", label: "Window blur size", min: 0, max: 20, decimals: 0 },
-            { key: "hypr_blur_passes", label: "Window blur passes", min: 0, max: 10, decimals: 0 },
-            { key: "hypr_blur_vibrancy", label: "Window blur vibrancy", min: 0, max: 1, decimals: 2 },
-        ]},
-        { title: "Layout", fields: [
-            { key: "radius", label: "Panel corner radius", min: 0, max: 30, decimals: 0 },
-            { key: "hypr_rounding", label: "Window corner rounding", min: 0, max: 30, decimals: 0 },
-            { key: "hypr_gaps_in", label: "Gaps between windows", min: 0, max: 40, decimals: 0 },
-            { key: "hypr_gaps_out", label: "Gaps to screen edge", min: 0, max: 60, decimals: 0 },
-            { key: "hypr_border_size", label: "Window border thickness", min: 0, max: 10, decimals: 0 },
-            { key: "hypr_active_opacity", label: "Focused window opacity", min: 0, max: 1, decimals: 2 },
-            { key: "hypr_inactive_opacity", label: "Unfocused window opacity", min: 0, max: 1, decimals: 2 },
-            { key: "hypr_active_border_angle", label: "Active border gradient angle", min: 0, max: 360, decimals: 0 },
-        ]},
-        { title: "Lock Screen", fields: [
-            { key: "lock_blur_passes", label: "Blur passes", min: 0, max: 10, decimals: 0 },
-            { key: "lock_blur_size", label: "Blur size", min: 0, max: 20, decimals: 0 },
-            { key: "lock_blur_vibrancy", label: "Blur vibrancy", min: 0, max: 1, decimals: 2 },
-            { key: "lock_bg_opacity", label: "Input field background opacity", min: 0, max: 1, decimals: 2 },
-        ]},
-        { title: "Fonts", fields: [
-            { key: "font_size_waybar", label: "Taskbar text size", min: 8, max: 24, decimals: 0 },
-            { key: "font_size_waybar_icons", label: "Taskbar app icon size", min: 8, max: 40, decimals: 0 },
-            { key: "font_size_wofi", label: "App launcher font size", min: 8, max: 24, decimals: 0 },
-            { key: "font_size_mako", label: "Notification font size", min: 8, max: 24, decimals: 0 },
-        ]},
-        { title: "Experience", fields: [
-            { key: "anim_duration_ms", label: "Animation speed (ms, lower = snappier)", min: 0, max: 500, decimals: 0 },
-            { key: "ui_density", label: "Settings app spacing", min: 0.5, max: 1.5, decimals: 2 },
-            { key: "shadow_intensity", label: "Panel shadow strength (Quickshell only)", min: 0, max: 1.5, decimals: 2 },
-        ]},
+    readonly property var blurFields: [
+        { key: "opacity_idle", label: "Panel opacity (idle)", min: 0, max: 1, decimals: 2 },
+        { key: "opacity_active", label: "Panel opacity (active)", min: 0, max: 1, decimals: 2 },
+        { key: "border_opacity_idle", label: "Border opacity (idle)", min: 0, max: 1, decimals: 2 },
+        { key: "border_opacity_active", label: "Border opacity (active)", min: 0, max: 1, decimals: 2 },
+        { key: "kitty_opacity", label: "Terminal opacity", min: 0, max: 1, decimals: 2 },
+        { key: "hypr_blur_size", label: "Window blur size", min: 0, max: 20, decimals: 0 },
+        { key: "hypr_blur_passes", label: "Window blur passes", min: 0, max: 10, decimals: 0 },
+        { key: "hypr_blur_vibrancy", label: "Window blur vibrancy", min: 0, max: 1, decimals: 2 },
+    ]
+    readonly property var layoutFields: [
+        { key: "radius", label: "Panel corner radius", min: 0, max: 30, decimals: 0 },
+        { key: "hypr_rounding", label: "Window corner rounding", min: 0, max: 30, decimals: 0 },
+        { key: "hypr_gaps_in", label: "Gaps between windows", min: 0, max: 40, decimals: 0 },
+        { key: "hypr_gaps_out", label: "Gaps to screen edge", min: 0, max: 60, decimals: 0 },
+        { key: "hypr_border_size", label: "Window border thickness", min: 0, max: 10, decimals: 0 },
+        { key: "hypr_active_opacity", label: "Focused window opacity", min: 0, max: 1, decimals: 2 },
+        { key: "hypr_inactive_opacity", label: "Unfocused window opacity", min: 0, max: 1, decimals: 2 },
+        { key: "hypr_active_border_angle", label: "Active border gradient angle", min: 0, max: 360, decimals: 0 },
+    ]
+    readonly property var lockFields: [
+        { key: "lock_blur_passes", label: "Blur passes", min: 0, max: 10, decimals: 0 },
+        { key: "lock_blur_size", label: "Blur size", min: 0, max: 20, decimals: 0 },
+        { key: "lock_blur_vibrancy", label: "Blur vibrancy", min: 0, max: 1, decimals: 2 },
+        { key: "lock_bg_opacity", label: "Input field background opacity", min: 0, max: 1, decimals: 2 },
+    ]
+    readonly property var fontSizeFields: [
+        { key: "font_size_waybar", label: "Taskbar text size", min: 8, max: 24, decimals: 0 },
+        { key: "font_size_waybar_icons", label: "Taskbar app icon size", min: 8, max: 40, decimals: 0 },
+        { key: "font_size_wofi", label: "App launcher font size", min: 8, max: 24, decimals: 0 },
+        { key: "font_size_mako", label: "Notification font size", min: 8, max: 24, decimals: 0 },
+    ]
+    readonly property var experienceFields: [
+        { key: "anim_duration_ms", label: "Animation speed (ms, lower = snappier)", min: 0, max: 500, decimals: 0 },
+        { key: "ui_density", label: "Settings app spacing", min: 0.5, max: 1.5, decimals: 2 },
+        { key: "shadow_intensity", label: "Panel shadow strength (Quickshell only)", min: 0, max: 1.5, decimals: 2 },
     ]
     readonly property var presets: ({
         "Glass Charcoal": { glass_bg: "12141a", glass_bg_active: "232630", glass_text: "e6e6e6", glass_text_active: "ffffff", glass_border: "ffffff", accent: "e67878", radius: 12, hypr_active_border_1: "8090a0", hypr_active_border_2: "c0a0b0", hypr_inactive_border: "1d2021" },
@@ -129,11 +133,33 @@ FloatingWindow {
         "Sunset": { glass_bg: "1a1210", glass_bg_active: "3a2420", glass_text: "f0e0d6", glass_text_active: "ffffff", glass_border: "ffb385", accent: "ff6b4a", radius: 16, hypr_active_border_1: "ff7e5f", hypr_active_border_2: "feb47b", hypr_inactive_border: "2a1d18" },
     })
 
+    // ---- sidebar categories ----
+    readonly property var categories: [
+        { id: "colors", glyph: "", label: "Colors", sub: "Presets, palette, window borders" },
+        { id: "blur", glyph: "", label: "Transparency & Blur", sub: "Panel opacity, window blur" },
+        { id: "layout", glyph: "", label: "Layout", sub: "Rounding, gaps, window borders" },
+        { id: "lock", glyph: "", label: "Lock Screen", sub: "Blur, vibrancy, input field" },
+        { id: "fonts", glyph: "", label: "Fonts", sub: "Sizes and font family" },
+        { id: "experience", glyph: "", label: "Experience", sub: "Animation speed, density, shadows" },
+        { id: "wallpaper", glyph: "", label: "Wallpaper", sub: "Desktop background image" },
+    ]
+    property string currentCategory: "colors"
+    property string searchText: ""
+    readonly property var filteredCategories: {
+        const q = root.searchText.trim().toLowerCase();
+        if (!q) return root.categories;
+        return root.categories.filter((c) => c.label.toLowerCase().includes(q) || c.sub.toLowerCase().includes(q));
+    }
+
     function allKeys() {
         const keys = ["font_family", "wallpaper"];
         for (const f of colorFields) keys.push(f.key);
         for (const f of borderColorFields) keys.push(f.key);
-        for (const group of sliderGroups) for (const f of group.fields) keys.push(f.key);
+        for (const f of blurFields) keys.push(f.key);
+        for (const f of layoutFields) keys.push(f.key);
+        for (const f of lockFields) keys.push(f.key);
+        for (const f of fontSizeFields) keys.push(f.key);
+        for (const f of experienceFields) keys.push(f.key);
         return keys;
     }
 
@@ -212,9 +238,51 @@ FloatingWindow {
         onAccepted: { root.wallpaper = String(wallpaperDialog.selectedFile).replace("file://", ""); root.dirty = true; }
     }
 
+    // ---- reusable field renderers (used by whichever category pane is
+    // active -- see the Loader-per-category in the content pane below) ----
+    component ColorList: Column {
+        property var fields: []
+        width: parent.width
+        spacing: Theme.padMd
+        Repeater {
+            model: parent.fields
+            delegate: SettingRow {
+                width: parent.width
+                title: modelData.label
+                subtitle: modelData.sub
+                Rectangle {
+                    width: 32; height: 24; radius: 6
+                    color: "#" + root[modelData.key]
+                    border.width: 1
+                    border.color: Theme.borderIdle
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.pickColor(modelData.key) }
+                }
+            }
+        }
+    }
+
+    component SliderList: Column {
+        property var fields: []
+        width: parent.width
+        spacing: Theme.padMd
+        Repeater {
+            model: parent.fields
+            delegate: SettingRow {
+                width: parent.width
+                title: modelData.label
+                SliderRow {
+                    width: 180
+                    from: modelData.min; to: modelData.max; decimals: modelData.decimals
+                    value: root[modelData.key]
+                    onChanged: (v) => { root[modelData.key] = modelData.decimals === 0 ? Math.round(v) : v; root.dirty = true; }
+                }
+            }
+        }
+    }
+
     // ---- visuals ----
-    implicitWidth: 480
-    implicitHeight: 780
+    implicitWidth: 700
+    implicitHeight: 640
 
     Shortcut { sequence: "Escape"; onActivated: root.closeRequested() }
 
@@ -275,135 +343,284 @@ FloatingWindow {
                 }
             }
 
-            Flickable {
+            Row {
+                id: sidebarLayout
                 width: parent.width
                 height: parent.height - header.height
-                contentHeight: body.implicitHeight + Theme.padLg * 2
-                clip: true
 
+                // ---- sidebar: search + category list ----
                 Column {
-                    id: body
-                    x: Theme.padLg
-                    y: Theme.padLg
-                    width: parent.width - Theme.padLg * 2
-                    spacing: Theme.padMd
+                    id: sidebar
+                    width: 208
+                    height: parent.height
+                    spacing: Theme.padSm
 
-                    Text { text: "Presets"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                    Card {
+                    Rectangle {
+                        x: Theme.padMd
+                        width: parent.width - Theme.padMd * 2
+                        height: 34
+                        radius: Theme.roundingSm
+                        color: Theme.layer1
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: Theme.padSm
+                            text: ""
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 11
+                            color: Theme.text
+                            opacity: 0.6
+                        }
+                        TextInput {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 26
+                            anchors.right: parent.right
+                            anchors.rightMargin: Theme.padSm
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: Theme.textActive
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                            text: root.searchText
+                            onTextChanged: root.searchText = text
+                            Text {
+                                text: "Search settings"
+                                color: Theme.text
+                                opacity: parent.text.length ? 0 : 0.5
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+                        }
+                    }
+
+                    Flickable {
                         width: parent.width
-                        Row {
+                        height: parent.height - 34 - Theme.padSm
+                        contentHeight: catColumn.implicitHeight
+                        clip: true
+
+                        Column {
+                            id: catColumn
                             width: parent.width
-                            spacing: Theme.padSm
+                            spacing: 2
+
                             Repeater {
-                                model: Object.keys(root.presets)
-                                delegate: GlassButton {
-                                    text: modelData
-                                    variant: "secondary"
-                                    onClicked: root.applyPreset(root.presets[modelData])
-                                }
-                            }
-                        }
-                    }
+                                model: root.filteredCategories
+                                delegate: Rectangle {
+                                    id: catRow
+                                    required property var modelData
+                                    width: parent.width - Theme.padMd
+                                    x: Theme.padMd / 2
+                                    height: 52
+                                    radius: Theme.roundingSm
+                                    readonly property bool selected: root.currentCategory === modelData.id
+                                    color: selected ? Theme.layer2Active : (catArea.containsMouse ? Theme.layer1Hover : "transparent")
+                                    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
-                    Text { text: "Glass Palette"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                    Card {
-                        width: parent.width
-                        Repeater {
-                            model: root.colorFields
-                            delegate: SettingRow {
-                                width: parent.width
-                                title: modelData.label
-                                subtitle: modelData.sub
-                                Rectangle {
-                                    width: 32; height: 24; radius: 6
-                                    color: "#" + root[modelData.key]
-                                    border.width: 1
-                                    border.color: Theme.borderIdle
-                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.pickColor(modelData.key) }
-                                }
-                            }
-                        }
-                    }
+                                    Rectangle {
+                                        visible: catRow.selected
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 3
+                                        height: 22
+                                        radius: 2
+                                        color: Theme.accent
+                                    }
 
-                    Text { text: "Window Border Gradient"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                    Card {
-                        width: parent.width
-                        Repeater {
-                            model: root.borderColorFields
-                            delegate: SettingRow {
-                                width: parent.width
-                                title: modelData.label
-                                subtitle: modelData.sub
-                                Rectangle {
-                                    width: 32; height: 24; radius: 6
-                                    color: "#" + root[modelData.key]
-                                    border.width: 1
-                                    border.color: Theme.borderIdle
-                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.pickColor(modelData.key) }
-                                }
-                            }
-                        }
-                    }
-
-                    Repeater {
-                        model: root.sliderGroups
-                        delegate: Column {
-                            width: body.width
-                            spacing: Theme.padMd
-                            property var group: modelData
-                            Text { text: group.title; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                            Card {
-                                width: parent.width
-                                Repeater {
-                                    model: group.fields
-                                    delegate: SettingRow {
-                                        width: parent.width
-                                        title: modelData.label
-                                        SliderRow {
-                                            width: 180
-                                            from: modelData.min; to: modelData.max; decimals: modelData.decimals
-                                            value: root[modelData.key]
-                                            onChanged: (v) => { root[modelData.key] = modelData.decimals === 0 ? Math.round(v) : v; root.dirty = true; }
+                                    Text {
+                                        id: catGlyph
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: Theme.padMd
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: catRow.modelData.glyph
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 15
+                                        color: catRow.selected ? Theme.accent : Theme.text
+                                    }
+                                    Column {
+                                        anchors.left: catGlyph.right
+                                        anchors.leftMargin: Theme.padSm
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: Theme.padSm
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 1
+                                        Text {
+                                            width: parent.width
+                                            text: catRow.modelData.label
+                                            color: catRow.selected ? Theme.textActive : Theme.text
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 12
+                                            font.weight: Font.Medium
+                                            elide: Text.ElideRight
                                         }
+                                        Text {
+                                            width: parent.width
+                                            text: catRow.modelData.sub
+                                            color: Theme.text
+                                            opacity: 0.55
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 10
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                    MouseArea {
+                                        id: catArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.currentCategory = catRow.modelData.id
                                     }
                                 }
                             }
                         }
                     }
+                }
 
-                    Text { text: "Font"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                    Card {
-                        width: parent.width
-                        SettingRow {
-                            width: parent.width
-                            title: "Font family"
-                            Rectangle {
-                                width: 180; height: 30; radius: Theme.entryRadius
-                                color: Qt.rgba(1, 1, 1, 0.06)
-                                border.width: 1; border.color: Theme.borderIdle
-                                TextInput {
-                                    anchors.fill: parent
-                                    anchors.margins: 6
-                                    text: root.font_family
-                                    color: Theme.textActive
-                                    font.family: Theme.fontFamily
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    onEditingFinished: { root.font_family = text; root.dirty = true; }
-                                }
+                Rectangle {
+                    width: 1
+                    height: parent.height
+                    color: Theme.borderIdle
+                }
+
+                // ---- content pane: one category's fields at a time ----
+                Flickable {
+                    id: contentFlick
+                    width: sidebarLayout.width - sidebar.width - 1
+                    height: parent.height
+                    contentHeight: paneLoader.item ? paneLoader.item.implicitHeight + Theme.padLg * 2 : 0
+                    clip: true
+                    Behavior on contentY { NumberAnimation { duration: Theme.durationFast } }
+
+                    Loader {
+                        id: paneLoader
+                        x: Theme.padLg
+                        y: Theme.padLg
+                        width: contentFlick.width - Theme.padLg * 2
+                        sourceComponent: {
+                            switch (root.currentCategory) {
+                            case "colors": return colorsPane;
+                            case "blur": return blurPane;
+                            case "layout": return layoutPane;
+                            case "lock": return lockPane;
+                            case "fonts": return fontsPane;
+                            case "experience": return experiencePane;
+                            case "wallpaper": return wallpaperPane;
+                            default: return colorsPane;
                             }
                         }
                     }
+                }
+            }
+        }
+    }
 
-                    Text { text: "Wallpaper"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                    Card {
-                        width: parent.width
-                        SettingRow {
-                            width: parent.width
-                            title: "Current wallpaper"
-                            subtitle: root.wallpaper
-                            GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
+    Component {
+        id: colorsPane
+        Column {
+            width: parent ? parent.width : implicitWidth
+            spacing: Theme.padLg
+            Text { text: "Presets"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
+            Card {
+                width: parent.width
+                Row {
+                    width: parent.width
+                    spacing: Theme.padSm
+                    Repeater {
+                        model: Object.keys(root.presets)
+                        delegate: GlassButton {
+                            text: modelData
+                            variant: "secondary"
+                            onClicked: root.applyPreset(root.presets[modelData])
                         }
                     }
+                }
+            }
+            Text { text: "Glass Palette"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
+            Card { width: parent.width; ColorList { fields: root.colorFields } }
+            Text { text: "Window Border Gradient"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
+            Card { width: parent.width; ColorList { fields: root.borderColorFields } }
+        }
+    }
+
+    Component {
+        id: blurPane
+        Column {
+            width: parent ? parent.width : implicitWidth
+            spacing: Theme.padLg
+            Card { width: parent.width; SliderList { fields: root.blurFields } }
+        }
+    }
+
+    Component {
+        id: layoutPane
+        Column {
+            width: parent ? parent.width : implicitWidth
+            spacing: Theme.padLg
+            Card { width: parent.width; SliderList { fields: root.layoutFields } }
+        }
+    }
+
+    Component {
+        id: lockPane
+        Column {
+            width: parent ? parent.width : implicitWidth
+            spacing: Theme.padLg
+            Card { width: parent.width; SliderList { fields: root.lockFields } }
+        }
+    }
+
+    Component {
+        id: fontsPane
+        Column {
+            width: parent ? parent.width : implicitWidth
+            spacing: Theme.padLg
+            Card { width: parent.width; SliderList { fields: root.fontSizeFields } }
+            Text { text: "Font family"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
+            Card {
+                width: parent.width
+                SettingRow {
+                    width: parent.width
+                    title: "Font family"
+                    Rectangle {
+                        width: 200; height: 30; radius: Theme.entryRadius
+                        color: Qt.rgba(1, 1, 1, 0.06)
+                        border.width: 1; border.color: Theme.borderIdle
+                        TextInput {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            text: root.font_family
+                            color: Theme.textActive
+                            font.family: Theme.fontFamily
+                            verticalAlignment: TextInput.AlignVCenter
+                            onEditingFinished: { root.font_family = text; root.dirty = true; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: experiencePane
+        Column {
+            width: parent ? parent.width : implicitWidth
+            spacing: Theme.padLg
+            Card { width: parent.width; SliderList { fields: root.experienceFields } }
+        }
+    }
+
+    Component {
+        id: wallpaperPane
+        Column {
+            width: parent ? parent.width : implicitWidth
+            spacing: Theme.padLg
+            Card {
+                width: parent.width
+                SettingRow {
+                    width: parent.width
+                    title: "Current wallpaper"
+                    subtitle: root.wallpaper
+                    GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
                 }
             }
         }
