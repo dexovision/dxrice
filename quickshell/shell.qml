@@ -78,6 +78,24 @@ ShellRoot {
         function hide(): void { taskbarLoader.active = false; }
     }
 
+    LazyLoader {
+        id: calendarLoader
+        source: "CalendarPanel.qml"
+    }
+    Connections {
+        target: calendarLoader.item
+        ignoreUnknownSignals: true
+        function onCloseRequested() { calendarLoader.active = false; }
+    }
+    IpcHandler {
+        target: "calendar"
+        function toggle(): void {
+            calendarLoader.active = !calendarLoader.active;
+        }
+        function show(): void { calendarLoader.active = true; }
+        function hide(): void { calendarLoader.active = false; }
+    }
+
     // Opt-in, not wired to SUPER+L: see LockScreen.qml's own comment for
     // why a real Wayland session lock is a fundamentally higher-stakes
     // thing to trust than any of the panels above (fail-secure by design --

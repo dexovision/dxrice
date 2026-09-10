@@ -48,7 +48,8 @@
         "format": "{name}"
     },
     "clock": {
-        "format": "{:%H:%M   %b %d}"
+        "format": "{:%H:%M   %b %d}",
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call calendar toggle'"
     },
     "pulseaudio": {
         "format": "Vol {volume}%",

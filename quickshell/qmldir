@@ -21,3 +21,4 @@ MediaBackend 1.0 MediaBackend.qml
 ClipboardBackend 1.0 ClipboardBackend.qml
 LockScreen 1.0 LockScreen.qml
 OSD 1.0 OSD.qml
+CalendarPanel 1.0 CalendarPanel.qml
