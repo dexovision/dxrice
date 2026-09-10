@@ -3,18 +3,33 @@ import QtQuick.Dialogs
 import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 
 // DXrice Taskbar manager -- Quickshell rewrite of dxrice_taskbar_gui.py.
 // Edits ~/.config/waybar/config directly (same file, same rules: never
 // synced back into the repo, so personal shortcuts survive an update --
 // see dxrice_deploy.py's copy-once handling of that file) and restarts
 // waybar after every change.
-FloatingWindow {
+//
+// A real wlr-layer-shell panel hanging flush off the bar (same drawer
+// pattern as QuickSettings.qml/ThemeEditor.qml), not a standalone OS
+// window.
+PanelWindow {
     id: root
     signal closeRequested()
-    title: "DXrice Taskbar"
     color: "transparent"
-    onVisibleChanged: if (!visible) root.closeRequested()
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.namespace: "dxrice-taskbar"
+    focusable: true
+
+    implicitWidth: 480
+    implicitHeight: 780
+    anchors { top: true; left: true }
+    margins {
+        top: 52
+        left: Math.round(((root.screen ? root.screen.width : 1920) - root.implicitWidth) / 2)
+    }
 
     readonly property string repoDir: Quickshell.shellDir + "/.."
     readonly property string configPath: Quickshell.env("HOME") + "/.config/waybar/config"
@@ -262,33 +277,47 @@ FloatingWindow {
         }
     }
 
-    // ---- visuals ----
-    implicitWidth: 480
-    implicitHeight: 780
-
-    RectangularShadow {
-        anchors.fill: panelSurface
-        radius: panelSurface.radius
-        color: Theme.shadowColor
-        blur: Theme.shadowBlurLg
-        offset.y: 4
-        opacity: panelSurface.opacity
-    }
-
-    Rectangle {
-        id: panelSurface
+    // ---- visuals: a drawer that unrolls down from the bar, matching
+    // QuickSettings.qml/ThemeEditor.qml exactly. ----
+    Item {
+        id: drawer
         anchors.fill: parent
-        radius: Theme.roundingXl
-        color: Theme.bg
-        border.width: 1
-        border.color: Theme.border
+        clip: true
 
-        opacity: 0
-        scale: 0.94
-        transformOrigin: Item.Top
-        Behavior on opacity { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Behavior on scale { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Component.onCompleted: { opacity = 1; scale = 1; }
+        property real revealHeight: 0
+        Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
+        Component.onCompleted: revealHeight = root.implicitHeight
+
+        RectangularShadow {
+            anchors.fill: panelSurface
+            radius: 0
+            bottomLeftRadius: Theme.roundingXl
+            bottomRightRadius: Theme.roundingXl
+            color: Theme.shadowColor
+            blur: Theme.shadowBlurLg
+            offset.y: 4
+        }
+
+        WavyTopRect {
+            id: wavyRect
+            anchors.top: parent.top
+            anchors.left: parent.left
+            width: parent.width
+            height: 7
+            color: Theme.bg
+        }
+
+        Rectangle {
+            id: panelSurface
+            anchors.top: wavyRect.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: Math.max(0, drawer.revealHeight - wavyRect.height)
+            radius: 0
+            bottomLeftRadius: Theme.roundingXl
+            bottomRightRadius: Theme.roundingXl
+            color: Theme.bg
+            clip: true
 
         Column {
             anchors.fill: parent
@@ -553,6 +582,7 @@ FloatingWindow {
                     }
                 }
             }
+        }
         }
     }
 

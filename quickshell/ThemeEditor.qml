@@ -3,6 +3,7 @@ import QtQuick.Dialogs
 import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 
 // DXrice Theme editor -- Quickshell rewrite of dxrice_theme_gui.py.
 // Edits the same live ~/.config/dxrice/theme.json and, on Apply, shells
@@ -16,12 +17,28 @@ import Quickshell.Io
 // category -- instead of every field dumped down one long scrolling
 // column. This is the actual structure end-4/caelestia-style settings
 // apps use; a single flat list is what was reading as "cheap."
-FloatingWindow {
+//
+// A real wlr-layer-shell panel hanging flush off the bar (same drawer
+// pattern as QuickSettings.qml: zero gap, bottom-only rounding, a
+// WavyTopRect seam), centered under it -- not a separate floating OS
+// window. A standalone window is exactly the "still a standalone GUI"
+// complaint this replaces.
+PanelWindow {
     id: root
     signal closeRequested()
-    title: "DXrice Theme"
     color: "transparent"
-    onVisibleChanged: if (!visible) root.closeRequested()
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.namespace: "dxrice-theme"
+    focusable: true
+
+    implicitWidth: 700
+    implicitHeight: 640
+    anchors { top: true; left: true }
+    margins {
+        top: 52
+        left: Math.round(((root.screen ? root.screen.width : 1920) - root.implicitWidth) / 2)
+    }
 
     readonly property string repoDir: Quickshell.shellDir + "/.."
     readonly property string themeJsonPath: Quickshell.env("HOME") + "/.config/dxrice/theme.json"
@@ -280,35 +297,50 @@ FloatingWindow {
         }
     }
 
-    // ---- visuals ----
-    implicitWidth: 700
-    implicitHeight: 640
-
+    // ---- visuals: a drawer that unrolls down from the bar, matching
+    // QuickSettings.qml exactly -- zero gap, square top corners, a
+    // WavyTopRect seam, bottom-only rounding. ----
     Shortcut { sequence: "Escape"; onActivated: root.closeRequested() }
 
-    RectangularShadow {
-        anchors.fill: panelSurface
-        radius: panelSurface.radius
-        color: Theme.shadowColor
-        blur: Theme.shadowBlurLg
-        offset.y: 4
-        opacity: panelSurface.opacity
-    }
-
-    Rectangle {
-        id: panelSurface
+    Item {
+        id: drawer
         anchors.fill: parent
-        radius: Theme.roundingXl
-        color: Theme.bg
-        border.width: 1
-        border.color: Theme.border
+        clip: true
 
-        opacity: 0
-        scale: 0.94
-        transformOrigin: Item.Top
-        Behavior on opacity { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Behavior on scale { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Component.onCompleted: { opacity = 1; scale = 1; }
+        property real revealHeight: 0
+        Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
+        Component.onCompleted: revealHeight = root.implicitHeight
+
+        RectangularShadow {
+            anchors.fill: panelSurface
+            radius: 0
+            bottomLeftRadius: Theme.roundingXl
+            bottomRightRadius: Theme.roundingXl
+            color: Theme.shadowColor
+            blur: Theme.shadowBlurLg
+            offset.y: 4
+        }
+
+        WavyTopRect {
+            id: wavyRect
+            anchors.top: parent.top
+            anchors.left: parent.left
+            width: parent.width
+            height: 7
+            color: Theme.bg
+        }
+
+        Rectangle {
+            id: panelSurface
+            anchors.top: wavyRect.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: Math.max(0, drawer.revealHeight - wavyRect.height)
+            radius: 0
+            bottomLeftRadius: Theme.roundingXl
+            bottomRightRadius: Theme.roundingXl
+            color: Theme.bg
+            clip: true
 
         Column {
             anchors.fill: parent
@@ -511,6 +543,7 @@ FloatingWindow {
                     }
                 }
             }
+        }
         }
     }
 
