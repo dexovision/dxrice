@@ -26,7 +26,7 @@ PanelWindow {
     id: root
     signal closeRequested()
 
-    implicitWidth: 390
+    implicitWidth: 720
     color: "transparent"
     anchors { top: true; right: true }
     margins { top: 52; right: 14 }
@@ -384,9 +384,14 @@ PanelWindow {
     // ==================== OVERVIEW ====================
     Component {
         id: overviewPane
-        Column {
+        Row {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padMd
+
+            Column {
+                id: leftCol
+                width: (parent.width - parent.spacing) / 2
+                spacing: Theme.padMd
 
             // -- quick toggles: 2x2 grid so Do Not Disturb fits alongside
             // Wi-Fi/Bluetooth/Awake instead of being left out entirely. --
@@ -558,6 +563,12 @@ PanelWindow {
                     }
                 }
             }
+            }
+
+            Column {
+                id: rightCol
+                width: (parent.width - parent.spacing) / 2
+                spacing: Theme.padMd
 
             // -- wifi networks: collapsed by default once there are more
             // than a couple. --
@@ -665,15 +676,60 @@ PanelWindow {
                     }
                 }
             }
+
+            // -- system info (a fetch-style card: OS, kernel, uptime,
+            // hostname) -- read straight from hostnamectl/uname/proc, no
+            // new dependency, matching the fetch widgets in the reference
+            // dashboards. --
+            Card {
+                width: parent.width
+                Text { text: "System"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
+                Repeater {
+                    model: [
+                        { label: "OS", value: systemInfo.osName },
+                        { label: "Kernel", value: systemInfo.kernel },
+                        { label: "Host", value: systemInfo.hostname },
+                        { label: "Uptime", value: systemInfo.uptime },
+                        { label: "User", value: systemInfo.user },
+                    ]
+                    delegate: Row {
+                        width: parent.width
+                        Text { text: modelData.label; color: Theme.text; opacity: 0.6; width: 60; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                        Text { text: modelData.value; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: 12; elide: Text.ElideRight; width: parent.width - 60 }
+                    }
+                }
+            }
+
+            // -- world clock -- a handful of fixed timezones, resolved
+            // locally via `date`, no network/API needed. --
+            Card {
+                width: parent.width
+                Text { text: "World Clock"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
+                Repeater {
+                    model: worldClock.cities
+                    delegate: Row {
+                        width: parent.width
+                        Text { text: modelData.label; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 12; width: parent.width - 60 }
+                        Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: 12; width: 60; horizontalAlignment: Text.AlignRight }
+                    }
+                }
+            }
+                }
         }
     }
 
     // ==================== MEDIA ====================
     Component {
         id: mediaPane
-        Loader {
+        Item {
             width: parent ? parent.width : implicitWidth
-            sourceComponent: mediaBackend.available ? mediaPlayerContent : mediaEmptyContent
+            implicitHeight: loader.implicitHeight
+            Loader {
+                id: loader
+                width: Math.min(420, parent.width)
+                anchors.horizontalCenter: parent.horizontalCenter
+                sourceComponent: mediaBackend.available ? mediaPlayerContent : mediaEmptyContent
+            }
         }
     }
 
@@ -684,8 +740,8 @@ PanelWindow {
             spacing: Theme.padLg
 
             Item {
-                width: 180
-                height: 180
+                width: 220
+                height: 220
                 anchors.horizontalCenter: parent.horizontalCenter
 
                 RectangularShadow {
@@ -958,6 +1014,8 @@ PanelWindow {
     }
     BluetoothBackend { id: btBackend; radioOn: root.bluetoothEnabled }
     AudioDeviceBackend { id: audioDeviceBackend }
+    SystemInfoBackend { id: systemInfo }
+    WorldClockBackend { id: worldClock }
     BrightnessBackend { id: brightnessBackend }
     MediaBackend { id: mediaBackend }
     ClipboardBackend { id: clipboardBackend; Component.onCompleted: refresh() }

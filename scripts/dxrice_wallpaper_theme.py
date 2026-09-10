@@ -77,14 +77,15 @@ def derive_palette(pixels):
     accent_h, accent_l, accent_s = best_pixel if best_pixel and best_sat > 0.12 else (avg_h, avg_l, avg_s)
 
     return {
-        "glass_bg": hls_hex(avg_h, 0.05, avg_s * 0.6),
-        "glass_bg_active": hls_hex(avg_h, 0.11, avg_s * 0.6),
+        "glass_bg": hls_hex(avg_h, 0.05, avg_s * 0.7),
+        "glass_bg_active": hls_hex(avg_h, 0.12, avg_s * 0.7),
         "glass_text": "d8d8d8",
         "glass_text_active": "ffffff",
         "glass_border": "ffffff",
-        # Boosted saturation/lightness so the accent reads as a real color
-        # note rather than whatever muted tone happened to sample highest.
-        "accent": hls_hex(accent_h, accent_l * 0.5 + 0.35, accent_s * 1.3 + 0.25),
+        # Pushed harder than a first pass -- a wallpaper-derived accent that
+        # plays it safe just reads as another gray. This is deliberately
+        # closer to a punchy, saturated UI accent than a literal color pick.
+        "accent": hls_hex(accent_h, accent_l * 0.35 + 0.45, accent_s * 1.6 + 0.35),
         "hypr_active_border_1": hls_hex(accent_h, accent_l * 0.4 + 0.55, accent_s * 0.8 + 0.15),
         "hypr_active_border_2": hls_hex(accent_h + 0.06, accent_l * 0.4 + 0.7, accent_s * 0.6 + 0.1),
         "hypr_inactive_border": hls_hex(avg_h, 0.09, avg_s * 0.4),
