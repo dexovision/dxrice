@@ -246,16 +246,26 @@ FloatingWindow {
             anchors.fill: parent
             spacing: 0
 
-            Row {
+            Item {
                 id: header
                 width: parent.width
-                height: 48
+                height: 56
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.roundingXl
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: Theme.headerWash }
+                        GradientStop { position: 1.0; color: Qt.rgba(Theme.headerWash.r, Theme.headerWash.g, Theme.headerWash.b, 0) }
+                    }
+                }
+
                 Text {
                     text: "Theme"
                     color: Theme.textActive
                     font.family: Theme.fontFamily
                     font.weight: Font.DemiBold
-                    font.pixelSize: 16
+                    font.pixelSize: 17
                     anchors.verticalCenter: parent.verticalCenter
                     x: Theme.padLg
                 }

@@ -39,9 +39,16 @@ Item {
         id: surface
         anchors.fill: parent
         radius: Theme.roundingMd
-        color: Theme.layer1
         border.width: root.highlighted ? 2 : 1
         border.color: root.highlighted ? Theme.accent : Theme.borderIdle
+
+        // A two-stop gradient instead of one flat tone -- a card that's
+        // subtly lighter at the top than the bottom reads as a physical,
+        // lit surface rather than a solid-fill rectangle with a border.
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Theme.mix(Theme.layer1, Theme.textActive, 0.035) }
+            GradientStop { position: 1.0; color: Theme.layer1 }
+        }
 
         Behavior on border.color {
             ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }

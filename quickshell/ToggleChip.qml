@@ -1,11 +1,11 @@
 import QtQuick
 import QtQuick.Effects
 
-// Compact icon-over-label toggle -- GNOME-quick-settings style (Wi-Fi,
-// Bluetooth, DND, Keep Awake). `active` is a plain external property this
-// binds to; the caller owns the actual on/off state and reacts to
-// `toggled(next)`, matching the rest of this rice's "backend owns state,
-// widget just reflects and requests changes" pattern.
+// Compact icon-badge-over-label toggle -- GNOME/mango-quick-settings style
+// (Wi-Fi, Bluetooth, DND, Keep Awake). `active` is a plain external
+// property this binds to; the caller owns the actual on/off state and
+// reacts to `toggled(next)`, matching the rest of this rice's "backend
+// owns state, widget just reflects and requests changes" pattern.
 Item {
     id: root
     property string glyph: ""
@@ -13,8 +13,8 @@ Item {
     property bool active: false
     signal toggled(bool next)
 
-    implicitWidth: 72
-    implicitHeight: 60
+    implicitWidth: 76
+    implicitHeight: 78
 
     RectangularShadow {
         anchors.fill: surface
@@ -30,22 +30,12 @@ Item {
         id: surface
         anchors.fill: parent
         radius: Theme.roundingLg
-        scale: area.pressed ? 0.97 : 1.0
+        scale: area.pressed ? 0.96 : 1.0
         gradient: Gradient {
-            GradientStop {
-                position: 0.0
-                color: root.active
-                    ? Theme.mix(Theme.accentSoft, Qt.rgba(1, 1, 1, 1), area.containsMouse ? 0.06 : 0.14)
-                    : (area.containsMouse ? Theme.layer2Hover : Theme.layer1Hover)
-            }
-            GradientStop {
-                position: 1.0
-                color: root.active
-                    ? Theme.mix(Theme.accentSoft, Qt.rgba(0, 0, 0, 1), area.containsMouse ? 0.1 : 0)
-                    : (area.containsMouse ? Theme.layer2 : Theme.layer1)
-            }
+            GradientStop { position: 0.0; color: area.containsMouse ? Theme.layer2Hover : Theme.layer1Hover }
+            GradientStop { position: 1.0; color: area.containsMouse ? Theme.layer2 : Theme.layer1 }
         }
-        border.width: root.active ? 0 : 1
+        border.width: 1
         border.color: Theme.borderIdle
 
         Behavior on scale {
@@ -63,13 +53,27 @@ Item {
 
     Column {
         anchors.centerIn: surface
-        spacing: 4
-        Text {
+        spacing: 6
+
+        Rectangle {
+            id: badge
             anchors.horizontalCenter: parent.horizontalCenter
-            text: root.glyph
-            font.family: Theme.fontFamily
-            font.pixelSize: 19
-            color: root.active ? Theme.textActive : Theme.text
+            width: 30
+            height: 30
+            radius: Theme.roundingFull
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: root.active ? Theme.mix(Theme.accent, Qt.rgba(1, 1, 1, 1), 0.2) : Theme.layer2 }
+                GradientStop { position: 1.0; color: root.active ? Theme.accent : Theme.layer1 }
+            }
+            Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+
+            Text {
+                anchors.centerIn: parent
+                text: root.glyph
+                font.family: Theme.fontFamily
+                font.pixelSize: 15
+                color: root.active ? Theme.textActive : Theme.text
+            }
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter

@@ -180,17 +180,42 @@ PanelWindow {
             width: parent.width
             spacing: 0
 
-            Row {
+            Item {
                 id: header
                 width: parent.width
-                height: 40
-                Text {
-                    text: "Quick Settings"
-                    color: Theme.textActive
-                    font.family: Theme.fontFamily
-                    font.weight: Font.DemiBold
-                    anchors.verticalCenter: parent.verticalCenter
+                height: 64
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.roundingXl
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: Theme.headerWash }
+                        GradientStop { position: 1.0; color: Qt.rgba(Theme.headerWash.r, Theme.headerWash.g, Theme.headerWash.b, 0) }
+                    }
+                }
+
+                Column {
                     x: Theme.padLg
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 2
+                    Text {
+                        text: "Quick Settings"
+                        color: Theme.textActive
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 17
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        id: headerClock
+                        color: Theme.text
+                        opacity: 0.7
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 12
+                    }
+                }
+                Timer {
+                    interval: 1000; running: true; repeat: true; triggeredOnStart: true
+                    onTriggered: headerClock.text = Qt.formatDateTime(new Date(), "dddd, h:mm AP")
                 }
                 IconButton {
                     glyph: "✕"
@@ -273,7 +298,9 @@ PanelWindow {
                         }
                     }
 
-                    // -- volume --
+                    // -- audio & display: one card, not three, for output
+                    // volume / mic / brightness -- three closely related
+                    // sliders don't each need their own floating box.
                     Card {
                         width: parent.width
                         Row {
@@ -306,19 +333,14 @@ PanelWindow {
                                 onChanged: (v) => { if (root.source && root.source.audio) root.source.audio.volume = v / 100; }
                             }
                         }
-                    }
-
-                    // -- brightness (only if a backlight actually exists) --
-                    Card {
-                        width: parent.width
-                        visible: brightnessBackend.hasBacklight
-                        height: visible ? implicitHeight : 0
                         Row {
                             width: parent.width
                             spacing: Theme.padSm
-                            Text { text: "☀"; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                            visible: brightnessBackend.hasBacklight
+                            height: visible ? implicitHeight : 0
+                            Text { text: "☀"; color: Theme.text; anchors.verticalCenter: parent.verticalCenter; width: 30; horizontalAlignment: Text.AlignHCenter }
                             SliderRow {
-                                width: parent.width - 30
+                                width: parent.width - 76
                                 from: 1; to: 100
                                 value: brightnessBackend.percent
                                 onChanged: (v) => brightnessBackend.set(v)
@@ -449,7 +471,9 @@ PanelWindow {
                         }
                     }
 
-                    // -- screenshots --
+                    // -- actions: screenshots + power, one card -- these
+                    // are all one-tap utility actions, they read better as
+                    // one grouped strip than two separate boxes.
                     Card {
                         width: parent.width
                         Row {
@@ -468,17 +492,12 @@ PanelWindow {
                                 onClicked: root.takeScreenshot(false)
                             }
                         }
-                    }
-
-                    // -- power row --
-                    Card {
-                        width: parent.width
                         Row {
                             width: parent.width
                             spacing: Theme.padSm
                             IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; onClicked: Quickshell.execDetached(["hyprlock"]) }
-                            IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; destructive: true; onClicked: Quickshell.execDetached(["hyprctl", "dispatch", "exit"]) }
-                            IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; destructive: true; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }
+                            IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; tint: Theme.warnTint; onClicked: Quickshell.execDetached(["hyprctl", "dispatch", "exit"]) }
+                            IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; tint: Theme.infoTint; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }
                             IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; destructive: true; onClicked: Quickshell.execDetached(["systemctl", "poweroff"]) }
                         }
                     }

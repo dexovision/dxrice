@@ -108,6 +108,18 @@ QtObject {
     readonly property color textActive: root._color(textActiveHex, 1.0)
     readonly property color scrim: Qt.rgba(0, 0, 0, 0.32)
 
+    // A muted, informational blue/amber/red used only for icon badges that
+    // need to read as distinct actions at rest (reboot vs. sign out vs.
+    // power off) without leaning on the user's own accent color for
+    // everything -- a single accent used for every single highlight is
+    // itself part of what reads as "flat" rather than "designed."
+    readonly property color infoTint: Qt.rgba(0.45, 0.62, 0.98, 1)
+    readonly property color warnTint: Qt.rgba(0.98, 0.68, 0.35, 1)
+    readonly property color dangerTint: Qt.rgba(0.95, 0.4, 0.42, 1)
+
+    function tintBg(tint, hovered) { return root.mix(layer1, tint, hovered ? 0.32 : 0.16); }
+    function tintBorder(tint, hovered) { return Qt.rgba(tint.r, tint.g, tint.b, hovered ? 0.55 : 0.28); }
+
     // ---- layered surfaces: each layer reads as a step "closer to the
     // viewer" than the one under it, exactly like a real card stack rather
     // than everything sharing one flat tone. panel < layer1 (cards) <
@@ -145,7 +157,7 @@ QtObject {
     readonly property real roundingSm: Math.max(4, Math.round(radius * 0.6))
     readonly property real roundingMd: Math.round(radius * 0.85)
     readonly property real roundingLg: Math.round(radius * 1.3)
-    readonly property real roundingXl: Math.round(radius * 1.7)
+    readonly property real roundingXl: Math.round(radius * 1.9)
     readonly property real roundingFull: 9999
     // Old name kept as an alias (small elements: chips, entries, inner rows).
     readonly property real entryRadius: roundingSm
@@ -183,6 +195,12 @@ QtObject {
     // active/primary element look "lit up" rather than just outlined --
     // used behind the active state of pill toggles and primary buttons.
     readonly property color accentGlow: Qt.rgba(accent.r, accent.g, accent.b, 0.4 * shadowIntensity)
+
+    // A faint accent-tinted wash behind a panel's header is most of what
+    // separates "a settings dialog" from "a designed panel" in the rices
+    // this is chasing -- one soft color note at the top that fades to
+    // nothing, rather than every pixel being the same flat surface tone.
+    readonly property color headerWash: Qt.rgba(accent.r, accent.g, accent.b, 0.22)
 
     readonly property string fontFamily: root._str("font_family", "sans-serif")
     readonly property string wallpaper: root._str("wallpaper", "")
