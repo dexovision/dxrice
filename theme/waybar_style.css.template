@@ -21,75 +21,89 @@ window#waybar {
     margin: 0 4px;
 }
 
-/* Strip native GTK button rendering engine styles */
+/* Strip native GTK button rendering engine styles. Idle state is
+   deliberately bare -- no fill, no border -- so a row of icons reads as
+   quiet chrome and not a strip of boxes; a hover/active state is what
+   earns any color at all. */
 #hyprland-workspaces button,
 #workspaces button,
 button {
     background-image: none;
-    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    background-color: transparent;
     color: ${TEXT_COLOR};
     padding: 4px 12px;
-    margin: 2px 2px;
+    margin: 3px 2px;
     border-radius: ${RADIUS}px;
-    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
     box-shadow: none;
     text-shadow: none;
-    transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1), min-width 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-/* Base style for modules matching taskbar/clock */
+/* Clock and app-shortcut icons stay text-only at rest too -- no
+   permanently-visible pill behind every single module. */
 #clock,
-#tray,
-#image,
 .modules-left widget > * {
-    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    background-color: transparent;
     background-image: none;
     color: ${TEXT_COLOR};
     padding: 4px 12px;
-    margin: 2px 2px;
+    margin: 3px 2px;
     border-radius: ${RADIUS}px;
-    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
-    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+#clock {
+    font-weight: 600;
+    color: ${TEXT_ACTIVE_COLOR};
+}
+
+/* The system tray is the one left-hand exception: a handful of unrelated
+   app icons genuinely read better grouped in one quiet pill than loose. */
+#tray {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    padding: 2px 10px;
+    margin: 3px 2px;
+    border-radius: ${RADIUS}px;
+    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Custom-image shortcuts ("pfps"): square avatar clipped to the same
    corner radius as everything else, sized to match icon shortcuts. */
 #image {
     padding: 2px;
+    background: transparent;
 }
 
 /* Quick Settings cluster: volume/wifi/cpu/ram grouped into one pill
    instead of four separate floating chips, clicking any segment opens
-   the dxrice_quick_settings.py panel. */
+   the Quick Settings panel. This is the one continuously-visible pill on
+   the whole bar, which is exactly why it's allowed a background -- it's a
+   single grouped control, not four things pretending to be one. */
 #quicksettings {
     background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
-    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_IDLE});
-    border-radius: ${RADIUS}px;
-    margin: 2px 2px;
-    padding: 0 2px;
-    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+    border-radius: 999px;
+    margin: 3px 2px;
+    padding: 0 4px;
+    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 #quicksettings widget > * {
     background: none;
-    border: none;
     color: ${TEXT_COLOR};
-    padding: 4px 10px;
-    margin: 2px 0;
-    transition: background-color 120ms ease-out, color 120ms ease-out;
+    padding: 4px 11px;
+    margin: 3px 0;
+    border-radius: 999px;
+    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 #quicksettings widget > *:hover {
-    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.15);
-    border-radius: ${ENTRY_RADIUS}px;
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.22);
     color: ${TEXT_ACTIVE_COLOR};
 }
 
-#quicksettings:hover {
-    border-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE});
-}
-
-/* Force active/focused GTK button states to stay dark */
+/* Active/focused workspace: a solid accent pill, the one saturated color
+   note on the whole bar -- everything else stays monochrome so this
+   actually reads as "the thing that's on" instead of blending in. */
 #hyprland-workspaces button.active,
 #hyprland-workspaces button.focused,
 #hyprland-workspaces button:checked,
@@ -99,19 +113,19 @@ button {
 button:checked,
 button.active {
     background-image: none;
-    background-color: rgba(${ACTIVE_R}, ${ACTIVE_G}, ${ACTIVE_B}, ${OPACITY_ACTIVE});
+    background-color: rgba(${ACCENT_R}, ${ACCENT_G}, ${ACCENT_B}, 0.85);
     color: ${TEXT_ACTIVE_COLOR};
-    border: 1px solid rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, ${BORDER_OPACITY_ACTIVE});
     box-shadow: none;
     text-shadow: none;
 }
 
-/* Hover effect */
+/* Hover effect -- a soft neutral fill, no border, on anything not already
+   using the accent for its active state. */
 #hyprland-workspaces button:hover,
 #workspaces button:hover,
 .modules-left widget > *:hover {
     background-image: none;
-    background-color: rgba(${BORDER_R}, ${BORDER_G}, ${BORDER_B}, 0.12);
+    background-color: rgba(${TEXT_ACTIVE_R}, ${TEXT_ACTIVE_G}, ${TEXT_ACTIVE_B}, 0.08);
     color: ${TEXT_ACTIVE_COLOR};
 }
 
