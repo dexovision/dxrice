@@ -35,6 +35,7 @@ Rectangle {
         anchors.centerIn: parent
         text: root.glyph
         color: (area.containsMouse && root.destructive) ? Theme.textActive : Theme.text
+        font.family: Theme.fontFamily
         font.pixelSize: root.size * 0.45
     }
 

@@ -267,9 +267,9 @@ PanelWindow {
                                     width: parent.width
                                 }
                             }
-                            IconButton { glyph: ""; size: 34; onClicked: mediaBackend.previous() }
-                            IconButton { glyph: mediaBackend.playing ? "" : ""; size: 34; onClicked: mediaBackend.playPause() }
-                            IconButton { glyph: ""; size: 34; onClicked: mediaBackend.next() }
+                            IconButton { glyph: ""; size: 34; onClicked: mediaBackend.previous() }
+                            IconButton { glyph: mediaBackend.playing ? "" : ""; size: 34; onClicked: mediaBackend.playPause() }
+                            IconButton { glyph: ""; size: 34; onClicked: mediaBackend.next() }
                         }
                     }
 
@@ -329,7 +329,7 @@ PanelWindow {
                     // -- wifi networks --
                     Card {
                         width: parent.width
-                        visible: root.wifiEnabled
+                        visible: root.wifiEnabled && wifiBackend.networks.length > 0
                         height: visible ? implicitHeight : 0
                         Repeater {
                             model: wifiBackend.networks
@@ -364,7 +364,7 @@ PanelWindow {
                     // -- bluetooth devices --
                     Card {
                         width: parent.width
-                        visible: root.bluetoothEnabled
+                        visible: root.bluetoothEnabled && btBackend.devices.length > 0
                         height: visible ? implicitHeight : 0
                         Repeater {
                             model: btBackend.devices
@@ -418,7 +418,7 @@ PanelWindow {
                                 font.weight: Font.DemiBold
                                 width: parent.width - 34
                             }
-                            IconButton { glyph: ""; size: 30; onClicked: clipboardBackend.refresh() }
+                            IconButton { glyph: "\uf021"; size: 30; onClicked: clipboardBackend.refresh() }
                         }
                         Repeater {
                             model: clipboardBackend.entries

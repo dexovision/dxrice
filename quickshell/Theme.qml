@@ -119,8 +119,17 @@ QtObject {
     readonly property color layer2: root.mix(layer1, textActive, 0.05)
     readonly property color layer2Hover: root.mix(layer1, textActive, 0.12)
     readonly property color layer2Active: root.mix(layer1, textActive, 0.18)
-    readonly property color border: root._color(glassBorderHex, borderOpacityActive)
-    readonly property color borderIdle: root._color(glassBorderHex, borderOpacityIdle)
+    // Raw glass_border can be any hue/opacity the user picks (including a
+    // fully-opaque, fully-saturated one) -- rendered as-is on every nested
+    // card, row, and chip that used to reach for it, that reads as a
+    // wireframe of colored outlines rather than glass. Real glass edges are
+    // a whisper: mostly neutral (blended toward the foreground color, not
+    // the raw hue) and capped well under full strength no matter how high
+    // the opacity sliders are turned up. The sliders still matter -- they
+    // move you across this capped range -- they just can't leave it.
+    readonly property color borderTint: root.mix(root._color(glassBorderHex, 1.0), textActive, 0.6)
+    readonly property color border: Qt.rgba(borderTint.r, borderTint.g, borderTint.b, Math.min(borderOpacityActive, 0.4))
+    readonly property color borderIdle: Qt.rgba(borderTint.r, borderTint.g, borderTint.b, Math.min(borderOpacityIdle, 0.12))
 
     // Old flat names kept as aliases so existing call sites keep working;
     // new code should reach for the layer* tokens above instead.
@@ -170,6 +179,10 @@ QtObject {
     readonly property color shadowColor: Qt.rgba(0, 0, 0, 0.45 * shadowIntensity)
     readonly property real shadowBlurSm: 16 * shadowIntensity
     readonly property real shadowBlurLg: 32 * shadowIntensity
+    // A soft, accent-tinted glow (not a plain black shadow) is what makes an
+    // active/primary element look "lit up" rather than just outlined --
+    // used behind the active state of pill toggles and primary buttons.
+    readonly property color accentGlow: Qt.rgba(accent.r, accent.g, accent.b, 0.4 * shadowIntensity)
 
     readonly property string fontFamily: root._str("font_family", "sans-serif")
     readonly property string wallpaper: root._str("wallpaper", "")
