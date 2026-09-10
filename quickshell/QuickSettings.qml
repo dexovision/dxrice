@@ -185,15 +185,6 @@ PanelWindow {
                 width: parent.width
                 height: 64
 
-                Rectangle {
-                    anchors.fill: parent
-                    radius: Theme.roundingXl
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.headerWash }
-                        GradientStop { position: 1.0; color: Qt.rgba(Theme.headerWash.r, Theme.headerWash.g, Theme.headerWash.b, 0) }
-                    }
-                }
-
                 Column {
                     x: Theme.padLg
                     anchors.verticalCenter: parent.verticalCenter
@@ -496,8 +487,8 @@ PanelWindow {
                             width: parent.width
                             spacing: Theme.padSm
                             IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; onClicked: Quickshell.execDetached(["hyprlock"]) }
-                            IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; tint: Theme.warnTint; onClicked: Quickshell.execDetached(["hyprctl", "dispatch", "exit"]) }
-                            IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; tint: Theme.infoTint; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }
+                            IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; onClicked: Quickshell.execDetached(["hyprctl", "dispatch", "exit"]) }
+                            IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }
                             IconButton { glyph: ""; size: (parent.width - parent.spacing * 3) / 4; destructive: true; onClicked: Quickshell.execDetached(["systemctl", "poweroff"]) }
                         }
                     }

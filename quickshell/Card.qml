@@ -1,11 +1,11 @@
 import QtQuick
 import QtQuick.Effects
 
-// A rounded glass panel with real elevation (a soft drop shadow, not just
-// a border) -- this + the bigger rounding scale is most of what was
-// missing to stop this looking like a flat settings dialog. Content goes
-// in `contentItem`'s implicit children (this is a Column by default so
-// rows just stack).
+// A rounded, borderless surface with a soft, barely-there drop shadow for
+// separation -- end-4/caelestia-style cards are flat fills at a slightly
+// different tone than the panel behind them, not bordered boxes. Content
+// goes in `contentItem`'s implicit children (this is a Column by default
+// so rows just stack).
 //
 // Root is a plain Item, not a Rectangle: the shadow has to be a true
 // sibling painted *before* the visible surface, not a child nested inside
@@ -17,12 +17,11 @@ Item {
     default property alias data: column.data
     property alias spacing: column.spacing
     // Set true while a drag-and-drop reorder is hovering over this card
-    // (see TaskbarManager.qml's DropArea) for a dashed accent highlight.
+    // (see TaskbarManager.qml's DropArea) for an accent-colored edge.
     property bool highlighted: false
 
     property alias color: surface.color
     property alias radius: surface.radius
-    property alias border: surface.border
 
     implicitWidth: column.implicitWidth + Theme.padLg * 2
     implicitHeight: column.implicitHeight + Theme.padLg * 2
@@ -32,23 +31,16 @@ Item {
         radius: surface.radius
         color: Theme.shadowColor
         blur: Theme.shadowBlurSm
-        offset.y: 2
+        offset.y: 1
     }
 
     Rectangle {
         id: surface
         anchors.fill: parent
         radius: Theme.roundingMd
-        border.width: root.highlighted ? 2 : 1
-        border.color: root.highlighted ? Theme.accent : Theme.borderIdle
-
-        // A two-stop gradient instead of one flat tone -- a card that's
-        // subtly lighter at the top than the bottom reads as a physical,
-        // lit surface rather than a solid-fill rectangle with a border.
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.mix(Theme.layer1, Theme.textActive, 0.035) }
-            GradientStop { position: 1.0; color: Theme.layer1 }
-        }
+        color: Theme.layer1
+        border.width: root.highlighted ? 2 : 0
+        border.color: Theme.accent
 
         Behavior on border.color {
             ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }

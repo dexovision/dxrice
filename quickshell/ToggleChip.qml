@@ -1,12 +1,13 @@
 import QtQuick
-import QtQuick.Effects
 
-// Compact icon-badge-over-label toggle -- GNOME/mango-quick-settings style
-// (Wi-Fi, Bluetooth, DND, Keep Awake). `active` is a plain external
-// property this binds to; the caller owns the actual on/off state and
-// reacts to `toggled(next)`, matching the rest of this rice's "backend
-// owns state, widget just reflects and requests changes" pattern.
-Item {
+// Compact icon+label toggle (Wi-Fi, Bluetooth, DND, Keep Awake). Flat fill,
+// no border, no glow -- end-4/caelestia-style panels stay monochrome and
+// quiet at rest, and use color only for the one thing that's actually on.
+// `active` is a plain external property this binds to; the caller owns the
+// actual on/off state and reacts to `toggled(next)`, matching the rest of
+// this rice's "backend owns state, widget just reflects and requests
+// changes" pattern.
+Rectangle {
     id: root
     property string glyph: ""
     property string label: ""
@@ -14,66 +15,30 @@ Item {
     signal toggled(bool next)
 
     implicitWidth: 76
-    implicitHeight: 78
-
-    RectangularShadow {
-        anchors.fill: surface
-        radius: surface.radius
-        color: Theme.accentGlow
-        blur: Theme.shadowBlurSm
-        spread: 1
-        opacity: root.active ? 0.6 : 0
-        Behavior on opacity { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+    implicitHeight: 72
+    radius: Theme.roundingLg
+    scale: area.pressed ? 0.97 : 1.0
+    color: {
+        if (root.active) return area.containsMouse ? Theme.mix(Theme.accent, Qt.rgba(0, 0, 0, 1), 0.08) : Theme.accent;
+        return area.containsMouse ? Theme.layer2Hover : Theme.layer1;
     }
 
-    Rectangle {
-        id: surface
-        anchors.fill: parent
-        radius: Theme.roundingLg
-        scale: area.pressed ? 0.96 : 1.0
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: area.containsMouse ? Theme.layer2Hover : Theme.layer1Hover }
-            GradientStop { position: 1.0; color: area.containsMouse ? Theme.layer2 : Theme.layer1 }
-        }
-        border.width: 1
-        border.color: Theme.borderIdle
-
-        Behavior on scale {
-            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
-        }
-
-        MouseArea {
-            id: area
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.toggled(!root.active)
-        }
+    Behavior on color {
+        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+    }
+    Behavior on scale {
+        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
     }
 
     Column {
-        anchors.centerIn: surface
+        anchors.centerIn: parent
         spacing: 6
-
-        Rectangle {
-            id: badge
+        Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            width: 30
-            height: 30
-            radius: Theme.roundingFull
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: root.active ? Theme.mix(Theme.accent, Qt.rgba(1, 1, 1, 1), 0.2) : Theme.layer2 }
-                GradientStop { position: 1.0; color: root.active ? Theme.accent : Theme.layer1 }
-            }
-            Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
-
-            Text {
-                anchors.centerIn: parent
-                text: root.glyph
-                font.family: Theme.fontFamily
-                font.pixelSize: 15
-                color: root.active ? Theme.textActive : Theme.text
-            }
+            text: root.glyph
+            font.family: Theme.fontFamily
+            font.pixelSize: 17
+            color: root.active ? Theme.textActive : Theme.text
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -83,5 +48,13 @@ Item {
             font.weight: Font.Medium
             color: root.active ? Theme.textActive : Theme.text
         }
+    }
+
+    MouseArea {
+        id: area
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.toggled(!root.active)
     }
 }

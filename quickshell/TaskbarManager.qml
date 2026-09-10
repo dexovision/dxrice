@@ -299,15 +299,6 @@ FloatingWindow {
                 width: parent.width
                 height: 56
 
-                Rectangle {
-                    anchors.fill: parent
-                    radius: Theme.roundingXl
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.headerWash }
-                        GradientStop { position: 1.0; color: Qt.rgba(Theme.headerWash.r, Theme.headerWash.g, Theme.headerWash.b, 0) }
-                    }
-                }
-
                 Text {
                     text: "Taskbar"
                     color: Theme.textActive

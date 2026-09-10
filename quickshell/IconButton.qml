@@ -7,10 +7,11 @@ import QtQuick
 // square -- reads as a distinct "chip" you tap, not a leftover corner of a
 // bigger shape.
 //
-// `tint`, when set, colors the badge at rest (not just on hover) -- a row
-// of otherwise-identical gray circles (lock/logout/reboot/power off) reads
-// as flat and same-y; a quiet color note per action reads as designed.
-// `destructive` is kept as a shorthand for `tint: Theme.dangerTint`.
+// Monochrome and borderless at rest -- reference shells (end-4, caelestia)
+// keep every icon the same quiet tone until you actually interact with it.
+// `tint`/`destructive`, when set, only show up once hovered or pressed (a
+// warning color that appears right as you're about to commit to the
+// action, not a permanently colored badge).
 Rectangle {
     id: root
     property string glyph: ""
@@ -20,19 +21,18 @@ Rectangle {
     signal clicked()
 
     readonly property var effectiveTint: tint !== null ? tint : (destructive ? Theme.dangerTint : null)
+    readonly property bool interacting: area.containsMouse || area.pressed
 
     implicitWidth: size
     implicitHeight: size
     radius: Theme.roundingFull
     scale: area.pressed ? 0.92 : 1.0
     color: {
-        if (root.effectiveTint !== null) return Theme.tintBg(root.effectiveTint, area.containsMouse || area.pressed);
+        if (root.effectiveTint !== null) return Theme.tintBg(root.effectiveTint, root.interacting);
         if (area.pressed) return Theme.layer2Active;
         if (area.containsMouse) return Theme.layer2Hover;
         return Theme.layer1;
     }
-    border.width: 1
-    border.color: root.effectiveTint !== null ? Theme.tintBorder(root.effectiveTint, area.containsMouse) : Theme.borderIdle
 
     Behavior on color {
         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
@@ -44,7 +44,7 @@ Rectangle {
     Text {
         anchors.centerIn: parent
         text: root.glyph
-        color: root.effectiveTint !== null ? Theme.mix(Theme.textActive, root.effectiveTint, 0.35) : Theme.text
+        color: (root.effectiveTint !== null && root.interacting) ? Theme.mix(Theme.textActive, root.effectiveTint, 0.4) : Theme.text
         font.family: Theme.fontFamily
         font.pixelSize: root.size * 0.45
     }

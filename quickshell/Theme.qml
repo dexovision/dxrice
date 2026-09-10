@@ -108,17 +108,13 @@ QtObject {
     readonly property color textActive: root._color(textActiveHex, 1.0)
     readonly property color scrim: Qt.rgba(0, 0, 0, 0.32)
 
-    // A muted, informational blue/amber/red used only for icon badges that
-    // need to read as distinct actions at rest (reboot vs. sign out vs.
-    // power off) without leaning on the user's own accent color for
-    // everything -- a single accent used for every single highlight is
-    // itself part of what reads as "flat" rather than "designed."
-    readonly property color infoTint: Qt.rgba(0.45, 0.62, 0.98, 1)
-    readonly property color warnTint: Qt.rgba(0.98, 0.68, 0.35, 1)
+    // Real end-4/caelestia panels stay monochrome at rest and reveal color
+    // only on interaction (hover/press) -- a row of icons that are all
+    // pre-tinted different colors reads busier, not more designed. This is
+    // used only for the one genuinely destructive action (power off).
     readonly property color dangerTint: Qt.rgba(0.95, 0.4, 0.42, 1)
-
-    function tintBg(tint, hovered) { return root.mix(layer1, tint, hovered ? 0.32 : 0.16); }
-    function tintBorder(tint, hovered) { return Qt.rgba(tint.r, tint.g, tint.b, hovered ? 0.55 : 0.28); }
+    function tintBg(tint, hovered) { return hovered ? root.mix(layer1, tint, 0.28) : layer1; }
+    function tintBorder(tint, hovered) { return hovered ? Qt.rgba(tint.r, tint.g, tint.b, 0.5) : borderIdle; }
 
     // ---- layered surfaces: each layer reads as a step "closer to the
     // viewer" than the one under it, exactly like a real card stack rather
@@ -140,8 +136,8 @@ QtObject {
     // the opacity sliders are turned up. The sliders still matter -- they
     // move you across this capped range -- they just can't leave it.
     readonly property color borderTint: root.mix(root._color(glassBorderHex, 1.0), textActive, 0.6)
-    readonly property color border: Qt.rgba(borderTint.r, borderTint.g, borderTint.b, Math.min(borderOpacityActive, 0.4))
-    readonly property color borderIdle: Qt.rgba(borderTint.r, borderTint.g, borderTint.b, Math.min(borderOpacityIdle, 0.12))
+    readonly property color border: Qt.rgba(borderTint.r, borderTint.g, borderTint.b, Math.min(borderOpacityActive, 0.22))
+    readonly property color borderIdle: Qt.rgba(borderTint.r, borderTint.g, borderTint.b, Math.min(borderOpacityIdle, 0.06))
 
     // Old flat names kept as aliases so existing call sites keep working;
     // new code should reach for the layer* tokens above instead.
@@ -155,19 +151,19 @@ QtObject {
     readonly property real radius: root._num("radius", 12)
     readonly property real roundingXs: Math.max(2, Math.round(radius * 0.35))
     readonly property real roundingSm: Math.max(4, Math.round(radius * 0.6))
-    readonly property real roundingMd: Math.round(radius * 0.85)
-    readonly property real roundingLg: Math.round(radius * 1.3)
-    readonly property real roundingXl: Math.round(radius * 1.9)
+    readonly property real roundingMd: Math.round(radius * 1.0)
+    readonly property real roundingLg: Math.round(radius * 1.5)
+    readonly property real roundingXl: Math.round(radius * 2.4)
     readonly property real roundingFull: 9999
     // Old name kept as an alias (small elements: chips, entries, inner rows).
     readonly property real entryRadius: roundingSm
 
     readonly property real density: root._num("ui_density", 1.0)
-    readonly property real padXs: Math.round(2 * density)
-    readonly property real padSm: Math.round(6 * density)
-    readonly property real padMd: Math.round(10 * density)
-    readonly property real padLg: Math.round(16 * density)
-    readonly property real padXl: Math.round(22 * density)
+    readonly property real padXs: Math.round(3 * density)
+    readonly property real padSm: Math.round(8 * density)
+    readonly property real padMd: Math.round(13 * density)
+    readonly property real padLg: Math.round(20 * density)
+    readonly property real padXl: Math.round(28 * density)
 
     // ---- motion: Material 3 Expressive-style overshoot curves instead of
     // flat ease-out, so a reveal/settle genuinely feels alive rather than
@@ -186,21 +182,13 @@ QtObject {
 
     // ---- elevation: a real drop shadow (QtQuick.Effects.RectangularShadow)
     // is what actually reads as "a floating card" instead of "a flat
-    // rectangle with a border" -- see Card.qml and each panel's root. ----
+    // rectangle with a border" -- see Card.qml and each panel's root.
+    // Reference shells (end-4, caelestia) keep this barely-there: a soft,
+    // low-opacity lift, not a glow or a hard drop shadow. ----
     readonly property real shadowIntensity: root._num("shadow_intensity", 1.0)
-    readonly property color shadowColor: Qt.rgba(0, 0, 0, 0.45 * shadowIntensity)
-    readonly property real shadowBlurSm: 16 * shadowIntensity
-    readonly property real shadowBlurLg: 32 * shadowIntensity
-    // A soft, accent-tinted glow (not a plain black shadow) is what makes an
-    // active/primary element look "lit up" rather than just outlined --
-    // used behind the active state of pill toggles and primary buttons.
-    readonly property color accentGlow: Qt.rgba(accent.r, accent.g, accent.b, 0.4 * shadowIntensity)
-
-    // A faint accent-tinted wash behind a panel's header is most of what
-    // separates "a settings dialog" from "a designed panel" in the rices
-    // this is chasing -- one soft color note at the top that fades to
-    // nothing, rather than every pixel being the same flat surface tone.
-    readonly property color headerWash: Qt.rgba(accent.r, accent.g, accent.b, 0.22)
+    readonly property color shadowColor: Qt.rgba(0, 0, 0, 0.28 * shadowIntensity)
+    readonly property real shadowBlurSm: 22 * shadowIntensity
+    readonly property real shadowBlurLg: 44 * shadowIntensity
 
     readonly property string fontFamily: root._str("font_family", "sans-serif")
     readonly property string wallpaper: root._str("wallpaper", "")
