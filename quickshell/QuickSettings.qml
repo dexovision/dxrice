@@ -6,9 +6,16 @@ import Quickshell.Wayland
 import Quickshell.Services.Pipewire
 
 // DXrice Quick Settings -- Quickshell rewrite of dxrice_quick_settings.py.
-// Docks under the top-right corner of the bar as a real wlr-layer-shell
-// panel (same anchor/margin geometry the GTK version used), toggled via
+// Docks flush under the top-right corner of the bar (waybar is 44px tall
+// with an 8px top margin -- see ~/.config/waybar/config -- so 52px is its
+// bottom edge) as a real wlr-layer-shell panel, toggled via
 // `qs -p <repo>/quickshell/shell.qml ipc call quicksettings toggle`.
+//
+// Deliberately zero gap and square top corners (only the bottom is
+// rounded, plus a WavyTopRect seam) so this reads as a drawer hanging off
+// the bar rather than a separate floating card -- the actual end-4/
+// caelestia pattern, ported from caelestia-dots/shell's own
+// modules/drawers/Panels.qml + components/widgets/WavyTopRect.qml.
 PanelWindow {
     id: root
     signal closeRequested()
@@ -16,7 +23,7 @@ PanelWindow {
     implicitWidth: 390
     color: "transparent"
     anchors { top: true; right: true }
-    margins { top: 60; right: 14 }
+    margins { top: 52; right: 14 }
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "dxrice-quicksettings"
@@ -150,30 +157,53 @@ PanelWindow {
         }
     }
 
-    // ---- root visuals ----
-    RectangularShadow {
-        anchors.fill: panelSurface
-        radius: panelSurface.radius
-        color: Theme.shadowColor
-        blur: Theme.shadowBlurLg
-        offset.y: 4
-        opacity: panelSurface.opacity
-    }
-
-    Rectangle {
-        id: panelSurface
+    // ---- root visuals: a drawer that unrolls DOWN from the bar, not a
+    // card that pops in from its center -- the wavy strip is the seam that
+    // visually welds it to the bar sitting right above (see
+    // WavyTopRect.qml); only the bottom corners round off. ----
+    Item {
+        id: drawer
         anchors.fill: parent
-        radius: Theme.roundingXl
-        color: Theme.bg
-        border.width: 1
-        border.color: Theme.border
+        clip: true
 
-        opacity: 0
-        scale: 0.94
-        transformOrigin: Item.Top
-        Behavior on opacity { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Behavior on scale { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Component.onCompleted: { opacity = 1; scale = 1; }
+        property real revealHeight: 0
+        Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
+        Component.onCompleted: revealHeight = root.implicitHeight
+        Connections {
+            target: root
+            function onImplicitHeightChanged() { drawer.revealHeight = root.implicitHeight; }
+        }
+
+        RectangularShadow {
+            anchors.fill: panelSurface
+            radius: 0
+            bottomLeftRadius: Theme.roundingXl
+            bottomRightRadius: Theme.roundingXl
+            color: Theme.shadowColor
+            blur: Theme.shadowBlurLg
+            offset.y: 4
+        }
+
+        WavyTopRect {
+            id: wavyRect
+            anchors.top: parent.top
+            anchors.left: parent.left
+            width: parent.width
+            height: 7
+            color: Theme.bg
+        }
+
+        Rectangle {
+            id: panelSurface
+            anchors.top: wavyRect.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: Math.max(0, drawer.revealHeight - wavyRect.height)
+            radius: 0
+            bottomLeftRadius: Theme.roundingXl
+            bottomRightRadius: Theme.roundingXl
+            color: Theme.bg
+            clip: true
 
         Column {
             id: outer
@@ -494,6 +524,7 @@ PanelWindow {
                     }
                 }
             }
+        }
         }
     }
 
