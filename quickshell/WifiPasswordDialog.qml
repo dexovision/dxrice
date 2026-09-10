@@ -18,8 +18,9 @@ FloatingWindow {
         anchors.fill: pwSurface
         radius: pwSurface.radius
         color: Theme.shadowColor
-        blur: Theme.shadowBlurLg
-        offset.y: 4
+        blur: Theme.elevationBlur(3)
+        spread: Theme.elevationSpread(3)
+        offset.y: Theme.elevationOffsetY(3)
     }
 
     Rectangle {

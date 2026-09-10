@@ -30,8 +30,9 @@ Item {
         anchors.fill: surface
         radius: surface.radius
         color: Theme.shadowColor
-        blur: Theme.shadowBlurSm
-        offset.y: 1
+        blur: Theme.elevationBlur(1)
+        spread: Theme.elevationSpread(1)
+        offset.y: Theme.elevationOffsetY(1)
     }
 
     Rectangle {

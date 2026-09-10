@@ -145,25 +145,44 @@ QtObject {
     readonly property color bgIdle: layer1
     readonly property color active: layer2
 
-    // ---- rounding scale: proportional to your own radius setting, so
-    // turning that slider still scales everything, but nothing shares one
-    // flat radius the way a stock dialog would. ----
+    // ---- rounding scale: caelestia-dots/shell's own RoundingTokens are
+    // fixed absolute values (config/tokens.hpp: extraSmall 4, small 8,
+    // medium 12, large 16, extraLarge 28), not a single radius knob
+    // stretched by ratios -- a real type-scale, not an approximation of
+    // one. `radius` still works as a scale multiplier around that real
+    // scale (default 12 = exactly a 1.0x multiplier, so out of the box
+    // this matches their numbers exactly; turning the slider scales all
+    // five steps together rather than picking one flat value). ----
     readonly property real radius: root._num("radius", 12)
-    readonly property real roundingXs: Math.max(2, Math.round(radius * 0.35))
-    readonly property real roundingSm: Math.max(4, Math.round(radius * 0.6))
-    readonly property real roundingMd: Math.round(radius * 1.0)
-    readonly property real roundingLg: Math.round(radius * 1.5)
-    readonly property real roundingXl: Math.round(radius * 2.4)
+    readonly property real roundingScale: radius / 12
+    readonly property real roundingXs: Math.max(2, Math.round(4 * roundingScale))
+    readonly property real roundingSm: Math.round(8 * roundingScale)
+    readonly property real roundingMd: Math.round(12 * roundingScale)
+    readonly property real roundingLg: Math.round(16 * roundingScale)
+    readonly property real roundingXl: Math.round(28 * roundingScale)
     readonly property real roundingFull: 9999
     // Old name kept as an alias (small elements: chips, entries, inner rows).
     readonly property real entryRadius: roundingSm
 
+    // Same story for spacing/padding: caelestia's SpacingTokens/
+    // PaddingTokens are the identical fixed 4/8/12/16/28 scale as
+    // rounding, scaled here by ui_density the same way.
     readonly property real density: root._num("ui_density", 1.0)
-    readonly property real padXs: Math.round(3 * density)
+    readonly property real padXs: Math.round(4 * density)
     readonly property real padSm: Math.round(8 * density)
-    readonly property real padMd: Math.round(13 * density)
-    readonly property real padLg: Math.round(20 * density)
+    readonly property real padMd: Math.round(12 * density)
+    readonly property real padLg: Math.round(16 * density)
     readonly property real padXl: Math.round(28 * density)
+
+    // FontSizeTokens: small 11, normal 13, larger 15, large 18, extraLarge
+    // 28 -- a real type scale instead of picking pixel sizes ad hoc per
+    // Text element, which is most of what made spacing/hierarchy feel
+    // arbitrary rather than designed.
+    readonly property int fontSizeSmall: 11
+    readonly property int fontSizeNormal: 13
+    readonly property int fontSizeLarger: 15
+    readonly property int fontSizeLarge: 18
+    readonly property int fontSizeExtraLarge: 28
 
     // ---- motion: Material 3 Expressive-style overshoot curves instead of
     // flat ease-out, so a reveal/settle genuinely feels alive rather than
@@ -180,15 +199,34 @@ QtObject {
     readonly property int durationDefault: Math.round(animMs * 2.2)
     readonly property int durationEnter: Math.round(animMs * 2.8)
 
-    // ---- elevation: a real drop shadow (QtQuick.Effects.RectangularShadow)
-    // is what actually reads as "a floating card" instead of "a flat
-    // rectangle with a border" -- see Card.qml and each panel's root.
-    // Reference shells (end-4, caelestia) keep this barely-there: a soft,
-    // low-opacity lift, not a glow or a hard drop shadow. ----
+    // ---- elevation: ported directly from caelestia-dots/shell's own
+    // components/effects/Elevation.qml -- a real Material 3 discrete
+    // elevation scale (dp = [0, 1, 3, 6, 8, 12] for levels 0-5), not one
+    // flat blur radius reused everywhere. blur and (negative) spread are
+    // both derived from dp with the exact same formulas they use, which is
+    // why the result is a tight, soft lift rather than a big blurry glow --
+    // real shadows tuck in at the edges instead of spreading outward.
+    // Level 1 = a resting card, level 2-3 = a floating panel, use higher
+    // for anything that should read as "closer to the viewer." ----
     readonly property real shadowIntensity: root._num("shadow_intensity", 1.0)
-    readonly property color shadowColor: Qt.rgba(0, 0, 0, 0.28 * shadowIntensity)
-    readonly property real shadowBlurSm: 22 * shadowIntensity
-    readonly property real shadowBlurLg: 44 * shadowIntensity
+    readonly property var elevationDp: [0, 1, 3, 6, 8, 12]
+    function elevationBlur(level) {
+        const dp = elevationDp[level] * shadowIntensity;
+        return Math.pow(dp * 5, 0.7);
+    }
+    function elevationSpread(level) {
+        const dp = elevationDp[level] * shadowIntensity;
+        return -dp * 0.3 + Math.pow(dp * 0.1, 2);
+    }
+    function elevationOffsetY(level) {
+        return (elevationDp[level] * shadowIntensity) / 2;
+    }
+    // Shadows are tinted very slightly toward the border hue instead of
+    // flat black, matching caelestia's own Colours.palette.m3shadow role
+    // (a real generated color, not literal black) without needing this
+    // rice's own Material You palette generator.
+    readonly property color shadowColor: Qt.rgba(
+        borderTint.r * 0.4, borderTint.g * 0.4, borderTint.b * 0.4, 0.5)
 
     readonly property string fontFamily: root._str("font_family", "sans-serif")
     readonly property string wallpaper: root._str("wallpaper", "")

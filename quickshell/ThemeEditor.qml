@@ -367,8 +367,9 @@ PanelWindow {
             bottomLeftRadius: Theme.roundingXl
             bottomRightRadius: Theme.roundingXl
             color: Theme.shadowColor
-            blur: Theme.shadowBlurLg
-            offset.y: 4
+            blur: Theme.elevationBlur(3)
+            spread: Theme.elevationSpread(3)
+            offset.y: Theme.elevationOffsetY(3)
         }
 
         WavyTopRect {
@@ -406,7 +407,7 @@ PanelWindow {
                     color: Theme.textActive
                     font.family: Theme.fontFamily
                     font.weight: Font.DemiBold
-                    font.pixelSize: 17
+                    font.pixelSize: Theme.fontSizeLarge
                     anchors.verticalCenter: parent.verticalCenter
                     x: Theme.padLg
                 }

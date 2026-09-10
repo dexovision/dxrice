@@ -222,8 +222,9 @@ PanelWindow {
             bottomLeftRadius: Theme.roundingXl
             bottomRightRadius: Theme.roundingXl
             color: Theme.shadowColor
-            blur: Theme.shadowBlurLg
-            offset.y: 4
+            blur: Theme.elevationBlur(3)
+            spread: Theme.elevationSpread(3)
+            offset.y: Theme.elevationOffsetY(3)
         }
 
         WavyTopRect {
@@ -261,7 +262,7 @@ PanelWindow {
                         text: "Quick Settings"
                         color: Theme.textActive
                         font.family: Theme.fontFamily
-                        font.pixelSize: 16
+                        font.pixelSize: Theme.fontSizeLarge
                         font.weight: Font.DemiBold
                         anchors.verticalCenter: parent.verticalCenter
                         x: Theme.padLg
@@ -749,8 +750,9 @@ PanelWindow {
                     anchors.fill: art
                     radius: art.radius
                     color: Theme.shadowColor
-                    blur: Theme.shadowBlurSm
-                    offset.y: 2
+                    blur: Theme.elevationBlur(2)
+                    spread: Theme.elevationSpread(2)
+                    offset.y: Theme.elevationOffsetY(2)
                 }
                 Rectangle {
                     id: art
