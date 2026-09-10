@@ -148,6 +148,7 @@ PanelWindow {
         "Nord": { glass_bg: "2e3440", glass_bg_active: "3b4252", glass_text: "d8dee9", glass_text_active: "eceff4", glass_border: "88c0d0", accent: "bf616a", radius: 8, hypr_active_border_1: "88c0d0", hypr_active_border_2: "81a1c1", hypr_inactive_border: "3b4252" },
         "Dracula": { glass_bg: "282a36", glass_bg_active: "44475a", glass_text: "f8f8f2", glass_text_active: "ffffff", glass_border: "bd93f9", accent: "ff5555", radius: 10, hypr_active_border_1: "ff79c6", hypr_active_border_2: "bd93f9", hypr_inactive_border: "44475a" },
         "Sunset": { glass_bg: "1a1210", glass_bg_active: "3a2420", glass_text: "f0e0d6", glass_text_active: "ffffff", glass_border: "ffb385", accent: "ff6b4a", radius: 16, hypr_active_border_1: "ff7e5f", hypr_active_border_2: "feb47b", hypr_inactive_border: "2a1d18" },
+        "Monochrome": { glass_bg: "0a0a0a", glass_bg_active: "1c1c1c", glass_text: "cfcfcf", glass_text_active: "ffffff", glass_border: "ffffff", accent: "5a5a5a", radius: 12, hypr_active_border_1: "e8e8e8", hypr_active_border_2: "ffffff", hypr_inactive_border: "1a1a1a" },
     })
 
     // ---- sidebar categories ----

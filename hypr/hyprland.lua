@@ -107,6 +107,8 @@ hl.config({
 hl.layer_rule({ name = "waybar-blur", match = { namespace = "waybar" }, blur = true, ignore_alpha = 0.6 })
 hl.layer_rule({ name = "wofi-blur",   match = { namespace = "wofi" },   blur = true, ignore_alpha = 0.6 })
 hl.layer_rule({ name = "quicksettings-blur", match = { namespace = "dxrice-quicksettings" }, blur = true, ignore_alpha = 0.6 })
+hl.layer_rule({ name = "theme-blur", match = { namespace = "dxrice-theme" }, blur = true, ignore_alpha = 0.6 })
+hl.layer_rule({ name = "taskbar-blur", match = { namespace = "dxrice-taskbar" }, blur = true, ignore_alpha = 0.6 })
 
 hl.config({
     input = {
