@@ -603,26 +603,65 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            Text { text: "Presets"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-            Card {
+
+            Text { text: "Presets"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+            // -- presets communicate visually (an actual mini palette),
+            // not as a row of plain text-labeled buttons the user has to
+            // read one at a time. --
+            Flow {
                 width: parent.width
-                Row {
-                    width: parent.width
-                    spacing: Theme.padSm
-                    Repeater {
-                        model: Object.keys(root.presets)
-                        delegate: GlassButton {
-                            text: modelData
-                            variant: "secondary"
-                            onClicked: root.applyPreset(root.presets[modelData])
+                spacing: Theme.padSm
+                Repeater {
+                    model: Object.keys(root.presets)
+                    delegate: Rectangle {
+                        id: presetSwatch
+                        readonly property var colors: root.presets[modelData]
+                        width: 108
+                        height: 64
+                        radius: Theme.roundingSm
+                        color: presetArea.containsMouse ? Theme.layer1 : "transparent"
+                        border.width: 1
+                        border.color: Theme.borderIdle
+                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+
+                        Column {
+                            anchors.centerIn: parent
+                            spacing: Theme.padXs
+                            Row {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                spacing: 4
+                                Rectangle { width: 16; height: 16; radius: Theme.roundingXs; color: "#" + presetSwatch.colors.glass_bg }
+                                Rectangle { width: 16; height: 16; radius: Theme.roundingXs; color: "#" + presetSwatch.colors.glass_bg_active }
+                                Rectangle { width: 16; height: 16; radius: Theme.roundingFull; color: "#" + presetSwatch.colors.accent }
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
+                            }
+                        }
+                        MouseArea {
+                            id: presetArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.applyPreset(presetSwatch.colors)
                         }
                     }
                 }
             }
-            Text { text: "Glass Palette"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-            Card { width: parent.width; ColorList { fields: root.colorFields } }
-            Text { text: "Window Border Gradient"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-            Card { width: parent.width; ColorList { fields: root.borderColorFields } }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+
+            Text { text: "Glass Palette"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+            ColorList { width: parent.width; fields: root.colorFields }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+
+            Text { text: "Window Border Gradient"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+            ColorList { width: parent.width; fields: root.borderColorFields }
         }
     }
 

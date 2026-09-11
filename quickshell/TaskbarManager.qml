@@ -373,209 +373,279 @@ PanelWindow {
                     width: parent.width - Theme.padLg * 2
                     spacing: Theme.padMd
 
-                    Text { text: "Options"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                    Card {
+                    Text { text: "Options"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                    SettingRow {
                         width: parent.width
-                        SettingRow {
-                            width: parent.width
-                            title: "Show icons"
-                            subtitle: "Applies to shortcuts left on \"Automatic\""
-                            Switch { checked: root.iconsEnabled(); onToggled: (next) => root.setIconsEnabled(next) }
-                        }
-                        SettingRow {
-                            width: parent.width
-                            title: "Custom icon size"
-                            SliderRow {
-                                width: 160
-                                from: 16; to: 48; decimals: 0
-                                value: root.cfg["dxrice_icon_size"] || 24
-                                onChanged: (v) => root.setIconSize(Math.round(v))
-                            }
+                        title: "Show icons"
+                        subtitle: "Applies to shortcuts left on \"Automatic\""
+                        Switch { checked: root.iconsEnabled(); onToggled: (next) => root.setIconsEnabled(next) }
+                    }
+                    SettingRow {
+                        width: parent.width
+                        title: "Custom icon size"
+                        SliderRow {
+                            width: 160
+                            from: 16; to: 48; decimals: 0
+                            value: root.cfg["dxrice_icon_size"] || 24
+                            onChanged: (v) => root.setIconSize(Math.round(v))
                         }
                     }
 
-                    Text { text: "Taskbar Shortcuts"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                    Repeater {
-                        model: root.loaded ? (root.cfg["modules-left"] || []) : []
-                        delegate: Item {
-                            id: shortcutCardWrap
-                            width: body.width
-                            visible: !!root.cfg[modelData]
-                            height: visible ? shortcutCard.implicitHeight : 0
+                    Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
 
-                            // DropArea is a sibling of Card, not a child of it: Card
-                            // redirects its children into an internal Column (so plain
-                            // `Card { Row {...} }` nesting works elsewhere), and Column
-                            // rejects anchors.fill on its children outright.
-                            DropArea {
-                                anchors.fill: parent
-                                keys: ["dxrice-shortcut"]
-                                onEntered: shortcutCard.highlighted = true
-                                onExited: shortcutCard.highlighted = false
-                                onDropped: (drop) => {
-                                    shortcutCard.highlighted = false;
-                                    root.moveShortcutTo(drop.text, shortcutCard.modid);
-                                }
-                            }
+                    // -- shortcuts: a compact, icon-first reorderable list,
+                    // not a stack of admin-panel cards. Every row is quiet
+                    // at rest; the drag handle, reorder arrows, and delete
+                    // action only reveal on hover (or while a row is
+                    // expanded), and the pinned launcher shows a bare dot
+                    // instead of a colored "Pinned" badge. --
+                    Text { text: "Taskbar Shortcuts"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                    Column {
+                        width: body.width
+                        spacing: 0
+                        Repeater {
+                            model: root.loaded ? (root.cfg["modules-left"] || []) : []
+                            delegate: Column {
+                                id: shortcutRow
+                                width: body.width
+                                visible: !!root.cfg[modelData]
+                                spacing: 0
+                                property string modid: modelData
+                                property var meta: root.cfg[modid] || ({})
+                                property bool expanded: false
+                                property bool pinned: modid === root.launcherId
+                                property bool dropHighlighted: false
 
-                            Card {
-                            id: shortcutCard
-                            anchors.fill: parent
-                            property string modid: modelData
-                            property var meta: root.cfg[modid] || ({})
-                            property bool expanded: false
-                            property bool pinned: modid === root.launcherId
+                                Item {
+                                    id: rowVisual
+                                    width: parent.width
+                                    height: 44
 
-                            SettingRow {
-                                width: parent.width
-                                title: shortcutCard.meta.dxrice_label || shortcutCard.modid
-                                subtitle: shortcutCard.meta.dxrice_cmd || ""
-
-                                Rectangle {
-                                    visible: !shortcutCard.pinned
-                                    width: 20; height: 20
-                                    color: "transparent"
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "⠿"
-                                        color: Theme.text
-                                        opacity: dragHandleMouse.drag.active ? 1.0 : 0.5
-                                    }
-                                    Drag.active: dragHandleMouse.drag.active
-                                    Drag.keys: ["dxrice-shortcut"]
-                                    Drag.mimeData: { "text/plain": shortcutCard.modid }
-                                    MouseArea {
-                                        id: dragHandleMouse
+                                    HoverHandler { id: rowHover }
+                                    DropArea {
                                         anchors.fill: parent
-                                        drag.target: parent
-                                        cursorShape: Qt.SizeAllCursor
-                                        onReleased: {
-                                            parent.Drag.drop();
-                                            // The handle briefly owns its own x/y while dragged;
-                                            // hand control back to the Row's normal layout
-                                            // immediately rather than leaving it visually stuck
-                                            // wherever the drag ended.
-                                            parent.x = 0;
-                                            parent.y = 0;
+                                        keys: ["dxrice-shortcut"]
+                                        onEntered: shortcutRow.dropHighlighted = true
+                                        onExited: shortcutRow.dropHighlighted = false
+                                        onDropped: (drop) => {
+                                            shortcutRow.dropHighlighted = false;
+                                            root.moveShortcutTo(drop.text, shortcutRow.modid);
                                         }
                                     }
-                                }
-                                Rectangle {
-                                    visible: shortcutCard.pinned
-                                    width: pinLabel.implicitWidth + 12
-                                    height: 20
-                                    radius: Theme.roundingFull
-                                    color: Theme.accentSoft
-                                    Text { id: pinLabel; anchors.centerIn: parent; text: "Pinned"; color: Theme.textActive; font.pixelSize: Theme.fontSizeSmall }
-                                }
-                                IconButton {
-                                    visible: !shortcutCard.pinned
-                                    glyph: shortcutCard.expanded ? "︿" : "﹀"
-                                    onClicked: shortcutCard.expanded = !shortcutCard.expanded
-                                }
-                                IconButton { visible: !shortcutCard.pinned; glyph: "↑"; onClicked: root.moveShortcut(shortcutCard.modid, "up") }
-                                IconButton { visible: !shortcutCard.pinned; glyph: "↓"; onClicked: root.moveShortcut(shortcutCard.modid, "down") }
-                                IconButton { visible: !shortcutCard.pinned; glyph: "🗑"; destructive: true; onClicked: root.removeShortcut(shortcutCard.modid) }
-                            }
 
-                            Column {
-                                width: parent.width
-                                visible: shortcutCard.expanded && !shortcutCard.pinned
-                                height: visible ? implicitHeight : 0
-                                spacing: Theme.padSm
-                                topPadding: Theme.padSm
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: Theme.roundingSm
+                                        color: shortcutRow.dropHighlighted
+                                            ? Theme.mix(Theme.layer1, Theme.accent, 0.18)
+                                            : (rowHover.hovered ? Theme.layer1 : "transparent")
+                                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                                    }
 
-                                Row {
+                                    Item {
+                                        id: leadHandle
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: Theme.padSm
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 18
+                                        height: 20
+                                        visible: !shortcutRow.pinned
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "⣿"
+                                            color: Theme.text
+                                            opacity: dragHandleMouse.drag.active ? 0.9 : (rowHover.hovered ? 0.55 : 0.22)
+                                            Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                                        }
+                                        Drag.active: dragHandleMouse.drag.active
+                                        Drag.keys: ["dxrice-shortcut"]
+                                        Drag.mimeData: { "text/plain": shortcutRow.modid }
+                                        MouseArea {
+                                            id: dragHandleMouse
+                                            anchors.fill: parent
+                                            drag.target: parent
+                                            cursorShape: Qt.SizeAllCursor
+                                            onReleased: {
+                                                parent.Drag.drop();
+                                                // The handle briefly owns its own x/y while
+                                                // dragged; hand control back to its normal
+                                                // anchored position immediately.
+                                                parent.x = 0;
+                                                parent.y = 0;
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: Theme.padSm + 6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: shortcutRow.pinned
+                                        text: "●"
+                                        font.pixelSize: 8
+                                        color: Theme.text
+                                        opacity: 0.3
+                                    }
+
+                                    Text {
+                                        id: leadIcon
+                                        anchors.left: leadHandle.right
+                                        anchors.leftMargin: Theme.padSm
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 20
+                                        horizontalAlignment: Text.AlignHCenter
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeNormal
+                                        color: Theme.text
+                                        opacity: 0.85
+                                        text: (shortcutRow.meta.dxrice_icon_mode || "auto") !== "text" && root.iconsEnabled()
+                                            ? (shortcutRow.meta.format || "")
+                                            : (shortcutRow.meta.dxrice_label || "?").charAt(0).toUpperCase()
+                                    }
+
+                                    Row {
+                                        id: actionsRow
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: Theme.padSm
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: !shortcutRow.pinned
+                                        opacity: (rowHover.hovered || shortcutRow.expanded) ? 1 : 0
+                                        Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                                        IconButton { glyph: shortcutRow.expanded ? "︿" : "﹀"; size: 26; onClicked: shortcutRow.expanded = !shortcutRow.expanded }
+                                        IconButton { glyph: "↑"; size: 26; onClicked: root.moveShortcut(shortcutRow.modid, "up") }
+                                        IconButton { glyph: "↓"; size: 26; onClicked: root.moveShortcut(shortcutRow.modid, "down") }
+                                        IconButton { glyph: "🗑"; size: 26; destructive: true; onClicked: root.removeShortcut(shortcutRow.modid) }
+                                    }
+
+                                    Text {
+                                        anchors.left: leadIcon.right
+                                        anchors.leftMargin: Theme.padSm
+                                        anchors.right: actionsRow.left
+                                        anchors.rightMargin: Theme.padSm
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: shortcutRow.meta.dxrice_label || shortcutRow.modid
+                                        color: Theme.textActive
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeNormal
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                Item {
+                                    width: 1
+                                    height: Theme.padSm
+                                    visible: shortcutRow.expanded && !shortcutRow.pinned
+                                }
+                                Column {
+                                    x: Theme.padSm + 18 + Theme.padSm + 20 + Theme.padSm
+                                    width: parent.width - x
+                                    visible: shortcutRow.expanded && !shortcutRow.pinned
                                     spacing: Theme.padSm
-                                    Repeater {
-                                        model: root.iconModeLabels
-                                        delegate: GlassButton {
-                                            text: modelData
-                                            variant: root.iconModes[index] === (shortcutCard.meta.dxrice_icon_mode || "auto") ? "primary" : "secondary"
-                                            onClicked: {
-                                                const mode = root.iconModes[index];
-                                                if (mode === "image") {
-                                                    root.pendingImageModid = shortcutCard.modid;
-                                                    imageDialog.open();
-                                                } else {
-                                                    root.setIconMode(shortcutCard.modid, mode, null);
+
+                                    Row {
+                                        spacing: Theme.padSm
+                                        Repeater {
+                                            model: root.iconModeLabels
+                                            delegate: GlassButton {
+                                                text: modelData
+                                                variant: root.iconModes[index] === (shortcutRow.meta.dxrice_icon_mode || "auto") ? "primary" : "secondary"
+                                                onClicked: {
+                                                    const mode = root.iconModes[index];
+                                                    if (mode === "image") {
+                                                        root.pendingImageModid = shortcutRow.modid;
+                                                        imageDialog.open();
+                                                    } else {
+                                                        root.setIconMode(shortcutRow.modid, mode, null);
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                Text {
-                                    visible: (shortcutCard.meta.dxrice_icon_mode || "auto") === "image"
-                                    text: shortcutCard.meta.dxrice_icon_path ? shortcutCard.meta.dxrice_icon_path : "No image chosen"
-                                    color: Theme.text
-                                    opacity: 0.7
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    elide: Text.ElideMiddle
-                                    width: parent.width
+                                    Text {
+                                        visible: (shortcutRow.meta.dxrice_icon_mode || "auto") === "image"
+                                        text: shortcutRow.meta.dxrice_icon_path ? shortcutRow.meta.dxrice_icon_path : "No image chosen"
+                                        color: Theme.text
+                                        opacity: 0.7
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        elide: Text.ElideMiddle
+                                        width: parent.width
+                                    }
+                                    Item { width: 1; height: Theme.padXs }
                                 }
                             }
-                            } // Card
                         }
                     }
 
-                    Text { text: "System Modules"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
+                    Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+
+                    // -- system modules: same compact-row language, and
+                    // underline-style inputs (a bottom hairline, no filled
+                    // box) instead of bordered text fields. --
+                    Text { text: "System Modules"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
                     Text {
                         text: "Click actions for the volume/network/CPU/RAM/clock modules"
-                        color: Theme.text; opacity: 0.7; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
+                        color: Theme.text; opacity: 0.55; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
                     }
-                    Repeater {
-                        model: root.loaded ? root.systemModuleIds() : []
-                        delegate: Card {
-                            id: sysCard
-                            width: body.width
-                            property string modid: modelData
-                            property bool expanded: false
-                            property var meta: root.cfg[modid] || ({})
-
-                            SettingRow {
+                    Column {
+                        width: body.width
+                        spacing: Theme.padSm
+                        Repeater {
+                            model: root.loaded ? root.systemModuleIds() : []
+                            delegate: Column {
+                                id: sysRow
                                 width: parent.width
-                                title: root.systemModuleLabels[sysCard.modid] || sysCard.modid
-                                subtitle: sysCard.meta["on-click"] || "No click action set"
-                                IconButton { glyph: sysCard.expanded ? "︿" : "﹀"; onClicked: sysCard.expanded = !sysCard.expanded }
-                            }
-                            Column {
-                                width: parent.width
-                                visible: sysCard.expanded
-                                height: visible ? implicitHeight : 0
                                 spacing: Theme.padSm
-                                topPadding: Theme.padSm
+                                property string modid: modelData
+                                property bool expanded: false
+                                property var meta: root.cfg[modid] || ({})
 
                                 SettingRow {
                                     width: parent.width
-                                    title: "Left click"
-                                    Rectangle {
-                                        width: 180; height: 30; radius: Theme.entryRadius
-                                        color: Qt.rgba(1, 1, 1, 0.06)
-                                        border.width: 1; border.color: Theme.borderIdle
-                                        TextInput {
-                                            anchors.fill: parent; anchors.margins: 6
-                                            text: sysCard.meta["on-click"] || ""
-                                            color: Theme.textActive
-                                            font.family: Theme.fontFamily
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            onEditingFinished: root.setModuleClick(sysCard.modid, "on-click", text)
+                                    title: root.systemModuleLabels[sysRow.modid] || sysRow.modid
+                                    subtitle: sysRow.meta["on-click"] || "No click action set"
+                                    IconButton { glyph: sysRow.expanded ? "︿" : "﹀"; size: 26; onClicked: sysRow.expanded = !sysRow.expanded }
+                                }
+                                Column {
+                                    width: parent.width
+                                    visible: sysRow.expanded
+                                    spacing: Theme.padMd
+
+                                    SettingRow {
+                                        width: parent.width
+                                        title: "Left click"
+                                        Rectangle {
+                                            width: 180; height: 26
+                                            color: "transparent"
+                                            border.width: 0
+                                            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: leftClickInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                                            TextInput {
+                                                id: leftClickInput
+                                                anchors.fill: parent
+                                                text: sysRow.meta["on-click"] || ""
+                                                color: Theme.textActive
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSizeSmaller
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                onEditingFinished: root.setModuleClick(sysRow.modid, "on-click", text)
+                                            }
                                         }
                                     }
-                                }
-                                SettingRow {
-                                    width: parent.width
-                                    title: "Right click"
-                                    Rectangle {
-                                        width: 180; height: 30; radius: Theme.entryRadius
-                                        color: Qt.rgba(1, 1, 1, 0.06)
-                                        border.width: 1; border.color: Theme.borderIdle
-                                        TextInput {
-                                            anchors.fill: parent; anchors.margins: 6
-                                            text: sysCard.meta["on-click-right"] || ""
-                                            color: Theme.textActive
-                                            font.family: Theme.fontFamily
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            onEditingFinished: root.setModuleClick(sysCard.modid, "on-click-right", text)
+                                    SettingRow {
+                                        width: parent.width
+                                        title: "Right click"
+                                        Rectangle {
+                                            width: 180; height: 26
+                                            color: "transparent"
+                                            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: rightClickInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                                            TextInput {
+                                                id: rightClickInput
+                                                anchors.fill: parent
+                                                text: sysRow.meta["on-click-right"] || ""
+                                                color: Theme.textActive
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSizeSmaller
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                onEditingFinished: root.setModuleClick(sysRow.modid, "on-click-right", text)
+                                            }
                                         }
                                     }
                                 }

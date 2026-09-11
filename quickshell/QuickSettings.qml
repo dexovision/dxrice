@@ -384,76 +384,70 @@ PanelWindow {
     }
 
     // ==================== OVERVIEW ====================
+    // A composition, not a stack of cards: toggles and sliders sit
+    // directly on the panel surface as plain rows, separated by spacing
+    // and the occasional hairline -- the only "container" is the panel
+    // itself. Secondary information on the right uses quiet section
+    // labels instead of card titles.
     Component {
         id: overviewPane
         Row {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.padMd
+            spacing: Theme.padLg
 
             Column {
                 id: leftCol
-                width: (parent.width - parent.spacing) / 2
-                spacing: Theme.padMd
+                width: (parent.width - parent.spacing * 2 - 1) / 2
+                spacing: Theme.padXs
 
-            // -- quick toggles: 2x2 grid so Do Not Disturb fits alongside
-            // Wi-Fi/Bluetooth/Awake instead of being left out entirely. --
-            Card {
-                width: parent.width
-                Grid {
+                ToggleChip {
                     width: parent.width
-                    columns: 2
-                    rowSpacing: Theme.padSm
-                    columnSpacing: Theme.padSm
-                    ToggleChip {
-                        width: (parent.width - parent.columnSpacing) / 2
-                        glyph: ""; label: "Wi-Fi"
-                        active: root.wifiEnabled
-                        onToggled: (next) => root.setWifi(next)
-                    }
-                    ToggleChip {
-                        width: (parent.width - parent.columnSpacing) / 2
-                        glyph: ""; label: "Bluetooth"
-                        active: root.bluetoothEnabled
-                        onToggled: (next) => root.setBluetooth(next)
-                    }
-                    ToggleChip {
-                        width: (parent.width - parent.columnSpacing) / 2
-                        glyph: ""; label: "Do Not Disturb"
-                        active: root.dndActive
-                        onToggled: (next) => root.setDnd(next)
-                    }
-                    ToggleChip {
-                        width: (parent.width - parent.columnSpacing) / 2
-                        glyph: "⏻"; label: "Awake"
-                        active: root.idleInhibited
-                        onToggled: (next) => root.setIdleInhibit(next)
-                    }
+                    glyph: ""; label: "Wi-Fi"
+                    active: root.wifiEnabled
+                    onToggled: (next) => root.setWifi(next)
                 }
-            }
+                ToggleChip {
+                    width: parent.width
+                    glyph: ""; label: "Bluetooth"
+                    active: root.bluetoothEnabled
+                    onToggled: (next) => root.setBluetooth(next)
+                }
+                ToggleChip {
+                    width: parent.width
+                    glyph: ""; label: "Do Not Disturb"
+                    active: root.dndActive
+                    onToggled: (next) => root.setDnd(next)
+                }
+                ToggleChip {
+                    width: parent.width
+                    glyph: "\u23fb"; label: "Keep Awake"
+                    active: root.idleInhibited
+                    onToggled: (next) => root.setIdleInhibit(next)
+                }
 
-            // -- audio & display: one card, not three, for output volume /
-            // mic / brightness -- three closely related sliders dont each
-            // need their own floating box. Device pickers are expandable
-            // sub-sections, not always-shown dropdowns. --
-            Card {
-                width: parent.width
+                Item { width: 1; height: Theme.padSm }
+                Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+                Item { width: 1; height: Theme.padXs }
+
                 Row {
                     width: parent.width
                     spacing: Theme.padSm
                     IconButton {
                         glyph: (root.sink && root.sink.audio && root.sink.audio.muted) ? "" : ""
+                        size: 26
                         anchors.verticalCenter: parent.verticalCenter
                         onClicked: if (root.sink && root.sink.audio) root.sink.audio.muted = !root.sink.audio.muted
                     }
                     SliderRow {
-                        width: parent.width - 76
+                        width: parent.width - 26 - Theme.padSm
                         from: 0; to: 100
                         value: (root.sink && root.sink.audio) ? Math.round(root.sink.audio.volume * 100) : 0
                         onChanged: (v) => { if (root.sink && root.sink.audio) root.sink.audio.volume = v / 100; }
                     }
                 }
                 Expandable {
-                    title: "Output device"
+                    width: parent.width
+                    title: "Output"
                     trailingText: root.sink ? audioDeviceBackend.label(root.sink) : ""
                     visible: audioDeviceBackend.outputs.length > 1
                     height: visible ? implicitHeight : 0
@@ -481,7 +475,7 @@ PanelWindow {
                                 anchors.right: parent.right
                                 anchors.rightMargin: Theme.padSm
                                 visible: root.sink && root.sink.name === modelData.name
-                                text: "✓"
+                                text: "\u2713"
                                 color: Theme.accent
                             }
                             MouseArea {
@@ -494,23 +488,26 @@ PanelWindow {
                         }
                     }
                 }
+
                 Row {
                     width: parent.width
                     spacing: Theme.padSm
                     IconButton {
                         glyph: (root.source && root.source.audio && root.source.audio.muted) ? "" : ""
+                        size: 26
                         anchors.verticalCenter: parent.verticalCenter
                         onClicked: if (root.source && root.source.audio) root.source.audio.muted = !root.source.audio.muted
                     }
                     SliderRow {
-                        width: parent.width - 76
+                        width: parent.width - 26 - Theme.padSm
                         from: 0; to: 100
                         value: (root.source && root.source.audio) ? Math.round(root.source.audio.volume * 100) : 0
                         onChanged: (v) => { if (root.source && root.source.audio) root.source.audio.volume = v / 100; }
                     }
                 }
                 Expandable {
-                    title: "Input device"
+                    width: parent.width
+                    title: "Input"
                     trailingText: root.source ? audioDeviceBackend.label(root.source) : ""
                     visible: audioDeviceBackend.inputs.length > 1
                     height: visible ? implicitHeight : 0
@@ -538,7 +535,7 @@ PanelWindow {
                                 anchors.right: parent.right
                                 anchors.rightMargin: Theme.padSm
                                 visible: root.source && root.source.name === modelData.name
-                                text: "✓"
+                                text: "\u2713"
                                 color: Theme.accent
                             }
                             MouseArea {
@@ -551,34 +548,40 @@ PanelWindow {
                         }
                     }
                 }
+
                 Row {
                     width: parent.width
                     spacing: Theme.padSm
                     visible: brightnessBackend.hasBacklight
                     height: visible ? implicitHeight : 0
-                    Text { text: "☀"; color: Theme.text; anchors.verticalCenter: parent.verticalCenter; width: 30; horizontalAlignment: Text.AlignHCenter }
+                    Text { text: "\u2600"; color: Theme.text; opacity: 0.85; anchors.verticalCenter: parent.verticalCenter; width: 26; horizontalAlignment: Text.AlignHCenter }
                     SliderRow {
-                        width: parent.width - 76
+                        width: parent.width - 26 - Theme.padSm
                         from: 1; to: 100
                         value: brightnessBackend.percent
                         onChanged: (v) => brightnessBackend.set(v)
                     }
                 }
             }
+
+            // A single hairline splitting the two panes so their
+            // independently sized content never visually smears together,
+            // instead of giving either column its own background box.
+            Rectangle {
+                width: 1
+                height: Math.max(leftCol.implicitHeight, rightCol.implicitHeight)
+                color: Theme.borderIdle
             }
 
             Column {
                 id: rightCol
-                width: (parent.width - parent.spacing) / 2
-                spacing: Theme.padMd
+                width: (parent.width - parent.spacing * 2 - 1) / 2
+                spacing: Theme.padLg
 
-            // -- wifi networks: collapsed by default once there are more
-            // than a couple. --
-            Card {
-                width: parent.width
-                visible: root.wifiEnabled && wifiBackend.networks.length > 0
-                height: visible ? implicitHeight : 0
                 Expandable {
+                    width: parent.width
+                    visible: root.wifiEnabled && wifiBackend.networks.length > 0
+                    height: visible ? implicitHeight : 0
                     title: "Networks"
                     trailingText: wifiBackend.networks.length + " found"
                     expanded: wifiBackend.networks.length <= 3
@@ -591,6 +594,7 @@ PanelWindow {
                                 text: modelData.ssid
                                 color: Theme.text
                                 font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmaller
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: parent.width - (modelData.connected ? 130 : 150)
                                 elide: Text.ElideRight
@@ -605,14 +609,14 @@ PanelWindow {
                             }
                             Text {
                                 visible: modelData.connected
-                                text: "✓"
+                                text: "\u2713"
                                 color: Theme.accent
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 16
                             }
                             IconButton {
                                 visible: modelData.known
-                                glyph: ""
+                                glyph: "_forget"
                                 size: 24
                                 destructive: true
                                 anchors.verticalCenter: parent.verticalCenter
@@ -628,14 +632,11 @@ PanelWindow {
                         }
                     }
                 }
-            }
 
-            // -- bluetooth devices --
-            Card {
-                width: parent.width
-                visible: root.bluetoothEnabled && btBackend.devices.length > 0
-                height: visible ? implicitHeight : 0
                 Expandable {
+                    width: parent.width
+                    visible: root.bluetoothEnabled && btBackend.devices.length > 0
+                    height: visible ? implicitHeight : 0
                     title: "Devices"
                     trailingText: btBackend.devices.length + " paired"
                     expanded: btBackend.devices.length <= 3
@@ -648,6 +649,7 @@ PanelWindow {
                                 text: modelData.name
                                 color: Theme.text
                                 font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmaller
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: parent.width - (modelData.battery >= 0 ? 190 : 160)
                                 elide: Text.ElideRight
@@ -677,48 +679,63 @@ PanelWindow {
                         }
                     }
                 }
-            }
 
-            // -- system info (a fetch-style card: OS, kernel, uptime,
-            // hostname) -- read straight from hostnamectl/uname/proc, no
-            // new dependency, matching the fetch widgets in the reference
-            // dashboards. --
-            Card {
-                width: parent.width
-                Text { text: "System"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                Repeater {
-                    model: [
-                        { label: "OS", value: systemInfo.osName },
-                        { label: "Kernel", value: systemInfo.kernel },
-                        { label: "Host", value: systemInfo.hostname },
-                        { label: "Uptime", value: systemInfo.uptime },
-                        { label: "User", value: systemInfo.user },
-                    ]
-                    delegate: Row {
+                // -- system + world clock folded into a couple of quiet
+                // metadata lines each, instead of five/three label:value
+                // rows in their own boxes -- a fetch strip, not a spec
+                // sheet. --
+                Column {
+                    width: parent.width
+                    spacing: Theme.padXs
+                    Text {
+                        text: "This device"
+                        color: Theme.text
+                        opacity: 0.55
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+                    Text {
                         width: parent.width
-                        Text { text: modelData.label; color: Theme.text; opacity: 0.6; width: 60; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
-                        Text { text: modelData.value; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; elide: Text.ElideRight; width: parent.width - 60 }
+                        text: systemInfo.osName + " \u00b7 " + systemInfo.kernel
+                        color: Theme.textActive
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmaller
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        width: parent.width
+                        text: systemInfo.hostname + " \u00b7 " + systemInfo.user + " \u00b7 up " + systemInfo.uptime
+                        color: Theme.text
+                        opacity: 0.7
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmaller
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: Theme.padXs
+                    Text {
+                        text: "World clock"
+                        color: Theme.text
+                        opacity: 0.55
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+                    Repeater {
+                        model: worldClock.cities
+                        delegate: Row {
+                            width: parent.width
+                            Text { text: modelData.label; color: Theme.text; opacity: 0.85; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: parent.width - 50 }
+                            Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: 50; horizontalAlignment: Text.AlignRight }
+                        }
                     }
                 }
             }
-
-            // -- world clock -- a handful of fixed timezones, resolved
-            // locally via `date`, no network/API needed. --
-            Card {
-                width: parent.width
-                Text { text: "World Clock"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-                Repeater {
-                    model: worldClock.cities
-                    delegate: Row {
-                        width: parent.width
-                        Text { text: modelData.label; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: parent.width - 60 }
-                        Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: 60; horizontalAlignment: Text.AlignRight }
-                    }
-                }
-            }
-                }
         }
     }
+
 
     // ==================== MEDIA ====================
     Component {
@@ -897,53 +914,59 @@ PanelWindow {
         id: performancePane
         Column {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.padMd
+            spacing: Theme.padLg
 
-            Card {
+            Column {
                 width: parent.width
+                spacing: Theme.padSm
                 Row {
                     width: parent.width
-                    Text { text: "CPU"; color: Theme.text; width: 60; font.family: Theme.fontFamily }
+                    Text { text: "CPU"; color: Theme.text; opacity: 0.8; width: 60; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
                     LevelBar { width: parent.width - 130; value: root.cpuPercent / 100; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: Math.round(root.cpuPercent) + "%"; color: Theme.text; width: 40; horizontalAlignment: Text.AlignRight }
+                    Text { text: Math.round(root.cpuPercent) + "%"; color: Theme.text; opacity: 0.8; width: 40; horizontalAlignment: Text.AlignRight; font.pixelSize: Theme.fontSizeSmaller }
                 }
                 Row {
                     width: parent.width
-                    Text { text: "Memory"; color: Theme.text; width: 60; font.family: Theme.fontFamily }
+                    Text { text: "Memory"; color: Theme.text; opacity: 0.8; width: 60; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
                     LevelBar { width: parent.width - 130; value: root.memPercent / 100; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: Math.round(root.memPercent) + "%"; color: Theme.text; width: 40; horizontalAlignment: Text.AlignRight }
+                    Text { text: Math.round(root.memPercent) + "%"; color: Theme.text; opacity: 0.8; width: 40; horizontalAlignment: Text.AlignRight; font.pixelSize: Theme.fontSizeSmaller }
                 }
                 Row {
                     width: parent.width
-                    Text { text: "Disk"; color: Theme.text; width: 60; font.family: Theme.fontFamily }
+                    Text { text: "Disk"; color: Theme.text; opacity: 0.8; width: 60; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
                     LevelBar { width: parent.width - 130; value: root.diskPercent / 100; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: Math.round(root.diskPercent) + "%"; color: Theme.text; width: 40; horizontalAlignment: Text.AlignRight }
+                    Text { text: Math.round(root.diskPercent) + "%"; color: Theme.text; opacity: 0.8; width: 40; horizontalAlignment: Text.AlignRight; font.pixelSize: Theme.fontSizeSmaller }
                 }
                 Text {
                     visible: root.diskUsedLabel.length > 0
                     text: root.diskUsedLabel
                     color: Theme.text
-                    opacity: 0.55
+                    opacity: 0.5
                     font.pixelSize: Theme.fontSizeSmall
                     anchors.right: parent.right
                 }
             }
 
-            // -- clipboard history --
-            Card {
+            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+
+            Column {
                 width: parent.width
+                spacing: Theme.padSm
                 Row {
                     width: parent.width
                     Text {
                         text: "Clipboard"
-                        color: Theme.textActive
+                        color: Theme.text
+                        opacity: 0.55
                         font.family: Theme.fontFamily
-                        font.weight: Font.DemiBold
-                        width: parent.width - 34
+                        font.pixelSize: Theme.fontSizeSmall
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - 30
                     }
-                    IconButton { glyph: ""; size: 30; onClicked: clipboardBackend.refresh() }
+                    IconButton { glyph: ""; size: 26; onClicked: clipboardBackend.refresh() }
                 }
                 Expandable {
+                    width: parent.width
                     title: "History"
                     trailingText: clipboardBackend.entries.length + " items"
                     Repeater {
@@ -951,17 +974,18 @@ PanelWindow {
                         delegate: Rectangle {
                             width: parent.width
                             height: 28
-                            radius: Theme.entryRadius
-                            color: clipArea.containsMouse ? Theme.active : "transparent"
-                            Behavior on color { ColorAnimation { duration: Theme.animMs } }
+                            radius: Theme.roundingXs
+                            color: clipArea.containsMouse ? Theme.layer2Hover : "transparent"
+                            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
-                                anchors.leftMargin: 6
-                                width: parent.width - 12
+                                anchors.leftMargin: Theme.padSm
+                                width: parent.width - Theme.padSm * 2
                                 text: modelData.preview.replace(/\n/g, " ")
                                 color: Theme.text
                                 font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmaller
                                 elide: Text.ElideRight
                             }
                             MouseArea {
@@ -976,11 +1000,11 @@ PanelWindow {
                 }
             }
 
-            // -- actions: screenshots + power, one card -- these are all
-            // one-tap utility actions, they read better as one grouped
-            // strip than two separate boxes.
-            Card {
+            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+
+            Column {
                 width: parent.width
+                spacing: Theme.padSm
                 Row {
                     width: parent.width
                     spacing: Theme.padSm
@@ -1008,6 +1032,7 @@ PanelWindow {
             }
         }
     }
+
 
     WifiBackend {
         id: wifiBackend
