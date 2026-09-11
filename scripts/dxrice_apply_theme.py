@@ -108,6 +108,12 @@ def build_vars(theme):
         # 32 * radius/12) -- so the waybar dock islands read as the same
         # kind of surface as the drawer panels, not a smaller-radius knockoff.
         "RADIUS_XL": round(32 * theme["radius"] / 12),
+        # A moderate "large but clearly rectangular" radius for the waybar
+        # islands specifically -- those are much shorter than a Quickshell
+        # panel, so reusing RADIUS_XL there rounds them into a stadium/pill
+        # instead of a rounded rectangle. Scaled off the same radius/12
+        # ratio as everything else, just with a smaller base multiplier.
+        "RADIUS_BAR": round(16 * theme["radius"] / 12),
 
         "KITTY_OPACITY": theme["kitty_opacity"],
 

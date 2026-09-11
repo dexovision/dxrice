@@ -1,7 +1,6 @@
 singleton Theme 1.0 Theme.qml
 
 Card 1.0 Card.qml
-WavyTopRect 1.0 WavyTopRect.qml
 Expandable 1.0 Expandable.qml
 SettingRow 1.0 SettingRow.qml
 GlassButton 1.0 GlassButton.qml

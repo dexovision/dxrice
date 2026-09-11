@@ -348,8 +348,9 @@ PanelWindow {
     }
 
     // ---- visuals: a drawer that unrolls down from the bar, matching
-    // QuickSettings.qml exactly -- zero gap, square top corners, a
-    // WavyTopRect seam, bottom-only rounding. ----
+    // QuickSettings.qml exactly -- zero gap, square top corners (flush
+    // against the bar), large-radius bottom corners only, no decorative
+    // seam. Reveal is height + opacity + a small upward settle together. ----
     Shortcut { sequence: "Escape"; onActivated: root.closeRequested() }
 
     Item {
@@ -358,6 +359,7 @@ PanelWindow {
         clip: true
 
         property real revealHeight: 0
+        readonly property real revealProgress: root.implicitHeight > 0 ? Math.min(1, drawer.revealHeight / root.implicitHeight) : 0
         Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
         Component.onCompleted: revealHeight = root.implicitHeight
 
@@ -370,23 +372,17 @@ PanelWindow {
             blur: Theme.elevationBlur(3)
             spread: Theme.elevationSpread(3)
             offset.y: Theme.elevationOffsetY(3)
-        }
-
-        WavyTopRect {
-            id: wavyRect
-            anchors.top: parent.top
-            anchors.left: parent.left
-            width: parent.width
-            height: 7
-            color: Theme.bg
+            opacity: drawer.revealProgress
         }
 
         Rectangle {
             id: panelSurface
-            anchors.top: wavyRect.bottom
+            anchors.top: parent.top
+            anchors.topMargin: (1 - drawer.revealProgress) * -10
             anchors.left: parent.left
             anchors.right: parent.right
-            height: Math.max(0, drawer.revealHeight - wavyRect.height)
+            height: Math.max(0, drawer.revealHeight)
+            opacity: drawer.revealProgress
             radius: 0
             bottomLeftRadius: Theme.roundingXl
             bottomRightRadius: Theme.roundingXl

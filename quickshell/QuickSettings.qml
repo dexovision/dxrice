@@ -199,16 +199,19 @@ PanelWindow {
         }
     }
 
-    // ---- root visuals: a drawer that unrolls DOWN from the bar, not a
-    // card that pops in from its center -- the wavy strip is the seam that
-    // visually welds it to the bar sitting right above (see
-    // WavyTopRect.qml); only the bottom corners round off. ----
+    // ---- root visuals: a drawer that unrolls DOWN from the bar. Clean
+    // rectangular geometry, no decorative seam -- square top (it's flush
+    // against the bar it came from), large-radius bottom corners only.
+    // The reveal is height + opacity + a small upward settle together,
+    // not just a growing rectangle, so opening this reads as "entering
+    // from the bar" rather than "a box appearing." ----
     Item {
         id: drawer
         anchors.fill: parent
         clip: true
 
         property real revealHeight: 0
+        readonly property real revealProgress: root.implicitHeight > 0 ? Math.min(1, drawer.revealHeight / root.implicitHeight) : 0
         Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
         Component.onCompleted: revealHeight = root.implicitHeight
         Connections {
@@ -225,27 +228,21 @@ PanelWindow {
             blur: Theme.elevationBlur(3)
             spread: Theme.elevationSpread(3)
             offset.y: Theme.elevationOffsetY(3)
-        }
-
-        WavyTopRect {
-            id: wavyRect
-            anchors.top: parent.top
-            anchors.left: parent.left
-            width: parent.width
-            height: 7
-            color: Theme.bg
+            opacity: drawer.revealProgress
         }
 
         Rectangle {
             id: panelSurface
-            anchors.top: wavyRect.bottom
+            anchors.top: parent.top
+            anchors.topMargin: (1 - drawer.revealProgress) * -10
             anchors.left: parent.left
             anchors.right: parent.right
-            height: Math.max(0, drawer.revealHeight - wavyRect.height)
+            height: Math.max(0, drawer.revealHeight)
             radius: 0
             bottomLeftRadius: Theme.roundingXl
             bottomRightRadius: Theme.roundingXl
             color: Theme.bg
+            opacity: drawer.revealProgress
             clip: true
 
             Column {

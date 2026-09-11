@@ -16,16 +16,19 @@ window#waybar {
    instead of one continuous flat strip -- this is what actually reads as
    "a compact floating dock" rather than "waybar with some colors changed."
    Each island shares the exact same translucent-glass language the
-   Quickshell panels use (same idle opacity, same outer radius register),
-   and the real gaps between them stay fully transparent so the wallpaper
-   -- already blurred behind each island via hyprland.lua's waybar-blur
-   layer_rule -- stays visible in between, not just underneath. */
+   Quickshell panels use, and the real gaps between them stay fully
+   transparent so the wallpaper -- already blurred behind each island via
+   hyprland.lua's waybar-blur layer_rule -- stays visible in between, not
+   just underneath. Radius is deliberately well short of half this
+   island's own height: a clearly rounded RECTANGLE, not a stadium/pill --
+   a large radius on a short bar reads as a capsule the instant it passes
+   that point, which is exactly the "wavy/blobby" look this is avoiding. */
 #waybar > box > box.modules-left,
 #waybar > box > box.modules-center,
 #waybar > box > box.modules-right {
     background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
     border: 1px solid rgba(${TEXT_ACTIVE_R}, ${TEXT_ACTIVE_G}, ${TEXT_ACTIVE_B}, ${BORDER_OPACITY_IDLE});
-    border-radius: ${RADIUS_XL}px;
+    border-radius: ${RADIUS_BAR}px;
     padding: 0 6px;
     margin: 6px 4px;
 }
@@ -107,7 +110,7 @@ button {
     color: ${TEXT_COLOR};
     padding: 4px 11px;
     margin: 3px 0;
-    border-radius: 999px;
+    border-radius: ${RADIUS}px;
     transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
