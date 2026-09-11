@@ -25,7 +25,19 @@ import Quickshell.Wayland
 // complaint this replaces.
 PanelWindow {
     id: root
+    // See QuickSettings.qml's identical comment: shell.qml destroys this
+    // panel the instant closeRequested() fires, so requestClose() plays
+    // the reveal in reverse first and only then emits the real signal.
+    // Every internal close path should call requestClose(), not
+    // closeRequested() directly.
     signal closeRequested()
+    property bool closing: false
+    function requestClose() {
+        if (root.closing) return;
+        root.closing = true;
+        closeTimer.start();
+    }
+    Timer { id: closeTimer; interval: Theme.durationEnter + 20; onTriggered: root.closeRequested() }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     aboveWindows: true
@@ -351,7 +363,7 @@ PanelWindow {
     // QuickSettings.qml exactly -- zero gap, square top corners (flush
     // against the bar), large-radius bottom corners only, no decorative
     // seam. Reveal is height + opacity + a small upward settle together. ----
-    Shortcut { sequence: "Escape"; onActivated: root.closeRequested() }
+    Shortcut { sequence: "Escape"; onActivated: root.requestClose() }
 
     Item {
         id: drawer
@@ -362,6 +374,10 @@ PanelWindow {
         readonly property real revealProgress: root.implicitHeight > 0 ? Math.min(1, drawer.revealHeight / root.implicitHeight) : 0
         Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
         Component.onCompleted: revealHeight = root.implicitHeight
+        Connections {
+            target: root
+            function onClosingChanged() { drawer.revealHeight = root.closing ? 0 : root.implicitHeight; }
+        }
 
         RectangularShadow {
             anchors.fill: panelSurface
@@ -418,7 +434,7 @@ PanelWindow {
                         enabled: !root.applying
                         onClicked: root.apply()
                     }
-                    IconButton { glyph: "✕"; onClicked: root.closeRequested() }
+                    IconButton { glyph: "✕"; onClicked: root.requestClose() }
                 }
             }
 

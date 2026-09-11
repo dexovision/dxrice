@@ -3,7 +3,7 @@
 to show real icons on taskbar shortcuts instead of plain text labels."""
 
 ICON_TABLE = [
-    (("firefox",), ""),
+    (("firefox", "librewolf", "waterfox", "icecat"), ""),
     (("chromium", "chrome"), ""),
     (("brave",), ""),
     (("discord",), "󰙯"),

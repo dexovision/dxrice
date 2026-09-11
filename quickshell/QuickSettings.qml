@@ -26,7 +26,22 @@ import Quickshell.Services.Pipewire
 // category panes.
 PanelWindow {
     id: root
+    // shell.qml's LazyLoader destroys this panel entirely the instant
+    // closeRequested() fires -- fine for the open animation (which plays
+    // naturally on creation) but with nothing to animate the CLOSE, since
+    // the object would just be gone mid-transition. requestClose() plays
+    // the reveal in reverse first, and only then emits the real
+    // closeRequested() shell.qml is listening for. Every internal close
+    // path (Escape, the close button, etc.) should call requestClose(),
+    // never closeRequested() directly.
     signal closeRequested()
+    property bool closing: false
+    function requestClose() {
+        if (root.closing) return;
+        root.closing = true;
+        closeTimer.start();
+    }
+    Timer { id: closeTimer; interval: Theme.durationEnter + 20; onTriggered: root.closeRequested() }
 
     implicitWidth: 720
     color: "transparent"
@@ -220,6 +235,10 @@ PanelWindow {
         readonly property real revealProgress: root.implicitWidth > 0 ? Math.min(1, drawer.revealWidth / root.implicitWidth) : 0
         Behavior on revealWidth { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
         Component.onCompleted: revealWidth = root.implicitWidth
+        Connections {
+            target: root
+            function onClosingChanged() { drawer.revealWidth = root.closing ? 0 : root.implicitWidth; }
+        }
 
         RectangularShadow {
             anchors.fill: panelSurface
@@ -284,7 +303,7 @@ PanelWindow {
                         glyph: "✕"
                         anchors.verticalCenter: parent.verticalCenter
                         x: outer.width - width - Theme.padLg
-                        onClicked: root.closeRequested()
+                        onClicked: root.requestClose()
                     }
                 }
 

@@ -20,14 +20,33 @@ import Quickshell.Io
 ShellRoot {
     id: root
 
+    // Closing a loaded panel from OUTSIDE it (an IPC hide/toggle -- the
+    // far more common path in practice, since that's what every waybar
+    // on-click and keybind actually calls) used to just slam
+    // `loader.active = false` straight away, destroying the panel mid-
+    // frame with no chance for its own close animation to play; only the
+    // panel's own internal close button/Escape went through
+    // requestClose(). Routing every close through the same
+    // requestClose() (when the panel exists to ask) means external and
+    // internal close paths now always play the same reveal-in-reverse
+    // before the loader actually tears it down.
+    function closeLoader(loader) {
+        if (loader.item) loader.item.requestClose();
+        else loader.active = false;
+    }
+    function toggleLoader(loader) {
+        if (loader.active) root.closeLoader(loader);
+        else loader.active = true;
+    }
+
     LazyLoader {
         id: quickSettingsLoader
         source: "QuickSettings.qml"
     }
-    // Each loaded panel calls its own closeRequested() (Escape, close
-    // button, or a self-triggered action like screenshotting) to ask to be
-    // torn down -- ignoreUnknownSignals covers the window between shell
-    // startup and the first `active = true`, when .item is still null.
+    // Each loaded panel calls its own closeRequested() (after its close
+    // animation finishes) to ask to be torn down for real --
+    // ignoreUnknownSignals covers the window between shell startup and
+    // the first `active = true`, when .item is still null.
     Connections {
         target: quickSettingsLoader.item
         ignoreUnknownSignals: true
@@ -35,11 +54,9 @@ ShellRoot {
     }
     IpcHandler {
         target: "quicksettings"
-        function toggle(): void {
-            quickSettingsLoader.active = !quickSettingsLoader.active;
-        }
+        function toggle(): void { root.toggleLoader(quickSettingsLoader); }
         function show(): void { quickSettingsLoader.active = true; }
-        function hide(): void { quickSettingsLoader.active = false; }
+        function hide(): void { root.closeLoader(quickSettingsLoader); }
     }
 
     LazyLoader {
@@ -53,11 +70,9 @@ ShellRoot {
     }
     IpcHandler {
         target: "theme"
-        function toggle(): void {
-            themeLoader.active = !themeLoader.active;
-        }
+        function toggle(): void { root.toggleLoader(themeLoader); }
         function show(): void { themeLoader.active = true; }
-        function hide(): void { themeLoader.active = false; }
+        function hide(): void { root.closeLoader(themeLoader); }
     }
 
     LazyLoader {
@@ -71,11 +86,9 @@ ShellRoot {
     }
     IpcHandler {
         target: "taskbar"
-        function toggle(): void {
-            taskbarLoader.active = !taskbarLoader.active;
-        }
+        function toggle(): void { root.toggleLoader(taskbarLoader); }
         function show(): void { taskbarLoader.active = true; }
-        function hide(): void { taskbarLoader.active = false; }
+        function hide(): void { root.closeLoader(taskbarLoader); }
     }
 
     LazyLoader {
@@ -89,11 +102,9 @@ ShellRoot {
     }
     IpcHandler {
         target: "calendar"
-        function toggle(): void {
-            calendarLoader.active = !calendarLoader.active;
-        }
+        function toggle(): void { root.toggleLoader(calendarLoader); }
         function show(): void { calendarLoader.active = true; }
-        function hide(): void { calendarLoader.active = false; }
+        function hide(): void { root.closeLoader(calendarLoader); }
     }
 
     // Opt-in, not wired to SUPER+L: see LockScreen.qml's own comment for

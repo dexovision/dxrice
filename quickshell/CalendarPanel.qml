@@ -8,7 +8,17 @@ import Quickshell.Wayland
 // every other panel (WavyTopRect seam, bottom-only rounding, aboveWindows).
 PanelWindow {
     id: root
+    // See QuickSettings.qml's identical comment: shell.qml destroys this
+    // panel the instant closeRequested() fires, so requestClose() plays
+    // the reveal in reverse first and only then emits the real signal.
     signal closeRequested()
+    property bool closing: false
+    function requestClose() {
+        if (root.closing) return;
+        root.closing = true;
+        closeTimer.start();
+    }
+    Timer { id: closeTimer; interval: Theme.durationEnter + 20; onTriggered: root.closeRequested() }
 
     implicitWidth: 320
     color: "transparent"
@@ -65,7 +75,8 @@ PanelWindow {
         Component.onCompleted: revealHeight = root.implicitHeight
         Connections {
             target: root
-            function onImplicitHeightChanged() { drawer.revealHeight = root.implicitHeight; }
+            function onImplicitHeightChanged() { if (!root.closing) drawer.revealHeight = root.implicitHeight; }
+            function onClosingChanged() { drawer.revealHeight = root.closing ? 0 : root.implicitHeight; }
         }
 
         RectangularShadow {
@@ -121,7 +132,7 @@ PanelWindow {
                         spacing: Theme.padSm
                         IconButton { glyph: ""; size: 28; onClicked: root.prevMonth() }
                         IconButton { glyph: ""; size: 28; onClicked: root.nextMonth() }
-                        IconButton { glyph: "✕"; size: 28; onClicked: root.closeRequested() }
+                        IconButton { glyph: "✕"; size: 28; onClicked: root.requestClose() }
                     }
                 }
 
