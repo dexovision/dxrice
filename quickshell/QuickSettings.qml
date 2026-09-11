@@ -417,35 +417,38 @@ PanelWindow {
                 width: (parent.width - parent.spacing) / 2
                 spacing: Theme.padLg
 
-                Card {
-                    width: parent.width
-                ToggleChip {
-                    width: parent.width
-                    glyph: ""; label: "Wi-Fi"
-                    active: root.wifiEnabled
-                    onToggled: (next) => root.setWifi(next)
+                Row {
+                    spacing: Theme.padSm
+                    ToggleChip {
+                        glyph: ""; label: "Wi-Fi"
+                        active: root.wifiEnabled
+                        onToggled: (next) => root.setWifi(next)
+                    }
+                    ToggleChip {
+                        glyph: ""; label: "Bluetooth"
+                        active: root.bluetoothEnabled
+                        onToggled: (next) => root.setBluetooth(next)
+                    }
+                    ToggleChip {
+                        glyph: ""; label: "Do Not Disturb"
+                        active: root.dndActive
+                        onToggled: (next) => root.setDnd(next)
+                    }
+                    ToggleChip {
+                        glyph: "\u23fb"; label: "Keep Awake"
+                        active: root.idleInhibited
+                        onToggled: (next) => root.setIdleInhibit(next)
+                    }
                 }
-                ToggleChip {
-                    width: parent.width
-                    glyph: ""; label: "Bluetooth"
-                    active: root.bluetoothEnabled
-                    onToggled: (next) => root.setBluetooth(next)
+
+                Text {
+                    text: "Audio"
+                    color: Theme.text
+                    opacity: 0.55
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.letterSpacing: 0.5
                 }
-                ToggleChip {
-                    width: parent.width
-                    glyph: ""; label: "Do Not Disturb"
-                    active: root.dndActive
-                    onToggled: (next) => root.setDnd(next)
-                }
-                ToggleChip {
-                    width: parent.width
-                    glyph: "\u23fb"; label: "Keep Awake"
-                    active: root.idleInhibited
-                    onToggled: (next) => root.setIdleInhibit(next)
-                }
-                }
-                Card {
-                    width: parent.width
                 Row {
                     width: parent.width
                     spacing: Theme.padSm
@@ -579,7 +582,6 @@ PanelWindow {
                         onChanged: (v) => brightnessBackend.set(v)
                     }
                 }
-                }
             }
 
             Column {
@@ -587,8 +589,6 @@ PanelWindow {
                 width: (parent.width - parent.spacing) / 2
                 spacing: Theme.padLg
 
-                Card {
-                    width: parent.width
                 Expandable {
                     width: parent.width
                     visible: root.wifiEnabled && wifiBackend.networks.length > 0
@@ -690,10 +690,7 @@ PanelWindow {
                         }
                     }
                 }
-                }
 
-                Card {
-                    width: parent.width
                 Column {
                     width: parent.width
                     spacing: Theme.padXs
@@ -741,7 +738,6 @@ PanelWindow {
                             Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: 50; horizontalAlignment: Text.AlignRight }
                         }
                     }
-                }
                 }
             }
         }

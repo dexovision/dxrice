@@ -682,7 +682,7 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            Card { width: parent.width; SliderList { fields: root.blurFields } }
+            SliderList { width: parent.width; fields: root.blurFields }
         }
     }
 
@@ -691,7 +691,7 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            Card { width: parent.width; SliderList { fields: root.layoutFields } }
+            SliderList { width: parent.width; fields: root.layoutFields }
         }
     }
 
@@ -700,7 +700,7 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            Card { width: parent.width; SliderList { fields: root.lockFields } }
+            SliderList { width: parent.width; fields: root.lockFields }
         }
     }
 
@@ -709,26 +709,23 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            Card { width: parent.width; SliderList { fields: root.fontSizeFields } }
-            Text { text: "Font family"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
-            Card {
+            SliderList { width: parent.width; fields: root.fontSizeFields }
+            Text { text: "Font family"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
+            SettingRow {
                 width: parent.width
-                SettingRow {
-                    width: parent.width
-                    title: "Font family"
-                    Rectangle {
-                        width: 200; height: 30; radius: Theme.entryRadius
-                        color: Qt.rgba(1, 1, 1, 0.06)
-                        border.width: 1; border.color: Theme.borderIdle
-                        TextInput {
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            text: root.font_family
-                            color: Theme.textActive
-                            font.family: Theme.fontFamily
-                            verticalAlignment: TextInput.AlignVCenter
-                            onEditingFinished: { root.font_family = text; root.dirty = true; }
-                        }
+                title: "Font family"
+                Rectangle {
+                    width: 200; height: 30
+                    color: "transparent"
+                    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: fontFamilyInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                    TextInput {
+                        id: fontFamilyInput
+                        anchors.fill: parent
+                        text: root.font_family
+                        color: Theme.textActive
+                        font.family: Theme.fontFamily
+                        verticalAlignment: TextInput.AlignVCenter
+                        onEditingFinished: { root.font_family = text; root.dirty = true; }
                     }
                 }
             }
@@ -740,7 +737,7 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            Card { width: parent.width; SliderList { fields: root.experienceFields } }
+            SliderList { width: parent.width; fields: root.experienceFields }
         }
     }
 
@@ -749,43 +746,72 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            Card {
+
+            // A real thumbnail instead of a text path -- "wallpaper should
+            // have a preview" means an actual image, not its filename.
+            Item {
                 width: parent.width
-                SettingRow {
-                    width: parent.width
-                    title: "Current wallpaper"
-                    subtitle: root.wallpaper
-                    GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
+                height: 200
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.roundingLg
+                    color: Theme.layer1
+                    clip: true
+                    Image {
+                        id: wallpaperPreviewImage
+                        anchors.fill: parent
+                        source: root.wallpaper ? "file://" + root.wallpaper : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        visible: status === Image.Ready
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        visible: wallpaperPreviewImage.status !== Image.Ready
+                        text: "No wallpaper set"
+                        color: Theme.text
+                        opacity: 0.5
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmaller
+                    }
+                }
+            }
+            SettingRow {
+                width: parent.width
+                title: "Current wallpaper"
+                subtitle: root.wallpaper
+                GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
+            }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+
+            Text {
+                text: "Match Theme to Wallpaper"
+                color: Theme.text
+                opacity: 0.55
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                font.letterSpacing: 0.5
+            }
+            SettingRow {
+                width: parent.width
+                title: "Generate colors from the current wallpaper"
+                subtitle: "Samples it for a background tone and accent -- overwrites the Colors tab below (Apply to keep, Revert to undo)"
+                GlassButton {
+                    text: root.generatingFromWallpaper ? "Sampling..." : "Generate"
+                    variant: "primary"
+                    enabled: !root.generatingFromWallpaper
+                    onClicked: root.generateFromWallpaper()
                 }
             }
             Text {
-                text: "Match Theme to Wallpaper"
-                color: Theme.textActive
-                font.family: Theme.fontFamily
-                font.weight: Font.DemiBold
-            }
-            Card {
+                visible: root.wallpaperGenerateError.length > 0
                 width: parent.width
-                SettingRow {
-                    width: parent.width
-                    title: "Generate colors from the current wallpaper"
-                    subtitle: "Samples it for a background tone and accent -- overwrites the Colors tab below (Apply to keep, Revert to undo)"
-                    GlassButton {
-                        text: root.generatingFromWallpaper ? "Sampling..." : "Generate"
-                        variant: "primary"
-                        enabled: !root.generatingFromWallpaper
-                        onClicked: root.generateFromWallpaper()
-                    }
-                }
-                Text {
-                    visible: root.wallpaperGenerateError.length > 0
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    text: root.wallpaperGenerateError
-                    color: Theme.accent
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmaller
-                }
+                wrapMode: Text.WordWrap
+                text: root.wallpaperGenerateError
+                color: Theme.accent
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmaller
             }
         }
     }

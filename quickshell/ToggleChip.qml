@@ -1,12 +1,12 @@
 import QtQuick
 
-// A quiet, full-width toggle row (Wi-Fi, Bluetooth, DND, Keep Awake) --
-// deliberately NOT a big solid-accent tile. The accent's job is to mark
-// "this one is on," not to become the dominant color of the panel, so an
-// active row gets only a faint accent-tinted background wash, a tinted
-// icon/label, and a small dot -- never a full-saturation fill. `active` is
-// a plain external property this binds to; the caller owns the actual
-// on/off state and reacts to `toggled(next)`.
+// A native-shell-control toggle tile (Wi-Fi, Bluetooth, DND, Keep Awake) --
+// primary controls get real visual presence (a square tile, a centered
+// icon, a label), not a thin list row, matching how an actual desktop
+// control center presents its top-level toggles. The accent still only
+// ever shows up as a quiet tint + a tinted icon when active -- never a
+// solid/high-saturation fill -- so four of these sitting side by side
+// read as "one is on" rather than "the panel turned cyan."
 Rectangle {
     id: root
     property string glyph: ""
@@ -14,48 +14,45 @@ Rectangle {
     property bool active: false
     signal toggled(bool next)
 
-    implicitWidth: parent ? parent.width : 200
-    implicitHeight: 38
-    radius: Theme.roundingSm
-    color: area.containsMouse ? Theme.layer1 : "transparent"
+    implicitWidth: 74
+    implicitHeight: 74
+    radius: Theme.roundingLg
+    color: {
+        if (root.active) return Theme.mix(Theme.layer1, Theme.accent, area.containsMouse ? 0.22 : 0.14);
+        return area.containsMouse ? Theme.layer1Hover : Theme.layer1;
+    }
+    scale: area.pressed ? 0.96 : 1.0
 
     Behavior on color {
         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
     }
+    Behavior on scale {
+        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+    }
 
-    Row {
-        anchors.left: parent.left
-        anchors.leftMargin: Theme.padMd
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: Theme.padSm
+    Column {
+        anchors.centerIn: parent
+        spacing: Theme.padXs
         Text {
+            anchors.horizontalCenter: parent.horizontalCenter
             text: root.glyph
-            width: 16
-            horizontalAlignment: Text.AlignHCenter
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeNormal
+            font.pixelSize: Theme.fontSizeLarge
             color: root.active ? Theme.accent : Theme.text
-            opacity: root.active ? 1 : 0.75
+            opacity: root.active ? 1 : 0.8
         }
         Text {
+            anchors.horizontalCenter: parent.horizontalCenter
             text: root.label
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeNormal
+            font.pixelSize: Theme.fontSizeSmall
             font.weight: root.active ? Font.Medium : Font.Normal
             color: root.active ? Theme.textActive : Theme.text
             opacity: root.active ? 1 : 0.85
+            elide: Text.ElideRight
+            width: 68
+            horizontalAlignment: Text.AlignHCenter
         }
-    }
-
-    Rectangle {
-        visible: root.active
-        anchors.right: parent.right
-        anchors.rightMargin: Theme.padMd
-        anchors.verticalCenter: parent.verticalCenter
-        width: 6
-        height: 6
-        radius: 3
-        color: Theme.accent
     }
 
     MouseArea {
