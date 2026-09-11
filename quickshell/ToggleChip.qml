@@ -32,19 +32,19 @@ Rectangle {
 
     Column {
         anchors.centerIn: parent
-        spacing: 6
+        spacing: Theme.padSm
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: root.glyph
             font.family: Theme.fontFamily
-            font.pixelSize: 17
+            font.pixelSize: Theme.fontSizeLarge
             color: root.active ? Theme.textActive : Theme.text
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: root.label
             font.family: Theme.fontFamily
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             font.weight: Font.Medium
             color: root.active ? Theme.textActive : Theme.text
         }

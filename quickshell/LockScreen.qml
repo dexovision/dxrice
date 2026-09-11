@@ -83,6 +83,9 @@ WlSessionLock {
                     anchors.horizontalCenter: parent.horizontalCenter
                     color: Theme.textActive
                     font.family: Theme.fontFamily
+                    // The one deliberately huge display size in this whole
+                    // shell -- a lock screen clock is meant to dominate,
+                    // same as every reference rice's own lock screen.
                     font.pixelSize: 72
                     font.weight: Font.Light
                 }
@@ -91,7 +94,7 @@ WlSessionLock {
                     anchors.horizontalCenter: parent.horizontalCenter
                     color: Theme.text
                     font.family: Theme.fontFamily
-                    font.pixelSize: 16
+                    font.pixelSize: Theme.fontSizeLarger
                     opacity: 0.85
                 }
             }
@@ -114,7 +117,7 @@ WlSessionLock {
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: parent.height * 0.28 + 160
                 width: 320
-                height: cardColumn.implicitHeight + Theme.padXl * 2
+                height: cardColumn.implicitHeight + Theme.pad2xl * 2
                 x: shakeAnim.running ? shakeAnim.offset : 0
 
                 SequentialAnimation {
@@ -146,16 +149,16 @@ WlSessionLock {
 
                     Column {
                         id: cardColumn
-                        x: Theme.padXl
-                        y: Theme.padXl
-                        width: parent.width - Theme.padXl * 2
+                        x: Theme.pad2xl
+                        y: Theme.pad2xl
+                        width: parent.width - Theme.pad2xl * 2
                         spacing: Theme.padMd
 
                         Text {
                             text: "Welcome back, " + Quickshell.env("USER")
                             color: Theme.textActive
                             font.family: Theme.fontFamily
-                            font.pixelSize: 15
+                            font.pixelSize: Theme.fontSizeLarger
                             font.weight: Font.DemiBold
                             width: parent.width
                             elide: Text.ElideRight
@@ -200,7 +203,7 @@ WlSessionLock {
                             text: ""
                             color: Theme.accent
                             font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontSizeSmaller
                             visible: text.length > 0
                             width: parent.width
                             wrapMode: Text.WordWrap

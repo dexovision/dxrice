@@ -464,9 +464,9 @@ PanelWindow {
                                     visible: shortcutCard.pinned
                                     width: pinLabel.implicitWidth + 12
                                     height: 20
-                                    radius: 10
+                                    radius: Theme.roundingFull
                                     color: Theme.accentSoft
-                                    Text { id: pinLabel; anchors.centerIn: parent; text: "Pinned"; color: Theme.textActive; font.pixelSize: 11 }
+                                    Text { id: pinLabel; anchors.centerIn: parent; text: "Pinned"; color: Theme.textActive; font.pixelSize: Theme.fontSizeSmall }
                                 }
                                 IconButton {
                                     visible: !shortcutCard.pinned
@@ -509,7 +509,7 @@ PanelWindow {
                                     text: shortcutCard.meta.dxrice_icon_path ? shortcutCard.meta.dxrice_icon_path : "No image chosen"
                                     color: Theme.text
                                     opacity: 0.7
-                                    font.pixelSize: 11
+                                    font.pixelSize: Theme.fontSizeSmall
                                     elide: Text.ElideMiddle
                                     width: parent.width
                                 }
@@ -521,7 +521,7 @@ PanelWindow {
                     Text { text: "System Modules"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
                     Text {
                         text: "Click actions for the volume/network/CPU/RAM/clock modules"
-                        color: Theme.text; opacity: 0.7; font.pixelSize: 12; font.family: Theme.fontFamily
+                        color: Theme.text; opacity: 0.7; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
                     }
                     Repeater {
                         model: root.loaded ? root.systemModuleIds() : []
@@ -673,8 +673,8 @@ PanelWindow {
                                     anchors.left: parent.left
                                     anchors.leftMargin: 8
                                     width: parent.width - 16
-                                    Text { text: modelData.name; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width }
-                                    Text { text: modelData.cmd; color: Theme.text; opacity: 0.6; font.pixelSize: 10; elide: Text.ElideRight; width: parent.width }
+                                    Text { text: modelData.name; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; elide: Text.ElideRight; width: parent.width }
+                                    Text { text: modelData.cmd; color: Theme.text; opacity: 0.6; font.pixelSize: Theme.fontSizeSmall; elide: Text.ElideRight; width: parent.width }
                                 }
                                 MouseArea {
                                     id: appArea
@@ -691,7 +691,7 @@ PanelWindow {
                     }
                 }
 
-                Text { text: "Or add a custom shortcut"; color: Theme.text; opacity: 0.7; font.pixelSize: 12; font.family: Theme.fontFamily }
+                Text { text: "Or add a custom shortcut"; color: Theme.text; opacity: 0.7; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily }
 
                 Rectangle {
                     width: parent.width; height: 34; radius: Theme.entryRadius

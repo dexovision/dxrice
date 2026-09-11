@@ -145,40 +145,50 @@ QtObject {
     readonly property color bgIdle: layer1
     readonly property color active: layer2
 
-    // ---- rounding scale: caelestia-dots/shell's own RoundingTokens are
-    // fixed absolute values (config/tokens.hpp: extraSmall 4, small 8,
-    // medium 12, large 16, extraLarge 28), not a single radius knob
-    // stretched by ratios -- a real type-scale, not an approximation of
-    // one. `radius` still works as a scale multiplier around that real
-    // scale (default 12 = exactly a 1.0x multiplier, so out of the box
-    // this matches their numbers exactly; turning the slider scales all
-    // five steps together rather than picking one flat value). ----
+    // ---- rounding scale: inner elements (chips, rows, list entries) stay
+    // restrained (4/8/12/16, caelestia-dots/shell's own fixed
+    // RoundingTokens); the outer floating panel itself gets a real jump to
+    // 32 -- a deliberately larger radius so the panel reads as one
+    // premium, soft "surface" rather than just a bigger version of its own
+    // inner cards. Mixing radically different radii within one component
+    // reads as inconsistent; having exactly two registers (inner vs.
+    // outer-surface) and reusing them everywhere is what reads as
+    // designed. `radius` is still a scale multiplier around these real
+    // numbers (default 12 = 1.0x, so out of the box these are exact). ----
     readonly property real radius: root._num("radius", 12)
     readonly property real roundingScale: radius / 12
     readonly property real roundingXs: Math.max(2, Math.round(4 * roundingScale))
     readonly property real roundingSm: Math.round(8 * roundingScale)
     readonly property real roundingMd: Math.round(12 * roundingScale)
     readonly property real roundingLg: Math.round(16 * roundingScale)
-    readonly property real roundingXl: Math.round(28 * roundingScale)
+    readonly property real roundingXl: Math.round(32 * roundingScale)
     readonly property real roundingFull: 9999
     // Old name kept as an alias (small elements: chips, entries, inner rows).
     readonly property real entryRadius: roundingSm
 
-    // Same story for spacing/padding: caelestia's SpacingTokens/
-    // PaddingTokens are the identical fixed 4/8/12/16/28 scale as
-    // rounding, scaled here by ui_density the same way.
+    // ---- spacing scale: 4/8/12/16/20/24/32 -- micro / icon-text gap /
+    // small component padding / normal component padding / section
+    // spacing / major spacing / large layout spacing. Every gap, margin,
+    // and padding value in this shell should come from one of these seven
+    // numbers; a widget picking its own one-off spacing value is exactly
+    // what reads as "randomly chosen" rather than "one grid." ----
     readonly property real density: root._num("ui_density", 1.0)
     readonly property real padXs: Math.round(4 * density)
     readonly property real padSm: Math.round(8 * density)
     readonly property real padMd: Math.round(12 * density)
     readonly property real padLg: Math.round(16 * density)
-    readonly property real padXl: Math.round(28 * density)
+    readonly property real padXl: Math.round(20 * density)
+    readonly property real pad2xl: Math.round(24 * density)
+    readonly property real pad3xl: Math.round(32 * density)
 
-    // FontSizeTokens: small 11, normal 13, larger 15, large 18, extraLarge
-    // 28 -- a real type scale instead of picking pixel sizes ad hoc per
-    // Text element, which is most of what made spacing/hierarchy feel
-    // arbitrary rather than designed.
+    // FontSizeTokens: small 11, smaller 12, normal 13, larger 15, large 18,
+    // hero 28 -- a real type scale instead of picking pixel sizes ad hoc
+    // per Text element, which is most of what made hierarchy feel
+    // arbitrary rather than designed. "smaller" sits between small and
+    // normal (caelestia's own naming) -- it's the single most-reused size
+    // for secondary/metadata text.
     readonly property int fontSizeSmall: 11
+    readonly property int fontSizeSmaller: 12
     readonly property int fontSizeNormal: 13
     readonly property int fontSizeLarger: 15
     readonly property int fontSizeLarge: 18

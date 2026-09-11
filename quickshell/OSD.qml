@@ -118,7 +118,7 @@ PanelWindow {
 
             Column {
                 anchors.centerIn: parent
-                width: parent.width - Theme.padXl * 2
+                width: parent.width - Theme.pad2xl * 2
                 spacing: Theme.padSm
 
                 Row {

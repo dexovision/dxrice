@@ -75,7 +75,7 @@ Item {
             text: root.decimals > 0 ? root.value.toFixed(root.decimals) : Math.round(root.value) + "%"
             color: Theme.text
             font.family: Theme.fontFamily
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeSmaller
             width: 42
             horizontalAlignment: Text.AlignRight
         }

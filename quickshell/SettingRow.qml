@@ -22,7 +22,7 @@ Row {
             text: root.title
             color: Theme.textActive
             font.family: Theme.fontFamily
-            font.pixelSize: 13
+            font.pixelSize: Theme.fontSizeNormal
             font.weight: Font.Medium
             elide: Text.ElideRight
             width: parent.width
@@ -33,7 +33,7 @@ Row {
             color: Theme.text
             opacity: 0.65
             font.family: Theme.fontFamily
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             elide: Text.ElideRight
             width: parent.width
         }

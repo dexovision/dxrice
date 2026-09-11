@@ -15,7 +15,7 @@ Rectangle {
     // happen to reuse.
     signal clicked()
 
-    implicitWidth: label.implicitWidth + Theme.padXl * 2
+    implicitWidth: label.implicitWidth + Theme.pad2xl * 2
     implicitHeight: label.implicitHeight + Theme.padMd * 2
     radius: root.variant === "primary" ? Theme.roundingFull : Theme.roundingSm
     opacity: root.enabled ? 1.0 : 0.5
@@ -42,7 +42,7 @@ Rectangle {
         text: root.text
         color: root.variant === "primary" ? Theme.textActive : Theme.text
         font.family: Theme.fontFamily
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontSizeNormal
         font.weight: root.variant === "primary" ? Font.DemiBold : Font.Medium
     }
 

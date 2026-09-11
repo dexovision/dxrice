@@ -272,7 +272,7 @@ PanelWindow {
                         color: Theme.text
                         opacity: 0.65
                         font.family: Theme.fontFamily
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fontSizeSmall
                         anchors.right: closeBtn.left
                         anchors.rightMargin: Theme.padMd
                         anchors.verticalCenter: parent.verticalCenter
@@ -310,21 +310,21 @@ PanelWindow {
 
                             Column {
                                 anchors.centerIn: parent
-                                spacing: 3
+                                spacing: Theme.padXs
                                 Row {
                                     anchors.horizontalCenter: parent.horizontalCenter
-                                    spacing: 6
+                                    spacing: Theme.padSm
                                     Text {
                                         text: modelData.glyph
                                         font.family: Theme.fontFamily
-                                        font.pixelSize: 13
+                                        font.pixelSize: Theme.fontSizeNormal
                                         color: parent.parent.parent.active ? Theme.textActive : Theme.text
                                         opacity: parent.parent.parent.active ? 1 : 0.6
                                     }
                                     Text {
                                         text: modelData.label
                                         font.family: Theme.fontFamily
-                                        font.pixelSize: 12
+                                        font.pixelSize: Theme.fontSizeSmaller
                                         font.weight: parent.parent.parent.active ? Font.DemiBold : Font.Normal
                                         color: parent.parent.parent.active ? Theme.textActive : Theme.text
                                         opacity: parent.parent.parent.active ? 1 : 0.6
@@ -334,7 +334,7 @@ PanelWindow {
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     width: 22
                                     height: 2
-                                    radius: 1
+                                    radius: Theme.roundingFull
                                     color: Theme.accent
                                     opacity: parent.parent.active ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
@@ -472,7 +472,7 @@ PanelWindow {
                                 text: audioDeviceBackend.label(modelData)
                                 color: Theme.text
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: Theme.fontSizeSmaller
                                 elide: Text.ElideRight
                             }
                             Text {
@@ -529,7 +529,7 @@ PanelWindow {
                                 text: audioDeviceBackend.label(modelData)
                                 color: Theme.text
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: Theme.fontSizeSmaller
                                 elide: Text.ElideRight
                             }
                             Text {
@@ -599,7 +599,7 @@ PanelWindow {
                                 text: modelData.signal + "%"
                                 color: Theme.text
                                 opacity: 0.55
-                                font.pixelSize: 11
+                                font.pixelSize: Theme.fontSizeSmall
                                 width: 34
                                 anchors.verticalCenter: parent.verticalCenter
                             }
@@ -657,7 +657,7 @@ PanelWindow {
                                 text: modelData.battery + "%"
                                 color: Theme.text
                                 opacity: 0.55
-                                font.pixelSize: 11
+                                font.pixelSize: Theme.fontSizeSmall
                                 width: 34
                                 anchors.verticalCenter: parent.verticalCenter
                             }
@@ -696,8 +696,8 @@ PanelWindow {
                     ]
                     delegate: Row {
                         width: parent.width
-                        Text { text: modelData.label; color: Theme.text; opacity: 0.6; width: 60; font.family: Theme.fontFamily; font.pixelSize: 12 }
-                        Text { text: modelData.value; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: 12; elide: Text.ElideRight; width: parent.width - 60 }
+                        Text { text: modelData.label; color: Theme.text; opacity: 0.6; width: 60; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
+                        Text { text: modelData.value; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; elide: Text.ElideRight; width: parent.width - 60 }
                     }
                 }
             }
@@ -711,8 +711,8 @@ PanelWindow {
                     model: worldClock.cities
                     delegate: Row {
                         width: parent.width
-                        Text { text: modelData.label; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 12; width: parent.width - 60 }
-                        Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: 12; width: 60; horizontalAlignment: Text.AlignRight }
+                        Text { text: modelData.label; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: parent.width - 60 }
+                        Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: 60; horizontalAlignment: Text.AlignRight }
                     }
                 }
             }
@@ -772,6 +772,8 @@ PanelWindow {
                         visible: mediaBackend.artUrl.length === 0
                         text: ""
                         font.family: Theme.fontFamily
+                        // Hero glyph, deliberately outside the type scale (a single
+                        // large placeholder icon, not body text).
                         font.pixelSize: 48
                         color: Theme.text
                         opacity: 0.4
@@ -788,7 +790,7 @@ PanelWindow {
                     text: mediaBackend.title
                     color: Theme.textActive
                     font.family: Theme.fontFamily
-                    font.pixelSize: 15
+                    font.pixelSize: Theme.fontSizeLarger
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -799,7 +801,7 @@ PanelWindow {
                     text: mediaBackend.artist
                     color: Theme.text
                     opacity: 0.7
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeSmaller
                     elide: Text.ElideRight
                 }
             }
@@ -822,14 +824,14 @@ PanelWindow {
                         text: mediaBackend.formatTime(root.mediaPosition)
                         color: Theme.text
                         opacity: 0.6
-                        font.pixelSize: 10
+                        font.pixelSize: Theme.fontSizeSmall
                         width: parent.width / 2
                     }
                     Text {
                         text: mediaBackend.formatTime(mediaBackend.length)
                         color: Theme.text
                         opacity: 0.6
-                        font.pixelSize: 10
+                        font.pixelSize: Theme.fontSizeSmall
                         width: parent.width / 2
                         horizontalAlignment: Text.AlignRight
                     }
@@ -866,12 +868,13 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padSm
-            Item { width: 1; height: Theme.padXl }
+            Item { width: 1; height: Theme.pad2xl }
             Text {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 text: ""
                 font.family: Theme.fontFamily
+                // Hero glyph, deliberately outside the type scale.
                 font.pixelSize: 40
                 color: Theme.text
                 opacity: 0.3
@@ -883,9 +886,9 @@ PanelWindow {
                 color: Theme.text
                 opacity: 0.5
                 font.family: Theme.fontFamily
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontSizeNormal
             }
-            Item { width: 1; height: Theme.padXl }
+            Item { width: 1; height: Theme.pad2xl }
         }
     }
 
@@ -921,7 +924,7 @@ PanelWindow {
                     text: root.diskUsedLabel
                     color: Theme.text
                     opacity: 0.55
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.fontSizeSmall
                     anchors.right: parent.right
                 }
             }

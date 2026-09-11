@@ -318,7 +318,7 @@ PanelWindow {
                 title: modelData.label
                 subtitle: modelData.sub
                 Rectangle {
-                    width: 32; height: 24; radius: 6
+                    width: 32; height: 24; radius: Theme.roundingXs
                     color: "#" + root[modelData.key]
                     border.width: 1
                     border.color: Theme.borderIdle
@@ -451,7 +451,7 @@ PanelWindow {
                             anchors.leftMargin: Theme.padSm
                             text: ""
                             font.family: Theme.fontFamily
-                            font.pixelSize: 11
+                            font.pixelSize: Theme.fontSizeSmall
                             color: Theme.text
                             opacity: 0.6
                         }
@@ -463,7 +463,7 @@ PanelWindow {
                             anchors.verticalCenter: parent.verticalCenter
                             color: Theme.textActive
                             font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontSizeSmaller
                             text: root.searchText
                             onTextChanged: root.searchText = text
                             Text {
@@ -471,7 +471,7 @@ PanelWindow {
                                 color: Theme.text
                                 opacity: parent.text.length ? 0 : 0.5
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: Theme.fontSizeSmaller
                             }
                         }
                     }
@@ -506,7 +506,7 @@ PanelWindow {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 3
                                         height: 22
-                                        radius: 2
+                                        radius: Theme.roundingFull
                                         color: Theme.accent
                                     }
 
@@ -517,7 +517,7 @@ PanelWindow {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: catRow.modelData.glyph
                                         font.family: Theme.fontFamily
-                                        font.pixelSize: 15
+                                        font.pixelSize: Theme.fontSizeLarger
                                         color: catRow.selected ? Theme.accent : Theme.text
                                     }
                                     Column {
@@ -532,7 +532,7 @@ PanelWindow {
                                             text: catRow.modelData.label
                                             color: catRow.selected ? Theme.textActive : Theme.text
                                             font.family: Theme.fontFamily
-                                            font.pixelSize: 12
+                                            font.pixelSize: Theme.fontSizeSmaller
                                             font.weight: Font.Medium
                                             elide: Text.ElideRight
                                         }
@@ -542,7 +542,7 @@ PanelWindow {
                                             color: Theme.text
                                             opacity: 0.55
                                             font.family: Theme.fontFamily
-                                            font.pixelSize: 10
+                                            font.pixelSize: Theme.fontSizeSmall
                                             elide: Text.ElideRight
                                         }
                                     }
@@ -733,7 +733,7 @@ PanelWindow {
                     text: root.wallpaperGenerateError
                     color: Theme.accent
                     font.family: Theme.fontFamily
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeSmaller
                 }
             }
         }
