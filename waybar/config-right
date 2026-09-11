@@ -1,10 +1,11 @@
 {
+    "name": "waybar-right",
     "layer": "top",
     "position": "right",
     "width": 48,
     "margin-top": 380,
     "margin-bottom": 380,
-    "margin-right": 10,
+    "margin-right": 0,
     "modules-center": [
         "group/quicksettings",
         "tray"

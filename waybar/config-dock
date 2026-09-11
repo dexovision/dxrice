@@ -1,8 +1,9 @@
 {
+    "name": "waybar-dock",
     "layer": "top",
     "position": "bottom",
     "height": 52,
-    "margin-bottom": 10,
+    "margin-bottom": 0,
     "margin-left": 700,
     "margin-right": 700,
     "modules-left": [

@@ -1,10 +1,11 @@
 {
+    "name": "waybar-left",
     "layer": "top",
     "position": "left",
     "width": 48,
     "margin-top": 380,
     "margin-bottom": 380,
-    "margin-left": 10,
+    "margin-left": 0,
     "modules-center": [
         "hyprland/workspaces"
     ],

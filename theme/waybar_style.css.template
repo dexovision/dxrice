@@ -12,6 +12,18 @@ window#waybar {
     background: transparent;
 }
 
+/* The left/right rails hold exactly one island each (no multiple-island
+   gaps to preserve the way the top/dock bars have), so any transparent
+   sliver inside their own window bounds beyond the island's rounded
+   fill is just a leftover gap with nothing to show but whatever's behind
+   it -- close it completely rather than let it leak arbitrary window
+   content when something happens to be floating behind that edge. */
+window#waybar.waybar-left,
+window#waybar.waybar-right {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${WAYBAR_BG_ALPHA});
+    border-radius: ${RADIUS_BAR}px;
+}
+
 /* Three floating islands (apps / workspaces+clock / tray+quicksettings)
    instead of one continuous flat strip -- this is what actually reads as
    "a compact floating dock" rather than "waybar with some colors changed."
@@ -31,6 +43,31 @@ window#waybar {
     border-radius: ${RADIUS_BAR}px;
     padding: 0 6px;
     margin: 6px 4px;
+    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Each bar is flush against the exact edge it belongs to (square on that
+   side) and rounded only on the side facing into the desktop -- the same
+   "square where attached, rounded where it floats free" geometry the
+   panel each bar triggers already uses (top/left/right/dock config files
+   set "name" to match). Opening Quick Settings or the Taskbar editor
+   then reads as that bar's own surface extending, not an unrelated
+   rectangle appearing elsewhere on screen. */
+#waybar.waybar-top > box > box.modules-center {
+    border-radius: 0 0 ${RADIUS_BAR}px ${RADIUS_BAR}px;
+    margin: 0 4px 6px 4px;
+}
+#waybar.waybar-left > box > box.modules-center {
+    border-radius: 0 ${RADIUS_BAR}px ${RADIUS_BAR}px 0;
+    margin: 6px 4px 6px 0;
+}
+#waybar.waybar-right > box > box.modules-center {
+    border-radius: ${RADIUS_BAR}px 0 0 ${RADIUS_BAR}px;
+    margin: 6px 0 6px 4px;
+}
+#waybar.waybar-dock > box > box.modules-left {
+    border-radius: ${RADIUS_BAR}px ${RADIUS_BAR}px 0 0;
+    margin: 6px 4px 0 4px;
 }
 
 /* Master container transparency -- these sit *inside* an island now, so
@@ -77,6 +114,36 @@ button {
 #clock {
     font-weight: 600;
     color: ${TEXT_ACTIVE_COLOR};
+}
+
+/* The clock is clickable (opens the calendar) but previously gave zero
+   interactive feedback -- a quiet hover tint says "this responds to you"
+   without adding a permanent pill around it. */
+#clock:hover {
+    background-color: rgba(${TEXT_ACTIVE_R}, ${TEXT_ACTIVE_G}, ${TEXT_ACTIVE_B}, 0.08);
+}
+
+/* Idle quiet, alert on interaction: the left workspace rail and right
+   status rail dim themselves slightly at rest and come to full
+   brightness on hover or when actually active/focused -- the shell
+   should be "there" without visually competing with the wallpaper the
+   moment nothing is happening. */
+#waybar.waybar-left button {
+    opacity: 0.72;
+    transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1), background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+#waybar.waybar-left button:hover,
+#waybar.waybar-left button.active,
+#waybar.waybar-left button.focused,
+#waybar.waybar-left button:checked {
+    opacity: 1;
+}
+#waybar.waybar-right widget > * {
+    opacity: 0.72;
+    transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1), background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+#waybar.waybar-right widget > *:hover {
+    opacity: 1;
 }
 
 /* The tray sits on the shared right-hand island surface now -- no second
@@ -153,7 +220,18 @@ button.active {
 }
 
 /* App-shortcut icons (launcher + custom taskbar buttons) size independently
-   from the clock/volume/network/etc text modules above. */
+   from the clock/volume/network/etc text modules above. A real dock
+   should feel tactile: icons grow slightly on hover, like they're
+   lifting toward the cursor, instead of just swapping a flat background
+   tint the way a plain text button does. GTK CSS has no transform/scale,
+   so the "lift" is a font-size step with a spring-ish easing curve. */
 .app-icon {
     font-size: ${FONT_SIZE_WAYBAR_ICONS}px;
+    opacity: 0.85;
+    transition: font-size 180ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 160ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+#waybar.waybar-dock button:hover .app-icon,
+#waybar.waybar-dock button:hover.app-icon {
+    font-size: ${FONT_SIZE_WAYBAR_ICONS_HOVER}px;
+    opacity: 1;
 }
