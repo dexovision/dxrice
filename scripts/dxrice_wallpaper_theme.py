@@ -69,26 +69,53 @@ def derive_palette(pixels):
     avg = tuple(sum(p[i] for p in pixels) / len(pixels) for i in range(3))
     avg_h, avg_l, avg_s = colorsys.rgb_to_hls(avg[0] / 255, avg[1] / 255, avg[2] / 255)
 
-    best_pixel, best_sat = None, -1.0
+    # The accent hue is a saturation-weighted circular mean over every
+    # sampled pixel (skipping near-black/near-white noise), not the single
+    # most-saturated pixel -- a single outlier pixel (a stray colored
+    # highlight, a UI element caught in the wallpaper) can easily have
+    # higher saturation than the image's actual dominant color while being
+    # wildly unrepresentative of it. Weighting by saturation still lets
+    # genuinely colorful regions dominate the average far more than gray/
+    # near-neutral ones, without a single pixel being able to hijack the
+    # whole result.
+    import math
+    sum_x = sum_y = weight_total = 0.0
     for p in pixels:
         h, l, s = colorsys.rgb_to_hls(p[0] / 255, p[1] / 255, p[2] / 255)
-        if 0.15 < l < 0.9 and s > best_sat:
-            best_sat, best_pixel = s, (h, l, s)
-    accent_h, accent_l, accent_s = best_pixel if best_pixel and best_sat > 0.12 else (avg_h, avg_l, avg_s)
+        if 0.08 < l < 0.92:
+            sum_x += math.cos(2 * math.pi * h) * s
+            sum_y += math.sin(2 * math.pi * h) * s
+            weight_total += s
+    if weight_total > 0.05 * len(pixels):
+        accent_h = (math.atan2(sum_y, sum_x) / (2 * math.pi)) % 1.0
+        accent_s = min(1.0, weight_total / len(pixels))
+    else:
+        accent_h, accent_s = avg_h, avg_s
 
+    # Backgrounds stay genuinely neutral -- zero saturation, independent of
+    # the wallpaper's own hue -- so the shell always reads as black/
+    # charcoal/off-white no matter what color the wallpaper is. Only the
+    # accent is allowed to carry any of the wallpaper's identity; a shell
+    # whose *surfaces* pick up wallpaper hue reads as "green UI," not
+    # "neutral UI with a green accent."
     return {
-        "glass_bg": hls_hex(avg_h, 0.05, avg_s * 0.7),
-        "glass_bg_active": hls_hex(avg_h, 0.12, avg_s * 0.7),
+        "glass_bg": hls_hex(0, 0.05, 0),
+        "glass_bg_active": hls_hex(0, 0.12, 0),
         "glass_text": "d8d8d8",
         "glass_text_active": "ffffff",
         "glass_border": "ffffff",
-        # Pushed harder than a first pass -- a wallpaper-derived accent that
-        # plays it safe just reads as another gray. This is deliberately
-        # closer to a punchy, saturated UI accent than a literal color pick.
-        "accent": hls_hex(accent_h, accent_l * 0.35 + 0.45, accent_s * 1.6 + 0.35),
-        "hypr_active_border_1": hls_hex(accent_h, accent_l * 0.4 + 0.55, accent_s * 0.8 + 0.15),
-        "hypr_active_border_2": hls_hex(accent_h + 0.06, accent_l * 0.4 + 0.7, accent_s * 0.6 + 0.1),
-        "hypr_inactive_border": hls_hex(avg_h, 0.09, avg_s * 0.4),
+        # A restrained, "sophisticated" accent: capped well short of a
+        # vivid/neon saturation and held at a mid lightness so it stays
+        # legible without dominating -- this is meant to read as one small
+        # indicator's worth of color, not a wash. Earlier versions of this
+        # script boosted saturation aggressively (accent_s * 1.6 + 0.35),
+        # which turned a muted wallpaper teal into a garish neon cyan --
+        # the fix is restraint here, not hiding the result behind smaller
+        # UI elements.
+        "accent": hls_hex(accent_h, 0.58, min(0.42, max(0.22, accent_s * 0.6))),
+        "hypr_active_border_1": hls_hex(accent_h, 0.55, min(0.35, accent_s * 0.5)),
+        "hypr_active_border_2": hls_hex(accent_h + 0.04, 0.45, min(0.3, accent_s * 0.45)),
+        "hypr_inactive_border": hls_hex(0, 0.10, 0),
     }
 
 

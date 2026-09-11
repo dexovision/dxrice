@@ -103,6 +103,11 @@ def build_vars(theme):
 
         "RADIUS": theme["radius"],
         "ENTRY_RADIUS": max(0, theme["radius"] - 2),
+        # Same "outer floating surface gets a distinctly larger radius"
+        # register the Quickshell panels use (Theme.qml's roundingXl =
+        # 32 * radius/12) -- so the waybar dock islands read as the same
+        # kind of surface as the drawer panels, not a smaller-radius knockoff.
+        "RADIUS_XL": round(32 * theme["radius"] / 12),
 
         "KITTY_OPACITY": theme["kitty_opacity"],
 

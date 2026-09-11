@@ -397,9 +397,11 @@ PanelWindow {
 
             Column {
                 id: leftCol
-                width: (parent.width - parent.spacing * 2 - 1) / 2
-                spacing: Theme.padXs
+                width: (parent.width - parent.spacing) / 2
+                spacing: Theme.padLg
 
+                Card {
+                    width: parent.width
                 ToggleChip {
                     width: parent.width
                     glyph: ""; label: "Wi-Fi"
@@ -424,11 +426,9 @@ PanelWindow {
                     active: root.idleInhibited
                     onToggled: (next) => root.setIdleInhibit(next)
                 }
-
-                Item { width: 1; height: Theme.padSm }
-                Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
-                Item { width: 1; height: Theme.padXs }
-
+                }
+                Card {
+                    width: parent.width
                 Row {
                     width: parent.width
                     spacing: Theme.padSm
@@ -562,22 +562,16 @@ PanelWindow {
                         onChanged: (v) => brightnessBackend.set(v)
                     }
                 }
-            }
-
-            // A single hairline splitting the two panes so their
-            // independently sized content never visually smears together,
-            // instead of giving either column its own background box.
-            Rectangle {
-                width: 1
-                height: Math.max(leftCol.implicitHeight, rightCol.implicitHeight)
-                color: Theme.borderIdle
+                }
             }
 
             Column {
                 id: rightCol
-                width: (parent.width - parent.spacing * 2 - 1) / 2
+                width: (parent.width - parent.spacing) / 2
                 spacing: Theme.padLg
 
+                Card {
+                    width: parent.width
                 Expandable {
                     width: parent.width
                     visible: root.wifiEnabled && wifiBackend.networks.length > 0
@@ -679,11 +673,10 @@ PanelWindow {
                         }
                     }
                 }
+                }
 
-                // -- system + world clock folded into a couple of quiet
-                // metadata lines each, instead of five/three label:value
-                // rows in their own boxes -- a fetch strip, not a spec
-                // sheet. --
+                Card {
+                    width: parent.width
                 Column {
                     width: parent.width
                     spacing: Theme.padXs
@@ -731,6 +724,7 @@ PanelWindow {
                             Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: 50; horizontalAlignment: Text.AlignRight }
                         }
                     }
+                }
                 }
             }
         }

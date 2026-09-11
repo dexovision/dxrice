@@ -12,7 +12,26 @@ window#waybar {
     background: transparent;
 }
 
-/* Master container transparency */
+/* Three floating islands (apps / workspaces+clock / tray+quicksettings)
+   instead of one continuous flat strip -- this is what actually reads as
+   "a compact floating dock" rather than "waybar with some colors changed."
+   Each island shares the exact same translucent-glass language the
+   Quickshell panels use (same idle opacity, same outer radius register),
+   and the real gaps between them stay fully transparent so the wallpaper
+   -- already blurred behind each island via hyprland.lua's waybar-blur
+   layer_rule -- stays visible in between, not just underneath. */
+#waybar > box > box.modules-left,
+#waybar > box > box.modules-center,
+#waybar > box > box.modules-right {
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    border: 1px solid rgba(${TEXT_ACTIVE_R}, ${TEXT_ACTIVE_G}, ${TEXT_ACTIVE_B}, ${BORDER_OPACITY_IDLE});
+    border-radius: ${RADIUS_XL}px;
+    padding: 0 6px;
+    margin: 6px 4px;
+}
+
+/* Master container transparency -- these sit *inside* an island now, so
+   they stay bare rather than doubling up their own background. */
 #hyprland-workspaces,
 #workspaces {
     background: transparent;
@@ -57,14 +76,12 @@ button {
     color: ${TEXT_ACTIVE_COLOR};
 }
 
-/* The system tray is the one left-hand exception: a handful of unrelated
-   app icons genuinely read better grouped in one quiet pill than loose. */
+/* The tray sits on the shared right-hand island surface now -- no second
+   background of its own, just its own spacing. */
 #tray {
-    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    background: transparent;
     padding: 2px 10px;
     margin: 3px 2px;
-    border-radius: ${RADIUS}px;
-    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Custom-image shortcuts ("pfps"): square avatar clipped to the same
@@ -74,17 +91,15 @@ button {
     background: transparent;
 }
 
-/* Quick Settings cluster: volume/wifi/cpu/ram grouped into one pill
-   instead of four separate floating chips, clicking any segment opens
-   the Quick Settings panel. This is the one continuously-visible pill on
-   the whole bar, which is exactly why it's allowed a background -- it's a
-   single grouped control, not four things pretending to be one. */
+/* Quick Settings cluster: volume/wifi/cpu/ram grouped into one row of
+   segments, clicking any segment opens the Quick Settings panel. It sits
+   on the same right-hand island surface as the tray now, rather than
+   getting its own nested pill -- one shared surface per island, not one
+   per widget. */
 #quicksettings {
-    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
-    border-radius: 999px;
+    background: transparent;
     margin: 3px 2px;
     padding: 0 4px;
-    transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 #quicksettings widget > * {
