@@ -111,6 +111,104 @@ WlSessionLock {
                 }
             }
 
+            // ---- scattered information zones -- the same real data used
+            // in Quick Settings (no fabricated widgets: this shell has no
+            // weather source, so it isn't pretending to have one), placed
+            // in the corners around the clock instead of one single card
+            // holding everything. Purely additive to the surface: nothing
+            // here touches PamContext or tryUnlock(). ----
+            SystemInfoBackend { id: systemInfo }
+            WorldClockBackend { id: worldClock }
+            MediaBackend { id: mediaBackend }
+
+            Column {
+                visible: surfaceRoot.isPrimary
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: Theme.pad3xl
+                spacing: Theme.padXs
+                Text {
+                    text: "This device"
+                    color: Theme.text
+                    opacity: 0.55
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+                Text {
+                    text: systemInfo.osName + " · " + systemInfo.kernel
+                    color: Theme.textActive
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmaller
+                }
+                Text {
+                    text: systemInfo.hostname + " · up " + systemInfo.uptime
+                    color: Theme.text
+                    opacity: 0.7
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmaller
+                }
+            }
+
+            Column {
+                visible: surfaceRoot.isPrimary
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: Theme.pad3xl
+                spacing: Theme.padXs
+                Text {
+                    text: "World clock"
+                    color: Theme.text
+                    opacity: 0.55
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    anchors.right: parent.right
+                }
+                Repeater {
+                    model: worldClock.cities
+                    delegate: Row {
+                        anchors.right: parent.right
+                        spacing: Theme.padSm
+                        Text { text: modelData.label; color: Theme.text; opacity: 0.85; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
+                        Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
+                    }
+                }
+            }
+
+            Row {
+                visible: surfaceRoot.isPrimary && mediaBackend.available
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.margins: Theme.pad3xl
+                spacing: Theme.padMd
+
+                IconButton { anchors.verticalCenter: parent.verticalCenter; glyph: ""; size: 30; onClicked: mediaBackend.previous() }
+                IconButton { anchors.verticalCenter: parent.verticalCenter; glyph: mediaBackend.playing ? "" : ""; size: 34; onClicked: mediaBackend.playPause() }
+                IconButton { anchors.verticalCenter: parent.verticalCenter; glyph: ""; size: 30; onClicked: mediaBackend.next() }
+
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 2
+                    Text {
+                        text: mediaBackend.title
+                        color: Theme.textActive
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeNormal
+                        elide: Text.ElideRight
+                        width: 240
+                    }
+                    Text {
+                        visible: mediaBackend.artist.length > 0
+                        text: mediaBackend.artist
+                        color: Theme.text
+                        opacity: 0.65
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmaller
+                        elide: Text.ElideRight
+                        width: 240
+                    }
+                }
+            }
+
             Item {
                 id: card
                 visible: surfaceRoot.isPrimary
