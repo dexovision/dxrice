@@ -40,6 +40,12 @@ STATIC_FILES = [
 COPY_ONCE_FILES = [
     ("hypr/hyprland.lua", HOME / ".config/hypr/hyprland.lua"),
     ("waybar/config", HOME / ".config/waybar/config"),
+    # The shell now has four independent waybar instances -- top clock,
+    # left workspace strip, right status strip, bottom app dock -- each
+    # its own personal, never-overwritten config, same as the top one.
+    ("waybar/config-left", HOME / ".config/waybar/config-left"),
+    ("waybar/config-right", HOME / ".config/waybar/config-right"),
+    ("waybar/config-dock", HOME / ".config/waybar/config-dock"),
 ]
 
 LEGACY_SCRIPTS_DIR = HOME / "scripts"

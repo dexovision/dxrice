@@ -1,80 +1,15 @@
 {
     "layer": "top",
     "position": "top",
-    "height": 44,
-    "margin-top": 8,
-    "margin-left": 14,
-    "margin-right": 14,
-    "spacing": 10,
-    "modules-left": [
-        "custom/launcher",
-        "custom/terminal",
-        "custom/files"
-    ],
+    "height": 40,
+    "margin-top": 10,
+    "margin-left": 780,
+    "margin-right": 780,
     "modules-center": [
-        "hyprland/workspaces",
         "clock"
     ],
-    "modules-right": [
-        "group/quicksettings",
-        "tray"
-    ],
-    "group/quicksettings": {
-        "orientation": "horizontal",
-        "modules": [
-            "pulseaudio",
-            "network",
-            "cpu",
-            "memory"
-        ]
-    },
-    "custom/launcher": {
-        "format": "\udb82\udcc7",
-        "on-click": "wofi --show drun",
-        "tooltip": true,
-        "tooltip-format": "App Launcher",
-        "class": "app-icon"
-    },
-    "custom/files": {
-        "format": "\uf07b",
-        "on-click": "nautilus",
-        "tooltip": true,
-        "tooltip-format": "Files",
-        "class": "app-icon"
-    },
-    "hyprland/workspaces": {
-        "disable-scroll": true,
-        "all-outputs": true,
-        "format": "{name}"
-    },
     "clock": {
         "format": "{:%H:%M   %b %d}",
         "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call calendar toggle'"
-    },
-    "pulseaudio": {
-        "format": "Vol {volume}%",
-        "format-muted": "Muted",
-        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
-    },
-    "network": {
-        "format-wifi": "Wifi {signalStrength}%",
-        "format-ethernet": "Ethernet",
-        "format-disconnected": "Offline",
-        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
-    },
-    "cpu": {
-        "format": "CPU {usage}%",
-        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
-    },
-    "memory": {
-        "format": "RAM {percentage}%",
-        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
-    },
-    "custom/terminal": {
-        "format": "\uf120",
-        "on-click": "sh -c 'kitty >/dev/null 2>&1 &'",
-        "tooltip": true,
-        "tooltip-format": "Terminal",
-        "class": "app-icon"
     }
 }

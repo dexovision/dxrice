@@ -26,7 +26,12 @@ end
 local repo = dxrice_repo()
 
 hl.on("hyprland.start", function()
-    hl.exec_cmd("waybar")
+    -- Four independent waybar instances -- top clock, left workspace
+    -- strip, right status strip, bottom dock -- sharing one style.css.
+    -- See waybar/config-{left,right,dock}.
+    hl.exec_cmd("sh -c 'for c in config config-left config-right config-dock; do "
+        .. "setsid waybar -c ~/.config/waybar/$c -s ~/.config/waybar/style.css "
+        .. ">/dev/null 2>&1 & done'")
 
     local bg_path = os.getenv("BG_WALLPAPER") or (home .. "/Pictures/Wallpapers/default.png")
     hl.exec_cmd("swaybg -i " .. bg_path .. " -m fill")

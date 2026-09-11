@@ -24,16 +24,22 @@ PanelWindow {
     WlrLayershell.namespace: "dxrice-taskbar"
     focusable: true
 
+    // The app dock this edits lives in its own bottom-edge waybar instance
+    // now (see waybar/config-dock), so this panel originates from the
+    // BOTTOM edge too and reveals upward -- not a top-anchored drawer
+    // above a dock it's no longer positioned near. Anchoring only
+    // `bottom` (no left/right) centers it horizontally automatically.
     implicitWidth: 480
     implicitHeight: 780
-    anchors { top: true; left: true }
-    margins {
-        top: 52
-        left: Math.round(((root.screen ? root.screen.width : 1920) - root.implicitWidth) / 2)
-    }
+    anchors { bottom: true }
+    margins { bottom: 0 }
 
     readonly property string repoDir: Quickshell.shellDir + "/.."
-    readonly property string configPath: Quickshell.env("HOME") + "/.config/waybar/config"
+    // The app dock lives in its own bottom-edge waybar instance now (see
+    // waybar/config-dock), separate from the top bar's own config -- this
+    // still edits the same "modules-left" array inside that file, just a
+    // different file than before.
+    readonly property string configPath: Quickshell.env("HOME") + "/.config/waybar/config-dock"
     readonly property string launcherId: "custom/launcher"
     readonly property var iconModes: ["auto", "text", "image"]
     readonly property var iconModeLabels: ["Automatic icon", "Text label", "Custom image"]
@@ -86,7 +92,13 @@ PanelWindow {
 
     Process {
         id: restartProc
-        command: ["sh", "-c", "pkill -x waybar; sleep 0.3; setsid waybar >/dev/null 2>&1 &"]
+        // Four independent waybar instances now (top clock, left workspace
+        // strip, right status strip, bottom dock) sharing one style.css --
+        // see waybar/config-{left,right,dock} and hyprland.lua's autostart.
+        command: ["sh", "-c",
+            "pkill -x waybar; sleep 0.3; " +
+            "for c in config config-left config-right config-dock; do " +
+            "setsid waybar -c ~/.config/waybar/$c -s ~/.config/waybar/style.css >/dev/null 2>&1 & done"]
     }
 
     function slugify(label) {
@@ -278,9 +290,9 @@ PanelWindow {
         }
     }
 
-    // ---- visuals: a drawer that unrolls down from the bar, matching
-    // QuickSettings.qml/ThemeEditor.qml exactly -- clean rectangular
-    // geometry, no decorative seam. ----
+    // ---- visuals: a drawer that unrolls UP from the bottom dock, the
+    // mirror of QuickSettings.qml/ThemeEditor.qml's top-anchored drawers --
+    // square bottom (flush with the edge it came from), rounded top only. ----
     Item {
         id: drawer
         anchors.fill: parent
@@ -294,8 +306,8 @@ PanelWindow {
         RectangularShadow {
             anchors.fill: panelSurface
             radius: 0
-            bottomLeftRadius: Theme.roundingXl
-            bottomRightRadius: Theme.roundingXl
+            topLeftRadius: Theme.roundingXl
+            topRightRadius: Theme.roundingXl
             color: Theme.shadowColor
             blur: Theme.elevationBlur(3)
             spread: Theme.elevationSpread(3)
@@ -305,15 +317,15 @@ PanelWindow {
 
         Rectangle {
             id: panelSurface
-            anchors.top: parent.top
-            anchors.topMargin: (1 - drawer.revealProgress) * -10
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: (1 - drawer.revealProgress) * -10
             anchors.left: parent.left
             anchors.right: parent.right
             height: Math.max(0, drawer.revealHeight)
             opacity: drawer.revealProgress
             radius: 0
-            bottomLeftRadius: Theme.roundingXl
-            bottomRightRadius: Theme.roundingXl
+            topLeftRadius: Theme.roundingXl
+            topRightRadius: Theme.roundingXl
             color: Theme.bg
             clip: true
 

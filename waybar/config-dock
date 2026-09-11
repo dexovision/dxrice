@@ -1,0 +1,34 @@
+{
+    "layer": "top",
+    "position": "bottom",
+    "height": 52,
+    "margin-bottom": 10,
+    "margin-left": 700,
+    "margin-right": 700,
+    "modules-left": [
+        "custom/launcher",
+        "custom/terminal",
+        "custom/files"
+    ],
+    "custom/launcher": {
+        "format": "\udb82\udcc7",
+        "on-click": "wofi --show drun",
+        "tooltip": true,
+        "tooltip-format": "App Launcher",
+        "class": "app-icon"
+    },
+    "custom/terminal": {
+        "format": "\uf120",
+        "on-click": "sh -c 'kitty >/dev/null 2>&1 &'",
+        "tooltip": true,
+        "tooltip-format": "Terminal",
+        "class": "app-icon"
+    },
+    "custom/files": {
+        "format": "\uf07b",
+        "on-click": "nautilus",
+        "tooltip": true,
+        "tooltip-format": "Files",
+        "class": "app-icon"
+    }
+}

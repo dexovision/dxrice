@@ -1,0 +1,46 @@
+{
+    "layer": "top",
+    "position": "right",
+    "width": 48,
+    "margin-top": 380,
+    "margin-bottom": 380,
+    "margin-right": 10,
+    "modules-center": [
+        "group/quicksettings",
+        "tray"
+    ],
+    "group/quicksettings": {
+        "orientation": "vertical",
+        "modules": [
+            "pulseaudio",
+            "network",
+            "cpu",
+            "memory"
+        ]
+    },
+    "pulseaudio": {
+        "format": "\uf028",
+        "format-muted": "\uf6a9",
+        "tooltip-format": "Volume {volume}%",
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
+    },
+    "network": {
+        "format-wifi": "\uf1eb",
+        "format-ethernet": "\uf796",
+        "format-disconnected": "\uf6ab",
+        "tooltip-format-wifi": "Wifi {signalStrength}%",
+        "tooltip-format-ethernet": "Ethernet",
+        "tooltip-format-disconnected": "Offline",
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
+    },
+    "cpu": {
+        "format": "\uf2db",
+        "tooltip-format": "CPU {usage}%",
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
+    },
+    "memory": {
+        "format": "\uf538",
+        "tooltip-format": "RAM {percentage}%",
+        "on-click": "sh -c 'r=\"$(cat ~/.local/state/dxrice/repo_path 2>/dev/null || echo ~/dxrice)\"; qs -p \"$r/quickshell/shell.qml\" ipc call quicksettings toggle 2>/dev/null || python3 \"$r/scripts/dxrice_quick_settings.py\"'"
+    }
+}

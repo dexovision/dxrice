@@ -26,7 +26,7 @@ window#waybar {
 #waybar > box > box.modules-left,
 #waybar > box > box.modules-center,
 #waybar > box > box.modules-right {
-    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${OPACITY_IDLE});
+    background-color: rgba(${BG_R}, ${BG_G}, ${BG_B}, ${WAYBAR_BG_ALPHA});
     border: 1px solid rgba(${TEXT_ACTIVE_R}, ${TEXT_ACTIVE_G}, ${TEXT_ACTIVE_B}, ${BORDER_OPACITY_IDLE});
     border-radius: ${RADIUS_BAR}px;
     padding: 0 6px;

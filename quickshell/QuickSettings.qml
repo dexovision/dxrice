@@ -6,16 +6,18 @@ import Quickshell.Wayland
 import Quickshell.Services.Pipewire
 
 // DXrice Quick Settings -- Quickshell rewrite of dxrice_quick_settings.py.
-// Docks flush under the top-right corner of the bar (waybar is 44px tall
-// with an 8px top margin -- see ~/.config/waybar/config -- so 52px is its
-// bottom edge) as a real wlr-layer-shell panel, toggled via
+// This is the system-status region's panel: the right-edge waybar strip
+// (volume/network/cpu/ram/tray -- see waybar/config-right) is its trigger,
+// so it originates from the RIGHT EDGE and slides in horizontally, flush
+// against that edge, rather than dropping down from the top the way
+// Theme/Taskbar/Calendar do. Anchoring only `right` (no top/bottom) lets
+// the compositor center it vertically on screen automatically, matching
+// "the user's action explains where the panel came from" -- toggled via
 // `qs -p <repo>/quickshell/shell.qml ipc call quicksettings toggle`.
 //
-// Deliberately zero gap and square top corners (only the bottom is
-// rounded, plus a WavyTopRect seam) so this reads as a drawer hanging off
-// the bar rather than a separate floating card -- the actual end-4/
-// caelestia pattern, ported from caelestia-dots/shell's own
-// modules/drawers/Panels.qml + components/widgets/WavyTopRect.qml.
+// Square right corners (flush with the screen edge it came from), rounded
+// left corners only -- the mirror of the top panels' "square where it's
+// attached, rounded where it floats free" geometry.
 //
 // A real tab bar (Overview / Media / Performance) instead of one long
 // scroll -- matching the multi-tab dashboards (caelestia's own
@@ -28,8 +30,8 @@ PanelWindow {
 
     implicitWidth: 720
     color: "transparent"
-    anchors { top: true; right: true }
-    margins { top: 52; right: 14 }
+    anchors { right: true }
+    margins { right: 0 }
     exclusionMode: ExclusionMode.Ignore
     aboveWindows: true
     WlrLayershell.layer: WlrLayer.Overlay
@@ -210,20 +212,20 @@ PanelWindow {
         anchors.fill: parent
         clip: true
 
-        property real revealHeight: 0
-        readonly property real revealProgress: root.implicitHeight > 0 ? Math.min(1, drawer.revealHeight / root.implicitHeight) : 0
-        Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Component.onCompleted: revealHeight = root.implicitHeight
-        Connections {
-            target: root
-            function onImplicitHeightChanged() { drawer.revealHeight = root.implicitHeight; }
-        }
+        // Slides in from the right -- the edge its own trigger (the
+        // right-hand waybar status strip) lives on -- instead of dropping
+        // down from the top. Width is the animated reveal dimension here;
+        // height still just follows the content (root.implicitHeight).
+        property real revealWidth: 0
+        readonly property real revealProgress: root.implicitWidth > 0 ? Math.min(1, drawer.revealWidth / root.implicitWidth) : 0
+        Behavior on revealWidth { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
+        Component.onCompleted: revealWidth = root.implicitWidth
 
         RectangularShadow {
             anchors.fill: panelSurface
             radius: 0
+            topLeftRadius: Theme.roundingXl
             bottomLeftRadius: Theme.roundingXl
-            bottomRightRadius: Theme.roundingXl
             color: Theme.shadowColor
             blur: Theme.elevationBlur(3)
             spread: Theme.elevationSpread(3)
@@ -234,13 +236,12 @@ PanelWindow {
         Rectangle {
             id: panelSurface
             anchors.top: parent.top
-            anchors.topMargin: (1 - drawer.revealProgress) * -10
-            anchors.left: parent.left
+            anchors.bottom: parent.bottom
             anchors.right: parent.right
-            height: Math.max(0, drawer.revealHeight)
+            width: Math.max(0, drawer.revealWidth)
             radius: 0
+            topLeftRadius: Theme.roundingXl
             bottomLeftRadius: Theme.roundingXl
-            bottomRightRadius: Theme.roundingXl
             color: Theme.bg
             opacity: drawer.revealProgress
             clip: true

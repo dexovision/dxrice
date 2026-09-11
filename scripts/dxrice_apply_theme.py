@@ -95,6 +95,14 @@ def build_vars(theme):
         "TEXT_ACTIVE_HEX": theme["glass_text_active"],
 
         "OPACITY_IDLE": theme["opacity_idle"],
+        # The waybar bars are persistent chrome that can end up sitting over
+        # arbitrary window content (a floating window can be dragged under
+        # any bar edge, unlike a dropdown panel that only ever appears over
+        # the desktop) -- blur alone doesn't reliably hide bright, sharp
+        # window text at very low opacity, so bar surfaces get a firmer
+        # opacity floor than the user's own opacity_idle slider, regardless
+        # of how translucent they've set panels/cards to be.
+        "WAYBAR_BG_ALPHA": max(theme["opacity_idle"], 0.6),
         "OPACITY_ACTIVE": theme["opacity_active"],
         "BORDER_OPACITY_IDLE": theme["border_opacity_idle"],
         "BORDER_OPACITY_ACTIVE": theme["border_opacity_active"],
@@ -218,8 +226,17 @@ def _run_guarded(args, timeout=3):
 
 def reload_apps(reload_wallpaper):
     _run_guarded(["pkill", "-x", "waybar"])
-    subprocess.Popen(["setsid", "waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                      stdin=subprocess.DEVNULL, start_new_session=True)
+    # Four independent waybar instances -- top clock, left workspace strip,
+    # right status strip, bottom dock -- sharing one style.css. See
+    # waybar/config-{left,right,dock} and hyprland.lua's autostart.
+    waybar_style = os.path.join(HOME, ".config/waybar/style.css")
+    for config_name in ("config", "config-left", "config-right", "config-dock"):
+        config_path = os.path.join(HOME, ".config/waybar", config_name)
+        if not os.path.exists(config_path):
+            continue
+        subprocess.Popen(["setsid", "waybar", "-c", config_path, "-s", waybar_style],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                          stdin=subprocess.DEVNULL, start_new_session=True)
 
     _run_guarded(["makoctl", "reload"])
     _run_guarded(["pkill", "-SIGUSR1", "-x", "kitty"])
