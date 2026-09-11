@@ -125,23 +125,23 @@ PanelWindow {
         { key: "border_opacity_idle", label: "Border opacity (idle)", min: 0, max: 1, decimals: 2 },
         { key: "border_opacity_active", label: "Border opacity (active)", min: 0, max: 1, decimals: 2 },
         { key: "kitty_opacity", label: "Terminal opacity", min: 0, max: 1, decimals: 2 },
-        { key: "hypr_blur_size", label: "Window blur size", min: 0, max: 20, decimals: 0 },
+        { key: "hypr_blur_size", label: "Window blur size", min: 0, max: 20, decimals: 0, unit: "px" },
         { key: "hypr_blur_passes", label: "Window blur passes", min: 0, max: 10, decimals: 0 },
         { key: "hypr_blur_vibrancy", label: "Window blur vibrancy", min: 0, max: 1, decimals: 2 },
     ]
     readonly property var layoutFields: [
-        { key: "radius", label: "Panel corner radius", min: 0, max: 30, decimals: 0 },
-        { key: "hypr_rounding", label: "Window corner rounding", min: 0, max: 30, decimals: 0 },
-        { key: "hypr_gaps_in", label: "Gaps between windows", min: 0, max: 40, decimals: 0 },
-        { key: "hypr_gaps_out", label: "Gaps to screen edge", min: 0, max: 60, decimals: 0 },
-        { key: "hypr_border_size", label: "Window border thickness", min: 0, max: 10, decimals: 0 },
+        { key: "radius", label: "Panel corner radius", min: 0, max: 30, decimals: 0, unit: "px" },
+        { key: "hypr_rounding", label: "Window corner rounding", min: 0, max: 30, decimals: 0, unit: "px" },
+        { key: "hypr_gaps_in", label: "Gaps between windows", min: 0, max: 40, decimals: 0, unit: "px" },
+        { key: "hypr_gaps_out", label: "Gaps to screen edge", min: 0, max: 60, decimals: 0, unit: "px" },
+        { key: "hypr_border_size", label: "Window border thickness", min: 0, max: 10, decimals: 0, unit: "px" },
         { key: "hypr_active_opacity", label: "Focused window opacity", min: 0, max: 1, decimals: 2 },
         { key: "hypr_inactive_opacity", label: "Unfocused window opacity", min: 0, max: 1, decimals: 2 },
-        { key: "hypr_active_border_angle", label: "Active border gradient angle", min: 0, max: 360, decimals: 0 },
+        { key: "hypr_active_border_angle", label: "Active border gradient angle", min: 0, max: 360, decimals: 0, unit: "°" },
     ]
     readonly property var lockFields: [
         { key: "lock_blur_passes", label: "Blur passes", min: 0, max: 10, decimals: 0 },
-        { key: "lock_blur_size", label: "Blur size", min: 0, max: 20, decimals: 0 },
+        { key: "lock_blur_size", label: "Blur size", min: 0, max: 20, decimals: 0, unit: "px" },
         { key: "lock_blur_vibrancy", label: "Blur vibrancy", min: 0, max: 1, decimals: 2 },
         { key: "lock_bg_opacity", label: "Input field background opacity", min: 0, max: 1, decimals: 2 },
     ]
@@ -152,7 +152,7 @@ PanelWindow {
         { key: "font_size_mako", label: "Notification font size", min: 8, max: 24, decimals: 0 },
     ]
     readonly property var experienceFields: [
-        { key: "anim_duration_ms", label: "Animation speed (ms, lower = snappier)", min: 0, max: 500, decimals: 0 },
+        { key: "anim_duration_ms", label: "Animation speed (lower = snappier)", min: 0, max: 500, decimals: 0, unit: "ms" },
         { key: "ui_density", label: "Settings app spacing", min: 0.5, max: 1.5, decimals: 2 },
         { key: "shadow_intensity", label: "Panel shadow strength (Quickshell only)", min: 0, max: 1.5, decimals: 2 },
     ]
@@ -348,21 +348,23 @@ PanelWindow {
         }
     }
 
+    // Each numeric setting is one filled slab -- label baked into the
+    // left of the fill, live value on the right, drag anywhere on the
+    // bar to change it -- instead of a label line stacked over a
+    // separate generic slider control.
     component SliderList: Column {
         property var fields: []
         width: parent.width
-        spacing: Theme.padMd
+        spacing: Theme.padSm
         Repeater {
             model: parent.fields
-            delegate: SettingRow {
+            delegate: FillSlider {
                 width: parent.width
-                title: modelData.label
-                SliderRow {
-                    width: 180
-                    from: modelData.min; to: modelData.max; decimals: modelData.decimals
-                    value: root[modelData.key]
-                    onChanged: (v) => { root[modelData.key] = modelData.decimals === 0 ? Math.round(v) : v; root.dirty = true; }
-                }
+                label: modelData.label
+                unit: modelData.unit || ""
+                from: modelData.min; to: modelData.max; decimals: modelData.decimals
+                value: root[modelData.key]
+                onChanged: (v) => { root[modelData.key] = modelData.decimals === 0 ? Math.round(v) : v; root.dirty = true; }
             }
         }
     }
@@ -381,23 +383,13 @@ PanelWindow {
         width: parent ? parent.width : implicitWidth
         spacing: Theme.padXs
 
-        Row {
+        FillSlider {
             width: parent.width
-            Text {
-                text: typeSizeRoot.label
-                color: Theme.text
-                opacity: 0.7
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmaller
-                width: parent.width - 180
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            SliderRow {
-                width: 180
-                from: typeSizeRoot.min; to: typeSizeRoot.max; decimals: 0
-                value: root[typeSizeRoot.key]
-                onChanged: (v) => { root[typeSizeRoot.key] = Math.round(v); root.dirty = true; }
-            }
+            label: typeSizeRoot.label
+            unit: "px"
+            from: typeSizeRoot.min; to: typeSizeRoot.max; decimals: 0
+            value: root[typeSizeRoot.key]
+            onChanged: (v) => { root[typeSizeRoot.key] = Math.round(v); root.dirty = true; }
         }
         Text {
             text: typeSizeRoot.sampleText

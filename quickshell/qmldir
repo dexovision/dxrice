@@ -8,6 +8,7 @@ IconButton 1.0 IconButton.qml
 ToggleChip 1.0 ToggleChip.qml
 Switch 1.0 Switch.qml
 SliderRow 1.0 SliderRow.qml
+FillSlider 1.0 FillSlider.qml
 LevelBar 1.0 LevelBar.qml
 
 WifiBackend 1.0 WifiBackend.qml
