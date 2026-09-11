@@ -23,7 +23,7 @@ Item {
 
         Slider {
             id: slider
-            width: parent.width - valueLabel.implicitWidth - parent.spacing
+            width: parent.width - valueLabel.width - parent.spacing
             anchors.verticalCenter: parent.verticalCenter
             from: root.from
             to: root.to

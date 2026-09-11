@@ -306,6 +306,14 @@ PanelWindow {
             }
         }
     }
+    function _rgba(hex, alpha) {
+        return Qt.rgba(
+            parseInt(hex.substring(0, 2), 16) / 255,
+            parseInt(hex.substring(2, 4), 16) / 255,
+            parseInt(hex.substring(4, 6), 16) / 255,
+            alpha
+        );
+    }
     function pickColor(key) {
         root.editingColorKey = key;
         colorDialog.selectedColor = "#" + root[key];
@@ -356,6 +364,48 @@ PanelWindow {
                     onChanged: (v) => { root[modelData.key] = modelData.decimals === 0 ? Math.round(v) : v; root.dirty = true; }
                 }
             }
+        }
+    }
+
+    // A slider whose own effect renders live underneath it -- "the user
+    // should understand what the setting does by looking at it" -- instead
+    // of a bare label+slider row that says nothing about what the number
+    // means until you go find the real thing it controls.
+    component TypeSizeRow: Column {
+        id: typeSizeRoot
+        property string label: ""
+        property string sampleText: "Sample"
+        property string key: ""
+        property real min: 8
+        property real max: 24
+        width: parent ? parent.width : implicitWidth
+        spacing: Theme.padXs
+
+        Row {
+            width: parent.width
+            Text {
+                text: typeSizeRoot.label
+                color: Theme.text
+                opacity: 0.7
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmaller
+                width: parent.width - 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            SliderRow {
+                width: 180
+                from: typeSizeRoot.min; to: typeSizeRoot.max; decimals: 0
+                value: root[typeSizeRoot.key]
+                onChanged: (v) => { root[typeSizeRoot.key] = Math.round(v); root.dirty = true; }
+            }
+        }
+        Text {
+            text: typeSizeRoot.sampleText
+            color: Theme.textActive
+            font.family: Theme.fontFamily
+            font.pixelSize: Math.max(8, root[typeSizeRoot.key])
+            elide: Text.ElideRight
+            width: parent.width
         }
     }
 
@@ -682,6 +732,44 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
+
+            // A real live preview of the opacity/border values against a
+            // colorful backdrop -- actual compositor blur only happens on
+            // a real Hyprland surface, so this is honestly just alpha +
+            // border (which is most of what these sliders change), not a
+            // blur simulation, but it's the same "see it, don't just read
+            // a number" idea as the Fonts specimen.
+            Item {
+                width: parent.width
+                height: 130
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.roundingLg
+                    clip: true
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#3a6b4a" }
+                        GradientStop { position: 1.0; color: "#1a2e22" }
+                    }
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: parent.width * 0.62
+                        height: parent.height * 0.62
+                        radius: Theme.roundingMd
+                        color: root._rgba(root.glass_bg, root.opacity_idle)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, root.border_opacity_idle)
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Panel preview"
+                            color: "#ffffff"
+                            opacity: 0.85
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmaller
+                        }
+                    }
+                }
+            }
+
             SliderList { width: parent.width; fields: root.blurFields }
         }
     }
@@ -691,6 +779,38 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
+
+            // Corner radius and window gaps are pure geometry -- a number
+            // by itself doesn't communicate "how rounded" or "how much
+            // space" the way an actual shape does.
+            Row {
+                width: parent.width
+                spacing: Theme.padLg
+
+                Column {
+                    width: (parent.width - parent.spacing) / 2
+                    spacing: Theme.padXs
+                    Text { text: "Corner radius"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                    Rectangle {
+                        width: 90; height: 90
+                        radius: root.radius
+                        color: Theme.layer1
+                        border.width: 1
+                        border.color: Theme.borderIdle
+                    }
+                }
+                Column {
+                    width: (parent.width - parent.spacing) / 2
+                    spacing: Theme.padXs
+                    Text { text: "Window gaps"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                    Row {
+                        spacing: Math.max(2, root.hypr_gaps_in)
+                        Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer1; border.width: 1; border.color: Theme.borderIdle }
+                        Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer1; border.width: 1; border.color: Theme.borderIdle }
+                    }
+                }
+            }
+
             SliderList { width: parent.width; fields: root.layoutFields }
         }
     }
@@ -708,26 +828,81 @@ PanelWindow {
         id: fontsPane
         Column {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.padLg
-            SliderList { width: parent.width; fields: root.fontSizeFields }
-            Text { text: "Font family"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
-            SettingRow {
+            spacing: Theme.pad2xl
+
+            // ---- typography: a live specimen, not a text field in a box.
+            // Typing a new family updates the "Aa" + sample sentence
+            // immediately (previewFamily), but only commits to the real
+            // theme (and marks the draft dirty) once you leave the field --
+            // the same "see it before you commit it" idea Colors/Presets
+            // already use, just for text instead of swatches. ----
+            Column {
                 width: parent.width
-                title: "Font family"
-                Rectangle {
-                    width: 200; height: 30
-                    color: "transparent"
-                    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: fontFamilyInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                spacing: Theme.padMd
+
+                Text {
+                    text: "Typography"
+                    color: Theme.text
+                    opacity: 0.55
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.letterSpacing: 0.5
+                }
+
+                Text {
+                    id: specimenGlyphs
+                    text: "Aa"
+                    color: Theme.textActive
+                    font.family: previewFamilyInput.text || Theme.fontFamily
+                    font.pixelSize: 48
+                    font.weight: Font.Light
+                }
+                Text {
+                    text: "The quick brown fox jumps over the lazy dog"
+                    color: Theme.text
+                    opacity: 0.85
+                    font.family: previewFamilyInput.text || Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeLarger
+                    wrapMode: Text.WordWrap
+                    width: parent.width
+                }
+
+                Item {
+                    width: parent.width
+                    height: 30
+                    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: previewFamilyInput.activeFocus ? Theme.accent : Theme.borderIdle }
                     TextInput {
-                        id: fontFamilyInput
+                        id: previewFamilyInput
                         anchors.fill: parent
                         text: root.font_family
                         color: Theme.textActive
                         font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeNormal
                         verticalAlignment: TextInput.AlignVCenter
                         onEditingFinished: { root.font_family = text; root.dirty = true; }
                     }
                 }
+            }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+
+            // ---- sizes: each slider's own sample renders live at that
+            // exact pixel size right underneath it. ----
+            Column {
+                width: parent.width
+                spacing: Theme.padLg
+                Text {
+                    text: "Sizes"
+                    color: Theme.text
+                    opacity: 0.55
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.letterSpacing: 0.5
+                }
+                TypeSizeRow { width: parent.width; label: "Taskbar text"; key: "font_size_waybar"; min: 8; max: 24; sampleText: "12:30 PM   Sep 10" }
+                TypeSizeRow { width: parent.width; label: "Taskbar app icons"; key: "font_size_waybar_icons"; min: 8; max: 40; sampleText: "★ ✎ ⚙" }
+                TypeSizeRow { width: parent.width; label: "App launcher"; key: "font_size_wofi"; min: 8; max: 24; sampleText: "Search applications..." }
+                TypeSizeRow { width: parent.width; label: "Notifications"; key: "font_size_mako"; min: 8; max: 24; sampleText: "Battery low -- 12% remaining" }
             }
         }
     }
