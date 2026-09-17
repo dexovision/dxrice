@@ -17,6 +17,7 @@ Usage: dxrice_apply_theme.py [path/to/theme.json]
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from string import Template
@@ -225,19 +226,39 @@ def _run_guarded(args, timeout=3):
         pass
 
 
+def quickshell_owns_bar():
+    """Whether Quickshell is this install's shell, with waybar only the
+    fallback for machines that don't have it.
+
+    Deliberately the same test hyprland.lua's autostart uses to pick which
+    one to launch, so there is exactly one notion of who owns the bar. Using
+    "is the qs daemon running right now" instead would be worse: a momentary
+    crash would resurrect waybar permanently alongside the restarted shell.
+    """
+    return shutil.which("qs") is not None
+
+
 def reload_apps(reload_wallpaper):
-    _run_guarded(["pkill", "-x", "waybar"])
-    # Four independent waybar instances -- top clock, left workspace strip,
-    # right status strip, bottom dock -- sharing one style.css. See
-    # waybar/config-{left,right,dock} and hyprland.lua's autostart.
-    waybar_style = os.path.join(HOME, ".config/waybar/style.css")
-    for config_name in ("config", "config-left", "config-right", "config-dock"):
-        config_path = os.path.join(HOME, ".config/waybar", config_name)
-        if not os.path.exists(config_path):
-            continue
-        subprocess.Popen(["setsid", "waybar", "-c", config_path, "-s", waybar_style],
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                          stdin=subprocess.DEVNULL, start_new_session=True)
+    # Quickshell reads theme.json live (Theme.qml watches it with a FileView),
+    # so there is nothing to restart there -- and relaunching waybar in that
+    # case puts the whole legacy bar back on screen ON TOP of the running
+    # shell. That is not hypothetical: applying a theme during development did
+    # exactly this, leaving two clocks, two docks and the old left/right
+    # strips rendering simultaneously, with waybar's exclusive zones also
+    # squeezing the real shell's windows inward.
+    if not quickshell_owns_bar():
+        _run_guarded(["pkill", "-x", "waybar"])
+        # Four independent waybar instances -- top clock, left workspace strip,
+        # right status strip, bottom dock -- sharing one style.css. See
+        # waybar/config-{left,right,dock} and hyprland.lua's autostart.
+        waybar_style = os.path.join(HOME, ".config/waybar/style.css")
+        for config_name in ("config", "config-left", "config-right", "config-dock"):
+            config_path = os.path.join(HOME, ".config/waybar", config_name)
+            if not os.path.exists(config_path):
+                continue
+            subprocess.Popen(["setsid", "waybar", "-c", config_path, "-s", waybar_style],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              stdin=subprocess.DEVNULL, start_new_session=True)
 
     _run_guarded(["makoctl", "reload"])
     _run_guarded(["pkill", "-SIGUSR1", "-x", "kitty"])

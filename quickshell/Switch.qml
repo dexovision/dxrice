@@ -10,7 +10,7 @@ Rectangle {
     implicitWidth: 46
     implicitHeight: 26
     radius: Theme.roundingFull
-    color: root.checked ? Theme.accent : Qt.rgba(Theme.border.r, Theme.border.g, Theme.border.b, 0.25)
+    color: root.checked ? Theme.accent : Theme.borderFaint
 
     Behavior on color {
         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }

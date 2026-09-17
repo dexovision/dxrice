@@ -29,6 +29,25 @@ PanelWindow {
     implicitWidth: 280
     implicitHeight: 92
 
+    // No mask meant this window's FULL rectangle -- 280x92, centered near
+    // the top of the screen since this file sets no horizontal anchor --
+    // captured pointer input at all times, including the ~99% of the time
+    // its content is fully transparent (opacity 0, between toasts). That
+    // rectangle sits almost exactly where the clock/Calendar island lives,
+    // which is exactly the "invisible dead zone" that made clicks near/below
+    // Calendar feel intercepted: verified by triggering a real OSD toast and
+    // screenshotting its rendered position (x~820-1100, y~76-168 at 1920x1080)
+    // against Calendar's own expanded bounds -- they overlap almost exactly.
+    // Shrinking the input region to 0x0 whenever the toast isn't visible
+    // means this window is only ever clickable while there's actually
+    // something on screen to click near.
+    mask: Region {
+        x: 0
+        y: 0
+        width: surface.opacity > 0.01 ? root.implicitWidth : 0
+        height: surface.opacity > 0.01 ? root.implicitHeight : 0
+    }
+
     PwObjectTracker { objects: [Pipewire.defaultAudioSink, Pipewire.defaultAudioSource] }
     readonly property var sink: Pipewire.defaultAudioSink
     readonly property var source: Pipewire.defaultAudioSource

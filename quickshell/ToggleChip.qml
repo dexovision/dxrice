@@ -49,6 +49,16 @@ Rectangle {
             font.weight: root.active ? Font.Medium : Font.Normal
             color: root.active ? Theme.textActive : Theme.text
             opacity: root.active ? 1 : 0.85
+            // Wrapping, not eliding: at a fixed 68px this tile's label was
+            // truncating "Do Not Disturb" to "Do Not Di..." regardless of
+            // how much room the surrounding card had, since the constraint
+            // is this tile's own fixed width, not its neighbors -- verified
+            // by reading the tile in isolation, not just in the full
+            // Connectivity row. Two short lines inside a 74px-tall square
+            // fits comfortably; elide is kept as a last-resort safety net
+            // for a future label too long even wrapped.
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
             elide: Text.ElideRight
             width: 68
             horizontalAlignment: Text.AlignHCenter

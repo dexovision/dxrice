@@ -8,7 +8,7 @@ Rectangle {
 
     implicitHeight: 8
     radius: Theme.roundingFull
-    color: Qt.rgba(Theme.border.r, Theme.border.g, Theme.border.b, 0.22)
+    color: Theme.borderFaint
 
     Rectangle {
         width: parent.width * Math.max(0, Math.min(1, root.value))

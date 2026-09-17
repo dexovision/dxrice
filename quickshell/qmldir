@@ -1,6 +1,12 @@
 singleton Theme 1.0 Theme.qml
+singleton ShellSurface 1.0 ShellSurface.qml
+singleton PanelManager 1.0 PanelManager.qml
+singleton PerformanceService 1.0 PerformanceService.qml
+
+ShellIsland 1.0 ShellIsland.qml
 
 Card 1.0 Card.qml
+ModalSurface 1.0 ModalSurface.qml
 Expandable 1.0 Expandable.qml
 SettingRow 1.0 SettingRow.qml
 GlassButton 1.0 GlassButton.qml
@@ -10,6 +16,7 @@ Switch 1.0 Switch.qml
 SliderRow 1.0 SliderRow.qml
 FillSlider 1.0 FillSlider.qml
 LevelBar 1.0 LevelBar.qml
+ScrollHint 1.0 ScrollHint.qml
 
 WifiBackend 1.0 WifiBackend.qml
 AudioDeviceBackend 1.0 AudioDeviceBackend.qml
@@ -22,3 +29,7 @@ ClipboardBackend 1.0 ClipboardBackend.qml
 LockScreen 1.0 LockScreen.qml
 OSD 1.0 OSD.qml
 CalendarPanel 1.0 CalendarPanel.qml
+QuickSettings 1.0 QuickSettings.qml
+TaskbarManager 1.0 TaskbarManager.qml
+TopBar 1.0 TopBar.qml
+Dock 1.0 Dock.qml
