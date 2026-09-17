@@ -13,6 +13,18 @@ Item {
     readonly property string artUrl: available ? player.trackArtUrl : ""
     readonly property bool playing: available ? player.isPlaying : false
 
+    // Secondary info for the Media pane's right column -- there is no
+    // lyrics source in this codebase, so rather than leave that column
+    // empty this exposes what MPRIS actually offers beyond title/artist:
+    // which app is actually playing, the album (when the player publishes
+    // one), and a real per-player volume control (most players -- browser
+    // tabs especially -- support this even when they don't support seeking).
+    readonly property string source: available ? (player.identity || "") : ""
+    readonly property string album: available && player.metadata ? (player.metadata["xesam:album"] || "") : ""
+    readonly property bool volumeSupported: available && player.volumeSupported
+    readonly property real volume: available ? player.volume : 0
+    function setVolume(v) { if (root.player && root.volumeSupported) root.player.volume = v; }
+
     readonly property bool seekable: available && player.positionSupported && player.lengthSupported && player.length > 0
     readonly property real position: available ? player.position : 0
     readonly property real length: available ? player.length : 0

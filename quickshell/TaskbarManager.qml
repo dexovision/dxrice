@@ -3,48 +3,58 @@ import QtQuick.Dialogs
 import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
-import Quickshell.Wayland
 
-// DXrice Taskbar manager -- Quickshell rewrite of dxrice_taskbar_gui.py.
-// Edits ~/.config/waybar/config directly (same file, same rules: never
-// synced back into the repo, so personal shortcuts survive an update --
-// see dxrice_deploy.py's copy-once handling of that file) and restarts
-// waybar after every change.
+// The Taskbar editor's content -- deliberately NOT a window.
 //
-// A real wlr-layer-shell panel hanging flush off the bar (same drawer
-// pattern as QuickSettings.qml/ThemeEditor.qml), not a standalone OS
-// window.
-PanelWindow {
+// Hosted inside the dock's own ShellIsland (see Dock.qml): the dock slab and
+// this panel are one surface that changes shape, so opening this reads as the
+// dock unfolding upward rather than a wider rectangle appearing above it.
+// See ShellIsland.qml for why that requires sharing the control's item tree.
+//
+// Still the only writer of ~/.config/waybar/config-dock (see the FileView
+// comments below for why that file/schema stays as the storage format).
+Item {
     id: root
-    // See QuickSettings.qml's identical comment: shell.qml destroys this
-    // panel the instant closeRequested() fires, so requestClose() plays
-    // the reveal in reverse first and only then emits the real signal.
-    // Every internal close path should call requestClose(), not
-    // closeRequested() directly.
+    // Safe to bind BOTH dimensions here (unlike QuickSettings.qml, see its own
+    // comment on `contentHeight` for why that one is fixed instead): this
+    // file has no repeating Timer anywhere, so nothing here perturbs its own
+    // measured contentHeight on a tick, which is what would be needed to
+    // start the feedback loop that made QuickSettings peg the CPU. Verified
+    // by testing this in isolation before committing to it.
+    anchors.fill: parent
     signal closeRequested()
-    property bool closing: false
-    function requestClose() {
-        if (root.closing) return;
-        root.closing = true;
-        closeTimer.start();
-    }
-    Timer { id: closeTimer; interval: Theme.durationEnter + 20; onTriggered: root.closeRequested() }
-    color: "transparent"
-    exclusionMode: ExclusionMode.Ignore
-    aboveWindows: true
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "dxrice-taskbar"
-    focusable: true
 
-    // The app dock this edits lives in its own bottom-edge waybar instance
-    // now (see waybar/config-dock), so this panel originates from the
-    // BOTTOM edge too and reveals upward -- not a top-anchored drawer
-    // above a dock it's no longer positioned near. Anchoring only
-    // `bottom` (no left/right) centers it horizontally automatically.
-    implicitWidth: 480
-    implicitHeight: 780
-    anchors { bottom: true }
-    margins { bottom: 0 }
+    // Drives the island's expanded height, so the surface fits the list rather
+    // than every taskbar being padded out to a fixed 780px with dead space
+    // under it (which is what the old fixed-size window did).
+    // Was `Math.min(660, header.height + body.implicitHeight + Theme.padLg*3)`
+    // paired with a Flickable sized off `parent.height - header.height` --
+    // i.e. off the OUTER height this very property produces, not off the
+    // Flickable's own content. Whenever the true content was shorter than
+    // that formula's estimate (it always was: the estimate independently
+    // guessed at padding the Flickable's own contentHeight already accounts
+    // for), the outer surface rendered at the guessed size and the Flickable
+    // rendered at its real, smaller size -- leaving the gap between them as
+    // dead panel background. That gap was almost the entire "System Modules"
+    // area in the last screenshots.
+    //
+    // Fixed by computing the Flickable's height FIRST, directly from the same
+    // expression as its own contentHeight, and having this property just add
+    // the header on top -- so there is exactly one source of truth for how
+    // tall the scrollable area is, and the outer surface can never disagree
+    // with what the Flickable actually shows.
+    //
+    // The 360 preference is also capped against the real screen (see
+    // ShellSurface.screenHeight): without this, a short display could make
+    // Dock.qml's own clampToScreen shrink the outer surface below what THIS
+    // property already promised, leaving the Flickable sized for more room
+    // than the surface actually gives it -- the exact mismatch that was
+    // silently clipping Quick Settings' Overview cards with no way to scroll
+    // to them. Computing the cap here instead means the outer clamp in
+    // Dock.qml is a pure backstop, never the thing actually doing the work.
+    readonly property real maxAvailableBodyHeight: ShellSurface.screenHeight - ShellSurface.gap * 2 - ShellSurface.dockUnit - header.height
+    readonly property real bodyHeight: Math.min(360, maxAvailableBodyHeight, body.implicitHeight + Theme.padXl * 2)
+    readonly property real contentHeight: header.height + bodyHeight
 
     readonly property string repoDir: Quickshell.shellDir + "/.."
     // The app dock lives in its own bottom-edge waybar instance now (see
@@ -59,7 +69,7 @@ PanelWindow {
     property var cfg: ({})
     property bool loaded: false
 
-    Shortcut { sequence: "Escape"; onActivated: root.requestClose() }
+    Shortcut { sequence: "Escape"; onActivated: root.closeRequested() }
 
     // blockLoading is required here, not optional: without it text() can
     // return "" if this runs before the async read finishes, which a
@@ -104,10 +114,20 @@ PanelWindow {
 
     Process {
         id: restartProc
-        // Four independent waybar instances now (top clock, left workspace
-        // strip, right status strip, bottom dock) sharing one style.css --
-        // see waybar/config-{left,right,dock} and hyprland.lua's autostart.
+        // Gated on `command -v qs`, the same test hyprland.lua's autostart and
+        // dxrice_apply_theme.py use to decide who owns the bar.
+        //
+        // When Quickshell owns it (the normal case) this does nothing at all:
+        // Dock.qml watches config-dock with a FileView and reloads itself, so
+        // a commit here is already reflected without restarting anything. The
+        // unguarded version relaunched all four legacy waybar instances on
+        // every single shortcut edit, putting the old bar back on screen on
+        // top of this very shell -- two clocks, two docks, the old side
+        // strips, and waybar's exclusive zones squeezing the real windows.
+        // The `else` branch keeps the fallback working on machines with no
+        // Quickshell, where waybar genuinely is the dock being edited.
         command: ["sh", "-c",
+            "if command -v qs >/dev/null 2>&1; then exit 0; fi; " +
             "pkill -x waybar; sleep 0.3; " +
             "for c in config config-left config-right config-dock; do " +
             "setsid waybar -c ~/.config/waybar/$c -s ~/.config/waybar/style.css >/dev/null 2>&1 & done"]
@@ -301,137 +321,175 @@ PanelWindow {
             }
         }
     }
-
-    // ---- visuals: a drawer that unrolls UP from the bottom dock, the
-    // mirror of QuickSettings.qml/ThemeEditor.qml's top-anchored drawers --
-    // square bottom (flush with the edge it came from), rounded top only. ----
-    Item {
-        id: drawer
+    // ---- content ----
+    Column {
         anchors.fill: parent
-        clip: true
+        spacing: 0
 
-        property real revealHeight: 0
-        readonly property real revealProgress: root.implicitHeight > 0 ? Math.min(1, drawer.revealHeight / root.implicitHeight) : 0
-        Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Component.onCompleted: revealHeight = root.implicitHeight
-        Connections {
-            target: root
-            function onClosingChanged() { drawer.revealHeight = root.closing ? 0 : root.implicitHeight; }
+        // No "Taskbar" title/close row here: the dock's own shortcut row is
+        // this panel's header now, staying fixed at the surface's bottom
+        // (its origin edge -- see ShellIsland.qml) instead of fading away
+        // for an unrelated title bar. "Add" is a real action, not decoration,
+        // so it stays as a slim, always-visible (non-scrolling) toolbar
+        // instead of disappearing along with the old title row.
+        //
+        // `height` is derived from the actual button it contains plus real
+        // padding, not a guessed constant: a bare `32` here (this panel's
+        // real, previous value) was 10px SHORTER than GlassButton's own
+        // implicitHeight (42, measured via mapToGlobal on a running shell),
+        // so the button -- vertically centered in a container shorter than
+        // itself -- rendered 5px above the header's own top edge, which is
+        // also the SURFACE's top edge here (this is the bottom-pinned dock's
+        // island, so content starts at the surface's origin with nothing
+        // above it to absorb the overflow) -- a real, measured 5px escape
+        // past the panel's own boundary, not a rendering illusion. The
+        // Theme.padSm top margin is the same breathing room every other
+        // panel already gives its first row (see QuickSettings.qml's spacer
+        // Item) -- Taskbar was the one panel missing it, which is also why
+        // its header sat close enough to the rounded top corner to look like
+        // it was escaping the surface even before accounting for the 5px.
+        Item {
+            id: header
+            width: parent.width
+            height: headerRow.implicitHeight + Theme.padSm * 2
+
+            // CLOSE REGION: ShellIsland.qml's own closeButton is fixed at
+            // `surface.width - 22 - 8` regardless of which edge this island
+            // grows from, so it always claims the surface's top-right
+            // corner -- confirmed by grabbing the actual rendered surface
+            // and finding the close "X" partially hidden behind this very
+            // Add button, which was positioned as if that corner were free.
+            // ACTION REGION (the Add button) has to stop clear of it: this
+            // is that same 22+8 footprint plus a visible gap, kept as one
+            // named value instead of folded into the position expression so
+            // the reason isn't just a bare magic number.
+            readonly property real closeButtonReserve: 22 + 8 + Theme.padSm
+
+            Row {
+                id: headerRow
+                anchors.top: parent.top
+                anchors.topMargin: Theme.padSm
+                x: header.width - width - Theme.padLg - header.closeButtonReserve
+                GlassButton { text: "Add"; variant: "primary"; onClicked: addDialog.visible = true }
+            }
         }
 
-        RectangularShadow {
-            anchors.fill: panelSurface
-            radius: 0
-            topLeftRadius: Theme.roundingXl
-            topRightRadius: Theme.roundingXl
-            color: Theme.shadowColor
-            blur: Theme.elevationBlur(3)
-            spread: Theme.elevationSpread(3)
-            offset.y: Theme.elevationOffsetY(3)
-            opacity: drawer.revealProgress
-        }
-
+        // Same structural seam QuickSettings.qml uses between its nav strip
+        // and content -- this header is genuinely a toolbar for the surface
+        // below it, not a decoration, so it earns the same "this is where
+        // the header ends and content begins" boundary language instead of
+        // just floating above the cards with nothing marking the handoff.
         Rectangle {
-            id: panelSurface
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: (1 - drawer.revealProgress) * -10
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: Math.max(0, drawer.revealHeight)
-            opacity: drawer.revealProgress
-            radius: 0
-            topLeftRadius: Theme.roundingXl
-            topRightRadius: Theme.roundingXl
-            color: Theme.bg
-            clip: true
+            x: Theme.padXl
+            width: parent.width - Theme.padXl * 2
+            y: header.height
+            height: 1
+            color: Theme.seam
+        }
 
-        Column {
-            anchors.fill: parent
-            spacing: 0
+        Text {
+            visible: root.loadFailed
+            width: parent.width - Theme.padLg * 2
+            x: Theme.padLg
+            y: Theme.padLg
+            wrapMode: Text.WordWrap
+            color: Theme.accent
+            font.family: Theme.fontFamily
+            text: "Could not read " + root.configPath + " -- nothing will be changed until this is fixed. Run install.sh first if this is a fresh install."
+        }
 
-            Item {
-                id: header
-                width: parent.width
-                height: 56
-
-                Text {
-                    text: "Taskbar"
-                    color: Theme.textActive
-                    font.family: Theme.fontFamily
-                    font.weight: Font.DemiBold
-                    font.pixelSize: Theme.fontSizeLarge
-                    anchors.verticalCenter: parent.verticalCenter
-                    x: Theme.padLg
-                }
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter
-                    x: header.width - width - Theme.padLg
-                    spacing: Theme.padSm
-                    GlassButton { text: "Add"; variant: "primary"; onClicked: addDialog.visible = true }
-                    IconButton { glyph: "✕"; onClicked: root.requestClose() }
-                }
-            }
-
-            Text {
-                visible: root.loadFailed
-                width: parent.width - Theme.padLg * 2
-                x: Theme.padLg
-                y: Theme.padLg
-                wrapMode: Text.WordWrap
-                color: Theme.accent
-                font.family: Theme.fontFamily
-                text: "Could not read " + root.configPath + " -- nothing will be changed until this is fixed. Run install.sh first if this is a fresh install."
-            }
+        Item {
+            width: parent.width
+            height: root.bodyHeight
+            visible: root.loaded
 
             Flickable {
-                width: parent.width
-                height: parent.height - header.height
-                contentHeight: body.implicitHeight + Theme.padLg * 2
+                id: bodyFlickable
+                anchors.fill: parent
+                contentHeight: body.implicitHeight + Theme.padXl * 2
                 clip: true
-                visible: root.loaded
 
                 Column {
                     id: body
-                    x: Theme.padLg
-                    y: Theme.padLg
-                    width: parent.width - Theme.padLg * 2
-                    spacing: Theme.padMd
+                    // Wider inset than before (padLg -> padXl), matching
+                    // QuickSettings.qml's identical reasoning: the panel's
+                    // own tone needs real visible margin around the cards
+                    // it hosts to read as their container.
+                    x: Theme.padXl
+                    y: Theme.padXl
+                    width: parent.width - Theme.padXl * 2
+                    // Same spacing-hierarchy reasoning as QuickSettings.qml's
+                    // overviewPane Row: this is the gap between two distinct
+                    // top-level cards (Options, Shortcuts), not between
+                    // items inside one -- it should read as a bigger jump
+                    // than a card's own internal cardGap.
+                    spacing: Theme.pad2xl
 
-                    Text { text: "Options"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-                    SettingRow {
+                // Options stays a single compact row (toggle + slider
+                // side by side) instead of a tall stacked card: it only
+                // has two controls, and a full-height column next to
+                // Shortcuts previously left a measured 211px of bare
+                // panel below it once Shortcuts (which owns the real
+                // scrollable content) pushed the shared row taller than
+                // Options' own content needed. Options is now sized
+                // purely from its own content and sits ABOVE Shortcuts,
+                // full width -- Shortcuts still owns the dominant
+                // vertical region below it, and nothing is stretched to
+                // fill space it doesn't have content for.
+                Card {
+                    width: parent.width
+                    title: "Options"
+                    Row {
                         width: parent.width
-                        title: "Show icons"
-                        subtitle: "Applies to shortcuts left on \"Automatic\""
-                        Switch { checked: root.iconsEnabled(); onToggled: (next) => root.setIconsEnabled(next) }
-                    }
-                    SettingRow {
-                        width: parent.width
-                        title: "Custom icon size"
-                        SliderRow {
-                            width: 160
+                        spacing: Theme.padLg
+
+                        Row {
+                            id: iconsToggleRow
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: Theme.padMd
+                            Switch { checked: root.iconsEnabled(); onToggled: (next) => root.setIconsEnabled(next) }
+                            Column {
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 0
+                                Text {
+                                    text: "Show icons"
+                                    color: Theme.textActive
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeNormal
+                                    font.weight: Font.Medium
+                                }
+                                Text {
+                                    text: "Automatic-mode shortcuts only"
+                                    color: Theme.text
+                                    opacity: 0.65
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeSmall
+                                }
+                            }
+                        }
+
+                        FillSlider {
+                            width: parent.width - iconsToggleRow.width - parent.spacing
+                            anchors.verticalCenter: parent.verticalCenter
+                            label: "Icon size"
                             from: 16; to: 48; decimals: 0
                             value: root.cfg["dxrice_icon_size"] || 24
                             onChanged: (v) => root.setIconSize(Math.round(v))
                         }
                     }
+                }
 
-                    Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
-
-                    // -- shortcuts: a compact, icon-first reorderable list,
-                    // not a stack of admin-panel cards. Every row is quiet
-                    // at rest; the drag handle, reorder arrows, and delete
-                    // action only reveal on hover (or while a row is
-                    // expanded), and the pinned launcher shows a bare dot
-                    // instead of a colored "Pinned" badge. --
-                    Text { text: "Taskbar Shortcuts"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                Card {
+                    width: parent.width
+                    title: "Shortcuts"
                     Column {
-                        width: body.width
+                        width: parent.width
                         spacing: 0
                         Repeater {
                             model: root.loaded ? (root.cfg["modules-left"] || []) : []
                             delegate: Column {
                                 id: shortcutRow
-                                width: body.width
+                                width: parent.width
                                 visible: !!root.cfg[modelData]
                                 spacing: 0
                                 property string modid: modelData
@@ -443,7 +501,7 @@ PanelWindow {
                                 Item {
                                     id: rowVisual
                                     width: parent.width
-                                    height: 44
+                                    height: 36
 
                                     HoverHandler { id: rowHover }
                                     DropArea {
@@ -534,10 +592,10 @@ PanelWindow {
                                         visible: !shortcutRow.pinned
                                         opacity: (rowHover.hovered || shortcutRow.expanded) ? 1 : 0
                                         Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
-                                        IconButton { glyph: shortcutRow.expanded ? "︿" : "﹀"; size: 26; onClicked: shortcutRow.expanded = !shortcutRow.expanded }
-                                        IconButton { glyph: "↑"; size: 26; onClicked: root.moveShortcut(shortcutRow.modid, "up") }
-                                        IconButton { glyph: "↓"; size: 26; onClicked: root.moveShortcut(shortcutRow.modid, "down") }
-                                        IconButton { glyph: "🗑"; size: 26; destructive: true; onClicked: root.removeShortcut(shortcutRow.modid) }
+                                        IconButton { glyph: shortcutRow.expanded ? "︿" : "﹀"; size: Theme.iconSm; onClicked: shortcutRow.expanded = !shortcutRow.expanded }
+                                        IconButton { glyph: "↑"; size: Theme.iconSm; onClicked: root.moveShortcut(shortcutRow.modid, "up") }
+                                        IconButton { glyph: "↓"; size: Theme.iconSm; onClicked: root.moveShortcut(shortcutRow.modid, "down") }
+                                        IconButton { glyph: "🗑"; size: Theme.iconSm; destructive: true; onClicked: root.removeShortcut(shortcutRow.modid) }
                                     }
 
                                     Text {
@@ -598,78 +656,77 @@ PanelWindow {
                             }
                         }
                     }
+                }
 
-                    Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
 
-                    // -- system modules: same compact-row language, and
-                    // underline-style inputs (a bottom hairline, no filled
-                    // box) instead of bordered text fields. --
-                    Text { text: "System Modules"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-                    Text {
-                        text: "Click actions for the volume/network/CPU/RAM/clock modules"
-                        color: Theme.text; opacity: 0.55; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
-                    }
-                    Column {
-                        width: body.width
-                        spacing: Theme.padSm
-                        Repeater {
-                            model: root.loaded ? root.systemModuleIds() : []
-                            delegate: Column {
-                                id: sysRow
+                // -- system modules: same compact-row language, and
+                // underline-style inputs (a bottom hairline, no filled
+                // box) instead of bordered text fields. --
+                Text { text: "System Modules"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                Text {
+                    text: "Click actions for the volume/network/CPU/RAM/clock modules"
+                    color: Theme.text; opacity: 0.55; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
+                }
+                Column {
+                    width: body.width
+                    spacing: Theme.padSm
+                    Repeater {
+                        model: root.loaded ? root.systemModuleIds() : []
+                        delegate: Column {
+                            id: sysRow
+                            width: parent.width
+                            spacing: Theme.padSm
+                            property string modid: modelData
+                            property bool expanded: false
+                            property var meta: root.cfg[modid] || ({})
+
+                            SettingRow {
                                 width: parent.width
-                                spacing: Theme.padSm
-                                property string modid: modelData
-                                property bool expanded: false
-                                property var meta: root.cfg[modid] || ({})
+                                title: root.systemModuleLabels[sysRow.modid] || sysRow.modid
+                                subtitle: sysRow.meta["on-click"] || "No click action set"
+                                IconButton { glyph: sysRow.expanded ? "︿" : "﹀"; size: Theme.iconSm; onClicked: sysRow.expanded = !sysRow.expanded }
+                            }
+                            Column {
+                                width: parent.width
+                                visible: sysRow.expanded
+                                spacing: Theme.padMd
 
                                 SettingRow {
                                     width: parent.width
-                                    title: root.systemModuleLabels[sysRow.modid] || sysRow.modid
-                                    subtitle: sysRow.meta["on-click"] || "No click action set"
-                                    IconButton { glyph: sysRow.expanded ? "︿" : "﹀"; size: 26; onClicked: sysRow.expanded = !sysRow.expanded }
-                                }
-                                Column {
-                                    width: parent.width
-                                    visible: sysRow.expanded
-                                    spacing: Theme.padMd
-
-                                    SettingRow {
-                                        width: parent.width
-                                        title: "Left click"
-                                        Rectangle {
-                                            width: 180; height: 26
-                                            color: "transparent"
-                                            border.width: 0
-                                            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: leftClickInput.activeFocus ? Theme.accent : Theme.borderIdle }
-                                            TextInput {
-                                                id: leftClickInput
-                                                anchors.fill: parent
-                                                text: sysRow.meta["on-click"] || ""
-                                                color: Theme.textActive
-                                                font.family: Theme.fontFamily
-                                                font.pixelSize: Theme.fontSizeSmaller
-                                                verticalAlignment: TextInput.AlignVCenter
-                                                onEditingFinished: root.setModuleClick(sysRow.modid, "on-click", text)
-                                            }
+                                    title: "Left click"
+                                    Rectangle {
+                                        width: 180; height: 26
+                                        color: "transparent"
+                                        border.width: 0
+                                        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: leftClickInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                                        TextInput {
+                                            id: leftClickInput
+                                            anchors.fill: parent
+                                            text: sysRow.meta["on-click"] || ""
+                                            color: Theme.textActive
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmaller
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            onEditingFinished: root.setModuleClick(sysRow.modid, "on-click", text)
                                         }
                                     }
-                                    SettingRow {
-                                        width: parent.width
-                                        title: "Right click"
-                                        Rectangle {
-                                            width: 180; height: 26
-                                            color: "transparent"
-                                            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: rightClickInput.activeFocus ? Theme.accent : Theme.borderIdle }
-                                            TextInput {
-                                                id: rightClickInput
-                                                anchors.fill: parent
-                                                text: sysRow.meta["on-click-right"] || ""
-                                                color: Theme.textActive
-                                                font.family: Theme.fontFamily
-                                                font.pixelSize: Theme.fontSizeSmaller
-                                                verticalAlignment: TextInput.AlignVCenter
-                                                onEditingFinished: root.setModuleClick(sysRow.modid, "on-click-right", text)
-                                            }
+                                }
+                                SettingRow {
+                                    width: parent.width
+                                    title: "Right click"
+                                    Rectangle {
+                                        width: 180; height: 26
+                                        color: "transparent"
+                                        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: rightClickInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                                        TextInput {
+                                            id: rightClickInput
+                                            anchors.fill: parent
+                                            text: sysRow.meta["on-click-right"] || ""
+                                            color: Theme.textActive
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmaller
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            onEditingFinished: root.setModuleClick(sysRow.modid, "on-click-right", text)
                                         }
                                     }
                                 }
@@ -678,7 +735,15 @@ PanelWindow {
                     }
                 }
             }
-        }
+                }
+
+            ScrollHint {
+                flickable: bodyFlickable
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.right: parent.right
+                anchors.margins: 3
+            }
         }
     }
 
@@ -707,22 +772,9 @@ PanelWindow {
         }
         onVisibleChanged: if (visible) appsProc.running = true
 
-        RectangularShadow {
-            anchors.fill: addDialogSurface
-            radius: addDialogSurface.radius
-            color: Theme.shadowColor
-            blur: Theme.elevationBlur(3)
-            spread: Theme.elevationSpread(3)
-            offset.y: Theme.elevationOffsetY(3)
-        }
-
-        Rectangle {
+        ModalSurface {
             id: addDialogSurface
             anchors.fill: parent
-            radius: Theme.roundingXl
-            color: Theme.bg
-            border.width: 1
-            border.color: Theme.border
 
             Column {
                 anchors.fill: parent
@@ -732,9 +784,9 @@ PanelWindow {
                 Text { text: "Add Shortcut"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
 
                 Rectangle {
-                    width: parent.width; height: 34; radius: Theme.entryRadius
-                    color: Qt.rgba(1, 1, 1, 0.06)
-                    border.width: 1; border.color: Theme.borderIdle
+                    width: parent.width; height: ShellSurface.rowHeight; radius: Theme.entryRadius
+                    color: Theme.inputFill
+                    border.width: Theme.borderWidth; border.color: Theme.borderIdle
                     TextInput {
                         id: searchInput
                         anchors.fill: parent; anchors.margins: 8
@@ -788,9 +840,9 @@ PanelWindow {
                 Text { text: "Or add a custom shortcut"; color: Theme.text; opacity: 0.7; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily }
 
                 Rectangle {
-                    width: parent.width; height: 34; radius: Theme.entryRadius
-                    color: Qt.rgba(1, 1, 1, 0.06)
-                    border.width: 1; border.color: Theme.borderIdle
+                    width: parent.width; height: ShellSurface.rowHeight; radius: Theme.entryRadius
+                    color: Theme.inputFill
+                    border.width: Theme.borderWidth; border.color: Theme.borderIdle
                     TextInput {
                         id: nameInput
                         anchors.fill: parent; anchors.margins: 8
@@ -801,9 +853,9 @@ PanelWindow {
                     Text { text: "Display name"; color: Theme.text; opacity: nameInput.text.length ? 0 : 0.5; anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter }
                 }
                 Rectangle {
-                    width: parent.width; height: 34; radius: Theme.entryRadius
-                    color: Qt.rgba(1, 1, 1, 0.06)
-                    border.width: 1; border.color: Theme.borderIdle
+                    width: parent.width; height: ShellSurface.rowHeight; radius: Theme.entryRadius
+                    color: Theme.inputFill
+                    border.width: Theme.borderWidth; border.color: Theme.borderIdle
                     TextInput {
                         id: cmdInput
                         anchors.fill: parent; anchors.margins: 8

@@ -26,12 +26,19 @@ end
 local repo = dxrice_repo()
 
 hl.on("hyprland.start", function()
-    -- Four independent waybar instances -- top clock, left workspace
-    -- strip, right status strip, bottom dock -- sharing one style.css.
-    -- See waybar/config-{left,right,dock}.
-    hl.exec_cmd("sh -c 'for c in config config-left config-right config-dock; do "
-        .. "setsid waybar -c ~/.config/waybar/$c -s ~/.config/waybar/style.css "
-        .. ">/dev/null 2>&1 & done'")
+    -- The shell's own bar (workspaces/clock/tray/status/dock) now lives
+    -- INSIDE the Quickshell process itself (TopBar.qml/Dock.qml) -- not
+    -- four separate waybar instances anymore, since that's what made the
+    -- bar and the panels it opens feel like unrelated products (different
+    -- toolkits, different processes, no shared state). The four-waybar
+    -- setup only runs as a fallback on a system where Quickshell isn't
+    -- installed at all, so a distro without `qs` packaged yet still gets a
+    -- working bar instead of nothing.
+    hl.exec_cmd("sh -c 'if command -v qs >/dev/null 2>&1; then "
+        .. "qs -p " .. repo .. "/quickshell/shell.qml -d -n; else "
+        .. "for c in config config-left config-right config-dock; do "
+        .. "setsid waybar -c ~/.config/waybar/$c -s ~/.config/waybar/style.css >/dev/null 2>&1 & "
+        .. "done; fi'")
 
     local bg_path = os.getenv("BG_WALLPAPER") or (home .. "/Pictures/Wallpapers/default.png")
     hl.exec_cmd("swaybg -i " .. bg_path .. " -m fill")
@@ -45,13 +52,6 @@ hl.on("hyprland.start", function()
 
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_window_memory.py > /tmp/window-memory.log 2>&1")
-
-    -- Quickshell (Theme/Taskbar/Quick Settings) if it's installed; a no-op
-    -- otherwise, since it isn't cleanly packaged on every distro yet -- see
-    -- the keybinds/waybar on-click below, which fall back to the old GTK
-    -- apps at the moment they're actually needed if `qs` isn't found, so a
-    -- missing Quickshell here never breaks anything, just skips the nicer UI.
-    hl.exec_cmd("sh -c 'command -v qs >/dev/null 2>&1 && qs -p " .. repo .. "/quickshell/shell.qml -d -n'")
 end)
 
 hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")
@@ -111,9 +111,14 @@ hl.config({
 
 hl.layer_rule({ name = "waybar-blur", match = { namespace = "^(waybar|waybar-top|waybar-left|waybar-right|waybar-dock)$" }, blur = true, ignore_alpha = 0.6 })
 hl.layer_rule({ name = "wofi-blur",   match = { namespace = "wofi" },   blur = true, ignore_alpha = 0.6 })
-hl.layer_rule({ name = "quicksettings-blur", match = { namespace = "dxrice-quicksettings" }, blur = true, ignore_alpha = 0.6 })
 hl.layer_rule({ name = "theme-blur", match = { namespace = "dxrice-theme" }, blur = true, ignore_alpha = 0.6 })
-hl.layer_rule({ name = "taskbar-blur", match = { namespace = "dxrice-taskbar" }, blur = true, ignore_alpha = 0.6 })
+-- quicksettings-blur/taskbar-blur/calendar-blur (dxrice-quicksettings,
+-- dxrice-taskbar, dxrice-calendar) removed: those namespaces belonged to
+-- PanelWindows that no longer exist -- Quick Settings/Taskbar/Calendar are
+-- now hosted inside TopBar's and Dock's own windows (see ShellIsland.qml),
+-- so bar-top-blur/bar-dock-blur below already cover them.
+hl.layer_rule({ name = "bar-top-blur", match = { namespace = "dxrice-bar-top" }, blur = true, ignore_alpha = 0.6 })
+hl.layer_rule({ name = "bar-dock-blur", match = { namespace = "dxrice-bar-dock" }, blur = true, ignore_alpha = 0.6 })
 
 hl.config({
     input = {

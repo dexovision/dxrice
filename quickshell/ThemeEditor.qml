@@ -19,17 +19,20 @@ import Quickshell.Wayland
 // apps use; a single flat list is what was reading as "cheap."
 //
 // A real wlr-layer-shell panel hanging flush off the bar (same drawer
-// pattern as QuickSettings.qml: zero gap, bottom-only rounding, a
-// WavyTopRect seam), centered under it -- not a separate floating OS
+// pattern as QuickSettings.qml: zero gap, bottom-only rounding, no
+// decorative seam), centered under it -- not a separate floating OS
 // window. A standalone window is exactly the "still a standalone GUI"
 // complaint this replaces.
 PanelWindow {
     id: root
-    // See QuickSettings.qml's identical comment: shell.qml destroys this
-    // panel the instant closeRequested() fires, so requestClose() plays
-    // the reveal in reverse first and only then emits the real signal.
-    // Every internal close path should call requestClose(), not
-    // closeRequested() directly.
+    // shell.qml destroys this panel the instant closeRequested() fires, so
+    // requestClose() plays the reveal in reverse first and only then emits
+    // the real signal. requestClose() itself is triggered reactively by
+    // shell.qml watching PanelManager.current (see its Connections block) --
+    // every internal dismissal path here (X, Escape, click-outside) goes
+    // through `PanelManager.close("theme")`, never `root.requestClose()`
+    // directly, so PanelManager.current stays the one accurate record of
+    // what's open regardless of which of the three dismissed it.
     signal closeRequested()
     property bool closing: false
     function requestClose() {
@@ -45,12 +48,48 @@ PanelWindow {
     WlrLayershell.namespace: "dxrice-theme"
     focusable: true
 
-    implicitWidth: 700
-    implicitHeight: 640
-    anchors { top: true; left: true }
-    margins {
-        top: 52
-        left: Math.round(((root.screen ? root.screen.width : 1920) - root.implicitWidth) / 2)
+    // The panel's own natural size -- was the whole window's implicitWidth/
+    // Height back when this was a plain top-center window with no
+    // click-outside-to-dismiss. Now the window itself spans the full screen
+    // (same reasoning as Dock.qml's implicitHeight: root.screen.height even
+    // though the dock pill only occupies its bottom strip) so a click
+    // anywhere outside the panel has somewhere on THIS window's surface to
+    // land; panelSurface below is what actually gets positioned/sized to
+    // this box.
+    readonly property real panelWidth: 700
+    // Capped against the real screen, not just a bare 640: a fixed constant
+    // never grows from content (this window's sidebar/content already scroll
+    // internally, see catFlickable/contentFlick above), but a fixed constant
+    // can still be too tall for a short display -- and "fits its own
+    // Rectangle" is not the same claim as "fits on this screen."
+    readonly property real panelHeight: Math.min(640, (root.screen ? root.screen.height : 1080) - ShellSurface.topEdgeHeight - ShellSurface.gap)
+    readonly property real panelX: Math.round(((root.screen ? root.screen.width : 1920) - root.panelWidth) / 2)
+    readonly property real panelY: ShellSurface.topEdgeHeight
+
+    implicitWidth: root.screen ? root.screen.width : 1920
+    implicitHeight: root.screen ? root.screen.height : 1080
+    anchors { top: true; left: true; right: true; bottom: true }
+
+    // Without this, the window's own full-screen rectangle would accept
+    // input everywhere for its entire lifetime. The first Region keeps the
+    // panel itself exact to `panelSurface`'s own live geometry (so the click
+    // target always matches what's actually visible, growing and shrinking
+    // with the reveal animation rather than being some fixed box from frame
+    // one); the second is click-outside-to-dismiss -- the rest of the
+    // now-full-screen window, so a click that misses the panel entirely
+    // still reaches `dismissArea` below and closes it. There is no state
+    // where this sits there as a permanent invisible click-blocker: the
+    // whole window (and this mask with it) is torn down by the LazyLoader
+    // once the close sequence described above finishes.
+    mask: Region {
+        Region { item: panelSurface }
+        Region { x: 0; y: 0; width: root.width; height: root.height }
+    }
+
+    MouseArea {
+        id: dismissArea
+        anchors.fill: parent
+        onClicked: PanelManager.close("theme")
     }
 
     readonly property string repoDir: Quickshell.shellDir + "/.."
@@ -340,7 +379,7 @@ PanelWindow {
                 Rectangle {
                     width: 32; height: 24; radius: Theme.roundingXs
                     color: "#" + root[modelData.key]
-                    border.width: 1
+                    border.width: Theme.borderWidth
                     border.color: Theme.borderIdle
                     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.pickColor(modelData.key) }
                 }
@@ -405,20 +444,26 @@ PanelWindow {
     // QuickSettings.qml exactly -- zero gap, square top corners (flush
     // against the bar), large-radius bottom corners only, no decorative
     // seam. Reveal is height + opacity + a small upward settle together. ----
-    Shortcut { sequence: "Escape"; onActivated: root.requestClose() }
+    Shortcut { sequence: "Escape"; onActivated: PanelManager.close("theme") }
 
     Item {
         id: drawer
-        anchors.fill: parent
+        // Positioned/sized to the panel's own box (panelX/Y/Width/Height),
+        // not anchors.fill: parent -- parent (root) is now the full screen,
+        // see the mask/dismissArea comment above.
+        x: root.panelX
+        y: root.panelY
+        width: root.panelWidth
+        height: root.panelHeight
         clip: true
 
         property real revealHeight: 0
-        readonly property real revealProgress: root.implicitHeight > 0 ? Math.min(1, drawer.revealHeight / root.implicitHeight) : 0
+        readonly property real revealProgress: root.panelHeight > 0 ? Math.min(1, drawer.revealHeight / root.panelHeight) : 0
         Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Component.onCompleted: revealHeight = root.implicitHeight
+        Component.onCompleted: revealHeight = root.panelHeight
         Connections {
             target: root
-            function onClosingChanged() { drawer.revealHeight = root.closing ? 0 : root.implicitHeight; }
+            function onClosingChanged() { drawer.revealHeight = root.closing ? 0 : root.panelHeight; }
         }
 
         RectangularShadow {
@@ -476,8 +521,20 @@ PanelWindow {
                         enabled: !root.applying
                         onClicked: root.apply()
                     }
-                    IconButton { glyph: "✕"; onClicked: root.requestClose() }
+                    IconButton { glyph: "✕"; onClicked: PanelManager.close("theme") }
                 }
+            }
+
+            // Same header->content seam as Dashboard/Media/Performance/
+            // Taskbar now use -- Theme's header was the one persistent
+            // toolbar in the shell with no boundary marking where it ends,
+            // which read as a generic app title bar rather than this
+            // shell's own structural language.
+            Rectangle {
+                x: Theme.padXl
+                width: parent.width - Theme.padXl * 2
+                height: 1
+                color: Theme.seam
             }
 
             Row {
@@ -495,9 +552,9 @@ PanelWindow {
                     Rectangle {
                         x: Theme.padMd
                         width: parent.width - Theme.padMd * 2
-                        height: 34
+                        height: ShellSurface.rowHeight
                         radius: Theme.roundingSm
-                        color: Theme.layer1
+                        color: Theme.inputFill
 
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
@@ -507,7 +564,7 @@ PanelWindow {
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                             color: Theme.text
-                            opacity: 0.6
+                        opacity: Theme.opacitySecondary
                         }
                         TextInput {
                             anchors.left: parent.left
@@ -523,18 +580,22 @@ PanelWindow {
                             Text {
                                 text: "Search settings"
                                 color: Theme.text
-                                opacity: parent.text.length ? 0 : 0.5
+                                opacity: parent.text.length ? 0 : Theme.opacityMuted
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmaller
                             }
                         }
                     }
 
-                    Flickable {
+                    Item {
                         width: parent.width
                         height: parent.height - 34 - Theme.padSm
-                        contentHeight: catColumn.implicitHeight
-                        clip: true
+
+                        Flickable {
+                            id: catFlickable
+                            anchors.fill: parent
+                            contentHeight: catColumn.implicitHeight
+                            clip: true
 
                         Column {
                             id: catColumn
@@ -594,7 +655,7 @@ PanelWindow {
                                             width: parent.width
                                             text: catRow.modelData.sub
                                             color: Theme.text
-                                            opacity: 0.55
+                                            opacity: Theme.opacityMuted
                                             font.family: Theme.fontFamily
                                             font.pixelSize: Theme.fontSizeSmall
                                             elide: Text.ElideRight
@@ -610,41 +671,66 @@ PanelWindow {
                                 }
                             }
                         }
+                        }
+
+                        ScrollHint {
+                            flickable: catFlickable
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.right: parent.right
+                            anchors.margins: 2
+                        }
                     }
                 }
 
+                // Sidebar (navigation) -> content boundary -- same
+                // structural role and Theme.seam token as the other three
+                // panels' header/nav seams, not a decorative hairline.
                 Rectangle {
                     width: 1
                     height: parent.height
-                    color: Theme.borderIdle
+                    color: Theme.seam
                 }
 
                 // ---- content pane: one category's fields at a time ----
-                Flickable {
-                    id: contentFlick
+                Item {
+                    id: contentViewport
                     width: sidebarLayout.width - sidebar.width - 1
                     height: parent.height
-                    contentHeight: paneLoader.item ? paneLoader.item.implicitHeight + Theme.padLg * 2 : 0
-                    clip: true
-                    Behavior on contentY { NumberAnimation { duration: Theme.durationFast } }
 
-                    Loader {
-                        id: paneLoader
-                        x: Theme.padLg
-                        y: Theme.padLg
-                        width: contentFlick.width - Theme.padLg * 2
-                        sourceComponent: {
-                            switch (root.currentCategory) {
-                            case "colors": return colorsPane;
-                            case "blur": return blurPane;
-                            case "layout": return layoutPane;
-                            case "lock": return lockPane;
-                            case "fonts": return fontsPane;
-                            case "experience": return experiencePane;
-                            case "wallpaper": return wallpaperPane;
-                            default: return colorsPane;
+                    Flickable {
+                        id: contentFlick
+                        anchors.fill: parent
+                        contentHeight: paneLoader.item ? paneLoader.item.implicitHeight + Theme.padLg * 2 : 0
+                        clip: true
+                        Behavior on contentY { NumberAnimation { duration: Theme.durationFast } }
+
+                        Loader {
+                            id: paneLoader
+                            x: Theme.padLg
+                            y: Theme.padLg
+                            width: contentFlick.width - Theme.padLg * 2
+                            sourceComponent: {
+                                switch (root.currentCategory) {
+                                case "colors": return colorsPane;
+                                case "blur": return blurPane;
+                                case "layout": return layoutPane;
+                                case "lock": return lockPane;
+                                case "fonts": return fontsPane;
+                                case "experience": return experiencePane;
+                                case "wallpaper": return wallpaperPane;
+                                default: return colorsPane;
+                                }
                             }
                         }
+                    }
+
+                    ScrollHint {
+                        flickable: contentFlick
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
+                        anchors.margins: 2
                     }
                 }
             }
@@ -656,9 +742,9 @@ PanelWindow {
         id: colorsPane
         Column {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.padLg
+            spacing: Theme.pad3xl
 
-            Text { text: "Presets"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+            Text { text: "Presets"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
             // -- presets communicate visually (an actual mini palette),
             // not as a row of plain text-labeled buttons the user has to
             // read one at a time. --
@@ -674,7 +760,7 @@ PanelWindow {
                         height: 64
                         radius: Theme.roundingSm
                         color: presetArea.containsMouse ? Theme.layer1 : "transparent"
-                        border.width: 1
+                        border.width: Theme.borderWidth
                         border.color: Theme.borderIdle
                         Behavior on color { ColorAnimation { duration: Theme.durationFast } }
 
@@ -707,15 +793,24 @@ PanelWindow {
                 }
             }
 
-            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
+            // Grouped as Level-2 cards (see Card.qml) rather than
+            // hairline-divided sections -- the same grammar Quick Settings
+            // and Taskbar's own setting groups use, so Theme reads as part
+            // of the same shell rather than a plain settings dialog that
+            // happens to share a color palette with it.
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Glass Palette"
+                ColorList { width: parent.width; fields: root.colorFields }
+            }
 
-            Text { text: "Glass Palette"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-            ColorList { width: parent.width; fields: root.colorFields }
-
-            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
-
-            Text { text: "Window Border Gradient"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-            ColorList { width: parent.width; fields: root.borderColorFields }
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Window Border Gradient"
+                ColorList { width: parent.width; fields: root.borderColorFields }
+            }
         }
     }
 
@@ -725,44 +820,49 @@ PanelWindow {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
 
-            // A real live preview of the opacity/border values against a
-            // colorful backdrop -- actual compositor blur only happens on
-            // a real Hyprland surface, so this is honestly just alpha +
-            // border (which is most of what these sliders change), not a
-            // blur simulation, but it's the same "see it, don't just read
-            // a number" idea as the Fonts specimen.
-            Item {
+            Card {
                 width: parent.width
-                height: 130
-                Rectangle {
-                    anchors.fill: parent
-                    radius: Theme.roundingLg
-                    clip: true
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: "#3a6b4a" }
-                        GradientStop { position: 1.0; color: "#1a2e22" }
-                    }
+                padding: Theme.pad2xl
+                title: "Transparency & Blur"
+                // A real live preview of the opacity/border values against a
+                // colorful backdrop -- actual compositor blur only happens on
+                // a real Hyprland surface, so this is honestly just alpha +
+                // border (which is most of what these sliders change), not a
+                // blur simulation, but it's the same "see it, don't just read
+                // a number" idea as the Fonts specimen.
+                Item {
+                    width: parent.width
+                    height: 130
                     Rectangle {
-                        anchors.centerIn: parent
-                        width: parent.width * 0.62
-                        height: parent.height * 0.62
-                        radius: Theme.roundingMd
-                        color: root._rgba(root.glass_bg, root.opacity_idle)
-                        border.width: 1
-                        border.color: Qt.rgba(1, 1, 1, root.border_opacity_idle)
-                        Text {
+                        anchors.fill: parent
+                        radius: Theme.roundingLg
+                        clip: true
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#3a6b4a" }
+                            GradientStop { position: 1.0; color: "#1a2e22" }
+                        }
+                        Rectangle {
                             anchors.centerIn: parent
-                            text: "Panel preview"
-                            color: "#ffffff"
-                            opacity: 0.85
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmaller
+                            width: parent.width * 0.62
+                            height: parent.height * 0.62
+                            radius: Theme.roundingMd
+                            color: root._rgba(root.glass_bg, root.opacity_idle)
+                            border.width: Theme.borderWidth
+                            border.color: Qt.rgba(1, 1, 1, root.border_opacity_idle)
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Panel preview"
+                                color: "#ffffff"
+                                opacity: Theme.opacityFaint
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmaller
+                            }
                         }
                     }
                 }
-            }
 
-            SliderList { width: parent.width; fields: root.blurFields }
+                SliderList { width: parent.width; fields: root.blurFields }
+            }
         }
     }
 
@@ -772,38 +872,43 @@ PanelWindow {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
 
-            // Corner radius and window gaps are pure geometry -- a number
-            // by itself doesn't communicate "how rounded" or "how much
-            // space" the way an actual shape does.
-            Row {
+            Card {
                 width: parent.width
-                spacing: Theme.padLg
+                padding: Theme.pad2xl
+                title: "Layout"
+                // Corner radius and window gaps are pure geometry -- a number
+                // by itself doesn't communicate "how rounded" or "how much
+                // space" the way an actual shape does.
+                Row {
+                    width: parent.width
+                    spacing: Theme.padLg
 
-                Column {
-                    width: (parent.width - parent.spacing) / 2
-                    spacing: Theme.padXs
-                    Text { text: "Corner radius"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-                    Rectangle {
-                        width: 90; height: 90
-                        radius: root.radius
-                        color: Theme.layer1
-                        border.width: 1
-                        border.color: Theme.borderIdle
+                    Column {
+                        width: (parent.width - parent.spacing) / 2
+                        spacing: Theme.padXs
+                        Text { text: "Corner radius"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                        Rectangle {
+                            width: 90; height: 90
+                            radius: root.radius
+                            color: Theme.layer1
+                            border.width: Theme.borderWidth
+                            border.color: Theme.borderIdle
+                        }
+                    }
+                    Column {
+                        width: (parent.width - parent.spacing) / 2
+                        spacing: Theme.padXs
+                        Text { text: "Window gaps"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                        Row {
+                            spacing: Math.max(2, root.hypr_gaps_in)
+                            Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer1; border.width: Theme.borderWidth; border.color: Theme.borderIdle }
+                            Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer1; border.width: Theme.borderWidth; border.color: Theme.borderIdle }
+                        }
                     }
                 }
-                Column {
-                    width: (parent.width - parent.spacing) / 2
-                    spacing: Theme.padXs
-                    Text { text: "Window gaps"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-                    Row {
-                        spacing: Math.max(2, root.hypr_gaps_in)
-                        Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer1; border.width: 1; border.color: Theme.borderIdle }
-                        Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer1; border.width: 1; border.color: Theme.borderIdle }
-                    }
-                }
+
+                SliderList { width: parent.width; fields: root.layoutFields }
             }
-
-            SliderList { width: parent.width; fields: root.layoutFields }
         }
     }
 
@@ -812,7 +917,12 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            SliderList { width: parent.width; fields: root.lockFields }
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Lock Screen"
+                SliderList { width: parent.width; fields: root.lockFields }
+            }
         }
     }
 
@@ -820,7 +930,7 @@ PanelWindow {
         id: fontsPane
         Column {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.pad2xl
+            spacing: Theme.pad3xl
 
             // ---- typography: a live specimen, not a text field in a box.
             // Typing a new family updates the "Aa" + sample sentence
@@ -828,18 +938,10 @@ PanelWindow {
             // theme (and marks the draft dirty) once you leave the field --
             // the same "see it before you commit it" idea Colors/Presets
             // already use, just for text instead of swatches. ----
-            Column {
+            Card {
                 width: parent.width
-                spacing: Theme.padMd
-
-                Text {
-                    text: "Typography"
-                    color: Theme.text
-                    opacity: 0.55
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    font.letterSpacing: 0.5
-                }
+                padding: Theme.pad2xl
+                title: "Typography"
 
                 Text {
                     id: specimenGlyphs
@@ -852,7 +954,7 @@ PanelWindow {
                 Text {
                     text: "The quick brown fox jumps over the lazy dog"
                     color: Theme.text
-                    opacity: 0.85
+                    opacity: Theme.opacityFaint
                     font.family: previewFamilyInput.text || Theme.fontFamily
                     font.pixelSize: Theme.fontSizeLarger
                     wrapMode: Text.WordWrap
@@ -876,21 +978,12 @@ PanelWindow {
                 }
             }
 
-            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
-
             // ---- sizes: each slider's own sample renders live at that
             // exact pixel size right underneath it. ----
-            Column {
+            Card {
                 width: parent.width
-                spacing: Theme.padLg
-                Text {
-                    text: "Sizes"
-                    color: Theme.text
-                    opacity: 0.55
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    font.letterSpacing: 0.5
-                }
+                padding: Theme.pad2xl
+                title: "Sizes"
                 TypeSizeRow { width: parent.width; label: "Taskbar text"; key: "font_size_waybar"; min: 8; max: 24; sampleText: "12:30 PM   Sep 10" }
                 TypeSizeRow { width: parent.width; label: "Taskbar app icons"; key: "font_size_waybar_icons"; min: 8; max: 40; sampleText: "★ ✎ ⚙" }
                 TypeSizeRow { width: parent.width; label: "App launcher"; key: "font_size_wofi"; min: 8; max: 24; sampleText: "Search applications..." }
@@ -904,7 +997,12 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            SliderList { width: parent.width; fields: root.experienceFields }
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Experience"
+                SliderList { width: parent.width; fields: root.experienceFields }
+            }
         }
     }
 
@@ -912,73 +1010,73 @@ PanelWindow {
         id: wallpaperPane
         Column {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.padLg
+            spacing: Theme.pad3xl
 
             // A real thumbnail instead of a text path -- "wallpaper should
             // have a preview" means an actual image, not its filename.
-            Item {
+            Card {
                 width: parent.width
-                height: 200
-                Rectangle {
-                    anchors.fill: parent
-                    radius: Theme.roundingLg
-                    color: Theme.layer1
-                    clip: true
-                    Image {
-                        id: wallpaperPreviewImage
+                padding: Theme.pad2xl
+                title: "Current Wallpaper"
+                Item {
+                    width: parent.width
+                    height: 200
+                    Rectangle {
                         anchors.fill: parent
-                        source: root.wallpaper ? "file://" + root.wallpaper : ""
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        visible: status === Image.Ready
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        visible: wallpaperPreviewImage.status !== Image.Ready
-                        text: "No wallpaper set"
-                        color: Theme.text
-                        opacity: 0.5
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmaller
+                        radius: Theme.roundingLg
+                        color: Theme.layer1
+                        clip: true
+                        Image {
+                            id: wallpaperPreviewImage
+                            anchors.fill: parent
+                            source: root.wallpaper ? "file://" + root.wallpaper : ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            visible: status === Image.Ready
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            visible: wallpaperPreviewImage.status !== Image.Ready
+                            text: "No wallpaper set"
+                            color: Theme.text
+                            opacity: 0.5
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmaller
+                        }
                     }
                 }
-            }
-            SettingRow {
-                width: parent.width
-                title: "Current wallpaper"
-                subtitle: root.wallpaper
-                GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
-            }
-
-            Rectangle { width: parent.width; height: 1; color: Theme.borderIdle }
-
-            Text {
-                text: "Match Theme to Wallpaper"
-                color: Theme.text
-                opacity: 0.55
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                font.letterSpacing: 0.5
-            }
-            SettingRow {
-                width: parent.width
-                title: "Generate colors from the current wallpaper"
-                subtitle: "Samples it for a background tone and accent -- overwrites the Colors tab below (Apply to keep, Revert to undo)"
-                GlassButton {
-                    text: root.generatingFromWallpaper ? "Sampling..." : "Generate"
-                    variant: "primary"
-                    enabled: !root.generatingFromWallpaper
-                    onClicked: root.generateFromWallpaper()
+                SettingRow {
+                    width: parent.width
+                    title: "Current wallpaper"
+                    subtitle: root.wallpaper
+                    GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
                 }
             }
-            Text {
-                visible: root.wallpaperGenerateError.length > 0
+
+            Card {
                 width: parent.width
-                wrapMode: Text.WordWrap
-                text: root.wallpaperGenerateError
-                color: Theme.accent
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmaller
+                padding: Theme.pad2xl
+                title: "Match Theme to Wallpaper"
+                SettingRow {
+                    width: parent.width
+                    title: "Generate colors from the current wallpaper"
+                    subtitle: "Samples it for a background tone and accent -- overwrites the Colors tab below (Apply to keep, Revert to undo)"
+                    GlassButton {
+                        text: root.generatingFromWallpaper ? "Sampling..." : "Generate"
+                        variant: "primary"
+                        enabled: !root.generatingFromWallpaper
+                        onClicked: root.generateFromWallpaper()
+                    }
+                }
+                Text {
+                    visible: root.wallpaperGenerateError.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: root.wallpaperGenerateError
+                    color: Theme.accent
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmaller
+                }
             }
         }
     }

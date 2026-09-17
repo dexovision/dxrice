@@ -1,39 +1,25 @@
 import QtQuick
-import QtQuick.Effects
-import Quickshell
-import Quickshell.Wayland
 
-// A real calendar, not just a bigger clock -- opened from the bar's clock
-// module (waybar/config's on-click), same bar-attached drawer pattern as
-// every other panel (WavyTopRect seam, bottom-only rounding, aboveWindows).
-PanelWindow {
+// The calendar's BODY -- deliberately not the whole panel.
+//
+// The clock itself is the calendar's header now (see ShellIsland.qml): it
+// stays visible, unchanged, at the top of the surface for the entire time
+// the panel is open, rather than fading out for a "September 2026" title
+// that has no visual relationship to what was just clicked. This file lays
+// out only the part that reveals below that persistent clock -- month
+// navigation and the day grid -- in the space the island leaves for it.
+Item {
     id: root
-    // See QuickSettings.qml's identical comment: shell.qml destroys this
-    // panel the instant closeRequested() fires, so requestClose() plays
-    // the reveal in reverse first and only then emits the real signal.
+    // See the identical comment in QuickSettings.qml/TaskbarManager.qml: a
+    // Loader with an explicit width/height does not resize its loaded item
+    // to match on its own.
+    anchors.fill: parent
     signal closeRequested()
-    property bool closing: false
-    function requestClose() {
-        if (root.closing) return;
-        root.closing = true;
-        closeTimer.start();
-    }
-    Timer { id: closeTimer; interval: Theme.durationEnter + 20; onTriggered: root.closeRequested() }
 
-    implicitWidth: 320
-    color: "transparent"
-    anchors { top: true }
-    margins {
-        top: 52
-        left: Math.round(((root.screen ? root.screen.width : 1920) - root.implicitWidth) / 2)
-    }
-    exclusionMode: ExclusionMode.Ignore
-    aboveWindows: true
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "dxrice-calendar"
-    focusable: true
-
-    implicitHeight: Math.min(500, drawer.contentImplicitHeight + 8)
+    // The island reads this (see TopBar.qml) to size the space it leaves
+    // below the persistent clock header -- this is body-only, not the whole
+    // panel's height, since the clock above it is accounted for separately.
+    readonly property real contentHeight: body.implicitHeight + Theme.padLg
 
     property var viewDate: new Date()
     readonly property var today: new Date()
@@ -62,139 +48,99 @@ PanelWindow {
     function prevMonth() { root.viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); }
     function nextMonth() { root.viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); }
 
-    Item {
-        id: drawer
-        anchors.fill: parent
-        clip: true
+    Column {
+        id: body
+        x: Theme.padLg
+        y: Theme.padSm
+        width: parent.width - Theme.padLg * 2
+        spacing: Theme.padSm
 
-        readonly property real contentImplicitHeight: header.implicitHeight + body.implicitHeight + Theme.padLg * 2
+        // Slim month nav -- a secondary, smaller line under the persistent
+        // clock, not a second competing title. The prev/next controls sit in
+        // a single quiet pill (ShellSurface.cardRadius, Theme.layer1) rather
+        // than as two bare icon buttons floating on the panel background --
+        // the same nav-as-integrated-surface language as Quick Settings'
+        // tab strip, even though a calendar has no tabs to switch between.
+        Item {
+            width: parent.width
+            height: ShellSurface.navHeight
 
-        property real revealHeight: 0
-        readonly property real revealProgress: root.implicitHeight > 0 ? Math.min(1, drawer.revealHeight / root.implicitHeight) : 0
-        Behavior on revealHeight { NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
-        Component.onCompleted: revealHeight = root.implicitHeight
-        Connections {
-            target: root
-            function onImplicitHeightChanged() { if (!root.closing) drawer.revealHeight = root.implicitHeight; }
-            function onClosingChanged() { drawer.revealHeight = root.closing ? 0 : root.implicitHeight; }
-        }
-
-        RectangularShadow {
-            anchors.fill: panelSurface
-            radius: 0
-            bottomLeftRadius: Theme.roundingXl
-            bottomRightRadius: Theme.roundingXl
-            color: Theme.shadowColor
-            blur: Theme.elevationBlur(3)
-            spread: Theme.elevationSpread(3)
-            offset.y: Theme.elevationOffsetY(3)
-            opacity: drawer.revealProgress
-        }
-
-        Rectangle {
-            id: panelSurface
-            anchors.top: parent.top
-            anchors.topMargin: (1 - drawer.revealProgress) * -10
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: Math.max(0, drawer.revealHeight)
-            opacity: drawer.revealProgress
-            radius: 0
-            bottomLeftRadius: Theme.roundingXl
-            bottomRightRadius: Theme.roundingXl
-            color: Theme.bg
-            clip: true
-
-            Column {
-                anchors.fill: parent
-                spacing: 0
-
-                Item {
-                    id: header
-                    width: parent.width
-                    implicitHeight: 52
-                    height: implicitHeight
-
-                    Text {
-                        text: root.monthNames[root.viewDate.getMonth()] + " " + root.viewDate.getFullYear()
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeLarge
-                        font.weight: Font.DemiBold
-                        anchors.left: parent.left
-                        anchors.leftMargin: Theme.padLg
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    Row {
-                        anchors.right: parent.right
-                        anchors.rightMargin: Theme.padLg
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: Theme.padSm
-                        IconButton { glyph: ""; size: 28; onClicked: root.prevMonth() }
-                        IconButton { glyph: ""; size: 28; onClicked: root.nextMonth() }
-                        IconButton { glyph: "✕"; size: 28; onClicked: root.requestClose() }
-                    }
-                }
-
-                Column {
-                    id: body
-                    x: Theme.padLg
-                    width: parent.width - Theme.padLg * 2
-                    spacing: Theme.padSm
-
-                    Row {
-                        width: parent.width
-                        Repeater {
-                            model: root.dayNames
-                            delegate: Text {
-                                width: parent.width / 7
-                                horizontalAlignment: Text.AlignHCenter
-                                text: modelData
-                                color: Theme.text
-                                opacity: 0.55
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                                font.weight: Font.Medium
-                            }
-                        }
-                    }
-
-                    Repeater {
-                        model: root.weeks
-                        delegate: Row {
-                            width: body.width
-                            Repeater {
-                                model: modelData
-                                delegate: Item {
-                                    width: body.width / 7
-                                    height: 36
-                                    readonly property bool isToday: modelData !== null && root.isSameDay(modelData, root.today)
-
-                                    Rectangle {
-                                        anchors.centerIn: parent
-                                        width: 30
-                                        height: 30
-                                        radius: Theme.roundingFull
-                                        visible: parent.isToday
-                                        color: Theme.accent
-                                    }
-                                    Text {
-                                        anchors.centerIn: parent
-                                        visible: modelData !== null
-                                        text: modelData ? modelData.getDate() : ""
-                                        color: parent.isToday ? Theme.textActive : Theme.text
-                                        font.family: Theme.fontFamily
-                                        font.weight: parent.isToday ? Font.DemiBold : Font.Normal
-                                        font.pixelSize: Theme.fontSizeNormal
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Item { width: 1; height: Theme.padLg }
+            Text {
+                text: root.monthNames[root.viewDate.getMonth()] + " " + root.viewDate.getFullYear()
+                color: Theme.textActive
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeNormal
+                font.weight: Font.DemiBold
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Rectangle {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: navRow.implicitWidth + Theme.padXs * 2
+                height: parent.height
+                radius: ShellSurface.cardRadius
+                color: Theme.layer1
+                Row {
+                    id: navRow
+                    anchors.centerIn: parent
+                    spacing: Theme.padXs
+                    IconButton { glyph: "‹"; size: 24; onClicked: root.prevMonth() }
+                    IconButton { glyph: "›"; size: 24; onClicked: root.nextMonth() }
                 }
             }
         }
+
+        Row {
+            width: parent.width
+            Repeater {
+                model: root.dayNames
+                delegate: Text {
+                    width: parent.width / 7
+                    horizontalAlignment: Text.AlignHCenter
+                    text: modelData
+                    color: Theme.text
+                    opacity: 0.55
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.weight: Font.Medium
+                }
+            }
+        }
+
+        Repeater {
+            model: root.weeks
+            delegate: Row {
+                width: body.width
+                Repeater {
+                    model: modelData
+                    delegate: Item {
+                        width: body.width / 7
+                        height: 30
+                        readonly property bool isToday: modelData !== null && root.isSameDay(modelData, root.today)
+
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 26
+                            height: 26
+                            radius: Theme.roundingFull
+                            visible: parent.isToday
+                            color: Theme.accent
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            visible: modelData !== null
+                            text: modelData ? modelData.getDate() : ""
+                            color: parent.isToday ? Theme.textActive : Theme.text
+                            font.family: Theme.fontFamily
+                            font.weight: parent.isToday ? Font.DemiBold : Font.Normal
+                            font.pixelSize: Theme.fontSizeNormal
+                        }
+                    }
+                }
+            }
+        }
+
+        Item { width: 1; height: Theme.padSm }
     }
 }

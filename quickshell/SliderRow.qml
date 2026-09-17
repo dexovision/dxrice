@@ -35,7 +35,7 @@ Item {
                 width: slider.availableWidth
                 height: 8
                 radius: Theme.roundingFull
-                color: Qt.rgba(Theme.border.r, Theme.border.g, Theme.border.b, 0.22)
+                color: Theme.borderFaint
 
                 Rectangle {
                     width: slider.visualPosition * parent.width
