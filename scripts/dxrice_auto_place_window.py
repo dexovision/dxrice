@@ -13,8 +13,12 @@ opinion about anything past the first placement.
 
 Algorithm, run against the new window's own REAL size (read back from
 `hyprctl clients` once the window is actually mapped, never assumed or
-fixed -- a small dialog and a maximized-by-default app get placed
-correctly relative to their own real footprint, not some average guess):
+fixed, and NEVER changed by this script -- a small dialog and a
+maximized-by-default app get placed correctly relative to their own real
+footprint, not some average guess, and this script only ever dispatches
+move commands, never a resize):
+
+STAGE 1 -- direct placement, move nothing else:
   1. No other floating window on this workspace yet -> leave it wherever
      Hyprland put it (nothing to avoid).
   2. Otherwise, this is an infinite canvas, not a bounded screen -- so
@@ -37,6 +41,18 @@ correctly relative to their own real footprint, not some average guess):
      distance limit until it finds free space -- the canvas has no edge, so
      this always terminates.
 
+STAGE 2 -- make room, only when it's actually worth it (see
+try_make_room's docstring for the exact mechanics): also computes the best
+position the new window could have if every ordinary window were free to
+move out of the way (fixed obstacles still respected), relocates only the
+ones actually blocking that spot (cascading if a relocation creates a new
+conflict, bounded so it can't run away), and compares the TOTAL cost of
+"stage 1's result, nothing else moves" against "stage 2's result, this
+much existing-window movement" -- stage 2 is only used when it's a
+genuine net win. There is no separate hardcoded "close enough to center"
+cutoff deciding this on its own; the two plans are always actually
+computed and compared.
+
 Reads Hyprland's own event socket (.socket2.sock) directly -- the same
 plain-text openwindow/activewindowv2 protocol `socat`/`hyprctl --instance`
 users read by hand -- rather than polling, so this costs nothing while no
@@ -50,7 +66,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dxrice_hypr_ipc import hyprctl_json, move_window_exact_async
+from dxrice_hypr_ipc import hyprctl_json, move_window_exact_async, move_window_exact_lua, batch_async
 import dxrice_xdg
 
 DEFAULT_GAP = 5
@@ -235,6 +251,213 @@ def find_free_position(new_size, others, center, gap, viewport=None, layout_othe
             return (cx - nw / 2, cy - nh / 2)
 
 
+def find_least_disruptive_position(new_size, others, gap, current_pos, layout_others=None):
+    """Relocates an EXISTING window that's blocking where the new window
+    wants to go. Unlike find_free_position (which has no prior position to
+    protect), here minimal movement from the window's own current spot is
+    the PRIMARY signal, with the same bounding-box-growth tiebreak as a
+    secondary preference -- there's no fixed target point at all, since a
+    displaced window isn't trying to get anywhere in particular, only out
+    of the way with the least disruption. Same candidate generation as
+    find_free_position (every obstacle's edges crossed in both axes, plus
+    the window's own current position as an explicit candidate), same
+    guaranteed-terminating spiral fallback if every edge-derived spot
+    conflicts with something.
+    """
+    if layout_others is None:
+        layout_others = others
+
+    nw, nh = new_size
+    cx0, cy0 = current_pos
+    other_rects = [rect_for(ox, oy, ow, oh) for ox, oy, ow, oh in others]
+    layout_rects = [rect_for(ox, oy, ow, oh) for ox, oy, ow, oh in layout_others]
+
+    def free(x, y):
+        candidate = rect_for(x, y, nw, nh)
+        return not any(overlaps((candidate[0] - gap, candidate[1] - gap,
+                                  candidate[2] + gap, candidate[3] + gap), r)
+                        for r in other_rects)
+
+    layout_bbox = None
+    if layout_rects:
+        layout_bbox = (min(r[0] for r in layout_rects), min(r[1] for r in layout_rects),
+                        max(r[2] for r in layout_rects), max(r[3] for r in layout_rects))
+
+    def score(x, y):
+        px, py = x + nw / 2, y + nh / 2
+        total = math.hypot(px - cx0, py - cy0)
+        if layout_bbox is not None:
+            bx0, by0, bx1, by1 = layout_bbox
+            cand = (x, y, x + nw, y + nh)
+            new_w = max(bx1, cand[2]) - min(bx0, cand[0])
+            new_h = max(by1, cand[3]) - min(by0, cand[1])
+            growth = (new_w - (bx1 - bx0)) + (new_h - (by1 - by0))
+            total += EXPANSION_WEIGHT * growth
+        return total
+
+    xs = {cx0 - nw / 2}
+    ys = {cy0 - nh / 2}
+    for ox, oy, ow, oh in others:
+        xs.update((ox, ox + ow + gap, ox - nw - gap))
+        ys.update((oy, oy + oh + gap, oy - nh - gap))
+
+    candidates = [(x, y) for x in xs for y in ys]
+    valid = [(x, y) for x, y in candidates if free(x, y)]
+    if valid:
+        return min(valid, key=lambda p: score(*p))
+
+    step = max(nw, nh, 1) // 4 + gap
+    ring = 1
+    while True:
+        radius = step * ring
+        ring_candidates = [
+            (cx0 - nw / 2 + radius, cy0 - nh / 2), (cx0 - nw / 2 - radius, cy0 - nh / 2),
+            (cx0 - nw / 2, cy0 - nh / 2 + radius), (cx0 - nw / 2, cy0 - nh / 2 - radius),
+            (cx0 - nw / 2 + radius, cy0 - nh / 2 + radius), (cx0 - nw / 2 - radius, cy0 - nh / 2 - radius),
+            (cx0 - nw / 2 + radius, cy0 - nh / 2 - radius), (cx0 - nw / 2 - radius, cy0 - nh / 2 + radius),
+        ]
+        free_ring = [(x, y) for x, y in ring_candidates if free(x, y)]
+        if free_ring:
+            return min(free_ring, key=lambda p: score(*p))
+        ring += 1
+        if ring > 500:
+            return (cx0 - nw / 2, cy0 - nh / 2)
+
+
+# How much a pixel of TOTAL movement imposed on existing windows "costs"
+# relative to a pixel of improvement in the NEW window's own distance from
+# the viewport center. Stage 2 (move existing windows to make room) is
+# chosen over Stage 1 (direct placement, nothing else moves) ONLY when it
+# wins this comparison outright -- there is no separate hardcoded "close
+# enough to center" distance that gates the decision on its own; both
+# plans are always actually computed, and whichever has the lower total
+# cost wins. A pixel of existing-window disruption is weighted at half a
+# pixel of new-window centering benefit: existing windows are already
+# wherever their owner (or a previous placement) put them, so nudging one
+# costs more than the same pixel would for the brand-new window (which has
+# no established position to protect) -- but not so much more that a real,
+# substantial centering win gets rejected over a modest rearrangement.
+# Reasoned starting value, not measured -- retune if the live result
+# rearranges too eagerly or too reluctantly.
+MAKE_ROOM_MOVEMENT_WEIGHT = 0.5
+
+
+def _rect_center(rect):
+    x0, y0, x1, y1 = rect
+    return ((x0 + x1) / 2, (y0 + y1) / 2)
+
+
+def try_make_room(new_size, eligible, fixed_obstacles, center, gap):
+    """Stage 2. `eligible`/`fixed_obstacles`: [(x, y, w, h), ...] plus an
+    "address" key on each `eligible` entry (fixed obstacles never move, so
+    they don't need one).
+
+    1. Finds the best position the new window could have if every ordinary
+       window were free to move out of the way -- i.e. find_free_position
+       run against ONLY the fixed obstacles. This is the true upper bound
+       on how close the new window could get to the viewport center; it's
+       unreachable if an ordinary window is still sitting there, which is
+       exactly what the rest of this function tries to fix.
+    2. Finds which ELIGIBLE windows actually overlap that reserved
+       rectangle (gap-inflated) -- only these are ever touched. Everything
+       else on the workspace stays exactly where it is.
+    3. Relocates them one at a time, largest-area first (ties broken by
+       address -- deterministic, never based on a moving computation like
+       distance-to-a-centroid, so the same input always produces the same
+       plan) via find_least_disruptive_position, which treats the new
+       window's reserved rectangle, every fixed obstacle, and every OTHER
+       eligible window's current effective position (already-relocated
+       ones at their new spot, untouched ones at their original spot) as
+       obstacles to avoid -- so a relocated window can never be pushed
+       back into space that's already reserved or already occupied.
+    4. If relocating one window creates a NEW conflict with a window not
+       yet queued, that window joins the queue too (this is the only way
+       "cascading" happens here, and it's bounded: the queue can never
+       need more rounds than there are eligible windows, since each round
+       either finishes a real conflict or discovers a new one that must
+       itself eventually be finished the same way -- if that bound is
+       somehow exceeded anyway, this returns None and the caller falls
+       back to Stage 1 rather than trying to force a resolution).
+
+    Returns (target_pos, {address: new_pos, ...}) -- the second dict holds
+    ONLY the windows that actually needed to move, empty if the ideal spot
+    was already clear. Returns None if the cascade doesn't resolve within
+    that bound, or if a final overlap sanity check somehow still fails
+    (defensive -- shouldn't happen given the construction above).
+    """
+    target_pos = find_free_position(new_size, fixed_obstacles, center, gap)
+    nw, nh = new_size
+    target_rect = rect_for(target_pos[0], target_pos[1], nw, nh)
+
+    by_addr = {w["address"]: w for w in eligible}
+    state = {w["address"]: rect_for(w["at"][0], w["at"][1], w["size"][0], w["size"][1])
+             for w in eligible}
+    original_center = {addr: _rect_center(rect) for addr, rect in state.items()}
+    fixed_rects = [rect_for(*r) for r in fixed_obstacles]
+
+    def gap_inflated(rect):
+        return (rect[0] - gap, rect[1] - gap, rect[2] + gap, rect[3] + gap)
+
+    def conflicts_with(rect, exclude=()):
+        inflated = gap_inflated(rect)
+        return [addr for addr, r in state.items() if addr not in exclude and overlaps(inflated, r)]
+
+    initial_conflicts = conflicts_with(target_rect)
+    if not initial_conflicts:
+        return target_pos, {}
+
+    def sort_key(addr):
+        w = by_addr[addr]
+        return (-(w["size"][0] * w["size"][1]), addr)
+
+    queue = sorted(initial_conflicts, key=sort_key)
+    queued_or_moved = set(queue)
+    moved = {}
+    max_rounds = len(eligible) + 1
+    rounds = 0
+
+    while queue:
+        rounds += 1
+        if rounds > max_rounds:
+            return None
+        addr = queue.pop(0)
+        w = by_addr[addr]
+        size = tuple(w["size"])
+        other_rects_xyxy = [r for a, r in state.items() if a != addr] + [target_rect]
+        other_xywh = [(r[0], r[1], r[2] - r[0], r[3] - r[1]) for r in other_rects_xyxy] + fixed_obstacles
+
+        new_pos = find_least_disruptive_position(size, other_xywh, gap, original_center[addr])
+        new_rect = rect_for(new_pos[0], new_pos[1], size[0], size[1])
+        state[addr] = new_rect
+        moved[addr] = new_pos
+
+        for other_addr in conflicts_with(new_rect, exclude={addr}):
+            if other_addr not in queued_or_moved:
+                queue.append(other_addr)
+                queued_or_moved.add(other_addr)
+
+    # Final sanity check: everything the new window's reservation or an
+    # ACTUALLY-MOVED window ends up next to must still respect the gap.
+    # This deliberately does NOT audit pairs of two untouched, pre-existing
+    # eligible windows against each other -- Stage 2 didn't create
+    # whatever relationship they already had (a real desktop could have
+    # two windows sitting closer together than this rice would place them
+    # itself, e.g. from a manual drag), and it isn't Stage 2's job to
+    # police or reject an otherwise-valid plan over something it never
+    # touched and wasn't asked to fix.
+    untouched = [r for addr, r in state.items() if addr not in moved]
+    touched = [target_rect] + [state[addr] for addr in moved]
+    all_rects = touched + untouched + fixed_rects
+    for i, rect_i in enumerate(touched):
+        for j, rect_j in enumerate(all_rects):
+            if rect_i is rect_j:
+                continue
+            if overlaps(gap_inflated(rect_i), rect_j):
+                return None  # defensive -- shouldn't happen given the construction above
+
+    return target_pos, moved
+
+
 _DEBUG = os.environ.get("DXRICE_DEBUG") == "1"
 
 
@@ -288,11 +511,48 @@ def place_new_window(address, workspace_id, gap):
     layout_others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1])
                       for w in same_ws if not w.get("fullscreen")]
 
-    pos = find_free_position((new_w, new_h), others, center, gap,
-                              viewport=(mx0, my0, mx1, my1), layout_others=layout_others)
-    if _DEBUG:
-        print(f"DEBUG pos={pos} new_size=({new_w},{new_h}) center={center}", file=sys.stderr, flush=True)
-    move_window_exact_async(int(pos[0]), int(pos[1]), address)
+    # Stage 1: best position without moving anything else.
+    pos1 = find_free_position((new_w, new_h), others, center, gap,
+                               viewport=(mx0, my0, mx1, my1), layout_others=layout_others)
+    d1 = math.hypot(pos1[0] + new_w / 2 - center[0], pos1[1] + new_h / 2 - center[1])
+
+    # Stage 2: best position if every ordinary window could move out of
+    # the way, and what that would actually cost to carry out. Always
+    # computed so the decision is a real comparison, never a hardcoded
+    # "close enough" cutoff -- see MAKE_ROOM_MOVEMENT_WEIGHT's comment.
+    eligible = [w for w in same_ws if not w.get("fullscreen")]
+    fixed_only = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1])
+                  for w in same_ws if w.get("fullscreen")]
+
+    use_stage2 = False
+    stage2 = try_make_room((new_w, new_h), eligible, fixed_only, center, gap) if eligible else None
+    if stage2 is not None:
+        pos2, moved = stage2
+        d2 = math.hypot(pos2[0] + new_w / 2 - center[0], pos2[1] + new_h / 2 - center[1])
+        orig_at = {w["address"]: w["at"] for w in eligible}
+        total_movement = sum(
+            math.hypot(nx - orig_at[addr][0], ny - orig_at[addr][1])
+            for addr, (nx, ny) in moved.items()
+        )
+        cost1, cost2_total = d1, d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
+        if _DEBUG:
+            print(f"DEBUG stage1 d1={d1:.1f} | stage2 d2={d2:.1f} moved={len(moved)} "
+                  f"total_movement={total_movement:.1f} cost1={cost1:.1f} cost2={cost2_total:.1f}",
+                  file=sys.stderr, flush=True)
+        if cost2_total < cost1:
+            use_stage2 = True
+
+    if use_stage2:
+        exprs = [move_window_exact_lua(int(pos2[0]), int(pos2[1]), address)]
+        for addr, (mx, my) in moved.items():
+            exprs.append(move_window_exact_lua(int(mx), int(my), addr))
+        if _DEBUG:
+            print(f"DEBUG using STAGE 2: pos={pos2} + {len(moved)} window(s) relocated", file=sys.stderr, flush=True)
+        batch_async(exprs)
+    else:
+        if _DEBUG:
+            print(f"DEBUG using STAGE 1: pos={pos1} new_size=({new_w},{new_h}) center={center}", file=sys.stderr, flush=True)
+        move_window_exact_async(int(pos1[0]), int(pos1[1]), address)
 
 
 def main():
