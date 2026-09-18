@@ -51,6 +51,7 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
 
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
+    hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_auto_place_window.py > /tmp/auto-place-window.log 2>&1")
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_window_memory.py > /tmp/window-memory.log 2>&1")
 end)
 
@@ -208,7 +209,13 @@ hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "-1" }))
 hl.bind(mainMod .. " + X", hl.dsp.focus({ workspace = "+1" }))
 hl.bind(mainMod .. " + SHIFT + Z", hl.dsp.window.move({ workspace = "-1" }))
 hl.bind(mainMod .. " + SHIFT + X", hl.dsp.window.move({ workspace = "+1" }))
-hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_floating_tile_toggle.py"))
+-- Was the float/tile toggle (dxrice_floating_tile_toggle.py) -- that
+-- script is still there and runnable by hand if you want its behavior
+-- back on a different bind; SUPER+D now runs the real whole-desktop
+-- auto-arrange solver (dxrice_auto_arrange.py), not the older
+-- collision-only resolver (dxrice_align_windows.py, still present and
+-- unbound -- point this bind back at it to revert to that behavior).
+hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_auto_arrange.py"))
 
 hl.bind(mainMod .. " + left",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py left"))
 hl.bind(mainMod .. " + right", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py right"))
