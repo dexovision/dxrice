@@ -156,10 +156,28 @@ def pan_other_windows(excluded_addr, dx, dy, workspace_id):
         return
     try:
         now = time.time()
-        if (workspace_id != _push_cache_workspace
-                or (now - _push_cache_last_refresh) >= PUSH_CACHE_REFRESH):
+        fresh_start = workspace_id != _push_cache_workspace
+        if fresh_start or (now - _push_cache_last_refresh) >= PUSH_CACHE_REFRESH:
             floating_windows = get_floating_windows(workspace_id)
-            _push_cache = {w['address']: [w['at'][0], w['at'][1]] for w in floating_windows}
+            live = {w['address']: [w['at'][0], w['at'][1]] for w in floating_windows}
+            if fresh_start:
+                _push_cache = live
+            else:
+                # Merge, never replace -- identical reasoning to
+                # refresh_drag_cache's own comment: this loop is the sole
+                # authority on where the pushed windows are while a push is
+                # in progress (it drives them with fire-and-forget moves),
+                # so a read-back that lags those dispatches must not be
+                # allowed to overwrite them and snap the windows backward.
+                # The dragged window itself is excluded from the push below
+                # and is moved by Hyprland's own drag, so its live position
+                # is always the correct one to adopt.
+                for addr, pos in live.items():
+                    if addr not in _push_cache or addr == excluded_addr:
+                        _push_cache[addr] = pos
+                for addr in list(_push_cache):
+                    if addr not in live:
+                        del _push_cache[addr]
             _push_cache_workspace = workspace_id
             _push_cache_last_refresh = now
 
@@ -431,19 +449,51 @@ _drag_cache_workspace = None
 _drag_cache_last_refresh = 0.0
 
 def refresh_drag_cache(workspace_id, force=False):
+    """Keeps _drag_cache's WINDOW LIST current without ever clobbering the
+    positions this loop is itself driving.
+
+    The distinction matters and used to be a real source of pan jitter: the
+    pan loop increments each cached position every frame and dispatches the
+    move fire-and-forget (never waiting for Hyprland to confirm it landed),
+    so for the duration of a pan THIS process is the authority on where
+    these windows are -- its accumulated values are strictly more current
+    than anything `hyprctl clients` can report, which necessarily lags by
+    however many dispatches are still in flight. Wholesale-replacing the
+    cache from that read-back every DRAG_CACHE_REFRESH seconds therefore
+    threw away real, already-dispatched movement and snapped every window
+    backward by the in-flight delta -- at 144Hz and a 0.2s refresh that is
+    up to ~29 frames of motion discarded several times a second, which is
+    exactly what "jitter"/"windows lag behind the camera" feels like.
+
+    So: a refresh now only ADDS windows that appeared since the last one
+    (taking Hyprland's position for those, since this loop has never
+    touched them) and DROPS ones that closed or left the workspace.
+    Windows already being tracked keep the position this loop computed.
+    `force=True` (or a workspace change, or the start of a fresh pan, which
+    resets _drag_cache_workspace to None) still does a full authoritative
+    re-read, because at that point this loop is NOT mid-flight and
+    Hyprland's state is the correct starting truth."""
     global _drag_cache, _drag_cache_workspace, _drag_cache_last_refresh
     now = time.time()
-    if (not force
-            and workspace_id == _drag_cache_workspace
-            and (now - _drag_cache_last_refresh) < DRAG_CACHE_REFRESH):
+    fresh_start = force or workspace_id != _drag_cache_workspace
+    if not fresh_start and (now - _drag_cache_last_refresh) < DRAG_CACHE_REFRESH:
         return
     try:
         clients = hyprctl_json(['clients']) or []
-        _drag_cache = {
+        live = {
             w['address']: [w['at'][0], w['at'][1]]
             for w in clients
             if w.get('floating') and w.get('workspace', {}).get('id') == workspace_id
         }
+        if fresh_start:
+            _drag_cache = live
+        else:
+            for addr, pos in live.items():
+                if addr not in _drag_cache:
+                    _drag_cache[addr] = pos          # newly appeared -- adopt its real position
+            for addr in list(_drag_cache):
+                if addr not in live:
+                    del _drag_cache[addr]            # closed / moved away -- stop driving it
         _drag_cache_workspace = workspace_id
         _drag_cache_last_refresh = now
     except Exception:
