@@ -44,8 +44,8 @@ FloatingWindow {
             }
             Rectangle {
                 width: parent.width; height: 34; radius: Theme.entryRadius
-                color: Qt.rgba(1, 1, 1, 0.06)
-                border.width: 1; border.color: Theme.borderIdle
+                color: Theme.inputFill
+                border.width: Theme.borderWidth; border.color: Theme.borderIdle
                 TextInput {
                     id: pwInput
                     anchors.fill: parent; anchors.margins: 8

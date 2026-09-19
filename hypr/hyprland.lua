@@ -192,7 +192,13 @@ hl.window_rule({
 -- live as "org.gnome.Nautilus" and "org.pulseaudio.pavucontrol" -- so this
 -- size-forcing rule silently never fired for either app before. The other
 -- five entries were not independently re-verified this pass.
-local float_apps = { "org.gnome.Nautilus", "org.pulseaudio.pavucontrol", "blueman-manager", "qt5ct", "qt6ct", "nwg-look", "cava" }
+-- "cava" removed: it is a terminal ncurses visualizer, not a Wayland
+-- toplevel with its own app-id -- it runs INSIDE whichever terminal
+-- launches it (e.g. class "kitty"), so a rule matching class="cava"
+-- could never match anything. Confirmed live: blueman-manager/qt5ct/
+-- qt6ct/nwg-look all report exactly the class already listed here and
+-- all correctly receive the 1100x750 size.
+local float_apps = { "org.gnome.Nautilus", "org.pulseaudio.pavucontrol", "blueman-manager", "qt5ct", "qt6ct", "nwg-look" }
 for _, class in ipairs(float_apps) do
     hl.window_rule({
         name = "float-" .. class,
