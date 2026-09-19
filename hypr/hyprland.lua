@@ -51,8 +51,12 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
 
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
+    -- New-window auto-placement (Algorithm A). Event-driven: it tails
+    -- Hyprland's .socket2.sock and reacts to openwindow>>. It takes an
+    -- flock on its own lock file, so a second copy started by hand (or by
+    -- a duplicated autostart line) exits immediately instead of both
+    -- racing to place the same window.
     hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_auto_place_window.py > /tmp/auto-place-window.log 2>&1")
-    hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_window_memory.py > /tmp/window-memory.log 2>&1")
 end)
 
 hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")
@@ -182,7 +186,13 @@ hl.window_rule({
     suppress_event = "maximize",
 })
 
-local float_apps = { "nautilus", "pavucontrol", "blueman-manager", "qt5ct", "qt6ct", "nwg-look", "cava" }
+-- Real, live-verified wayland app-ids for nautilus/pavucontrol (both
+-- previously listed by their binary name, which never matched: Hyprland
+-- matches against the actual app-id/class a client reports, confirmed
+-- live as "org.gnome.Nautilus" and "org.pulseaudio.pavucontrol" -- so this
+-- size-forcing rule silently never fired for either app before. The other
+-- five entries were not independently re-verified this pass.
+local float_apps = { "org.gnome.Nautilus", "org.pulseaudio.pavucontrol", "blueman-manager", "qt5ct", "qt6ct", "nwg-look", "cava" }
 for _, class in ipairs(float_apps) do
     hl.window_rule({
         name = "float-" .. class,
@@ -209,13 +219,21 @@ hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "-1" }))
 hl.bind(mainMod .. " + X", hl.dsp.focus({ workspace = "+1" }))
 hl.bind(mainMod .. " + SHIFT + Z", hl.dsp.window.move({ workspace = "-1" }))
 hl.bind(mainMod .. " + SHIFT + X", hl.dsp.window.move({ workspace = "+1" }))
--- Was the float/tile toggle (dxrice_floating_tile_toggle.py) -- that
--- script is still there and runnable by hand if you want its behavior
--- back on a different bind; SUPER+D now runs the real whole-desktop
--- auto-arrange solver (dxrice_auto_arrange.py), not the older
--- collision-only resolver (dxrice_align_windows.py, still present and
--- unbound -- point this bind back at it to revert to that behavior).
-hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_auto_arrange.py"))
+-- SUPER+D is back to its original job from before any auto-arrange work:
+-- dxrice_floating_tile_toggle.py, toggling this workspace's windows
+-- between floating and tiled. It briefly ran the whole-desktop
+-- auto-arrange solver instead, but pressing that same key reliably
+-- re-tiled floating windows via something outside this config's own bind
+-- table (never tracked down conclusively -- unrelated to the toggle
+-- script below, which has its own, intentional float/tile behavior and
+-- was never implicated). Auto-arrange (dxrice_auto_arrange.py) now lives
+-- on SUPER+G instead, clear of whatever that was.
+hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_floating_tile_toggle.py"))
+
+-- Whole-desktop auto-arrange (Algorithm B) -- not the older collision-only
+-- resolver (dxrice_align_windows.py, still present and unbound -- point
+-- this bind at it instead to revert to that simpler behavior).
+hl.bind(mainMod .. " + G", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_auto_arrange.py"))
 
 hl.bind(mainMod .. " + left",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py left"))
 hl.bind(mainMod .. " + right", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py right"))
