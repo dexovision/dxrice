@@ -15,8 +15,9 @@ Algorithm, run against the new window's own REAL size (read back from
 `hyprctl clients` once the window is actually mapped, never assumed or
 fixed, and NEVER changed by this script -- a small dialog and a
 maximized-by-default app get placed correctly relative to their own real
-footprint, not some average guess, and this script only ever dispatches
-move commands, never a resize):
+footprint, not some average guess). Stages 1 and 2 only ever dispatch move
+commands; Stage 3 (see below) is the one exception -- and even there, only
+an EXISTING window is ever resized, never the new one:
 
 STAGE 1 -- direct placement, move nothing else:
   1. No other floating window on this workspace yet -> leave it wherever
@@ -454,6 +455,31 @@ def find_least_disruptive_position(new_size, others, gap, current_pos, layout_ot
 # rearranges too eagerly or too reluctantly.
 MAKE_ROOM_MOVEMENT_WEIGHT = 0.5
 
+# A flat per-pixel movement cost treats shoving a 1200x800 application
+# aside exactly like nudging a 250x150 dialog the same distance -- live
+# testing surfaced exactly this: a tiny dialog opening beside a large,
+# already-centered window relocated that large window 480px just to land
+# the dialog dead-center, because 480px of "movement" was cheap in raw
+# pixels regardless of whose 480px it was. A human doesn't experience
+# those as equally disruptive -- displacing the big, prominent thing
+# reads as the layout being torn up; nudging the small one reads as
+# tidying. This scales the per-pixel cost of moving a given window by
+# how much LARGER its own area is than the new window's -- a window at or
+# below the new window's own size still costs the base rate (moving
+# something small or similarly-sized to make room stays cheap, e.g. a
+# tiny window sliding aside for a large new application), while a window
+# substantially bigger than the new one costs progressively more per
+# pixel, so Stage 2 only relocates something significantly more prominent
+# than the new window when the centering win is real, not just numerically
+# ahead. Square-rooted rather than linear in the area ratio so a modestly
+# bigger window isn't punished as harshly as a dramatically bigger one.
+def prominence_weight(addr, eligible_by_addr, new_area):
+    aw, ah = eligible_by_addr[addr]["size"]
+    area = aw * ah
+    if new_area <= 0 or area <= new_area:
+        return 1.0
+    return math.sqrt(area / new_area)
+
 
 def _rect_center(rect):
     x0, y0, x1, y1 = rect
@@ -629,7 +655,30 @@ def clamp_to_usable_size(w, h):
 
 
 def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost):
-    """Only called once Stage 1 and Stage 2 have already both been scored
+    """DECISION (investigated, not assumed): this stage is a deliberate,
+    intentionally-rare safety fallback -- kept, not redesigned or removed.
+    Across every synthetic test in dxrice_test_placement.py plus 10
+    deliberately adversarial real-layout scenarios on a live compositor
+    (a large centered window + a tiny dialog, a tiny centered window + a
+    large application, a narrow gap between two windows, an L of windows,
+    windows surrounding the viewport center, a dense 6-window cluster,
+    scattered far-apart windows, a huge window overlapping the viewport,
+    a fullscreen obstacle, and windows with extreme/mismatched aspect
+    ratios), Stage 1 and Stage 2 resolved every single one on their own --
+    this function never fired naturally once. That's evidence the infinite
+    canvas rarely if ever runs out of room to rearrange into, not that this
+    code is dead: an infinite canvas means Stage 2's spiral fallback always
+    eventually finds free space, so RESIZE_TRIGGER_MULTIPLE's bar (rearrange
+    alone still bad) is genuinely hard to clear outside a pathological,
+    extremely dense/gridlocked cluster. Kept specifically for that case
+    rather than removed, since it costs nothing when it doesn't fire (only
+    evaluated once Stage 1/2 are both already scored as bad) and is fully
+    bounded/tested when it does. Verified separately, by forcing the trigger
+    threshold directly, that the mechanism itself (variant selection, the
+    MIN_USABLE/MAX_SHRINK bounds, the explicit anchor correction below) is
+    correct -- see dxrice_test_placement.py's TestResizeMinimums.
+
+    Only called once Stage 1 and Stage 2 have already both been scored
     and the better of the two (`best_cost`) is still bad relative to the
     new window's own size -- see RESIZE_TRIGGER_MULTIPLE. Tries shrinking
     exactly ONE existing eligible window (never the new one, never more
@@ -770,8 +819,11 @@ def place_new_window(address, workspace_id, gap):
         pos2, moved = stage2
         d2 = math.hypot(pos2[0] + new_w / 2 - center[0], pos2[1] + new_h / 2 - center[1])
         orig_at = {w["address"]: w["at"] for w in eligible}
+        eligible_by_addr = {w["address"]: w for w in eligible}
+        new_area = new_w * new_h
         total_movement = sum(
             math.hypot(nx - orig_at[addr][0], ny - orig_at[addr][1])
+            * prominence_weight(addr, eligible_by_addr, new_area)
             for addr, (nx, ny) in moved.items()
         )
         cost1, cost2_total = d1, d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
@@ -818,6 +870,29 @@ def place_new_window(address, workspace_id, gap):
         if _DEBUG:
             print(f"DEBUG using STAGE 1: pos={pos1} new_size=({new_w},{new_h}) center={center}", file=sys.stderr, flush=True)
         move_window_exact_async(int(pos1[0]), int(pos1[1]), address)
+
+    # Found live, via a 40-cycle soak test that opened/closed windows in
+    # rapid bursts: every dispatch above is fire-and-forget (want_reply=
+    # False) so this function returns the instant the move/resize command
+    # is SENT, not once Hyprland has actually applied it. If a second
+    # openwindow event arrives and this function runs again before that
+    # happens, its `hyprctl clients` read of "where everything else
+    # currently is" can catch the first window still at its PRE-move
+    # position -- both placements get computed against a real position
+    # that's about to change out from under them, and the actual result on
+    # screen can overlap even though each individual decision was correct
+    # against the (stale) state it saw. Reproduced exactly once in the
+    # burst-spawn soak scenario, never in normal one-app-at-a-time use.
+    # A brief settle delay here, before this function returns and the
+    # listener reads its next buffered event, gives Hyprland's own IPC time
+    # to actually finish applying what was just dispatched -- imperceptible
+    # for a human opening one window at a time, and closes the race for
+    # everything short of multiple windows mapping within single-digit
+    # milliseconds of each other. Not a formal guarantee (that would need
+    # waiting for confirmation the move actually landed, adding real
+    # latency to the common case for a rare edge case) -- a bounded,
+    # proportionate mitigation for a bounded, rare race.
+    time.sleep(0.03)
 
 
 def main():

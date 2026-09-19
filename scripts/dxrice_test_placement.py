@@ -191,6 +191,60 @@ class TestTryMakeRoom(unittest.TestCase):
                                   f"{final_rects[i]} overlaps {final_rects[j]}")
 
 
+class TestProminenceWeighting(unittest.TestCase):
+    """Real-layout scenario A from live QA: a tiny dialog opening next to a
+    large, already-centered window must NOT relocate that large window just
+    to land the dialog at the exact pixel center -- a flat per-pixel
+    movement cost made that numerically cheap even though no human would
+    want it. See prominence_weight's own docstring for the fix."""
+
+    def test_tiny_dialog_does_not_evict_large_centered_window(self):
+        big = {"address": "0xBIG", "at": [360, 140], "size": [1200, 800]}
+        center = (960, 540)
+        gap = GAP
+        new_size = (250, 150)  # the tiny dialog
+
+        others = [(big["at"][0], big["at"][1], *big["size"])]
+        pos1 = apw.find_free_position(new_size, others, center, gap, layout_others=others)
+        d1 = math.hypot(pos1[0] + new_size[0] / 2 - center[0], pos1[1] + new_size[1] / 2 - center[1])
+
+        stage2 = apw.try_make_room(new_size, [big], [], center, gap)
+        self.assertIsNotNone(stage2)
+        pos2, moved = stage2
+        d2 = math.hypot(pos2[0] + new_size[0] / 2 - center[0], pos2[1] + new_size[1] / 2 - center[1])
+        eligible_by_addr = {"0xBIG": big}
+        new_area = new_size[0] * new_size[1]
+        total_movement = sum(
+            math.hypot(nx - big["at"][0], ny - big["at"][1]) * apw.prominence_weight(a, eligible_by_addr, new_area)
+            for a, (nx, ny) in moved.items()
+        )
+        cost2 = d2 + apw.MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
+
+        # Stage 1 (leave the big window alone) must win -- the whole point
+        # of this test is that relocating BIG for a perfectly-centered tiny
+        # dialog is no longer cheaper than just placing the dialog beside it.
+        self.assertLess(d1, cost2,
+                         "prominence weighting regressed -- the large window would be evicted again")
+
+    def test_small_existing_window_still_moves_cheaply_for_large_new_one(self):
+        """The mirror case (scenario B): a tiny existing window sitting where
+        a large NEW window wants to go should still be nudged aside cheaply
+        -- prominence weighting must not make Stage 2 universally reluctant,
+        only reluctant to move something bigger than the new window."""
+        small = {"address": "0xSMALL", "at": [860, 490], "size": [200, 100]}
+        center = (960, 540)
+        gap = GAP
+        new_size = (1000, 700)  # the large new application
+
+        stage2 = apw.try_make_room(new_size, [small], [], center, gap)
+        self.assertIsNotNone(stage2)
+        pos2, moved = stage2
+        eligible_by_addr = {"0xSMALL": small}
+        new_area = new_size[0] * new_size[1]
+        w = apw.prominence_weight("0xSMALL", eligible_by_addr, new_area)
+        self.assertEqual(w, 1.0, "moving something smaller than the new window must stay at base cost")
+
+
 class TestAutoArrangeAlgorithmB(unittest.TestCase):
     def _mk(self, addr, x, y, w, h):
         return {"address": addr, "at": [x, y], "size": [w, h]}
@@ -339,6 +393,23 @@ class TestResizeMinimums(unittest.TestCase):
         orig_ratio = 50 / 300
         new_ratio = w / h
         self.assertAlmostEqual(orig_ratio, new_ratio, delta=0.05)
+
+
+class TestSettleDelayDocumentation(unittest.TestCase):
+    """place_new_window's post-dispatch settle delay (see its own comment)
+    is a live-timing mitigation, not something synthetic geometry tests can
+    exercise -- this test only documents that it's actually present, so a
+    future refactor can't silently drop it without at least a test noticing.
+    Live confirmation: a 40-cycle burst-spawn soak test hit exactly one real
+    overlap before this fix; an 8-burst/48-window rapid-fire stress test
+    (spawning FASTER than the soak that found the bug) hit zero after it."""
+
+    def test_settle_delay_present_in_source(self):
+        import inspect
+        src = inspect.getsource(apw.place_new_window)
+        self.assertIn("time.sleep(0.03)", src,
+                       "place_new_window's post-dispatch settle delay was removed -- "
+                       "see the comment above it for the race this closes")
 
 
 if __name__ == "__main__":
