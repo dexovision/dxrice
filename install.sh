@@ -679,6 +679,11 @@ verify_deploy() {
         "$HOME/.config/hypr/hyprland.lua"
         "$STATE_DIR/repo_path"
         "$REPO_DIR/scripts/dxrice_infinite_desktop_core.py"
+        "$REPO_DIR/scripts/dxrice_auto_place_window.py"
+        "$REPO_DIR/scripts/dxrice_auto_arrange.py"
+        "$REPO_DIR/scripts/dxrice_hypr_ipc.py"
+        "$REPO_DIR/scripts/dxrice_singleton.py"
+        "$REPO_DIR/scripts/dxrice_xdg.py"
         "$REPO_DIR/scripts/dxrice_taskbar_gui.py"
         "$REPO_DIR/scripts/dxrice_theme_gui.py"
         "$REPO_DIR/scripts/dxrice_apply_theme.py"
@@ -710,6 +715,22 @@ verify_deploy() {
         return 1
     fi
     ok "Everything the keybinds depend on is in place."
+
+    # Deterministic placement/arrangement geometry tests -- pure-Python,
+    # no live Hyprland needed (see the script's own docstring), so this
+    # runs safely as part of every install/update rather than only when
+    # someone happens to run it by hand. A failure here means the window
+    # placement/auto-arrange logic itself is broken, not a deploy problem,
+    # so it's reported distinctly rather than folded into the file-presence
+    # check above.
+    if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_DIR/scripts/dxrice_test_placement.py" ]; then
+        if python3 "$REPO_DIR/scripts/dxrice_test_placement.py" >/tmp/dxrice-verify-tests.log 2>&1; then
+            ok "Window placement/arrangement tests passed."
+        else
+            warn "Window placement/arrangement tests FAILED -- see /tmp/dxrice-verify-tests.log"
+            info "SUPER+G and new-window auto-placement may not behave correctly."
+        fi
+    fi
 
     if [ -f "$HOME/.config/hypr/hyprland.conf" ]; then
         warn "You also have a leftover ~/.config/hypr/hyprland.conf."
