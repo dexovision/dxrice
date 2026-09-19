@@ -291,7 +291,23 @@ def action_lock():
 
 
 def action_logout():
-    subprocess.Popen(["hyprctl", "dispatch", "exit"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # NOT `hyprctl dispatch exit`: this system launches Hyprland through
+    # `start-hyprland`, Hyprland's own official watchdog binary, which
+    # restarts Hyprland on anything it reads as a "not clean" exit --
+    # `dispatch exit` doesn't complete that watchdog's clean-exit
+    # handshake, so the compositor just silently respawns instead of
+    # actually logging out. `loginctl terminate-session $XDG_SESSION_ID`
+    # ends just this graphical session at the systemd-logind layer,
+    # bypassing the compositor (and its watchdog) entirely -- the narrow
+    # form, not `terminate-user`, which also tears down the whole user
+    # slice including the sddm-helper process that owns this very session,
+    # reproduced live to leave a black screen with no greeter until reboot.
+    sid = os.environ.get("XDG_SESSION_ID")
+    if sid:
+        subprocess.Popen(["loginctl", "terminate-session", sid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen(["loginctl", "terminate-user", os.environ.get("USER", "")],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def action_reboot():

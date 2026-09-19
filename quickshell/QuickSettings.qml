@@ -1226,7 +1226,51 @@ Item {
                 Row {
                     spacing: Theme.padSm
                     IconButton { glyph: "\uf023"; size: Theme.iconLg; onClicked: Quickshell.execDetached(["hyprlock"]) }
-                    IconButton { glyph: "\uf2f5"; size: Theme.iconLg; onClicked: Quickshell.execDetached(["hyprctl", "dispatch", "exit"]) }
+                    // NOT `hyprctl dispatch exit`: this system launches
+                    // Hyprland through `start-hyprland`, Hyprland's own
+                    // official watchdog binary, which automatically
+                    // restarts Hyprland on anything it reads as a "not
+                    // clean" exit -- confirmed via the watchdog's own
+                    // embedded strings ("Hyprland exit not-cleanly,
+                    // restarting"). `dispatch exit` is the textbook-correct
+                    // way to close a plain Hyprland session, but on this
+                    // launcher it doesn't complete the watchdog's clean-exit
+                    // handshake, so the compositor just silently respawns --
+                    // reboot/shutdown "worked" only because they tear down
+                    // the whole system, watchdog included, not because the
+                    // compositor-level exit path was ever fine.
+                    // `loginctl terminate-session $XDG_SESSION_ID` ends
+                    // JUST this graphical session at the systemd-logind
+                    // layer, the same mechanism a real desktop's own "Log
+                    // out" uses, bypassing the compositor (and its
+                    // watchdog) entirely -- WITHOUT `terminate-user`'s
+                    // blast radius. `terminate-user` kills every session
+                    // AND the whole user@.service slice; on this machine
+                    // that includes the sddm-helper process that IS this
+                    // session's logind session leader, so killing it made
+                    // SDDM read the session's own clean end as a helper
+                    // "crash" and give up restarting the greeter instead
+                    // of returning to it -- reproduced live: a real
+                    // terminate-user logout left a black screen with no
+                    // greeter until a manual reboot. XDG_SESSION_ID is
+                    // fixed for this process's whole lifetime (set once by
+                    // logind/PAM when the session started), so reading it
+                    // via Quickshell.env here is exactly as reliable as
+                    // reading USER above it.
+                    IconButton {
+                        glyph: "\uf2f5"; size: Theme.iconLg
+                        onClicked: {
+                            const sid = Quickshell.env("XDG_SESSION_ID");
+                            if (sid)
+                                Quickshell.execDetached(["loginctl", "terminate-session", sid]);
+                            else
+                                // No session id available for some reason --
+                                // fall back to the broader (but previously
+                                // proven-risky) command rather than silently
+                                // doing nothing when Log Out is pressed.
+                                Quickshell.execDetached(["loginctl", "terminate-user", Quickshell.env("USER")]);
+                        }
+                    }
                     IconButton { glyph: "\uf2ea"; size: Theme.iconLg; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }
                     IconButton { glyph: "\uf011"; size: Theme.iconLg; destructive: true; onClicked: Quickshell.execDetached(["systemctl", "poweroff"]) }
                 }
