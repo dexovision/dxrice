@@ -831,6 +831,36 @@ def place_new_window(address, workspace_id, gap):
             if new_win:
                 break
         time.sleep(0.03)
+
+    # Existing but not yet SETTLED is a different problem from not existing
+    # yet, and it has a real, measured consequence. Some toolkits map at one
+    # size and immediately resize to another (zenity maps 320x246 and settles
+    # to 300x226). Placing against the transient size puts the window at the
+    # correct gap for a size it is about to stop being -- and because
+    # Hyprland resizes a floating window around its CENTRE (confirmed live,
+    # see try_resize_room), the app's own shrink then walks the window half
+    # the difference away from the neighbour it was just placed against.
+    # Reproduced exactly and deterministically: a 20px self-shrink left a
+    # 15px gap where 5px was configured, identically on every trial.
+    # So: wait for two consecutive reads to agree on the size before
+    # committing to a placement. Costs one short interval in the common case
+    # (a window whose size is already stable agrees immediately), is capped
+    # so a pathologically animated window can't stall the listener, and
+    # stays comfortably inside the window's own map-to-visible latency --
+    # measured at ~93ms here, against which this is invisible.
+    if new_win:
+        stable_since = tuple(new_win.get("size", ()))
+        for _ in range(6):
+            time.sleep(0.012)
+            clients = hyprctl_json(["clients"]) or clients
+            probe = find_window(clients, address)
+            if not probe:
+                break
+            size_now = tuple(probe.get("size", ()))
+            new_win = probe
+            if size_now == stable_since:
+                break
+            stable_since = size_now
     if _DEBUG:
         print(f"DEBUG address={address} found={new_win is not None} floating={new_win.get('floating') if new_win else None}", file=sys.stderr, flush=True)
     if not new_win or not new_win.get("floating"):
