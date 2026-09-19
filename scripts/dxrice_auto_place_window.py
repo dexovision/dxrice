@@ -747,6 +747,19 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
     MIN_USABLE/MAX_SHRINK bounds, the explicit anchor correction below) is
     correct -- see dxrice_test_placement.py's TestResizeMinimums.
 
+    Why an EXISTING window and never the new one: the new window's size is
+    what the application itself just asked for (or what a window rule
+    deliberately set for it), and nobody has seen it yet -- shrinking it
+    before its first frame means the user never gets to see the size the
+    app actually wanted, and "make the new window small enough to fit the
+    hole that's left" is precisely the behaviour this whole stage exists
+    to avoid. An existing window, by contrast, is already on screen at a
+    size the user has seen and can judge, a modest trim of it is visible
+    and undoable, and it is the window actually in the way. Preferring the
+    incumbent to absorb the compromise also keeps the rule predictable:
+    opening an app never silently changes that app, only ever its
+    neighbour, and only when nothing short of that worked.
+
     Only called once Stage 1 and Stage 2 have already both been scored
     and the better of the two (`best_cost`) is still bad relative to the
     new window's own size -- see RESIZE_TRIGGER_MULTIPLE. Tries shrinking

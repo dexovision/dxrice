@@ -1261,14 +1261,27 @@ Item {
                         glyph: "\uf2f5"; size: Theme.iconLg
                         onClicked: {
                             const sid = Quickshell.env("XDG_SESSION_ID");
-                            if (sid)
+                            if (sid) {
                                 Quickshell.execDetached(["loginctl", "terminate-session", sid]);
-                            else
-                                // No session id available for some reason --
-                                // fall back to the broader (but previously
-                                // proven-risky) command rather than silently
-                                // doing nothing when Log Out is pressed.
-                                Quickshell.execDetached(["loginctl", "terminate-user", Quickshell.env("USER")]);
+                            } else {
+                                // XDG_SESSION_ID missing for some reason. Ask
+                                // logind directly which session is this user's
+                                // DISPLAY session rather than falling back to
+                                // `terminate-user` -- that command is exactly
+                                // what caused the black-screen-no-greeter
+                                // failure this whole fix exists to remove, so
+                                // reaching for it on a technicality would just
+                                // reintroduce the bug on the rarer path.
+                                // Verified to resolve to the same session id
+                                // as the env var, including with the env var
+                                // explicitly unset. Does nothing if even that
+                                // fails: a Log Out button that no-ops is a far
+                                // better failure than one that strands the
+                                // machine with no greeter.
+                                Quickshell.execDetached(["sh", "-c",
+                                    'sid="$(loginctl show-user "$(id -un)" -p Display --value 2>/dev/null)"; '
+                                    + '[ -n "$sid" ] && exec loginctl terminate-session "$sid"']);
+                            }
                         }
                     }
                     IconButton { glyph: "\uf2ea"; size: Theme.iconLg; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }

@@ -61,10 +61,11 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Gtk4LayerShell, Pango
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_gtk_widgets import animate_in, label as _label, load_css, make_card, make_debounced, read_anim_ms
 import dxrice_apply_theme as apply_theme
+import dxrice_xdg
 
 HOME = os.path.expanduser("~")
 PID_FILE = "/tmp/dxrice-quick-settings.pid"
-CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
+CSS_PATH = os.path.join(dxrice_xdg.config_dir(), "gtk_style.css")
 
 # The Theme app's own animation-speed setting, so this panel's entrance
 # animation matches the rest of the rice instead of a hardcoded constant.
@@ -303,11 +304,25 @@ def action_logout():
     # slice including the sddm-helper process that owns this very session,
     # reproduced live to leave a black screen with no greeter until reboot.
     sid = os.environ.get("XDG_SESSION_ID")
+    if not sid:
+        # Ask logind directly which session is this user's DISPLAY session
+        # rather than falling back to `terminate-user` -- that command is
+        # exactly what produced the black-screen-no-greeter failure this fix
+        # exists to remove, so reaching for it on a technicality would just
+        # reintroduce the bug on the rarer path. Verified to resolve to the
+        # same id as the env var, including with the env var unset.
+        try:
+            r = subprocess.run(["loginctl", "show-user", os.environ.get("USER") or os.getlogin(),
+                                 "-p", "Display", "--value"],
+                                capture_output=True, text=True, timeout=3)
+            sid = r.stdout.strip()
+        except Exception:
+            sid = ""
     if sid:
-        subprocess.Popen(["loginctl", "terminate-session", sid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        subprocess.Popen(["loginctl", "terminate-user", os.environ.get("USER", "")],
+        subprocess.Popen(["loginctl", "terminate-session", sid],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # If even that failed, do nothing: a Log Out button that no-ops is a far
+    # better failure than one that strands the machine with no greeter.
 
 
 def action_reboot():
