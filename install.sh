@@ -605,6 +605,18 @@ migrate_taskbar_bind() {
         "$f"
 }
 
+# Root-cause fix for a real, previously-silent failure mode: hyprland.lua is
+# copy-once (see do_deploy/dxrice_deploy.py) so it's yours to hand-edit
+# forever, but that also means a `git pull` that adds a new required
+# autostart line or default keybind to the repo's template has no way to
+# ever reach your already-deployed copy -- and nothing ever told you it
+# happened. That's exactly what let dxrice_auto_place_window.py's autostart
+# line silently never run for a full session. Never modifies your live
+# file -- only tells you, in plain terms, what's new.
+check_hypr_drift() {
+    python3 "$REPO_DIR/scripts/dxrice_check_hypr_drift.py" 2>/dev/null || true
+}
+
 detect_monitor() {
     local target="$HOME/.config/hypr/hyprland.lua"
     command -v hyprctl >/dev/null 2>&1 || { warn "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
@@ -740,6 +752,7 @@ do_install() {
 
     do_deploy
     verify_deploy || true
+    check_hypr_drift
 
     if [ "$hypr_existed" = "0" ]; then
         echo ""
@@ -850,6 +863,7 @@ do_update() {
     install_shell_alias
     do_deploy
     verify_deploy || true
+    check_hypr_drift
 
     if [ "$hypr_existed" = "0" ]; then
         echo ""

@@ -30,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_manifest
+import dxrice_xdg
 
 HOME = Path.home()
 
@@ -183,6 +184,17 @@ def deploy_copy_once(repo_dir: Path, manifest: dict, results: dict):
         dst.write_bytes(src.read_bytes())
         dxrice_manifest.mark_deployed(dst, manifest)
         results[str(dst)] = "installed"
+        # Keep a pristine copy of the repo template exactly as it looked at
+        # the moment it was seeded -- this is the ONLY way a later drift
+        # check (dxrice_check_hypr_drift.py) can tell "a default the repo
+        # has since gained" apart from "something you removed on purpose,"
+        # since this file is never touched again after this point (see the
+        # module docstring) and a byte-hash alone can't say what changed.
+        snapshot_dir = Path(dxrice_xdg.state_dir()) / "copy_once_snapshots"
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = snapshot_dir / rel.replace("/", "_")
+        if not snapshot_path.exists():
+            snapshot_path.write_bytes(src.read_bytes())
 
 
 def print_summary(results: dict):
