@@ -5,6 +5,27 @@ rice is floating (hyprland.lua's "float-everything" rule), so without this,
 every new app opens at Hyprland's own default floating position and
 overlaps whatever's already there.
 
+COMPOSITION MODEL: every candidate position is scored primarily by
+composition_cost -- a GLOBAL measure of whether the whole set of windows
+(existing plus the one being placed) reads as a balanced cluster around the
+viewport center, not by how close any single window's own center is to
+that point. The distinction matters: individual-distance-to-center is what
+originally made new windows pile onto whichever axis already had the
+shortest remaining path there (a vertical/horizontal stack minimizes that
+distance just as well as it minimizes bounding-box growth, since both are
+really the same rectangle-packing objective wearing different names).
+composition_cost instead measures the mass-weighted center of the whole
+group (so no single window is rewarded merely for personally sitting near
+center) and how concentrated that mass is along one angular axis through
+it (so a straight run of windows costs more as a THIRD, FOURTH, etc. one
+joins it, however that line happens to be oriented -- never by comparing
+against a hardcoded compass direction). See composition_cost's own
+docstring for the full mechanics. Local terms (composition_penalty's
+sliver/dead-gap/alignment checks, and EXPANSION_WEIGHT's bbox-growth
+tiebreak) remain and stay genuinely secondary -- they decide between
+candidates the global term is otherwise indifferent between, they don't
+override it.
+
 This only ever runs ONCE, at the moment a window opens -- it picks an
 initial position, nothing more. It never re-positions a window after that,
 so dragging one over another by hand (the normal Super+click drag this rice
@@ -180,14 +201,28 @@ ALIGN_EPS = 1.5
 
 # Cost per pixel of dead (unusable) space left between a candidate and a
 # neighbour it lands near but not flush against -- see _dead_gap_penalty.
-# Deliberately just above 1.0: at exactly 1.0 a candidate would be
-# indifferent between closing a dead strip and moving the same number of
-# pixels further from the viewport centre, and the whole point is that
-# closing it should win that trade narrowly. Capped so this can only ever
-# decide a near-tie between neighbouring candidates, never drag a window
-# a long way across the canvas just to sit flush against something.
-DEAD_GAP_WEIGHT = 1.2
-DEAD_GAP_CAP = 120.0
+# Raised from an original 1.2 once ANGULAR_PENALTY_SCALE (2000) existed: a
+# leftover dead-gap strip is an objective, unambiguous local flaw --
+# "shared edges stay at the configured gap" is a hard-feeling requirement,
+# not a soft aesthetic one to be traded against a more abstract radial
+# preference. At the original weight a modest violation (a 50px strip
+# where 5px was configured) cost only ~60 points -- nowhere near enough to
+# outweigh a genuine, if modest, angular improvement, and raising DEAD_GAP_
+# CAP alone did nothing because the cap was never what was binding; the
+# per-pixel rate itself was just too cheap. Reproduced live: two windows
+# with a new one between them landed 5px from one, 55px from the other,
+# identically before and after a 120->900 cap change, because a 50px
+# violation was only ever going to cost 50 * old_weight regardless of the
+# cap. This weight is deliberately steep so even a modest violation costs
+# more than a large angular improvement is realistically worth.
+DEAD_GAP_WEIGHT = 8.0
+
+# Still capped so a genuinely wide gap (already past MIN_USABLE_WIDTH/
+# HEIGHT and therefore not "dead" at all -- see _dead_gap_penalty) can
+# never be approached, and so this can only ever decide among candidates
+# that are otherwise close, never drag a window a long way across the
+# canvas just to sit flush against something.
+DEAD_GAP_CAP = 900.0
 
 
 def _axis_gap(a0, a1, b0, b1):
@@ -269,6 +304,194 @@ def _dead_gap_penalty(cand, layout_rects, gap):
     return min(worst, DEAD_GAP_CAP) * DEAD_GAP_WEIGHT
 
 
+# ============================================================================
+# GLOBAL composition model: mass-weighted center-of-mass + angular spread
+# ============================================================================
+#
+# Diagnosis this section fixes: every score() in this file was a per-
+# candidate distance to viewport_center plus purely LOCAL terms ("does this
+# candidate touch its one neighbor cleanly"). Nothing anywhere asked what
+# the WHOLE composition looks like. A vertical stack of 4 windows satisfies
+# every local term perfectly (each is 100%-flush against its neighbor) and
+# minimizes bbox growth, because a stack IS the minimum bounding rectangle
+# for that footprint -- individual-distance-to-center + local edge-quality +
+# bbox-growth is, together, a 2D bin-packing objective. No single term was
+# "wrong"; the objective itself was rectangle packing with nicer edges.
+#
+# These two functions replace "how close is THIS window to center" with
+# "how well-distributed is the WHOLE mass-weighted composition around
+# center" -- reused by Stage 1, Stage 2, and (via import) Algorithm B, so
+# one definition of "organic" governs every placement decision here.
+
+# Bounds a window's contribution to the composition so neither a huge
+# window nor a tiny one can swamp/vanish from the balance calculation --
+# sqrt(area ratio), same shape as prominence_weight's own movement-cost
+# scaling below, for the same reason: a 4x larger window should matter
+# more than a same-sized one, but not 4x more (that would make the angular
+# math effectively ignore every smaller window whenever one large one is
+# present, defeating the point of measuring the WHOLE composition).
+MASS_MIN = 0.35
+MASS_MAX = 2.5
+
+
+def window_mass(w, h, reference_area):
+    if reference_area <= 0:
+        return 1.0
+    return min(MASS_MAX, max(MASS_MIN, math.sqrt((w * h) / reference_area)))
+
+
+def _effective_count(weights):
+    """Kish's effective sample size: sum(w)^2 / sum(w^2). Equals the literal
+    count when every weight is equal; drops toward 1 as one weight comes to
+    dominate the rest. Used by composition_cost to scale the concentration
+    penalty by how many windows are actually contributing meaningful mass,
+    not by raw window count -- "distribution is based on physical
+    composition, not window count": 3 tiny dialogs clustered next to one
+    huge window shouldn't be weighed the same as 4 similarly-sized windows
+    when deciding whether the layout is spread out enough."""
+    total = sum(weights)
+    sq = sum(w * w for w in weights)
+    return (total * total) / sq if sq > 0 else 0.0
+
+
+# Pixel-equivalent scale for the angular-concentration penalty. Empirically
+# tuned, not just reasoned: an initial value comparable to SLIVER_PENALTY_MAX
+# (a few hundred) was measured (via dxrice_test_placement.py's
+# TestRadialComposition* cases, both directly instrumented and via the live
+# desktop) to be reliably beaten by MOVEMENT_WEIGHT/COMPACTNESS_WEIGHT's
+# realistic swings whenever breaking a stack requires a genuinely large
+# geometric jump -- the composition term correctly PREFERRED the
+# better-distributed candidate in every case checked, just not by enough
+# margin to survive the real movement cost of reaching it. Raised until it
+# reliably won that trade in the adversarial stacking tests without
+# overriding a genuinely necessary edge join (verified by the same test
+# suite still passing the sliver/alignment/gap-preservation cases).
+ANGULAR_PENALTY_SCALE = 2000.0
+
+# Pixel-equivalent weight for how far the mass-weighted CENTER of the whole
+# composition sits from the viewport center. This is "balanced_cluster
+# around viewport_center," not "every_window -> viewport_center": it
+# replaces the old per-candidate hypot(px-cx, py-cy) term, and degenerates
+# to exactly that old term when there's only one window in the composition
+# (its own center IS the mass center) -- so single/first-window placement
+# is unchanged; behavior only diverges once there's an actual cluster to
+# balance.
+CENTER_OF_MASS_WEIGHT = 1.0
+
+
+def _axial_concentration(weighted_angles):
+    """weighted_angles: [(angle_radians, weight), ...] for every window
+    with a meaningfully-defined direction from the viewport center (a
+    window sitting essentially AT the center has no stable angle and is
+    excluded by the caller -- its mass still counts via the center-of-mass
+    term instead).
+
+    Returns (R, n_eff). R in [0, 1] is the mass-weighted mean resultant
+    length of DOUBLED angles -- the standard directional-statistics trick
+    for axial (line-like) data, where a window directly above center and
+    one directly below center both represent "on the vertical axis" rather
+    than being seen as opposite/cancelling directions. R near 1 means the
+    mass is concentrated on a single line through the center (a vertical
+    or horizontal stack, or any other straight run, in ANY orientation);
+    R near 0 means the mass is spread across multiple distinct directions
+    -- a plus/cross or X-shaped cluster scores R=0, a straight stack scores
+    R=1, regardless of which absolute compass direction that line happens
+    to run in. Nothing here ever tests whether an angle equals 0/90/180/
+    270 -- only whether the whole set of angles clusters onto ANY one line
+    -- which is the "no hardcoded preferred angles" requirement.
+
+    n_eff is the Kish effective count of the angle-bearing weights: with
+    exactly 2 windows, ANY two points are trivially "on a line" (R is
+    always 1 for n=2 regardless of the actual angle between them), which
+    would wrongly flag a perfectly normal side-by-side pair as a bad stack.
+    composition_cost scales the penalty by a confidence term derived from
+    n_eff so it contributes ~0 at n=2 and grows only as a THIRD, FOURTH,
+    etc. window joins the same line -- that's when "stacking" becomes an
+    actual, avoidable pattern rather than an unavoidable property of any
+    two points.
+    """
+    if not weighted_angles:
+        return 0.0, 0.0
+    weights = [w for _, w in weighted_angles]
+    total = sum(weights)
+    if total <= 0:
+        return 0.0, 0.0
+    rx = sum(w * math.cos(2 * a) for a, w in weighted_angles) / total
+    ry = sum(w * math.sin(2 * a) for a, w in weighted_angles) / total
+    return math.hypot(rx, ry), _effective_count(weights)
+
+
+def mass_center(weighted_points):
+    """weighted_points: [(cx, cy, mass), ...]. Returns (com_x, com_y), or
+    None if there's no mass at all (empty list)."""
+    total_w = sum(w for _, _, w in weighted_points)
+    if total_w <= 0:
+        return None
+    com_x = sum(cx * w for cx, cy, w in weighted_points) / total_w
+    com_y = sum(cy * w for cx, cy, w in weighted_points) / total_w
+    return (com_x, com_y)
+
+
+def composition_cost(weighted_points, viewport_center, angle_eps=6.0):
+    """The GLOBAL (whole-cluster) composition term -- see the module
+    comment above for why this exists. `weighted_points`: [(cx, cy, mass),
+    ...] for EVERY window in the composition, including whatever candidate
+    is being scored (the caller assembles this list fresh per candidate,
+    since the candidate's own point changes each time). Never includes
+    fixed/fullscreen obstacles -- those are furniture the composition
+    routes around, not mass it's trying to balance, same convention
+    `layout_others` already uses for the local terms.
+
+    Two components, both pixel-equivalent and summed directly:
+
+      - center-of-mass distance: how far the mass-weighted average
+        position sits from viewport_center. With one window this is
+        exactly that window's own distance to center (the old per-window
+        term, preserved as a special case); with several, it's the
+        aggregate's distance, so no single window is rewarded merely for
+        personally sitting close to center.
+      - angular concentration: _axial_concentration's R, scaled by how
+        many effectively-distinct masses are actually contributing (so 2
+        windows -- always "a line" by construction -- cost nothing; a
+        THIRD or later window joining the same line costs progressively
+        more).
+
+    `angle_eps` (pixels): a window whose center is closer than this to
+    viewport_center has no stable angle (atan2 near the origin is noise)
+    and is excluded from the angular term -- it still counts fully in the
+    center-of-mass term, which is the right place for "something is
+    already sitting exactly at the middle" to be represented.
+    """
+    if not weighted_points:
+        return 0.0
+    vx, vy = viewport_center
+    com = mass_center(weighted_points)
+    if com is None:
+        return 0.0
+    center_of_mass_cost = math.hypot(com[0] - vx, com[1] - vy)
+
+    weighted_angles = []
+    for cx, cy, w in weighted_points:
+        dx, dy = cx - vx, cy - vy
+        if math.hypot(dx, dy) < angle_eps:
+            continue
+        weighted_angles.append((math.atan2(dy, dx), w))
+
+    R, n_eff = _axial_concentration(weighted_angles)
+    # (n_eff - 2) / (n_eff - 1): exactly 0 at n_eff==2 (any 2 points are
+    # trivially "a line," never penalized -- see _axial_concentration's
+    # docstring), then ramps up steeply so a genuine THIRD point joining an
+    # existing pair on the same axis is already a strong signal (0.5 at
+    # n_eff==3) rather than a faint one -- empirically necessary: a gentler
+    # ramp left the angular term too weak to outweigh local edge-quality
+    # rewards (a clean full-edge join) for the window that actually turns a
+    # pair into a stack, which is the exact moment this term needs to act.
+    confidence = max(0.0, (n_eff - 2.0) / (n_eff - 1.0)) if n_eff > 1 else 0.0
+    angular_cost = ANGULAR_PENALTY_SCALE * R * confidence
+
+    return CENTER_OF_MASS_WEIGHT * center_of_mass_cost + angular_cost
+
+
 def composition_penalty(cand, layout_rects, gap):
     """Pixel-equivalent score contribution (added directly to a distance-
     based score, so 0 is neutral, positive is worse) capturing whether
@@ -289,7 +512,8 @@ def composition_penalty(cand, layout_rects, gap):
     return sliver + dead - align
 
 
-def find_free_position(new_size, others, center, gap, viewport=None, layout_others=None):
+def find_free_position(new_size, others, center, gap, viewport=None, layout_others=None,
+                        reference_area=None):
     """others: [(x, y, w, h), ...] of every OTHER floating window on this
     workspace that the new window must not overlap -- both ordinary
     movable windows and fixed/fullscreen obstacles alike; ALL of them are
@@ -304,16 +528,22 @@ def find_free_position(new_size, others, center, gap, viewport=None, layout_othe
     function never reads it.
 
     layout_others: optional subset of `others` -- just the ordinary
-    movable windows, excluding fixed/fullscreen ones -- used only for the
-    "don't unnecessarily expand the existing layout" soft tiebreak (see
-    score() below). Defaults to `others` itself when not given, so a
+    movable windows, excluding fixed/fullscreen ones -- used for the local
+    "don't unnecessarily expand the existing layout" tiebreak AND as the
+    GLOBAL composition reference (see score() below and composition_cost's
+    own docstring). Defaults to `others` itself when not given, so a
     caller that doesn't distinguish fixed obstacles (dxrice_align_windows.py)
     keeps its previous behavior. A fullscreen window is still always a
     hard obstacle via `others` either way; it's excluded here only so it
-    doesn't count as part of "the layout" that a merely-nearby placement
-    would be penalized for extending -- that bounding box is about the
-    ordinary windows this feature actually arranges around, not a fixed
-    obstacle it just has to avoid.
+    doesn't count as mass/layout the new window is meaningfully being
+    composed with -- it's fixed furniture to route around.
+
+    reference_area: the "typical window size" used to normalize mass for
+    the global composition term -- defaults to this window's own area
+    (matching prominence_weight's existing convention) so a caller placing
+    a single new window doesn't need to think about it; a caller arranging
+    a whole group (Algorithm B) passes a shared value so every window in
+    that pass is weighed against the same yardstick.
 
     Candidates are every crossing of "an X derived from some obstacle's
     left/right edge (or this window's own gap-width clearance past it)"
@@ -321,19 +551,24 @@ def find_free_position(new_size, others, center, gap, viewport=None, layout_othe
     past it)", plus the plain viewport-center point -- i.e. every place a
     new window could line up flush against an existing one on either axis,
     not just the four cardinal offsets immediately beside each obstacle.
+    This set already includes diagonal/corner-relative positions (an x
+    from one obstacle crossed with a y from another, or the same one)
+    without needing a separate "generate diagonals" step.
 
-    Candidates are scored by distance from the candidate's own center to
-    `center` (the primary signal, no tiers of any kind: no on-screen-vs-
-    off-screen preference, no axis preference -- a version of this that
-    ranked on-screen candidates over off-screen ones, or vertical offsets
-    over horizontal ones, was itself found to be a hardcoded directional
-    bias and was removed; direction falls out purely of which spot is
-    geometrically closest), plus a small secondary preference for
-    candidates that don't unnecessarily grow the bounding box of the
-    existing (non-fixed) layout beyond its current extent -- so among two
-    candidates that are about equally close to center, the one that tucks
-    in next to the existing windows wins over one that would start a
-    disconnected island the same distance away.
+    Candidates are scored by the GLOBAL composition cost of the whole
+    layout with this candidate added (see composition_cost) -- how far the
+    mass-weighted center of everything sits from `center`, plus how
+    concentrated the whole set of windows is along a single angular axis
+    through it -- NOT by this one candidate's own distance to `center`
+    (that per-window pull was itself the source of a real bug: it made
+    every window in a sequence prefer whichever spot was individually
+    closest to center, which reliably piled new windows onto whatever
+    axis already had the shortest remaining path there). A small local
+    tiebreak for candidates that don't unnecessarily grow the existing
+    layout's own footprint, plus the existing sliver/dead-gap/alignment
+    terms, round out the score -- both are intentionally secondary to the
+    composition term, per the explicit requirement that compactness not
+    dominate the visual result.
 
     Returns (x, y), always -- if every generated candidate conflicts with
     something (a tight cluster of many windows), falls back to a spiral
@@ -345,8 +580,17 @@ def find_free_position(new_size, others, center, gap, viewport=None, layout_othe
 
     nw, nh = new_size
     cx, cy = center
+    if reference_area is None:
+        reference_area = nw * nh
     other_rects = [rect_for(ox, oy, ow, oh) for ox, oy, ow, oh in others]
     layout_rects = [rect_for(ox, oy, ow, oh) for ox, oy, ow, oh in layout_others]
+
+    # Precomputed once: every OTHER window's contribution to the global
+    # composition (center + mass) -- fixed for the whole candidate search,
+    # since only the candidate itself varies between calls to score().
+    other_points = [(ox + ow / 2, oy + oh / 2, window_mass(ow, oh, reference_area))
+                     for ox, oy, ow, oh in layout_others]
+    cand_mass = window_mass(nw, nh, reference_area)
 
     def free(x, y):
         candidate = rect_for(x, y, nw, nh)
@@ -364,8 +608,8 @@ def find_free_position(new_size, others, center, gap, viewport=None, layout_othe
 
     def score(x, y):
         px, py = x + nw / 2, y + nh / 2
-        total = math.hypot(px - cx, py - cy)
         cand = (x, y, x + nw, y + nh)
+        total = composition_cost(other_points + [(px, py, cand_mass)], center)
         if layout_bbox is not None:
             bx0, by0, bx1, by1 = layout_bbox
             new_w = max(bx1, cand[2]) - min(bx0, cand[0])
@@ -422,26 +666,46 @@ def find_free_position(new_size, others, center, gap, viewport=None, layout_othe
             return (cx - nw / 2, cy - nh / 2)
 
 
-def find_least_disruptive_position(new_size, others, gap, current_pos, layout_others=None):
+def find_least_disruptive_position(new_size, others, gap, current_pos, layout_others=None,
+                                    viewport_center=None, reference_area=None):
     """Relocates an EXISTING window that's blocking where the new window
     wants to go. Unlike find_free_position (which has no prior position to
     protect), here minimal movement from the window's own current spot is
-    the PRIMARY signal, with the same bounding-box-growth tiebreak as a
-    secondary preference -- there's no fixed target point at all, since a
+    the PRIMARY signal -- there's no fixed target point at all, since a
     displaced window isn't trying to get anywhere in particular, only out
     of the way with the least disruption. Same candidate generation as
     find_free_position (every obstacle's edges crossed in both axes, plus
     the window's own current position as an explicit candidate), same
     guaranteed-terminating spiral fallback if every edge-derived spot
     conflicts with something.
+
+    The GLOBAL composition cost (see composition_cost) is added as a
+    secondary term when `viewport_center` is given -- among positions that
+    are roughly equally cheap to reach, prefer whichever one leaves the
+    overall composition better balanced, rather than treating "get this
+    window out of the way" as having no opinion at all about the result.
+    Movement-to-own-position has no artificial cap and typically differs
+    by tens to hundreds of pixels between genuinely different candidates,
+    so it dominates the decision in the normal case; the composition term
+    only breaks near-ties, matching the "movement should be minimized"
+    requirement while still steering toward a better shape when the choice
+    is otherwise open. Omitted entirely (falls back to the old
+    movement-only behavior) if the caller has no meaningful viewport
+    center to offer -- callers that already had this contract keep working
+    unmodified.
     """
     if layout_others is None:
         layout_others = others
 
     nw, nh = new_size
     cx0, cy0 = current_pos
+    if reference_area is None:
+        reference_area = nw * nh
     other_rects = [rect_for(ox, oy, ow, oh) for ox, oy, ow, oh in others]
     layout_rects = [rect_for(ox, oy, ow, oh) for ox, oy, ow, oh in layout_others]
+    other_points = [(ox + ow / 2, oy + oh / 2, window_mass(ow, oh, reference_area))
+                     for ox, oy, ow, oh in layout_others]
+    cand_mass = window_mass(nw, nh, reference_area)
 
     def free(x, y):
         candidate = rect_for(x, y, nw, nh)
@@ -458,6 +722,8 @@ def find_least_disruptive_position(new_size, others, gap, current_pos, layout_ot
         px, py = x + nw / 2, y + nh / 2
         total = math.hypot(px - cx0, py - cy0)
         cand = (x, y, x + nw, y + nh)
+        if viewport_center is not None:
+            total += composition_cost(other_points + [(px, py, cand_mass)], viewport_center)
         if layout_bbox is not None:
             bx0, by0, bx1, by1 = layout_bbox
             new_w = max(bx1, cand[2]) - min(bx0, cand[0])
@@ -512,6 +778,18 @@ def find_least_disruptive_position(new_size, others, gap, current_pos, layout_ot
 # Reasoned starting value, not measured -- retune if the live result
 # rearranges too eagerly or too reluctantly.
 MAKE_ROOM_MOVEMENT_WEIGHT = 0.5
+
+# Secondary influence of the GLOBAL composition cost on the Stage 1 vs
+# Stage 2 decision itself (see the comment where this is used, in
+# place_new_window) -- deliberately small relative to d1/d2's own
+# coefficient of 1.0, so the new window's own centeredness stays the
+# dominant consideration (restoring the property that worked before the
+# composition audit) while a genuine, large composition difference between
+# the two plans (the kind that matters for 3+ window stack-breaking, where
+# this term was never actually the deciding factor to begin with -- that
+# happens inside find_free_position's own candidate search) can still tip
+# a close call.
+STAGE_DECISION_COMPOSITION_WEIGHT = 0.3
 
 # A flat per-pixel movement cost treats shoving a 1200x800 application
 # aside exactly like nudging a 250x150 dialog the same distance -- live
@@ -591,9 +869,16 @@ def try_make_room(new_size, eligible, fixed_obstacles, center, gap):
     # nothing but raw distance to centre and reliably produced arbitrary,
     # non-gap-width offsets (live QA: 5px from the window on one side, 55px
     # from the one on the other) -- technically central, visibly unplanned.
+    # One reference area for the WHOLE Stage 2 decision, derived from the
+    # actual new window being placed (not whichever eligible window happens
+    # to be getting relocated in a given cascade round) -- every mass
+    # comparison in this pass needs the same yardstick, or "how prominent
+    # is window X" would mean something different depending on which call
+    # computed it.
+    reference_area = new_size[0] * new_size[1]
     eligible_rects = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible]
     target_pos = find_free_position(new_size, fixed_obstacles, center, gap,
-                                     layout_others=eligible_rects)
+                                     layout_others=eligible_rects, reference_area=reference_area)
     nw, nh = new_size
     target_rect = rect_for(target_pos[0], target_pos[1], nw, nh)
 
@@ -634,7 +919,8 @@ def try_make_room(new_size, eligible, fixed_obstacles, center, gap):
         other_rects_xyxy = [r for a, r in state.items() if a != addr] + [target_rect]
         other_xywh = [(r[0], r[1], r[2] - r[0], r[3] - r[1]) for r in other_rects_xyxy] + fixed_obstacles
 
-        new_pos = find_least_disruptive_position(size, other_xywh, gap, original_center[addr])
+        new_pos = find_least_disruptive_position(size, other_xywh, gap, original_center[addr],
+                                                  viewport_center=center, reference_area=reference_area)
         new_rect = rect_for(new_pos[0], new_pos[1], size[0], size[1])
         state[addr] = new_rect
         moved[addr] = new_pos
@@ -912,9 +1198,12 @@ def place_new_window(address, workspace_id, gap):
     layout_others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1])
                       for w in same_ws if not w.get("fullscreen")]
 
+    new_area = new_w * new_h
+
     # Stage 1: best position without moving anything else.
     pos1 = find_free_position((new_w, new_h), others, center, gap,
-                               viewport=(mx0, my0, mx1, my1), layout_others=layout_others)
+                               viewport=(mx0, my0, mx1, my1), layout_others=layout_others,
+                               reference_area=new_area)
     d1 = math.hypot(pos1[0] + new_w / 2 - center[0], pos1[1] + new_h / 2 - center[1])
 
     # Stage 2: best position if every ordinary window could move out of
@@ -932,22 +1221,70 @@ def place_new_window(address, workspace_id, gap):
         d2 = math.hypot(pos2[0] + new_w / 2 - center[0], pos2[1] + new_h / 2 - center[1])
         orig_at = {w["address"]: w["at"] for w in eligible}
         eligible_by_addr = {w["address"]: w for w in eligible}
-        new_area = new_w * new_h
         total_movement = sum(
             math.hypot(nx - orig_at[addr][0], ny - orig_at[addr][1])
             * prominence_weight(addr, eligible_by_addr, new_area)
             for addr, (nx, ny) in moved.items()
         )
-        cost1, cost2_total = d1, d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
+        # Stage 1 vs Stage 2 keeps the NEW window's own distance to center
+        # (d1/d2) as the primary term -- NOT the full mass-weighted
+        # composition_cost of the whole resulting layout. That was tried
+        # first and caused a real regression: when a small existing window
+        # happens to already sit near center, averaging its position in
+        # with a much larger new window's position pulls the WEIGHTED
+        # AVERAGE artificially close to center even while the large,
+        # visually-dominant new window itself sits meaningfully off to one
+        # side -- measured live, a 1400x900 new window landed 517px off
+        # center, flush against a tiny 220x140 neighbor, because the
+        # average of "huge window far off" and "tiny window at center"
+        # scored better than actually evicting the tiny one. The candidate
+        # SEARCH within each stage (find_free_position, already
+        # composition-aware) is unaffected by this -- only the coarser
+        # "is it worth the movement cost to switch plans" decision needed
+        # this fix. Composition still influences the choice, just as a
+        # secondary term, matching the same "primary distance/movement,
+        # secondary composition" shape used everywhere else in this file
+        # (see find_least_disruptive_position).
+        pos1_mass = window_mass(new_w, new_h, new_area)
+        stage1_points = [(ox + ow / 2, oy + oh / 2, window_mass(ow, oh, new_area))
+                          for ox, oy, ow, oh in layout_others]
+        stage1_points.append((pos1[0] + new_w / 2, pos1[1] + new_h / 2, pos1_mass))
+        comp_cost1 = composition_cost(stage1_points, center)
+
+        stage2_points = []
+        for w in eligible:
+            addr = w["address"]
+            ow, oh = w["size"]
+            if addr in moved:
+                mx, my = moved[addr]
+                stage2_points.append((mx + ow / 2, my + oh / 2, window_mass(ow, oh, new_area)))
+            else:
+                ox, oy = w["at"]
+                stage2_points.append((ox + ow / 2, oy + oh / 2, window_mass(ow, oh, new_area)))
+        stage2_points.append((pos2[0] + new_w / 2, pos2[1] + new_h / 2, pos1_mass))
+        comp_cost2 = composition_cost(stage2_points, center)
+
+        cost1 = d1 + STAGE_DECISION_COMPOSITION_WEIGHT * comp_cost1
+        cost2_total = (d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
+                       + STAGE_DECISION_COMPOSITION_WEIGHT * comp_cost2)
         if _DEBUG:
-            print(f"DEBUG stage1 d1={d1:.1f} | stage2 d2={d2:.1f} moved={len(moved)} "
-                  f"total_movement={total_movement:.1f} cost1={cost1:.1f} cost2={cost2_total:.1f}",
+            print(f"DEBUG stage1 d1={d1:.1f} comp={comp_cost1:.1f} cost1={cost1:.1f} | "
+                  f"stage2 d2={d2:.1f} moved={len(moved)} total_movement={total_movement:.1f} "
+                  f"comp={comp_cost2:.1f} cost2={cost2_total:.1f}",
                   file=sys.stderr, flush=True)
         if cost2_total < cost1:
             use_stage2 = True
 
+    # Stage 3's trigger stays a plain positional check (see
+    # RESIZE_TRIGGER_MULTIPLE) -- deliberately NOT the composition cost
+    # above, so adding the angular-balance term can't make resize fire more
+    # often just because a composition score got numerically bigger. Stage
+    # 3 exists for "rearranging couldn't get the new window anywhere near
+    # center at all," which is a positional question, not a compositional
+    # one -- its own rarity (see try_resize_room's docstring) is preserved
+    # unchanged by this file's composition-model changes.
     if use_stage2:
-        best_cost = cost2_total
+        best_cost = d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
     else:
         best_cost = d1
 
