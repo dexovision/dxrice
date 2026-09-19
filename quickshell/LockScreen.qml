@@ -266,8 +266,8 @@ WlSessionLock {
                             width: parent.width
                             height: 38
                             radius: Theme.roundingSm
-                            color: Qt.rgba(1, 1, 1, 0.06)
-                            border.width: 1
+                            color: Theme.inputFill
+                            border.width: Theme.borderWidth
                             border.color: passwordField.activeFocus
                                 ? Theme.accent
                                 : Theme.borderIdle
