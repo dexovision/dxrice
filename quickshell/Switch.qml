@@ -10,7 +10,14 @@ Rectangle {
     implicitWidth: 46
     implicitHeight: 26
     radius: Theme.roundingFull
-    color: root.checked ? Theme.accent : Theme.borderFaint
+    // Hover feedback, matching ToggleChip's idiom (lift the track toward
+    // the accent when on, toward the hover layer when off) -- this was the
+    // one interactive primitive in the shell with a MouseArea and a
+    // pointing-hand cursor but no visual response to the pointer at all,
+    // which reads as a dead control next to every other toggle.
+    color: root.checked
+        ? Theme.mix(Theme.accent, Theme.textActive, area.containsMouse ? 0.18 : 0.0)
+        : (area.containsMouse ? Theme.layer1Hover : Theme.borderFaint)
 
     Behavior on color {
         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
@@ -29,7 +36,9 @@ Rectangle {
     }
 
     MouseArea {
+        id: area
         anchors.fill: parent
+        hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: root.toggled(!root.checked)
     }
