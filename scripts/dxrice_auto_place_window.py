@@ -178,6 +178,17 @@ SLIVER_PENALTY_MAX = 140.0
 ALIGN_BONUS = 22.0
 ALIGN_EPS = 1.5
 
+# Cost per pixel of dead (unusable) space left between a candidate and a
+# neighbour it lands near but not flush against -- see _dead_gap_penalty.
+# Deliberately just above 1.0: at exactly 1.0 a candidate would be
+# indifferent between closing a dead strip and moving the same number of
+# pixels further from the viewport centre, and the whole point is that
+# closing it should win that trade narrowly. Capped so this can only ever
+# decide a near-tie between neighbouring candidates, never drag a window
+# a long way across the canvas just to sit flush against something.
+DEAD_GAP_WEIGHT = 1.2
+DEAD_GAP_CAP = 120.0
+
 
 def _axis_gap(a0, a1, b0, b1):
     """Positive = the real gap between two disjoint 1D intervals; 0 if they
@@ -223,12 +234,47 @@ def _edge_alignment_count(cand, rects):
     return int(aligned_x) + int(aligned_y)
 
 
+def _dead_gap_penalty(cand, layout_rects, gap):
+    """Penalises the strip of space left between `cand` and a neighbour it
+    lands NEAR but not flush against.
+
+    This closes a real hole the first two terms leave open: a candidate is
+    rewarded for joining a neighbour cleanly (via coverage) and is neutral
+    when it floats free in open space, but "sitting 50px off a neighbour's
+    edge when the configured gap is 5" is neither -- and used to score as
+    a completely free 0.0. Live QA caught exactly that: a new window landed
+    5px from the window on one side and 55px from the one on the other,
+    because scoring exact viewport-centering paid more than closing up a
+    strip of space nothing can ever use. That leftover strip is precisely
+    the "tiny awkward sliver of unusable space" that makes an arrangement
+    read as accidental instead of composed.
+
+    "Unusable" is measured, not guessed: a strip narrower than
+    MIN_USABLE_WIDTH/HEIGHT could never hold another window, so it is dead
+    by definition. Wider strips are left alone -- at that point the space
+    reads as deliberate separation between two groups, not a misalignment.
+    The penalty is capped so a candidate is never dragged across a large
+    distance purely to close a gap."""
+    worst = 0.0
+    for r in layout_rects:
+        xg = _axis_gap(cand[0], cand[2], r[0], r[2])
+        yg = _axis_gap(cand[1], cand[3], r[1], r[3])
+        # Only count neighbours actually FACING the candidate on one axis
+        # (overlapping on the other) -- a diagonal neighbour isn't leaving
+        # a dead strip between them, it's just elsewhere.
+        if yg == 0.0 and gap < xg < MIN_USABLE_WIDTH:
+            worst = max(worst, xg - gap)
+        if xg == 0.0 and gap < yg < MIN_USABLE_HEIGHT:
+            worst = max(worst, yg - gap)
+    return min(worst, DEAD_GAP_CAP) * DEAD_GAP_WEIGHT
+
+
 def composition_penalty(cand, layout_rects, gap):
     """Pixel-equivalent score contribution (added directly to a distance-
     based score, so 0 is neutral, positive is worse) capturing whether
     `cand` reads as a clean, intentional addition to `layout_rects` rather
     than merely a non-overlapping rectangle. See the weight comments above
-    for what each term means; both are no-ops when there's no existing
+    for what each term means; all are no-ops when there's no existing
     layout to compose with yet (an empty/absent `layout_rects`)."""
     if not layout_rects:
         return 0.0
@@ -239,7 +285,8 @@ def composition_penalty(cand, layout_rects, gap):
             best_coverage = frac if best_coverage is None else max(best_coverage, frac)
     sliver = SLIVER_PENALTY_MAX * (1.0 - best_coverage) if best_coverage is not None else 0.0
     align = ALIGN_BONUS * _edge_alignment_count(cand, layout_rects)
-    return sliver - align
+    dead = _dead_gap_penalty(cand, layout_rects, gap)
+    return sliver + dead - align
 
 
 def find_free_position(new_size, others, center, gap, viewport=None, layout_others=None):
@@ -328,9 +375,20 @@ def find_free_position(new_size, others, center, gap, viewport=None, layout_othe
         total += composition_penalty(cand, layout_rects, gap)
         return total
 
+    # Candidates are derived from BOTH the hard obstacles and the
+    # composition reference. Including layout_others here matters for
+    # Stage 2 specifically: there, `others` is only the fixed/fullscreen
+    # windows (often none at all), because every ordinary window is free to
+    # move out of the way -- so without this the only candidate that ever
+    # existed was the bare viewport-centre point, and Stage 2's target was
+    # decided by nothing but "dead centre," ignoring the layout entirely.
+    # These edges aren't constraints (free() below still only tests
+    # `others`), they're the positions worth CONSIDERING -- lining up with
+    # a window that happens to stay put is exactly what makes the result
+    # read as composed rather than dropped in the middle.
     xs = {cx - nw / 2}
     ys = {cy - nh / 2}
-    for ox, oy, ow, oh in others:
+    for ox, oy, ow, oh in list(others) + list(layout_others):
         xs.update((ox, ox + ow + gap, ox - nw - gap))
         ys.update((oy, oy + oh + gap, oy - nh - gap))
 
@@ -524,7 +582,18 @@ def try_make_room(new_size, eligible, fixed_obstacles, center, gap):
     that bound, or if a final overlap sanity check somehow still fails
     (defensive -- shouldn't happen given the construction above).
     """
-    target_pos = find_free_position(new_size, fixed_obstacles, center, gap)
+    # `fixed_obstacles` are the only HARD constraints here -- every ordinary
+    # window is free to move, which is the whole point of this stage. But
+    # the ordinary windows are still passed as the COMPOSITION reference
+    # (layout_others), because "which of the equally-central spots actually
+    # lines up with the furniture that's already there" is a real question
+    # even when that furniture could move. Without this, Stage 2 scored
+    # nothing but raw distance to centre and reliably produced arbitrary,
+    # non-gap-width offsets (live QA: 5px from the window on one side, 55px
+    # from the one on the other) -- technically central, visibly unplanned.
+    eligible_rects = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible]
+    target_pos = find_free_position(new_size, fixed_obstacles, center, gap,
+                                     layout_others=eligible_rects)
     nw, nh = new_size
     target_rect = rect_for(target_pos[0], target_pos[1], nw, nh)
 

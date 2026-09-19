@@ -245,6 +245,88 @@ class TestProminenceWeighting(unittest.TestCase):
         self.assertEqual(w, 1.0, "moving something smaller than the new window must stay at base cost")
 
 
+class TestStage2CompositionAwareness(unittest.TestCase):
+    """try_make_room used to call find_free_position with only the FIXED
+    obstacles and no composition reference at all -- so on a workspace with
+    no fullscreen window, layout_rects was empty, composition_penalty
+    short-circuited to 0.0, and the only candidate generated was the bare
+    viewport-centre point. Stage 2's target was therefore decided by pure
+    distance-to-centre, ignoring the layout entirely, which is what produced
+    arbitrary non-gap-width offsets live (5px from one neighbour, 55px from
+    the other). These tests pin the fix."""
+
+    def test_layout_reference_widens_the_candidate_set(self):
+        """The concrete regression: with only hard obstacles feeding
+        candidate generation, a workspace with no fixed windows produced
+        exactly ONE candidate (the bare viewport-centre point), so the
+        layout could not influence the result even in principle. A fixed
+        obstacle sitting on the centre makes that observable -- without
+        layout-derived candidates the only alternatives come from the
+        obstacle alone; with them, the composition reference can win."""
+        blocker = [(860, 440, 200, 200)]            # hard obstacle over the centre
+        layout = [(300, 440, 400, 200)]             # composition reference to the left
+        without = apw.find_free_position((200, 200), blocker, (960, 540), GAP)
+        with_layout = apw.find_free_position((200, 200), blocker, (960, 540), GAP,
+                                              layout_others=layout)
+        ref = rect(*layout[0])
+        cand = rect(*with_layout, 200, 200)
+        gap_aligned = (abs(apw._axis_gap(cand[0], cand[2], ref[0], ref[2]) - GAP) < 2
+                       or abs(apw._axis_gap(cand[1], cand[3], ref[1], ref[3]) - GAP) < 2)
+        edge_aligned = (abs(cand[1] - ref[1]) < 2 or abs(cand[3] - ref[3]) < 2)
+        self.assertTrue(gap_aligned or edge_aligned,
+                         f"{with_layout} ignores the composition reference "
+                         f"(without-layout result was {without})")
+
+    def test_make_room_target_respects_layout(self):
+        eligible = [
+            {"address": "0xL", "at": [400, 300], "size": [400, 500]},
+            {"address": "0xR", "at": [805, 300], "size": [400, 500]},
+        ]
+        result = apw.try_make_room((300, 250), eligible, [], (960, 540), GAP)
+        self.assertIsNotNone(result)
+        target_pos, _ = result
+        cand = rect(*target_pos, 300, 250)
+        # The reserved target must sit at the configured gap from at least
+        # one of the windows it is composing with -- not at an arbitrary
+        # offset that merely happens to be central.
+        gaps = []
+        for w in eligible:
+            r = rect(w["at"][0], w["at"][1], *w["size"])
+            xg = apw._axis_gap(cand[0], cand[2], r[0], r[2])
+            yg = apw._axis_gap(cand[1], cand[3], r[1], r[3])
+            gaps.extend([xg, yg])
+        self.assertTrue(any(abs(g - GAP) < 2 for g in gaps),
+                         f"target {target_pos} is not gap-aligned to anything: gaps={gaps}")
+
+
+class TestDeadGapPenalty(unittest.TestCase):
+    """A candidate that lands NEAR a neighbour but not flush leaves a strip
+    of space too narrow to ever hold another window -- dead space that made
+    the arrangement read as accidental. Neither the sliver term (which only
+    scores candidates that ARE flush) nor the alignment bonus caught it."""
+
+    def test_dead_gap_is_penalised(self):
+        neighbour = rect(0, 0, 400, 400)
+        snug = rect(400 + GAP, 0, 300, 400)        # exactly the configured gap
+        loose = rect(400 + GAP + 50, 0, 300, 400)  # 50px of dead space
+        p_snug = apw.composition_penalty(snug, [neighbour], GAP)
+        p_loose = apw.composition_penalty(loose, [neighbour], GAP)
+        self.assertLess(p_snug, p_loose)
+
+    def test_large_separation_is_not_penalised_as_dead(self):
+        """Space wide enough to actually hold another window reads as a
+        deliberate separation, not a misalignment -- must not be charged."""
+        neighbour = rect(0, 0, 400, 400)
+        far = rect(400 + GAP + apw.MIN_USABLE_WIDTH + 50, 0, 300, 400)
+        self.assertEqual(apw._dead_gap_penalty(far, [neighbour], GAP), 0.0)
+
+    def test_dead_gap_penalty_is_capped(self):
+        neighbour = rect(0, 0, 400, 400)
+        worst = rect(400 + GAP + apw.MIN_USABLE_WIDTH - 1, 0, 300, 400)
+        p = apw._dead_gap_penalty(worst, [neighbour], GAP)
+        self.assertLessEqual(p, apw.DEAD_GAP_CAP * apw.DEAD_GAP_WEIGHT + 0.01)
+
+
 class TestAutoArrangeAlgorithmB(unittest.TestCase):
     def _mk(self, addr, x, y, w, h):
         return {"address": addr, "at": [x, y], "size": [w, h]}
