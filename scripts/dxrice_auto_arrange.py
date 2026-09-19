@@ -60,7 +60,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, batch_async, move_window_exact_lua
-from dxrice_auto_place_window import get_monitor_bounds, live_gap, rect_for, overlaps
+from dxrice_auto_place_window import get_monitor_bounds, live_gap, rect_for, overlaps, composition_penalty
 
 _DEBUG = os.environ.get("DXRICE_DEBUG") == "1"
 
@@ -166,11 +166,11 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
 
     def score(x, y):
         px, py = x + nw / 2, y + nh / 2
+        cand = (x, y, x + nw, y + nh)
         movement = math.hypot(px - cx0, py - cy0)
         total = MOVEMENT_WEIGHT * movement
         if cluster_bbox is not None:
             bx0_, by0_, bx1_, by1_ = cluster_bbox
-            cand = (x, y, x + nw, y + nh)
             new_w = max(bx1_, cand[2]) - min(bx0_, cand[0])
             new_h = max(by1_, cand[3]) - min(by0_, cand[1])
             growth = (new_w - (bx1_ - bx0_)) + (new_h - (by1_ - by0_))
@@ -180,6 +180,13 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
             dist = math.hypot(dx, dy)
             cos_sim = (dx * bx + dy * by) / dist if dist > 1e-6 else 1.0
             total += BEARING_WEIGHT * (1 - cos_sim)  # 0 = aligned, up to 2 = opposite
+        # Same "does this read as a clean, intentional composition" terms
+        # dxrice_auto_place_window.py uses for a single new window --
+        # rewards a candidate that shares a full edge with a neighbor
+        # already in the cluster over one that only sliver-touches it, and
+        # rewards lining up with an existing window's edge even when not
+        # directly touching it. See composition_penalty's own docstring.
+        total += composition_penalty(cand, obstacle_rects, gap)
         return total
 
     return min(candidates, key=lambda p: score(*p))

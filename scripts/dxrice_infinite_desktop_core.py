@@ -1,8 +1,22 @@
-import sys, struct, threading, time, subprocess, json, os
+import sys, struct, threading, time, os
 from evdev import InputDevice, list_devices, ecodes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dxrice_hypr_ipc import move_window_exact_lua, batch_async
+from dxrice_hypr_ipc import move_window_exact_lua, batch_async, hyprctl_json
+import dxrice_singleton
+
+# Same exclusive-instance guard dxrice_auto_place_window.py uses -- this
+# daemon has the same "exactly one per session, started by an unguarded
+# autostart line" shape, so it has the same double-instance exposure
+# (two copies would both react to every drag/pan input event and both
+# issue their own batch of window moves) even though it had never actually
+# been hit in practice the way the placement listener's was. Refuse to
+# start a second copy rather than silently duplicating every window move.
+_singleton_lock = dxrice_singleton.claim_single_instance("infinite-desktop-core")
+if _singleton_lock is None:
+    print("another dxrice_infinite_desktop_core.py already holds the lock for this "
+          "session -- exiting.", flush=True)
+    sys.exit(0)
 
 speed = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
 
@@ -47,25 +61,20 @@ def get_cached_inverted():
 
 def get_monitor_bounds():
     try:
-        r = subprocess.run(['hyprctl', 'monitors', '-j'], capture_output=True, text=True, timeout=0.1)
-        monitors = json.loads(r.stdout)
+        monitors = hyprctl_json(['monitors'])
         if monitors:
-            for m in monitors:
-                if m.get('focused', False):
-                    return {
-                        'left': m['x'], 'right': m['x'] + m['width'],
-                        'top': m['y'], 'bottom': m['y'] + m['height'],
-                        'width': m['width'], 'height': m['height']
-                    }
-            m = monitors[0]
+            m = next((x for x in monitors if x.get('focused', False)), monitors[0])
             return {
                 'left': m['x'], 'right': m['x'] + m['width'],
                 'top': m['y'], 'bottom': m['y'] + m['height'],
-                'width': m['width'], 'height': m['height']
+                'width': m['width'], 'height': m['height'],
+                # Real refresh rate (this machine's panel is 144Hz, not the
+                # 60Hz this loop used to assume) -- see get_frame_interval().
+                'refreshRate': m.get('refreshRate', 60.0),
             }
     except Exception:
         pass
-    return {'left': 0, 'right': 1920, 'top': 0, 'bottom': 1080, 'width': 1920, 'height': 1080}
+    return {'left': 0, 'right': 1920, 'top': 0, 'bottom': 1080, 'width': 1920, 'height': 1080, 'refreshRate': 60.0}
 
 _monitor_bounds_cache = None
 _monitor_bounds_last_check = 0.0
@@ -79,18 +88,37 @@ def get_cached_monitor_bounds():
         _monitor_bounds_last_check = now
     return _monitor_bounds_cache
 
+def get_frame_interval():
+    """Paces the pan/drag loops to the monitor's own real refresh rate
+    instead of a hardcoded 60fps assumption -- sending position updates
+    slower than the display can actually redraw is exactly what a fixed
+    16ms (60Hz) sleep did on this machine's real 144Hz panel, and was a
+    direct, measurable contributor to panning looking less smooth than the
+    display is actually capable of."""
+    rate = get_cached_monitor_bounds().get('refreshRate', 60.0) or 60.0
+    return 1.0 / max(30.0, min(rate, 240.0))
+
+# Idle poll rate for both while-True loops below, used whenever nothing is
+# actually being panned/dragged right now -- there is no reason to wake up
+# up to 240 times/sec (this machine's real refresh rate) just to re-check
+# two booleans that a keyboard-reader thread updates asynchronously anyway.
+# 60Hz still notices a drag start within ~16ms (imperceptible) while
+# cutting idle wakeups by up to ~4x on a 240Hz panel and ~2.4x on this
+# machine's own 144Hz one -- real, measured-in-kind savings for a loop that
+# otherwise runs unconditionally for the entire session, not just while
+# actively dragging.
+IDLE_POLL_INTERVAL = 1.0 / 60.0
+
 def get_floating_windows(workspace_id):
     try:
-        r = subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True, text=True, timeout=0.1)
-        clients = json.loads(r.stdout)
+        clients = hyprctl_json(['clients']) or []
         return [w for w in clients if w.get('floating') and w.get('workspace', {}).get('id') == workspace_id]
     except Exception:
         return []
 
 def get_focused_window():
     try:
-        r = subprocess.run(['hyprctl', 'activewindow', '-j'], capture_output=True, text=True, timeout=0.1)
-        return json.loads(r.stdout)
+        return hyprctl_json(['activewindow'])
     except Exception:
         return None
 
@@ -102,17 +130,46 @@ def get_window_bounds(window):
         'center_x': x + w // 2, 'center_y': y + h // 2
     }
 
+# Edge-push drag (Super+click, dragging a window into the monitor's edge so
+# it shoves the others along) can call pan_other_windows on every single
+# frame while the edge is held -- previously this issued a fresh, blocking
+# `hyprctl clients` query every single time, on the same thread that's also
+# tracking the drag itself. The whole-desktop glide path just below
+# (refresh_drag_cache/_drag_cache) already solved this exact problem by
+# caching positions and applying each frame's delta directly instead of
+# re-querying; this mirrors that same pattern for the edge-push path
+# specifically, rather than inventing a second caching scheme.
+_push_cache = {}
+_push_cache_workspace = None
+_push_cache_last_refresh = 0.0
+PUSH_CACHE_REFRESH = 0.2
+
+
+def _push_cache_workspace_reset():
+    global _push_cache_workspace
+    _push_cache_workspace = None
+
+
 def pan_other_windows(excluded_addr, dx, dy, workspace_id):
+    global _push_cache, _push_cache_workspace, _push_cache_last_refresh
     if dx == 0 and dy == 0:
         return
     try:
-        floating_windows = get_floating_windows(workspace_id)
+        now = time.time()
+        if (workspace_id != _push_cache_workspace
+                or (now - _push_cache_last_refresh) >= PUSH_CACHE_REFRESH):
+            floating_windows = get_floating_windows(workspace_id)
+            _push_cache = {w['address']: [w['at'][0], w['at'][1]] for w in floating_windows}
+            _push_cache_workspace = workspace_id
+            _push_cache_last_refresh = now
+
         exprs = []
-        for w in floating_windows:
-            if w['address'] != excluded_addr:
-                nx = int(w['at'][0] + dx)
-                ny = int(w['at'][1] + dy)
-                exprs.append(move_window_exact_lua(nx, ny, w['address']))
+        for addr, pos in _push_cache.items():
+            if addr == excluded_addr:
+                continue
+            pos[0] += dx
+            pos[1] += dy
+            exprs.append(move_window_exact_lua(pos[0], pos[1], addr))
         batch_async(exprs)
     except Exception:
         pass
@@ -155,6 +212,7 @@ def monitor_window_drag():
                 window_drag_active = False
                 dragged_window_addr = None
                 last_window_bounds = None
+                _push_cache_workspace_reset()
 
             if window_drag_active and dragged_window_addr:
                 window = poll_focused_throttled()
@@ -192,7 +250,7 @@ def monitor_window_drag():
                     window_drag_active = False
                     dragged_window_addr = None
 
-            time.sleep(0.016)
+            time.sleep(get_frame_interval() if (is_dragging or window_drag_active) else IDLE_POLL_INTERVAL)
         except Exception:
             time.sleep(0.1)
 
@@ -338,8 +396,8 @@ def device_manager():
 
 print("Preloading...", flush=True)
 try:
-    subprocess.run(['hyprctl', 'activeworkspace', '-j'], capture_output=True, text=True, timeout=0.5)
-    subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True, text=True, timeout=0.5)
+    hyprctl_json(['activeworkspace'])
+    hyprctl_json(['clients'])
 except Exception:
     pass
 
@@ -360,9 +418,7 @@ def get_cached_workspace_id():
     now = time.time()
     if _cached_workspace_id is None or (now - _last_workspace_check) > WORKSPACE_CACHE_TTL:
         try:
-            r = subprocess.run(['hyprctl', 'activeworkspace', '-j'],
-                               capture_output=True, text=True, timeout=0.1)
-            ws = json.loads(r.stdout)
+            ws = hyprctl_json(['activeworkspace'])
             _cached_workspace_id = ws['id']
             _last_workspace_check = now
         except Exception:
@@ -382,8 +438,7 @@ def refresh_drag_cache(workspace_id, force=False):
             and (now - _drag_cache_last_refresh) < DRAG_CACHE_REFRESH):
         return
     try:
-        r = subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True, text=True, timeout=0.1)
-        clients = json.loads(r.stdout)
+        clients = hyprctl_json(['clients']) or []
         _drag_cache = {
             w['address']: [w['at'][0], w['at'][1]]
             for w in clients
@@ -394,13 +449,23 @@ def refresh_drag_cache(workspace_id, force=False):
     except Exception:
         pass
 
-BATCH_SEND_EVERY_N = 3
+
+# Sending every frame instead of batching every 3rd: the send itself is a
+# non-blocking Popen (batch_async in dxrice_hypr_ipc.py), so the poll loop
+# never actually waits on hyprctl finishing -- there was no real cost being
+# amortized by only sending every 3rd frame, just an extra ~33-50ms of
+# input-to-motion latency and coarser (batched, less frequent) window
+# movement, which reads as choppy/laggy panning compared to the edge-push
+# drag path just below (monitor_window_drag), which already sends every
+# frame and has never had this complaint.
+BATCH_SEND_EVERY_N = 1
 _pending_dx = 0
 _pending_dy = 0
 _frame_count = 0
 
+_was_active = False
 while True:
-    time.sleep(0.016)
+    time.sleep(get_frame_interval() if _was_active else IDLE_POLL_INTERVAL)
 
     with lock:
         active_drag = super_pressed and alt_pressed
@@ -409,6 +474,7 @@ while True:
         acc_x = 0.0
         acc_y = 0.0
 
+    _was_active = active_drag
     if not active_drag:
         _drag_cache_workspace = None
         _pending_dx = 0
