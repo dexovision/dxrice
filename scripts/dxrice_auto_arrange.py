@@ -556,7 +556,8 @@ def _mass_ratio(w, h, reference_area):
 
 
 def _choose_size_and_position(w, current_pos, bearing_unit, cluster_centroid, cluster_bbox,
-                               placed, fixed_rects, viewport_center, reference_area, gap, resized_addrs):
+                               placed, fixed_rects, viewport_center, reference_area, gap, resized_addrs,
+                               allow_resize=True):
     """The joint decision for ONE window's incremental placement step:
     among (a) its own current size with no resize, (b) its own size
     shrunk to one of RESIZE_SCALE_STEPS, and (c) its own unchanged size
@@ -649,7 +650,7 @@ def _choose_size_and_position(w, current_pos, bearing_unit, cluster_centroid, cl
     # a window at or below the group's own typical size was never the
     # dominant one, so it is never offered as a shrink candidate AT ALL,
     # regardless of how cheap the formula would otherwise price it.
-    if cluster_bbox is not None and _mass_ratio(own_w, own_h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR:
+    if allow_resize and cluster_bbox is not None and _mass_ratio(own_w, own_h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR:
         for scale in RESIZE_SCALE_STEPS:
             sized = _usable_scaled_size(own_w, own_h, scale)
             if sized is None:
@@ -664,7 +665,7 @@ def _choose_size_and_position(w, current_pos, bearing_unit, cluster_centroid, cl
     # (c) shrink exactly one already-placed, not-yet-resized neighbor
     # instead, center-anchored, keeping the CURRENT window at its own
     # unchanged size.
-    for n_addr, (nx, ny, nw_, nh_) in placed.items():
+    for n_addr, (nx, ny, nw_, nh_) in ({} if not allow_resize else placed).items():
         if n_addr in resized_addrs:
             continue
         n_prominence = window_mass(nw_, nh_, reference_area)
@@ -963,97 +964,152 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap):
     ordered = sorted(eligible, key=sort_key)
 
     reference_area = _typical_area(eligible)
-
     fixed_rects = [rect_for(*_xywh(w)) for w in fixed]
-    placed = {}  # {address: (x, y, w, h)} -- FINAL geometry, mutated in place when
-                 # a neighbor is chosen as a resize target at a later step
-    resized_addrs = set()  # each window may be a resize target at most once per pass
-    cluster_bbox = None
 
-    for i, w in enumerate(ordered):
-        addr = w["address"]
-        if i == 0:
-            # Nothing placed yet -- no cluster to be compact with or bear
-            # a direction from, and no already-placed neighbor exists to
-            # offer as a resize candidate either. Finds the closest free
-            # spot to its own current position, respecting only the FIXED
-            # obstacles.
-            bearing_unit = (0.0, 0.0)
-            cluster_centroid = viewport_center  # unused when bearing_unit is (0,0)
-        else:
-            bearing_unit = bearing_of(w)
-            n = len(placed)
-            cluster_centroid = (
-                sum(x + ww / 2 for x, y, ww, hh in placed.values()) / n,
-                sum(y + hh / 2 for x, y, ww, hh in placed.values()) / n,
-            )
-        chosen_size, pos, neighbor_resize = _choose_size_and_position(
-            w, raw_center(w), bearing_unit, cluster_centroid, cluster_bbox,
-            placed, fixed_rects, viewport_center, reference_area, gap, resized_addrs)
-        # Rounded to integers THE MOMENT a position is decided, before it
-        # can be used as the geometric basis (an edge/corner candidate) for
-        # any LATER window in this same pass. Found live: two windows meant
-        # to be exactly gap-apart came out 1px short after dispatch --
-        # traced to a fractional position surviving from one window's own
-        # placement, inherited by a later window's candidate generation
-        # (which crosses EVERY already-placed window's edges), then
-        # compounding through the chain. A fractional pixel offset the same
-        # for two windows cancels out of their gap exactly; two DIFFERENT
-        # fractional offsets, each independently rounded at dispatch time,
-        # do not. Rounding here, once, keeps every candidate downstream
-        # exact-integer, so relative gaps can never drift.
-        pos = (round(pos[0]), round(pos[1]))
-        if neighbor_resize is not None:
-            n_addr, nx2, ny2, snw, snh = neighbor_resize
-            placed[n_addr] = (nx2, ny2, snw, snh)
-            resized_addrs.add(n_addr)
-        placed[addr] = (pos[0], pos[1], chosen_size[0], chosen_size[1])
-        rect = rect_for(pos[0], pos[1], chosen_size[0], chosen_size[1])
-        cluster_bbox = rect if cluster_bbox is None else (
-            min(cluster_bbox[0], rect[0]), min(cluster_bbox[1], rect[1]),
-            max(cluster_bbox[2], rect[2]), max(cluster_bbox[3], rect[3]),
-        )
+    def _build(allow_resize):
+        """Runs the full incremental build once, either allowing resize
+        decisions or not, and returns the finished [(addr,x,y,w,h), ...].
+        Factored out so auto_arrange can run it TWICE (see the real
+        whole-composition comparison right after this function) -- see
+        that comparison's own comment for why a second run is necessary
+        at all."""
+        placed = {}  # {address: (x, y, w, h)} -- FINAL geometry, mutated in place when
+                     # a neighbor is chosen as a resize target at a later step
+        resized_addrs = set()  # each window may be a resize target at most once per pass
+        cluster_bbox = None
 
-    # Rigid recenter: one (dx, dy) applied to every eligible window's
-    # POSITION (never its size -- resize decisions are already final by
-    # this point) so the cluster's bounding box lands on the viewport
-    # center -- scaled down (binary search) if the full shift would newly
-    # overlap a fixed window.
-    xs0 = [v[0] for v in placed.values()]; ys0 = [v[1] for v in placed.values()]
-    xs1 = [v[0] + v[2] for v in placed.values()]; ys1 = [v[1] + v[3] for v in placed.values()]
-    bbox_cx, bbox_cy = (min(xs0) + max(xs1)) / 2, (min(ys0) + max(ys1)) / 2
-    full_shift = (viewport_center[0] - bbox_cx, viewport_center[1] - bbox_cy)
-
-    just_rects = list(placed.values())
-    if fixed_rects and not _shift_is_safe(just_rects, full_shift, fixed_rects, gap):
-        lo, hi = 0.0, 1.0
-        for _ in range(20):
-            mid = (lo + hi) / 2
-            trial = (full_shift[0] * mid, full_shift[1] * mid)
-            if _shift_is_safe(just_rects, trial, fixed_rects, gap):
-                lo = mid
+        for i, w in enumerate(ordered):
+            addr = w["address"]
+            if i == 0:
+                # Nothing placed yet -- no cluster to be compact with or bear
+                # a direction from, and no already-placed neighbor exists to
+                # offer as a resize candidate either. Finds the closest free
+                # spot to its own current position, respecting only the FIXED
+                # obstacles.
+                bearing_unit = (0.0, 0.0)
+                cluster_centroid = viewport_center  # unused when bearing_unit is (0,0)
             else:
-                hi = mid
-        full_shift = (full_shift[0] * lo, full_shift[1] * lo)
+                bearing_unit = bearing_of(w)
+                n = len(placed)
+                cluster_centroid = (
+                    sum(x + ww / 2 for x, y, ww, hh in placed.values()) / n,
+                    sum(y + hh / 2 for x, y, ww, hh in placed.values()) / n,
+                )
+            chosen_size, pos, neighbor_resize = _choose_size_and_position(
+                w, raw_center(w), bearing_unit, cluster_centroid, cluster_bbox,
+                placed, fixed_rects, viewport_center, reference_area, gap, resized_addrs,
+                allow_resize=allow_resize)
+            # Rounded to integers THE MOMENT a position is decided, before it
+            # can be used as the geometric basis (an edge/corner candidate) for
+            # any LATER window in this same pass. Found live: two windows meant
+            # to be exactly gap-apart came out 1px short after dispatch --
+            # traced to a fractional position surviving from one window's own
+            # placement, inherited by a later window's candidate generation
+            # (which crosses EVERY already-placed window's edges), then
+            # compounding through the chain. A fractional pixel offset the same
+            # for two windows cancels out of their gap exactly; two DIFFERENT
+            # fractional offsets, each independently rounded at dispatch time,
+            # do not. Rounding here, once, keeps every candidate downstream
+            # exact-integer, so relative gaps can never drift.
+            pos = (round(pos[0]), round(pos[1]))
+            if neighbor_resize is not None:
+                n_addr, nx2, ny2, snw, snh = neighbor_resize
+                placed[n_addr] = (nx2, ny2, snw, snh)
+                resized_addrs.add(n_addr)
+            placed[addr] = (pos[0], pos[1], chosen_size[0], chosen_size[1])
+            rect = rect_for(pos[0], pos[1], chosen_size[0], chosen_size[1])
+            cluster_bbox = rect if cluster_bbox is None else (
+                min(cluster_bbox[0], rect[0]), min(cluster_bbox[1], rect[1]),
+                max(cluster_bbox[2], rect[2]), max(cluster_bbox[3], rect[3]),
+            )
 
-    # Rounded once, applied to every window identically -- since `placed`
-    # is already exact-integer (see above), adding the SAME integer shift
-    # to all of them can never perturb a relative gap between any two.
-    shift_x, shift_y = round(full_shift[0]), round(full_shift[1])
-    # A fixed-obstacle-scaled shift (the branch above) was deliberately
-    # found to be exactly at the edge of safe -- rounding it could in
-    # principle nudge it the wrong way. "No overlaps" is a hard, always-on
-    # invariant in this file (see this function's own module docstring),
-    # so re-verify after rounding and fall back to truncating toward zero
-    # (strictly more conservative than round-to-nearest, never less) if
-    # rounding-to-nearest happened to cross the line.
-    if fixed_rects and not _shift_is_safe(just_rects, (shift_x, shift_y), fixed_rects, gap):
-        shift_x, shift_y = math.trunc(full_shift[0]), math.trunc(full_shift[1])
+        # Rigid recenter: one (dx, dy) applied to every eligible window's
+        # POSITION (never its size -- resize decisions are already final by
+        # this point) so the cluster's bounding box lands on the viewport
+        # center -- scaled down (binary search) if the full shift would newly
+        # overlap a fixed window.
+        xs0 = [v[0] for v in placed.values()]; ys0 = [v[1] for v in placed.values()]
+        xs1 = [v[0] + v[2] for v in placed.values()]; ys1 = [v[1] + v[3] for v in placed.values()]
+        bbox_cx, bbox_cy = (min(xs0) + max(xs1)) / 2, (min(ys0) + max(ys1)) / 2
+        full_shift = (viewport_center[0] - bbox_cx, viewport_center[1] - bbox_cy)
 
-    results = []
-    for address, (x, y, w, h) in placed.items():
-        results.append((address, x + shift_x, y + shift_y, w, h))
-    return results
+        just_rects = list(placed.values())
+        if fixed_rects and not _shift_is_safe(just_rects, full_shift, fixed_rects, gap):
+            lo, hi = 0.0, 1.0
+            for _ in range(20):
+                mid = (lo + hi) / 2
+                trial = (full_shift[0] * mid, full_shift[1] * mid)
+                if _shift_is_safe(just_rects, trial, fixed_rects, gap):
+                    lo = mid
+                else:
+                    hi = mid
+            full_shift = (full_shift[0] * lo, full_shift[1] * lo)
+
+        # Rounded once, applied to every window identically -- since `placed`
+        # is already exact-integer (see above), adding the SAME integer shift
+        # to all of them can never perturb a relative gap between any two.
+        shift_x, shift_y = round(full_shift[0]), round(full_shift[1])
+        # A fixed-obstacle-scaled shift (the branch above) was deliberately
+        # found to be exactly at the edge of safe -- rounding it could in
+        # principle nudge it the wrong way. "No overlaps" is a hard, always-on
+        # invariant in this file (see this function's own module docstring),
+        # so re-verify after rounding and fall back to truncating toward zero
+        # (strictly more conservative than round-to-nearest, never less) if
+        # rounding-to-nearest happened to cross the line.
+        if fixed_rects and not _shift_is_safe(just_rects, (shift_x, shift_y), fixed_rects, gap):
+            shift_x, shift_y = math.trunc(full_shift[0]), math.trunc(full_shift[1])
+
+        return [(address, x + shift_x, y + shift_y, w, h) for address, (x, y, w, h) in placed.items()]
+
+    result = _build(allow_resize=True)
+
+    orig_sizes = {w["address"]: tuple(w["size"]) for w in eligible}
+    any_resize = any((w, h) != orig_sizes[a] for a, x, y, w, h in result)
+    if not any_resize:
+        return result
+
+    # A resize decided by ONE incremental step is only ever compared
+    # against THAT step's own local baseline (see _choose_size_and_position
+    # and its resize_threshold) -- a real, live-instrumented investigation
+    # (per an explicit request to prove resize necessity, not just assume
+    # the per-step margin already guarantees it) found this is NOT the
+    # same claim as "the resize made the FINAL, WHOLE composition better":
+    # across 20 seeded variations of "1 lone large window + several
+    # medium/typical ones," resize fired in 16 and the completed result's
+    # own composition_cost was actually WORSE than simply disabling resize
+    # entirely in 9 of those 16 -- a later window's incremental step can
+    # locally justify shrinking an earlier-placed neighbor using only the
+    # geometry visible AT THAT STEP, while the REST of the incremental
+    # build (still to come) ends up not needing the freed space the way
+    # that one step's local comparison assumed it would. This is exactly
+    # the gap between "compare the candidate's local score" and "compare
+    # the two COMPLETE alternatives" -- closed here by actually building
+    # BOTH complete alternatives (this function already has everything
+    # needed to do so cheaply, since it's the exact same _build call with
+    # allow_resize toggled) and only keeping the resize-enabled result
+    # when it's a REAL, whole-composition improvement -- not merely
+    # "resize fired," which the evidence above shows is not sufficient.
+    # Only pays this doubled cost on the minority of calls where a resize
+    # was even considered; the common (no resize) case returns above.
+    result_moveonly = _build(allow_resize=False)
+
+    def _final_cost(built):
+        by_addr = {a: (x, y, w, h) for a, x, y, w, h in built}
+        pts = [(x + w / 2, y + h / 2, w, h, window_mass(w, h, reference_area)) for x, y, w, h in by_addr.values()]
+        comp = composition_cost(pts, viewport_center)
+        movement = sum(
+            math.hypot(x + w / 2 - (orig["at"][0] + orig["size"][0] / 2),
+                       y + h / 2 - (orig["at"][1] + orig["size"][1] / 2))
+            * window_mass(orig["size"][0], orig["size"][1], reference_area)
+            for orig in eligible for x, y, w, h in [by_addr[orig["address"]]]
+        )
+        return comp + MOVEMENT_WEIGHT * movement
+
+    cost_resize = _final_cost(result)
+    cost_moveonly = _final_cost(result_moveonly)
+    if cost_resize < cost_moveonly * (1.0 - SUPER_G_RESIZE_MARGIN_FRACTION):
+        return result
+    return result_moveonly
 
 
 def _xywh(w):

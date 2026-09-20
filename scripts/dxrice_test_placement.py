@@ -608,30 +608,67 @@ class TestSuperGResize(unittest.TestCase):
     def test_disproportionate_outlier_among_a_real_population_can_resize(self):
         """Companion to the test above: resize must still be reachable when
         there genuinely IS a real, well-populated 'typical' size class that
-        a real outlier clearly and substantially exceeds -- 10 medium
-        windows (500x400, combined area 2.0M) clearly outweigh one
-        moderately larger window (950x750, area 712500, combined-area-
-        outweighed 2.8x) whose own ratio (1.89) clears
-        RESIZE_ELIGIBLE_RATIO_FLOOR with room to spare. Verifies the fix
-        for the compounding bug did not also kill resize's actual, still-
-        needed capability, and that a genuine resize converges in exactly
-        one step and stays stable."""
-        eligible = [self._mk(f"M{i}", (i % 5) * 510, (i // 5) * 410, 500, 400) for i in range(10)]
-        eligible.append(self._mk("BIGGER", 2600, 100, 950, 750))
+        a real outlier clearly and substantially exceeds. This exact
+        geometry was chosen from a 30-seed sweep specifically because it
+        SURVIVES this session's own whole-composition safety check (see
+        auto_arrange's own comment on why per-step local justification
+        isn't sufficient -- a live-instrumented sweep of a similar
+        distribution found the completed resize-enabled layout's actual
+        composition_cost was WORSE than the true move-only alternative in
+        9 of 16 cases where a resize locally looked justified at the time
+        it was decided). This is the harder, more honest bar: not merely
+        'did a resize fire,' but 'is the reached layout provably better
+        than the real alternative,' which auto_arrange itself now checks
+        before ever returning a resized result."""
+        eligible = [
+            self._mk("W0", 977, 952, 1600, 1000), self._mk("W1", 1122, -518, 700, 500),
+            self._mk("W2", 460, 1377, 700, 500), self._mk("W3", 1494, 395, 700, 500),
+            self._mk("W4", 1058, 1280, 700, 500), self._mk("W5", 642, 1382, 700, 500),
+            self._mk("W6", 1352, 133, 700, 500), self._mk("W7", 1789, 1226, 700, 500),
+            self._mk("W8", 294, 433, 700, 500),
+        ]
         layout = eligible
         sizes = []
         for _ in range(5):
             result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
-            bigger = next(r for r in result if r[0] == "BIGGER")
-            sizes.append((bigger[3], bigger[4]))
+            w0 = next(r for r in result if r[0] == "W0")
+            sizes.append((w0[3], w0[4]))
             layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
-        self.assertNotEqual(sizes[0], (950, 750), "BIGGER was never resized despite a real, well-outweighed outlier")
-        min_w = round(950 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        min_h = round(750 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        self.assertNotEqual(sizes[0], (1600, 1000), "W0 was never resized despite a real, well-outweighed outlier")
+        min_w = round(1600 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        min_h = round(1000 * (1.0 - apw.MAX_SHRINK_FRACTION))
         self.assertGreaterEqual(sizes[0][0], min_w, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
         self.assertGreaterEqual(sizes[0][1], min_h, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
         for s in sizes[1:]:
-            self.assertEqual(s, sizes[0], f"BIGGER kept changing size across repeated runs: {sizes}")
+            self.assertEqual(s, sizes[0], f"W0 kept changing size across repeated runs: {sizes}")
+
+    def test_resize_only_kept_when_it_beats_the_true_moveonly_alternative(self):
+        """The whole-composition safety check itself: a resize that a
+        per-step local comparison would accept must still be DISCARDED
+        (falling back to the true move-only layout) if the COMPLETED
+        resize-enabled composition doesn't actually beat the completed
+        move-only one on the combined (composition + weighted-movement)
+        cost auto_arrange itself now checks before ever returning a
+        resized result. This exact geometry (a tidy pre-arranged grid of
+        10 mediums, an outlier placed off to the side) is the ORIGINAL
+        version of the test above, from before this safety check existed
+        -- back then it was accepted as a demonstration that resize still
+        works. Kept here specifically because the safety check now
+        reveals that acceptance was wrong: in this tidier geometry, the
+        windows are already close to good positions regardless of size,
+        so the per-step resize's composition benefit doesn't outweigh a
+        real move-only alternative -- unlike the scattered-start case
+        above, where resize also saves substantial real movement. Two
+        superficially-similar "big outlier among mediums" scenarios,
+        two different genuinely-correct outcomes -- exactly the "compare
+        the real alternatives, don't assume from population ratio alone"
+        behavior this session's own investigation was asked to prove."""
+        eligible = [self._mk(f"M{i}", (i % 5) * 510, (i // 5) * 410, 500, 400) for i in range(10)]
+        eligible.append(self._mk("BIGGER", 2600, 100, 950, 750))
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        bigger = next(r for r in result if r[0] == "BIGGER")
+        self.assertEqual((bigger[3], bigger[4]), (950, 750),
+                          "a locally-justified but globally-worse resize was not caught by the safety check")
 
     def test_position_only_already_good_resizes_nothing(self):
         """6: a composition where move-only already produces a good result
