@@ -528,12 +528,46 @@ def composition_cost(weighted_rects, viewport_center):
     subset" of points anymore; every window, wherever it sits, is one
     uniform contribution to one matrix.
     """
+    center_of_mass_cost, angular_cost = composition_cost_components(weighted_rects, viewport_center)
+    return CENTER_OF_MASS_WEIGHT * center_of_mass_cost + angular_cost
+
+
+def composition_cost_components(weighted_rects, viewport_center):
+    """Same two ingredients composition_cost sums together, returned
+    SEPARATELY as (center_of_mass_cost, angular_cost) -- angular_cost
+    already includes its own ANGULAR_PENALTY_SCALE multiplication (i.e. it
+    is on the SAME absolute scale composition_cost itself uses, not a bare
+    0..1 anisotropy value), so a caller that wants to weight the two
+    ingredients differently can do so without re-deriving the formula.
+
+    Why this exists: place_new_window's Stage 1 vs Stage 2 decision (and
+    Stage 3's comparison against it) dampens composition_cost's
+    contribution to a SECONDARY role via STAGE_DECISION_COMPOSITION_WEIGHT
+    -- necessary because the RAW center-of-mass term is vulnerable to a
+    real bug (see that weight's own comment: a small window already
+    sitting near center can pull the mass-weighted AVERAGE position close
+    to center even while a large, dominant new window sits far off,
+    making eviction look unnecessary when it wasn't). But a live benchmark
+    (this change's own report, "Case A": two huge windows already stacked,
+    a new medium window arrives) found that dampening the WHOLE
+    composition_cost -- shape included -- let a candidate that measurably
+    WORSENED the group's shape (extending the existing stack) win anyway,
+    because moving a huge window 460px to slot the new one into the same
+    line also happened to pull the new window's own distance-to-center
+    down a lot, and that saving wasn't fairly weighed against the shape it
+    cost. The center-of-mass term's averaging bug and the shape term's
+    "extends a stack" signal are different phenomena with different
+    failure modes -- damping BOTH by the same factor was the actual
+    representational error, not a constant needing further tuning. This
+    split lets a caller keep center-of-mass secondary (where the bug
+    lives) while keeping shape at its own already-validated, undamped
+    scale (where it doesn't)."""
     if not weighted_rects:
-        return 0.0
+        return 0.0, 0.0
     vx, vy = viewport_center
     com = mass_center(weighted_rects)
     if com is None:
-        return 0.0
+        return 0.0, 0.0
     center_of_mass_cost = math.hypot(com[0] - vx, com[1] - vy)
 
     Cxx, Cyy, Cxy = covariance_matrix(weighted_rects, com)
@@ -573,7 +607,7 @@ def composition_cost(weighted_rects, viewport_center):
     # penalty" framing -- escalating, not flat-rate.
     angular_cost = ANGULAR_PENALTY_SCALE * (aniso ** 2) * confidence
 
-    return CENTER_OF_MASS_WEIGHT * center_of_mass_cost + angular_cost
+    return center_of_mass_cost, angular_cost
 
 
 def composition_penalty(cand, layout_rects, gap):
@@ -1188,6 +1222,55 @@ RESIZE_COST_PER_PIXEL = 1.2
 # when it materially helps" is enforced by an honest comparison, not a
 # threshold guess.)
 
+# A resize is only taken when it beats `best_cost` by at least this
+# FRACTION, not merely scores numerically lower. Added after a live
+# benchmark (sequential A-F window opens, no SUPER+G involved at all)
+# found the SAME existing window resized on two SEPARATE, unrelated
+# new-window arrivals -- 550px wide down to 412, then down to 309, a 44%
+# total cut with neither single event's own MAX_SHRINK_FRACTION cap
+# looking like a runaway in isolation. Stage 3 has no memory of a window
+# having already given up space for a DIFFERENT earlier arrival (each
+# openwindow event is an independent decision -- see this file's own
+# architecture), so a hard eligibility floor keyed on the incoming
+# window's own size was tried first and rejected: it either did nothing
+# (the floor's reference, new_area, varies per event and isn't a stable
+# quantity to gate on) or broke a genuinely legitimate resize (a modest,
+# one-time trim of an existing MEDIUM window to help a larger new one
+# arrive, which needs the EXISTING window to be considered even though
+# it's smaller than the incoming one). What actually distinguishes the
+# two cases, measured directly: the first resize (of a not-yet-touched
+# window) beat its baseline by ~8%; the second (of the SAME window,
+# already smaller from the first) beat its baseline by only ~4% --
+# diminishing returns from trimming something already trimmed, whether or
+# not this script can remember that fact directly. A moderate required
+# margin (comfortably below the genuinely-beneficial ~8-15% margins seen
+# in real cases, comfortably above the ~4% seen when compounding on an
+# already-shrunk window) captures this without any cross-event memory at
+# all -- verified against both the repeated-resize regression and the
+# original genuine-improvement case (dxrice_test_placement.py's
+# TestResizeCompositionAware).
+STAGE3_RESIZE_MARGIN_FRACTION = 0.05
+
+# Bounded search, not brute force: profiled at n=20 eligible windows,
+# try_resize_room's own find_free_position call (already O(n^2)-ish per
+# call, since it scores every edge-crossing candidate against every other
+# obstacle) was being repeated once per eligible window x up to 4 edge
+# variants -- an UNBOUNDED outer factor stacked on an already-expensive
+# per-call cost, measured at 3.3s wall-clock for a single new-window
+# placement with 20 existing windows already open (vs. 5ms at 2). Per this
+# session's own explicit performance requirement ("more computation OK for
+# N<=8, bounded pruning for larger N"), only the CANDIDATE_CAP largest-by-
+# area eligible windows are ever tried as a resize target when there are
+# more than that many -- largest-first is the same convention
+# dxrice_auto_arrange.py's own top-level sort already uses, and is a
+# reasonable proxy here too: a window already smaller than most of the
+# group was never a plausible "the big one in the way" candidate, and the
+# margin/d3-gate checks already in this function would reject shrinking it
+# for a real improvement anyway -- this never changes which resize
+# actually gets chosen at realistic window counts, it only skips wasted
+# work when there are many more candidates than could plausibly matter.
+STAGE3_RESIZE_CANDIDATE_CAP = 8
+
 
 def clamp_to_usable_size(w, h):
     """Raises (w, h) up to MIN_USABLE_WIDTH/HEIGHT if either falls below
@@ -1205,7 +1288,7 @@ def clamp_to_usable_size(w, h):
     return (max(MIN_USABLE_WIDTH, round(w * scale)), max(MIN_USABLE_HEIGHT, round(h * scale)))
 
 
-def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost):
+def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost, best_direct_distance):
     """DECISION (investigated, not assumed): a live sizing audit (6
     deterministic mixed-size scenarios, see this change's own report and
     dxrice_test_placement.py's TestResizeCompositionAware) found the
@@ -1270,6 +1353,24 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
     alongside the resize to land exactly there -- it never relies on
     Hyprland's own resize anchor to happen to match what was scored here.
 
+    `best_direct_distance`: the new window's own distance-to-center under
+    whichever of Stage 1/Stage 2 actually won (d1 if Stage 1, d2 if Stage
+    2) -- a candidate here must ALSO get the new window MEANINGFULLY
+    closer to center than that, not just improve the total cost. Added
+    after a live benchmark ("Case F": three same-sized windows in a row,
+    a fourth same-sized window arrives) found the composition-cost
+    comparison alone let a resize through that shrank an EXISTING window
+    (H1) by 25% while leaving the new window at the EXACT SAME position
+    it already had without any resize at all (d3 == d1 to the pixel) --
+    the entire ~6% "improvement" came from reshaping the existing trio's
+    own second moment, not from helping the window Stage 3 exists to
+    help. None of H1/H2/H3 was oversized relative to anything either (all
+    four windows were the same size) -- Stage 3's whole justification is
+    "rearranging alone couldn't get the new window a usable spot," and a
+    plan that doesn't move the new window's own spot at all has, by
+    definition, not satisfied that justification, regardless of how the
+    abstract score reads.
+
     Returns (target_pos, address_to_resize, (new_x, new_y), (new_w, new_h))
     or None. new_x/new_y is the resized window's own corrected top-left,
     which the caller must move it to (not just resize it) for the geometry
@@ -1279,8 +1380,28 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
     new_area = nw * nh
     fixed_rects = [rect_for(*r) for r in fixed_obstacles]
     best_plan = None
+    # See best_direct_distance's own docstring paragraph: a resize
+    # candidate must get the new window meaningfully closer to center than
+    # rearrangement alone already does, not just improve the aggregate
+    # score. "Meaningfully" mirrors the same margin philosophy used
+    # elsewhere in this file (SUPER_G_RESIZE_MARGIN_FRACTION,
+    # STAGE3_RESIZE_MARGIN_FRACTION) rather than requiring a bare, fragile
+    # inequality.
+    direct_distance_threshold = best_direct_distance * (1.0 - STAGE3_RESIZE_MARGIN_FRACTION)
+    # See STAGE3_RESIZE_MARGIN_FRACTION's own comment: a resize must beat
+    # best_cost by a real margin, not just numerically, so that trimming
+    # the SAME window again on a later, unrelated new-window arrival
+    # (which this function has no memory of) needs a genuine improvement
+    # to repeat, not just any improvement at all.
+    resize_threshold = best_cost * (1.0 - STAGE3_RESIZE_MARGIN_FRACTION)
 
-    for w in eligible:
+    # Bounded search, not brute force -- see STAGE3_RESIZE_CANDIDATE_CAP's
+    # own comment.
+    resize_candidates = eligible
+    if len(eligible) > STAGE3_RESIZE_CANDIDATE_CAP:
+        resize_candidates = sorted(eligible, key=lambda w: -(w["size"][0] * w["size"][1]))[:STAGE3_RESIZE_CANDIDATE_CAP]
+
+    for w in resize_candidates:
         ow, oh = w["size"]
         ox, oy = w["at"]
         other_eligible = [o for o in eligible if o["address"] != w["address"]]
@@ -1310,20 +1431,20 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
             obstacles_xywh.append((sx, sy, sw, sh))
             pos = find_free_position(new_size, obstacles_xywh, center, gap, layout_others=obstacles_xywh)
 
-            # Same TWO-TERM shape as cost1/cost2_total in place_new_window
-            # (see STAGE_DECISION_COMPOSITION_WEIGHT's own comment there):
-            # the new window's own distance to center as the PRIMARY
-            # signal, whole-composition cost as a secondary one at the
-            # SAME 0.3 weight -- not the raw composition_cost alone. An
-            # earlier version of this fix scored candidates by raw
-            # composition_cost with no distance term at all, which let a
-            # resize win against `best_cost` (itself d + 0.3*comp) purely
-            # from the scale mismatch between "compared at full weight"
-            # and "compared at 0.3 weight," not from any real improvement
-            # -- caught by comparing actual resulting com_err/anisotropy
-            # before and after: a candidate that "won" by ~230 points
-            # numerically produced a change of 0.0004 in anisotropy and
-            # 0.003px in com_err, i.e. no visible difference at all. Using
+            # Same shape as cost1/cost2_total in place_new_window (see
+            # composition_cost_components' own docstring for why the two
+            # ingredients are weighted DIFFERENTLY, not the combined
+            # composition_cost dampened by one shared factor): the new
+            # window's own distance to center as the PRIMARY signal,
+            # center-of-mass as a damped secondary term (STAGE_DECISION_
+            # COMPOSITION_WEIGHT), shape/anisotropy at its own full,
+            # undamped scale. An earlier version of this fix scored
+            # candidates by raw composition_cost with no distance term at
+            # all, which let a resize win against `best_cost` purely from a
+            # scale mismatch, not a real improvement -- caught by comparing
+            # actual resulting com_err/anisotropy before and after: a
+            # candidate that "won" by ~230 points numerically produced a
+            # change of 0.0004 in anisotropy and 0.003px in com_err. Using
             # the identical formula Stage 1/2 already use makes the
             # comparison actually fair.
             d3 = math.hypot(pos[0] + nw / 2 - center[0], pos[1] + nh / 2 - center[1])
@@ -1334,9 +1455,11 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
                 oox, ooy = o["at"]
                 oow, ooh = o["size"]
                 whole_points.append((oox + oow / 2, ooy + ooh / 2, oow, ooh, window_mass(oow, ooh, new_area)))
-            comp = composition_cost(whole_points, center)
-            cost = d3 + STAGE_DECISION_COMPOSITION_WEIGHT * comp + RESIZE_COST_PER_PIXEL * shrink_amount * resize_prominence
-            if cost < best_cost and (best_plan is None or cost < best_plan[0]):
+            com_cost3, shape_cost3 = composition_cost_components(whole_points, center)
+            cost = (d3 + STAGE_DECISION_COMPOSITION_WEIGHT * com_cost3 + shape_cost3
+                    + RESIZE_COST_PER_PIXEL * shrink_amount * resize_prominence)
+            if (cost < resize_threshold and d3 < direct_distance_threshold
+                    and (best_plan is None or cost < best_plan[0])):
                 best_plan = (cost, pos, w["address"], (int(sx), int(sy)), (int(sw), int(sh)))
 
     if best_plan is None:
@@ -1535,8 +1658,9 @@ def place_new_window(address, workspace_id, gap):
     stage1_points = [(ox + ow / 2, oy + oh / 2, ow, oh, window_mass(ow, oh, new_area))
                       for ox, oy, ow, oh in layout_others]
     stage1_points.append((pos1[0] + new_w / 2, pos1[1] + new_h / 2, new_w, new_h, pos1_mass))
-    comp_cost1 = composition_cost(stage1_points, center)
-    cost1 = d1 + STAGE_DECISION_COMPOSITION_WEIGHT * comp_cost1
+    com_cost1, shape_cost1 = composition_cost_components(stage1_points, center)
+    comp_cost1 = com_cost1 + shape_cost1  # kept for the _DEBUG line below, not the decision itself
+    cost1 = d1 + STAGE_DECISION_COMPOSITION_WEIGHT * com_cost1 + shape_cost1
 
     use_stage2 = False
     stage2 = try_make_room((new_w, new_h), eligible, fixed_only, center, gap) if eligible else None
@@ -1552,24 +1676,46 @@ def place_new_window(address, workspace_id, gap):
             for addr, (nx, ny) in moved.items()
         )
         # Stage 1 vs Stage 2 keeps the NEW window's own distance to center
-        # (d1/d2) as the primary term -- NOT the full mass-weighted
-        # composition_cost of the whole resulting layout. That was tried
-        # first and caused a real regression: when a small existing window
-        # happens to already sit near center, averaging its position in
-        # with a much larger new window's position pulls the WEIGHTED
-        # AVERAGE artificially close to center even while the large,
-        # visually-dominant new window itself sits meaningfully off to one
-        # side -- measured live, a 1400x900 new window landed 517px off
-        # center, flush against a tiny 220x140 neighbor, because the
-        # average of "huge window far off" and "tiny window at center"
-        # scored better than actually evicting the tiny one. The candidate
-        # SEARCH within each stage (find_free_position, already
-        # composition-aware) is unaffected by this -- only the coarser
-        # "is it worth the movement cost to switch plans" decision needed
-        # this fix. Composition still influences the choice, just as a
-        # secondary term, matching the same "primary distance/movement,
-        # secondary composition" shape used everywhere else in this file
-        # (see find_least_disruptive_position).
+        # (d1/d2) as the primary term, with composition_cost's two
+        # ingredients weighted DIFFERENTLY as a secondary term -- not the
+        # combined composition_cost dampened by one shared factor. That
+        # was tried first (both ingredients at STAGE_DECISION_COMPOSITION_
+        # WEIGHT) and had two DIFFERENT failure modes needing different
+        # fixes, not one:
+        #
+        #   1. Damping the CENTER-OF-MASS ingredient is real and necessary:
+        #      undamped, a small existing window already sitting near
+        #      center pulls the mass-weighted AVERAGE position artificially
+        #      close to center even while a much larger, visually-dominant
+        #      new window sits meaningfully off to one side -- measured
+        #      live, a 1400x900 new window landed 517px off center, flush
+        #      against a tiny 220x140 neighbor, because the average of
+        #      "huge window far off" and "tiny window at center" scored
+        #      better than actually evicting the tiny one.
+        #   2. Damping the SHAPE (anisotropy) ingredient by that SAME
+        #      factor was the actual bug this comment now documents: a
+        #      live benchmark ("Case A" -- two huge windows already
+        #      stacked, a new medium window arrives) found the algorithm
+        #      moved one huge window 460px just to slot the new window
+        #      into the SAME vertical line, because that candidate's much
+        #      lower d2 (the new window's own distance to center) outweighed
+        #      a real, measured WORSENING of the group's shape (anisotropy
+        #      0.18 -> 0.42) once that worsening was dampened down to 30%
+        #      of its true scale. Shape was never implicated in bug #1 --
+        #      it has no "average masks an offender" failure mode, since
+        #      anisotropy measures the group's actual spatial spread, not
+        #      a position that can be pulled toward a point by one member.
+        #      Damping it was simply the wrong call, not a badly-tuned one.
+        #
+        # So: center-of-mass stays secondary (bug #1's fix, unchanged);
+        # shape now counts at its own full, already-validated scale (the
+        # same ANGULAR_PENALTY_SCALE the within-stage candidate SEARCH
+        # already uses, via composition_cost_components) -- both fixes
+        # verified together: the ORIGINAL 1400x900-vs-tiny-220x140 scenario
+        # still correctly evicts the tiny window (that case has only 2
+        # windows, so the shape term is confidence-gated to exactly 0
+        # regardless -- it was never doing any work there to begin with),
+        # while Case A above now correctly leaves the huge window alone.
         stage2_points = []
         for w in eligible:
             addr = w["address"]
@@ -1581,10 +1727,11 @@ def place_new_window(address, workspace_id, gap):
                 ox, oy = w["at"]
                 stage2_points.append((ox + ow / 2, oy + oh / 2, ow, oh, window_mass(ow, oh, new_area)))
         stage2_points.append((pos2[0] + new_w / 2, pos2[1] + new_h / 2, new_w, new_h, pos1_mass))
-        comp_cost2 = composition_cost(stage2_points, center)
+        com_cost2, shape_cost2 = composition_cost_components(stage2_points, center)
+        comp_cost2 = com_cost2 + shape_cost2  # kept for the _DEBUG line below, not the decision itself
 
         cost2_total = (d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
-                       + STAGE_DECISION_COMPOSITION_WEIGHT * comp_cost2)
+                       + STAGE_DECISION_COMPOSITION_WEIGHT * com_cost2 + shape_cost2)
         if _DEBUG:
             print(f"DEBUG stage1 d1={d1:.1f} comp={comp_cost1:.1f} cost1={cost1:.1f} | "
                   f"stage2 d2={d2:.1f} moved={len(moved)} total_movement={total_movement:.1f} "
@@ -1601,14 +1748,22 @@ def place_new_window(address, workspace_id, gap):
     # could provide, purely because the new window's own position looked
     # "fine" even when the overall layout wasn't).
     best_cost = cost2_total if use_stage2 else cost1
+    best_direct_distance = d2 if use_stage2 else d1
 
     # Stage 3: try_resize_room now always evaluates its candidates against
     # this same objective and only returns a plan that genuinely beats it
     # -- "only for outcomes that are genuinely bad" is enforced by that
     # honest comparison, not a separate gate here. Never touches the new
     # window's own size, never touches more than one existing window, and
-    # never crosses MIN_USABLE_WIDTH/HEIGHT.
-    stage3 = try_resize_room((new_w, new_h), eligible, fixed_only, center, gap, best_cost) if eligible else None
+    # never crosses MIN_USABLE_WIDTH/HEIGHT. Also never fires unless it
+    # gets the new window itself meaningfully closer to center than
+    # rearrangement alone -- see try_resize_room's own docstring for the
+    # live case (Case F) this closes: a resize that only reshapes the
+    # EXISTING windows' own composition, without moving the actual new
+    # window any closer to a usable spot, isn't doing Stage 3's job no
+    # matter how the aggregate score reads.
+    stage3 = (try_resize_room((new_w, new_h), eligible, fixed_only, center, gap, best_cost, best_direct_distance)
+              if eligible else None)
 
     if stage3 is not None:
         pos3, resize_addr, resize_xy, resize_size = stage3
