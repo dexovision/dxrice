@@ -762,7 +762,7 @@ class TestResizeMinimums(unittest.TestCase):
 
     def test_stage3_forced_trigger_returns_valid_plan(self):
         eligible = [{"address": "0xBIG", "at": [660, 240], "size": [600, 600]}]
-        result = apw.try_resize_room((500, 500), eligible, [], (960, 540), GAP, 999999)
+        result = apw.try_resize_room((500, 500), eligible, [], (960, 540), GAP, 999999, 999999)
         self.assertIsNotNone(result)
         pos3, addr, new_xy, new_size = result
         self.assertGreaterEqual(new_size[0], apw.MIN_USABLE_WIDTH)
@@ -774,14 +774,14 @@ class TestResizeMinimums(unittest.TestCase):
     def test_stage3_never_triggers_when_rearrangement_already_good(self):
         eligible = [{"address": "0xA", "at": [760, 240], "size": [400, 300]}]
         # A trivially good best_cost (small) must never trigger a resize.
-        result = apw.try_resize_room((300, 300), eligible, [], (960, 540), GAP, 10.0)
+        result = apw.try_resize_room((300, 300), eligible, [], (960, 540), GAP, 10.0, 10.0)
         self.assertIsNone(result)
 
     def test_stage3_never_shrinks_fixed_obstacles(self):
         # Fixed obstacles aren't even in `eligible`, so try_resize_room has
         # structurally no way to touch them -- this documents that contract.
         eligible = []
-        result = apw.try_resize_room((500, 500), eligible, [(0, 0, 2000, 2000)], (960, 540), GAP, 999999)
+        result = apw.try_resize_room((500, 500), eligible, [(0, 0, 2000, 2000)], (960, 540), GAP, 999999, 999999)
         self.assertIsNone(result, "no eligible windows to resize -- must return None, never touch fixed")
 
     def test_stage3_resize_geometry_matches_explicit_anchor(self):
@@ -791,7 +791,7 @@ class TestResizeMinimums(unittest.TestCase):
         result (which is what Hyprland's raw resize dispatch would do if
         the caller didn't also send an explicit corrective move)."""
         eligible = [{"address": "0xBIG", "at": [100, 100], "size": [600, 600]}]
-        result = apw.try_resize_room((500, 500), eligible, [], (960, 540), GAP, 999999)
+        result = apw.try_resize_room((500, 500), eligible, [], (960, 540), GAP, 999999, 999999)
         self.assertIsNotNone(result)
         _, _, (nx, ny), (nw, nh) = result
         ox, oy, ow, oh = 100, 100, 600, 600
@@ -845,7 +845,14 @@ class TestResizeCompositionAware(unittest.TestCase):
     def _real_stage1_cost(self, existing, new_size, center=(960, 540), gap=GAP):
         """Mirrors place_new_window's own cost1 computation exactly, so
         these tests call try_resize_room with the SAME baseline the real
-        listener would -- not an arbitrary trigger value."""
+        listener would -- not an arbitrary trigger value. Uses
+        composition_cost_components (center-of-mass damped, shape at full
+        scale), matching place_new_window's own split -- see that
+        function's comment for why the two ingredients are weighted
+        differently now, not by one shared factor. Returns (cost1, d1) --
+        try_resize_room needs both now (see its own docstring for why d1,
+        the new window's own distance-to-center, is a separate required
+        condition from the aggregate cost)."""
         others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in existing]
         new_area = new_size[0] * new_size[1]
         pos1 = apw.find_free_position(new_size, others, center, gap,
@@ -857,8 +864,8 @@ class TestResizeCompositionAware(unittest.TestCase):
                           for w in existing]
         stage1_points.append((pos1[0] + new_size[0] / 2, pos1[1] + new_size[1] / 2,
                                new_size[0], new_size[1], pos1_mass))
-        comp1 = apw.composition_cost(stage1_points, center)
-        return d1 + apw.STAGE_DECISION_COMPOSITION_WEIGHT * comp1
+        com_cost1, shape_cost1 = apw.composition_cost_components(stage1_points, center)
+        return d1 + apw.STAGE_DECISION_COMPOSITION_WEIGHT * com_cost1 + shape_cost1, d1
 
     def test_declines_marginal_non_material_resize(self):
         """One small existing window (250x150), one large new window
@@ -870,8 +877,8 @@ class TestResizeCompositionAware(unittest.TestCase):
         technically favors it under a mismatched scale."""
         existing = [{"address": "SML", "at": [835, 465], "size": [250, 150]}]
         new_size = (1200, 800)
-        best_cost = self._real_stage1_cost(existing, new_size)
-        result = apw.try_resize_room(new_size, existing, [], (960, 540), GAP, best_cost)
+        best_cost, d1 = self._real_stage1_cost(existing, new_size)
+        result = apw.try_resize_room(new_size, existing, [], (960, 540), GAP, best_cost, d1)
         self.assertIsNone(result, "a non-material resize (illusory numeric win, "
                                    "no real composition change) must not fire")
 
@@ -890,9 +897,9 @@ class TestResizeCompositionAware(unittest.TestCase):
         new_area = new_size[0] * new_size[1]
         pos1 = apw.find_free_position(new_size, others, center, GAP,
                                        layout_others=others, reference_area=new_area)
-        best_cost = self._real_stage1_cost(existing, new_size)
+        best_cost, d1 = self._real_stage1_cost(existing, new_size)
 
-        result = apw.try_resize_room(new_size, existing, [], center, GAP, best_cost)
+        result = apw.try_resize_room(new_size, existing, [], center, GAP, best_cost, d1)
         self.assertIsNotNone(result, "a genuine, material composition improvement was available "
                                       "but Stage 3 declined to use it")
         pos3, addr, xy, size = result
@@ -925,10 +932,159 @@ class TestResizeCompositionAware(unittest.TestCase):
         the new window's own size is never a resize target, regardless of
         how good a plan that might numerically produce."""
         existing = [{"address": "ONLY", "at": [100, 100], "size": [300, 300]}]
-        result = apw.try_resize_room((250, 200), existing, [], (960, 540), GAP, best_cost=999999)
+        result = apw.try_resize_room((250, 200), existing, [], (960, 540), GAP,
+                                      best_cost=999999, best_direct_distance=999999)
         if result is not None:
             _, addr, _, _ = result
             self.assertEqual(addr, "ONLY", "the only thing try_resize_room may ever resize is an existing window")
+
+
+def _place_new_window_replica(existing, new_title, new_size, center=(960, 540), gap=GAP):
+    """Exact replica of place_new_window's Stage1/2/3 decision, using the
+    real production functions -- necessary because place_new_window itself
+    reads from a live Hyprland socket. `existing`: [(label, x, y, w, h),
+    ...]. Returns (new_layout, method_str)."""
+    same_ws = [{"address": lbl, "at": [x, y], "size": [w, h]} for lbl, x, y, w, h in existing]
+    if not same_ws:
+        nx, ny = center[0] - new_size[0] / 2, center[1] - new_size[1] / 2
+        return existing + [(new_title, nx, ny, *new_size)], "FIRST"
+
+    others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in same_ws]
+    new_w, new_h = new_size
+    new_area = new_w * new_h
+
+    pos1 = apw.find_free_position((new_w, new_h), others, center, gap,
+                                   layout_others=others, reference_area=new_area)
+    d1 = math.hypot(pos1[0] + new_w / 2 - center[0], pos1[1] + new_h / 2 - center[1])
+    pos1_mass = apw.window_mass(new_w, new_h, new_area)
+    stage1_points = [(ox + ow / 2, oy + oh / 2, ow, oh, apw.window_mass(ow, oh, new_area))
+                      for ox, oy, ow, oh in others]
+    stage1_points.append((pos1[0] + new_w / 2, pos1[1] + new_h / 2, new_w, new_h, pos1_mass))
+    com_cost1, shape_cost1 = apw.composition_cost_components(stage1_points, center)
+    cost1 = d1 + apw.STAGE_DECISION_COMPOSITION_WEIGHT * com_cost1 + shape_cost1
+
+    eligible = list(same_ws)
+    stage2 = apw.try_make_room((new_w, new_h), eligible, [], center, gap)
+    use_stage2 = False
+    moved = {}
+    cost2_total = None
+    d2 = None
+    if stage2 is not None:
+        pos2, moved = stage2
+        d2 = math.hypot(pos2[0] + new_w / 2 - center[0], pos2[1] + new_h / 2 - center[1])
+        orig_at = {w["address"]: w["at"] for w in eligible}
+        eligible_by_addr = {w["address"]: w for w in eligible}
+        total_movement = sum(
+            math.hypot(nx - orig_at[a][0], ny - orig_at[a][1]) * apw.prominence_weight(a, eligible_by_addr, new_area)
+            for a, (nx, ny) in moved.items()
+        )
+        stage2_points = []
+        for w in eligible:
+            a = w["address"]; ow, oh = w["size"]
+            mx, my = moved[a] if a in moved else w["at"]
+            stage2_points.append((mx + ow / 2, my + oh / 2, ow, oh, apw.window_mass(ow, oh, new_area)))
+        stage2_points.append((pos2[0] + new_w / 2, pos2[1] + new_h / 2, new_w, new_h, pos1_mass))
+        com_cost2, shape_cost2 = apw.composition_cost_components(stage2_points, center)
+        cost2_total = (d2 + apw.MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
+                       + apw.STAGE_DECISION_COMPOSITION_WEIGHT * com_cost2 + shape_cost2)
+        if cost2_total < cost1:
+            use_stage2 = True
+
+    best_cost = cost2_total if use_stage2 else cost1
+    best_direct_distance = d2 if use_stage2 else d1
+    stage3 = apw.try_resize_room((new_w, new_h), eligible, [], center, gap, best_cost, best_direct_distance)
+
+    by_lbl = {lbl: [x, y, w, h] for lbl, x, y, w, h in existing}
+    if stage3 is not None:
+        pos3, resize_addr, resize_xy, resize_size = stage3
+        if use_stage2:
+            for a, (nx, ny) in moved.items():
+                by_lbl[a][0], by_lbl[a][1] = nx, ny
+        by_lbl[resize_addr] = [resize_xy[0], resize_xy[1], resize_size[0], resize_size[1]]
+        new_rect = (new_title, pos3[0], pos3[1], new_w, new_h)
+        method = f"STAGE3(resize {resize_addr})"
+    elif use_stage2:
+        for a, (nx, ny) in moved.items():
+            by_lbl[a][0], by_lbl[a][1] = nx, ny
+        new_rect = (new_title, pos2[0], pos2[1], new_w, new_h)
+        method = f"STAGE2({len(moved)}moved)"
+    else:
+        new_rect = (new_title, pos1[0], pos1[1], new_w, new_h)
+        method = "STAGE1"
+
+    return [(lbl, *vals) for lbl, vals in by_lbl.items()] + [new_rect], method
+
+
+class TestGlobalCompositionRegressions(unittest.TestCase):
+    """End-to-end regressions found via a deterministic benchmark (this
+    change's own report) that unit tests scoped to a single function
+    couldn't see -- each requires the FULL Stage1/2/3 decision chain, not
+    just one stage in isolation, which is why these use
+    _place_new_window_replica rather than calling try_make_room or
+    try_resize_room directly."""
+
+    def test_does_not_move_huge_window_to_extend_an_existing_stack(self):
+        """Case A: two huge (1400x800) windows already stacked vertically,
+        a new MEDIUM window arrives. Before the fix, the algorithm moved
+        one huge window 460px just to slot the new window into the SAME
+        vertical line -- the new window's own distance-to-center improved,
+        but the group's actual shape measurably WORSENED (anisotropy
+        0.18 -> 0.42), because STAGE_DECISION_COMPOSITION_WEIGHT (0.3)
+        was damping the shape/anisotropy term as much as the (correctly
+        damped) center-of-mass term, when only the latter was ever
+        implicated in the bug that weight exists to fix. Neither huge
+        window should move meaningfully for this."""
+        existing = [("H1", 200, 100, 1400, 800), ("H2", 200, 950, 1400, 800)]
+        final, method = _place_new_window_replica(existing, "M", (700, 500))
+        h1_after = next(r for r in final if r[0] == "H1")
+        h2_after = next(r for r in final if r[0] == "H2")
+        self.assertLess(math.hypot(h1_after[1] - 200, h1_after[2] - 100), 50,
+                         f"H1 moved to help M join the same stack (method={method})")
+        self.assertLess(math.hypot(h2_after[1] - 200, h2_after[2] - 950), 50,
+                         f"H2 moved to help M join the same stack (method={method})")
+
+    def test_stage3_does_not_resize_the_same_window_across_separate_events(self):
+        """A normal sequential-open sequence (no SUPER+G at all) must never
+        resize the SAME existing window on two SEPARATE, unrelated
+        new-window arrivals -- before the fix, a 550x400 window was cut to
+        412x400 when one window arrived, then cut AGAIN to 309x400 when a
+        LATER, unrelated window arrived: a 44% total reduction with
+        neither single MAX_SHRINK_FRACTION-bounded event looking like a
+        runaway in isolation."""
+        layout = []
+        resized_addrs = set()
+        original_sizes = {}
+        for title, w, h in [("A", 550, 400), ("B", 700, 300), ("C", 300, 500),
+                             ("D", 450, 450), ("E", 250, 180), ("F", 380, 600)]:
+            original_sizes[title] = (w, h)
+            before_sizes = {lbl: (ow, oh) for lbl, x, y, ow, oh in layout}
+            layout, method = _place_new_window_replica(layout, title, (w, h))
+            for lbl, x, y, nw, nh in layout:
+                if lbl in before_sizes and (nw, nh) != before_sizes[lbl]:
+                    self.assertNotIn(lbl, resized_addrs,
+                                      f"{lbl} was resized on a SECOND separate event (at '{title}' arriving)")
+                    resized_addrs.add(lbl)
+        # Sanity: this scenario is known to trigger at least one real
+        # resize (otherwise the test would pass vacuously).
+        self.assertGreaterEqual(len(resized_addrs), 1,
+                                 "expected at least one legitimate resize in this sequence")
+
+    def test_does_not_resize_to_reshape_existing_windows_alone(self):
+        """Case F: three IDENTICALLY-sized windows in a row, a fourth
+        identically-sized window arrives. Before the fix, Stage 3 shrank
+        one of the three existing windows by 25% even though the plan's
+        own new-window position (d3) was EXACTLY the same as the no-resize
+        baseline (d1) -- the entire numeric "improvement" came from
+        reshaping the existing trio's own second moment, not from helping
+        the actual window Stage 3 exists to help. None of the four windows
+        is oversized relative to any other, so no resize should occur."""
+        existing = [("H1", 0, 500, 350, 280), ("H2", 355, 500, 350, 280), ("H3", 710, 500, 350, 280)]
+        final, method = _place_new_window_replica(existing, "H4", (350, 280))
+        by_orig = {"H1": (350, 280), "H2": (350, 280), "H3": (350, 280)}
+        for lbl, x, y, w, h in final:
+            if lbl in by_orig:
+                self.assertEqual((w, h), by_orig[lbl],
+                                  f"{lbl} was resized purely to reshape the existing group (method={method})")
 
 
 class TestSettleDelayDocumentation(unittest.TestCase):
@@ -1122,6 +1278,45 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
                              f"{addr} moved {math.hypot(nx-ox, ny-oy):.1f}px on a no-op re-run")
             self.assertLess(abs(nw - ow) + abs(nh - oh), 1.0,
                              f"{addr} resized ({ow}x{oh} -> {nw}x{nh}) on a no-op re-run")
+
+    def test_already_excellent_2x2_grid_stays_put(self):
+        """I: an already-excellent composition -- SUPER+G should do nothing.
+        Live testing found this exact shape (4 identically-sized windows in
+        a tight, already-centered, already-gapped 2x2 grid) broke this
+        requirement: the LAST window placed during the incremental rebuild
+        lost its own perfect slot to a candidate that yanked it far above
+        the group, because that disconnected candidate happened to pull 3
+        of the 4 window centers onto a shared x-coordinate, driving the
+        shared composition_cost's covariance-based anisotropy down to a
+        near-perfect ~0.01 by coincidence -- not because it was a better
+        composition (it had worse compactness, worse edge-alignment, and
+        real movement) -- which then cascaded into the FINAL rigid recenter
+        shift dragging the other 3 (already-correct) windows along with it.
+        Fixed by _find_best_position's stay-put veto: a candidate may not
+        win purely on the (proven exploitable) anisotropy term while also
+        being no better on every independently-verifiable geometric signal
+        (edge-alignment, bbox growth) than simply leaving a window where it
+        already legitimately sits."""
+        w, h = 300, 200
+        gap = GAP2
+        left = 657  # exact integers: bbox (657,337)-(1262,742), centered on (960,540)
+        top = 337
+        eligible = [
+            {"address": "A", "at": [left, top], "size": [w, h]},
+            {"address": "B", "at": [left + w + gap, top], "size": [w, h]},
+            {"address": "C", "at": [left, top + h + gap], "size": [w, h]},
+            {"address": "D", "at": [left + w + gap, top + h + gap], "size": [w, h]},
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
+        by_addr = {a: (x, y, w2, h2) for a, x, y, w2, h2 in result}
+        for w2 in eligible:
+            addr = w2["address"]
+            ox, oy = w2["at"]
+            ow, oh = w2["size"]
+            nx, ny, nw, nh = by_addr[addr]
+            self.assertLess(math.hypot(nx - ox, ny - oy), 1.0,
+                             f"{addr} moved on an already-excellent 2x2 grid (SUPER+G should do nothing)")
+            self.assertEqual((nw, nh), (ow, oh), f"{addr} was resized on an already-excellent 2x2 grid")
 
     def test_deterministic_same_input_same_output(self):
         rects0 = [(900, 0, 400, 300), (200, 700, 350, 280), (1500, 300, 300, 500)]

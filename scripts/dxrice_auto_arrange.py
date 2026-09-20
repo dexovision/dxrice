@@ -299,7 +299,68 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
         total += composition_penalty(cand, obstacle_rects, gap)
         return total
 
+    def growth_of(x, y):
+        if cluster_bbox is None:
+            return 0.0
+        bx0_, by0_, bx1_, by1_ = cluster_bbox
+        cand = (x, y, x + nw, y + nh)
+        new_w = max(bx1_, cand[2]) - min(bx0_, cand[0])
+        new_h = max(by1_, cand[3]) - min(by0_, cand[1])
+        return (new_w - (bx1_ - bx0_)) + (new_h - (by1_ - by0_))
+
+    def alignment_of(x, y):
+        return composition_penalty((x, y, x + nw, y + nh), obstacle_rects, gap)
+
     best = min(candidates, key=lambda p: score(*p))
+
+    # Stay-put veto: composition_cost's anisotropy term is a 2nd-moment
+    # statistic over a handful of window centers, and this session's own
+    # investigation found it can be won by a candidate that is actually a
+    # WORSE composition to a human eye -- live evidence: a tight, already-
+    # centered, already-gapped 2x2 grid of 4 identical windows (bbox growth
+    # 0, two full-edge alignments, aniso a benign 0.38 from the grid's own
+    # non-square aspect ratio) lost to a candidate that yanked one window
+    # far above the cluster (bbox growth +205px, only one alignment, real
+    # movement) purely because that disconnected placement happened to pull
+    # 3-of-4 centers onto a shared x-coordinate, driving aniso down to a
+    # near-perfect 0.01 by coincidence, not by being a better composition.
+    # A single global ANGULAR_PENALTY_SCALE cannot fix this: this file's own
+    # documented stack-vs-side-break calibration (see that constant's
+    # comment) NEEDS the anisotropy term strong enough to overrule a ~305px
+    # compactness disadvantage in the other direction, and this new failure
+    # needs it weak enough not to overrule a 0-vs-205px one -- solved
+    # algebraically, the two requirements have no common scale (verified:
+    # the grid case demands ANGULAR_PENALTY_SCALE below ~1865, the
+    # calibration case demands it above ~1964 with real margin). Retuning
+    # the shared weight cannot be correct; the fix has to catch the
+    # SPECIFIC failure mode instead.
+    #
+    # The distinguishing signal is exactly the one Stage 3's own Case-F fix
+    # (dxrice_auto_place_window.py's best_direct_distance gate) established
+    # this session: a candidate that wins ONLY on the metric being
+    # investigated, while being simultaneously no better on every other
+    # independently-verifiable geometric signal, is the fingerprint of
+    # gaming that metric rather than a genuine improvement. Here: if the
+    # window's own CURRENT position is itself a legitimate (free) candidate
+    # -- i.e. nothing else has claimed that spot -- and it is AT LEAST AS
+    # GOOD as the naive winner on bbox growth AND on edge-alignment, then
+    # the naive winner's only possible advantage is the anisotropy term,
+    # which this investigation just proved is not trustworthy enough to be
+    # sufficient on its own. Deliberately does NOT compare movement (0 for
+    # stay-put by construction, so it would trivially always look "better"
+    # and this veto would fire far too often) or the composition term
+    # itself (that's the metric being distrusted, not used as a tiebreak).
+    # Only engages when stay-put is genuinely available -- during a real
+    # incremental rebuild most windows' original spots ARE claimed by
+    # something else by the time they're evaluated, so this cannot block a
+    # genuine, necessary relocation (including the stack-vs-side-break
+    # case above, where neither candidate is the window's own current
+    # position at all).
+    stay_put = (cx0 - nw / 2, cy0 - nh / 2)
+    if stay_put != best and stay_put in candidates:
+        if growth_of(*stay_put) <= growth_of(*best) and alignment_of(*stay_put) < alignment_of(*best):
+            best = stay_put
+
     return best, score(*best)
 
 
