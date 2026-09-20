@@ -578,14 +578,23 @@ class TestSuperGResize(unittest.TestCase):
         for addr, x, y, w, h in result:
             self.assertEqual((w, h), (300, 250), f"{addr} was resized among six equally-sized windows")
 
-    def test_oversized_window_among_medium_ones_can_resize(self):
-        """4/7: one absurdly oversized window among otherwise medium
-        windows, positioned so move-alone leaves a measurably worse
-        composition than a modest resize achieves -- resize IS taken here,
-        verified against an independently-recomputed composition cost (not
-        just by re-invoking the function under test), and stays within the
-        MAX_SHRINK_FRACTION-derived bound (never below
-        1-MAX_SHRINK_FRACTION of original in a single step)."""
+    def test_lone_big_window_among_only_a_few_mediums_is_not_oversized(self):
+        """4/7, REVISED: a later, more rigorous investigation (this
+        session's own resize-compounding root-cause work) found that a
+        window being "outnumbered" by a handful of smaller ones is not
+        the same question as "is this window actually too big" -- 1 main
+        window (1600x1000) among only 3 modest utility windows (500x400
+        each) is a completely ordinary desktop, not a problem to fix. The
+        ORIGINAL version of this test assumed resize was the expected,
+        demonstrated outcome here; _typical_area's size-class model (see
+        its own docstring) correctly recognizes BIG as its own legitimate
+        size class -- its total area (1.6M) still exceeds the 3 mediums'
+        combined area (0.6M) -- so it now reads as typical, not oversized,
+        and is never offered as a resize candidate. See
+        test_disproportionate_outlier_among_a_real_population_can_resize
+        for the case where resize IS still correctly reachable: a real
+        population of enough similarly-sized windows that clearly
+        outweighs a genuine outlier by total area."""
         eligible = [
             self._mk("M1", 100, 100, 500, 400),
             self._mk("M2", 700, 100, 500, 400),
@@ -594,36 +603,35 @@ class TestSuperGResize(unittest.TestCase):
         ]
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
         big = next((w, h) for a, x, y, w, h in result if a == "BIG")
-        min_w = round(1600 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        min_h = round(1000 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        self.assertGreaterEqual(big[0], min_w, "BIG shrunk more than MAX_SHRINK_FRACTION allows in one step")
-        self.assertGreaterEqual(big[1], min_h, "BIG shrunk more than MAX_SHRINK_FRACTION allows in one step")
-        # If a resize DID happen, it must be a genuine improvement over what
-        # the position-only algorithm achieves on its own -- compared
-        # fairly by actually running that TRUE position-only baseline
-        # (resize disabled entirely) rather than reusing the resize run's
-        # own chosen position with the original size spliced back in: BIG's
-        # position in the resize-enabled result was chosen specifically FOR
-        # its resized footprint, so substituting the original size at that
-        # same position is not a fair stand-in for what position-only
-        # placement would actually have done.
-        if big != (1600, 1000):
-            saved_floor = arr.RESIZE_ELIGIBLE_RATIO_FLOOR
-            arr.RESIZE_ELIGIBLE_RATIO_FLOOR = 1e9  # effectively disables resize
-            try:
-                baseline_result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
-            finally:
-                arr.RESIZE_ELIGIBLE_RATIO_FLOOR = saved_floor
+        self.assertEqual(big, (1600, 1000), "BIG was resized despite being its own legitimate, dominant size class")
 
-            ref_area = sorted(w * h for _, _, _, w, h in result)[len(result) // 2]
-
-            def cost_of(layout):
-                pts = [(x + w / 2, y + h / 2, w, h, apw.window_mass(w, h, ref_area))
-                       for _, x, y, w, h in layout]
-                return apw.composition_cost(pts, (960, 540))
-
-            self.assertLess(cost_of(result), cost_of(baseline_result),
-                             "BIG was resized but the result isn't actually better than the true position-only baseline")
+    def test_disproportionate_outlier_among_a_real_population_can_resize(self):
+        """Companion to the test above: resize must still be reachable when
+        there genuinely IS a real, well-populated 'typical' size class that
+        a real outlier clearly and substantially exceeds -- 10 medium
+        windows (500x400, combined area 2.0M) clearly outweigh one
+        moderately larger window (950x750, area 712500, combined-area-
+        outweighed 2.8x) whose own ratio (1.89) clears
+        RESIZE_ELIGIBLE_RATIO_FLOOR with room to spare. Verifies the fix
+        for the compounding bug did not also kill resize's actual, still-
+        needed capability, and that a genuine resize converges in exactly
+        one step and stays stable."""
+        eligible = [self._mk(f"M{i}", (i % 5) * 510, (i // 5) * 410, 500, 400) for i in range(10)]
+        eligible.append(self._mk("BIGGER", 2600, 100, 950, 750))
+        layout = eligible
+        sizes = []
+        for _ in range(5):
+            result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+            bigger = next(r for r in result if r[0] == "BIGGER")
+            sizes.append((bigger[3], bigger[4]))
+            layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
+        self.assertNotEqual(sizes[0], (950, 750), "BIGGER was never resized despite a real, well-outweighed outlier")
+        min_w = round(950 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        min_h = round(750 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        self.assertGreaterEqual(sizes[0][0], min_w, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
+        self.assertGreaterEqual(sizes[0][1], min_h, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
+        for s in sizes[1:]:
+            self.assertEqual(s, sizes[0], f"BIGGER kept changing size across repeated runs: {sizes}")
 
     def test_position_only_already_good_resizes_nothing(self):
         """6: a composition where move-only already produces a good result
@@ -749,14 +757,26 @@ class TestSuperGResize(unittest.TestCase):
         r2 = arr.auto_arrange(round1, [], (0, 0, 1920, 1080), GAP)
         self.assertEqual(sorted(r1), sorted(r2), "5 identically-sized windows did not converge on a repeated run")
 
-    def test_moderately_oversized_window_converges_in_one_step(self):
+    def test_moderately_oversized_window_never_resizes_among_many_tiny_dialogs(self):
         """Found by dxrice_placement_benchmark.py's random-layout harness,
-        not a hand-picked scenario: one dominant window (~7x the group's
-        typical area) among 10 tiny dialogs kept losing another ~10% on
-        EVERY SEPARATE SUPER+G invocation at the old 0.02 margin -- each
-        individual cut looked like a real improvement, so nothing said
-        stop. At the current 0.10 margin, the resize fires exactly once
-        and holds stable on every subsequent run."""
+        not a hand-picked scenario: one dominant window (~7x a flat
+        population median) among 10 tiny dialogs used to lose another
+        ~10-20% of its size on EVERY SEPARATE SUPER+G invocation -- each
+        individual cut looked like a real improvement against that
+        skewed reference, so nothing ever said stop. Root-caused (not
+        just patched) via direct instrumentation: a TINY dialog's own
+        incremental placement step was the one choosing to shrink this
+        unrelated, much larger window, because a population-median
+        reference_area made it look "oversized" purely from being
+        outnumbered by dialogs, not because it was ever actually in
+        anyone's way. Fixed structurally: _typical_area() groups windows
+        into size CLASSES and picks the class with the greatest total
+        (not counted) area as the reference -- a lone main window's own
+        class trivially wins on total area over a swarm of tiny dialogs,
+        so it now reads as perfectly typical (ratio 1.0) and is never
+        offered as a resize candidate at all. Asserts the strong, correct
+        guarantee directly, not just "eventually stops": zero resizes,
+        zero movement of W0 itself, across repeated runs."""
         eligible = [
             self._mk("W0", 687, 548, 1390, 996), self._mk("W1", 1551, 114, 165, 141),
             self._mk("W2", 2082, 816, 151, 191), self._mk("W3", 912, 119, 185, 142),
@@ -772,26 +792,24 @@ class TestSuperGResize(unittest.TestCase):
             w0 = next(r for r in result if r[0] == "W0")
             sizes.append((w0[3], w0[4]))
             layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
-        self.assertEqual(sizes[1], sizes[2], f"W0 kept changing size across runs: {sizes}")
-        self.assertEqual(sizes[2], sizes[3], f"W0 kept changing size across runs: {sizes}")
+        for s in sizes:
+            self.assertEqual(s, (1390, 996), f"W0 was resized even once: {sizes}")
 
-    def test_extreme_oversized_window_converges_monotonically(self):
+    def test_extreme_oversized_window_never_resizes_among_many_tiny_dialogs(self):
         """Companion to the moderate case above, also found by the random
-        benchmark: a window ~5.4x the group's typical area among 14 tiny
-        dialogs cannot reach RESIZE_ELIGIBLE_RATIO_FLOOR in a single step
-        without violating MAX_SHRINK_FRACTION's 25%-per-event cap. Verified
-        directly (not assumed): this specific 14-tiny-dialogs-to-1 ratio
-        takes 12 real, individually-justified cuts before stopping, by
-        which point the window has lost the large majority of its original
-        area -- a genuine, disclosed remaining characteristic (reference_area
-        is a simple median, which a 14:1 window-count skew drags down hard,
-        making an otherwise-ordinary main window look extremely oversized
-        by comparison) documented in this change's own report, NOT the
-        forbidden compounding pattern this test exists to rule out, which
-        has no bound and no decay at all. What IS asserted, because it's
-        the actual distinguishing line between the two: strictly
-        non-increasing size every round, and an EVENTUAL hard stop -- never
-        unbounded, never oscillating, never re-inflating."""
+        benchmark: a window ~5.4x a flat population median among 14 tiny
+        dialogs used to take 12 real, individually-justified cuts before
+        stopping, losing the large majority of its original area in the
+        process -- monotonic and bounded (never oscillating, never
+        re-inflating), but still an obviously wrong outcome for an
+        entirely ordinary main window that just happens to share a
+        desktop with a lot of small utility dialogs. With _typical_area's
+        size-class model (see the moderate test's own docstring), this
+        window's own class -- itself alone -- has more total area than
+        all 14 dialogs combined, so it reads as typical and is never
+        eligible for resize in the first place. Asserts the strong
+        guarantee: zero resizes across 20 repeated runs, not merely
+        "eventually stops shrinking"."""
         eligible = [
             self._mk("W0", 193, 832, 1233, 888), self._mk("W1", 285, 412, 179, 211),
             self._mk("W2", 1304, 239, 289, 149), self._mk("W3", 1478, 739, 291, 131),
@@ -803,20 +821,11 @@ class TestSuperGResize(unittest.TestCase):
             self._mk("W14", 223, 19, 220, 147),
         ]
         layout = eligible
-        areas = []
-        MAX_ROUNDS = 20
-        stable_round = None
-        for i in range(MAX_ROUNDS):
+        for i in range(20):
             result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
             w0 = next(r for r in result if r[0] == "W0")
-            areas.append(w0[3] * w0[4])
+            self.assertEqual((w0[3], w0[4]), (1233, 888), f"W0 was resized at round {i}")
             layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
-            if len(areas) >= 2 and areas[-1] == areas[-2]:
-                stable_round = i
-                break
-        self.assertIsNotNone(stable_round, f"never reached a fixed point within {MAX_ROUNDS} rounds: {areas}")
-        for a, b in zip(areas, areas[1:]):
-            self.assertLessEqual(b, a, f"W0's area INCREASED at some round -- not monotonic: {areas}")
 
 
 class TestResizeMinimums(unittest.TestCase):
@@ -1523,6 +1532,117 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
             for w, (a, nx, ny, nw, nh) in zip(eligible, result)
         )
         self.assertGreater(total_move, 100, "a genuinely bad vertical stack was left untouched")
+
+    def test_two_separate_coherent_clusters_stay_separate(self):
+        """Live-verified false negative (this session's own re-investigation):
+        requiring ALL eligible windows to share ONE connected component
+        conflated "coherent" with "connected to everything else" -- two
+        individually-perfect, already-centered 2x2 grids sitting apart
+        (e.g. one app's windows grouped left, an unrelated app's grouped
+        right -- a deliberate, sensible arrangement) got merged into one
+        supercluster, moving every window thousands of pixels. Multiple
+        components are now allowed provided each non-trivial one is
+        itself a reasonable shape."""
+        w, h, gap = 280, 220, GAP2
+
+        def grid(prefix, left, top):
+            return [
+                {"address": f"{prefix}0", "at": [left, top], "size": [w, h]},
+                {"address": f"{prefix}1", "at": [left + w + gap, top], "size": [w, h]},
+                {"address": f"{prefix}2", "at": [left, top + h + gap], "size": [w, h]},
+                {"address": f"{prefix}3", "at": [left + w + gap, top + h + gap], "size": [w, h]},
+            ]
+
+        eligible = grid("L", 100, 400) + grid("R", 1400, 400)
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
+        by_addr = {a: (x, y) for a, x, y, nw, nh in result}
+        for w2 in eligible:
+            addr = w2["address"]
+            self.assertEqual(by_addr[addr], tuple(w2["at"]), f"{addr} moved despite two already-good clusters")
+
+    def test_isolated_dialog_far_from_a_coherent_cluster_is_left_alone(self):
+        """Companion to the two-clusters test: a single window sitting
+        clearly apart from the main cluster (not merely a few dozen
+        pixels past flush-adjacency, but genuinely separate) must not be
+        dragged into it."""
+        eligible = [
+            {"address": "M0", "at": [700, 400], "size": [280, 220]},
+            {"address": "M1", "at": [985, 400], "size": [280, 220]},
+            {"address": "M2", "at": [700, 625], "size": [280, 220]},
+            {"address": "M3", "at": [985, 625], "size": [280, 220]},
+            {"address": "dialog", "at": [100, 100], "size": [300, 200]},
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
+        by_addr = {a: (x, y) for a, x, y, w2, h2 in result}
+        for w2 in eligible:
+            addr = w2["address"]
+            self.assertEqual(by_addr[addr], tuple(w2["at"]),
+                              f"{addr} moved despite an already-good cluster plus a clearly separate dialog")
+
+    def test_isolated_singleton_too_close_to_cluster_is_not_exempted(self):
+        """The flip side: a window that FAILS the strict flush-adjacency
+        test by only a small margin (relative to its own size) reads as
+        "should be tucked into the cluster it's right next to," not a
+        deliberate standalone dialog -- the singleton exemption must not
+        treat that as equivalent to a genuinely separate window."""
+        eligible = [
+            {"address": "A", "at": [558, 238], "size": [400, 300]},
+            {"address": "B", "at": [558, 543], "size": [400, 300]},
+            {"address": "C", "at": [963, 543], "size": [400, 300]},
+            {"address": "D", "at": [900, 915], "size": [400, 300]},  # only 72px past C's flush gap
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
+        by_addr = {a: (x, y) for a, x, y, w2, h2 in result}
+        moved = sum(1 for w2 in eligible if by_addr[w2["address"]] != tuple(w2["at"]))
+        self.assertGreater(moved, 0, "a window barely past flush-adjacency to its neighbor was wrongly exempted")
+
+
+class TestSuperGEquilibriumChange(unittest.TestCase):
+    """Part 9 of this session's own request: resize eligibility must
+    recompute fresh from CURRENT state every call (no persistent "never
+    resize this again" memory), so a genuine change to the window set can
+    re-enable it -- and, in the other direction, existing main windows
+    must not start shrinking just because new tiny windows arrived."""
+
+    def test_tiny_dialogs_arriving_does_not_shrink_existing_main_windows(self):
+        eligible = [
+            {"address": "MAIN1", "at": [100, 100], "size": [1200, 900]},
+            {"address": "MAIN2", "at": [1350, 100], "size": [500, 900]},
+        ]
+        layout = [{"address": a, "at": [x, y], "size": [w, h]}
+                  for a, x, y, w, h in arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)]
+        orig_sizes = {w["address"]: tuple(w["size"]) for w in layout}
+        for i in range(15):
+            others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in layout]
+            pos = apw.find_free_position((200, 150), others, (960, 540), GAP,
+                                          layout_others=others, reference_area=200 * 150)
+            layout.append({"address": f"dialog{i}", "at": list(pos), "size": [200, 150]})
+        for i in range(6):
+            result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+            for a, x, y, w, h in result:
+                if a in orig_sizes:
+                    self.assertEqual((w, h), orig_sizes[a], f"{a} was resized after tiny dialogs arrived (round {i})")
+            layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
+
+    def test_resize_eligibility_recomputes_fresh_each_call(self):
+        """No persistent "already resized, never again" flag exists
+        anywhere -- eligibility is a pure function of the CURRENT window
+        set each call. Verified two ways: (1) a genuinely disproportionate
+        outlier introduced into an otherwise-stable population resizes
+        normally (not blocked by some memory of the earlier stable state),
+        and (2) removing the outlier and re-adding a differently-sized one
+        re-evaluates independently."""
+        base = [{"address": f"M{i}", "at": [(i % 5) * 510, (i // 5) * 410], "size": [500, 400]} for i in range(10)]
+        layout = [{"address": a, "at": [x, y], "size": [w, h]}
+                  for a, x, y, w, h in arr.auto_arrange(base, [], (0, 0, 1920, 1080), GAP)]
+        for _ in range(3):
+            layout = [{"address": a, "at": [x, y], "size": [w, h]}
+                      for a, x, y, w, h in arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)]
+        layout.append({"address": "OUTLIER", "at": [2600, 100], "size": [950, 750]})
+        result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+        outlier = next(r for r in result if r[0] == "OUTLIER")
+        self.assertNotEqual((outlier[3], outlier[4]), (950, 750),
+                             "a genuine outlier added to an already-stable population was never resized")
 
 
 class TestRadialCompositionAlgorithmA(unittest.TestCase):
