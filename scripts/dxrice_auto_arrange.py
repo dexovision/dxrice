@@ -462,27 +462,31 @@ SUPER_G_RESIZE_COST_SCALE = 400.0
 # moderately (not pathologically) oversized window converging to a stable
 # result within a single re-run.
 #
-# Raised from an original 0.02 after the deterministic random-layout
-# benchmark (dxrice_placement_benchmark.py, not just hand-picked scenarios)
-# found real cases neither this margin nor the floor alone had ever been
-# tested against: one dominant window among a swarm of tiny dialogs (area
-# ratio ~2.8-3x typical) kept losing another ~10% every SEPARATE SUPER+G
-# invocation at the old 0.02 margin -- each individual cut looked like a
-# real, if modest, improvement, so nothing ever said "stop" until many
-# presses later. 0.10 was verified directly against that same reproducing
-# layout: the resize now fires exactly ONCE and holds stable on every
-# subsequent run for a ~2.8-3x oversized window. A genuinely EXTREME
-# outlier (~5x+ typical area, one huge window among a dozen-plus tiny
-# dialogs) still takes a handful of monotonically-decaying, individually-
-# justified steps to settle even at this margin -- expected, not a bug:
-# MAX_SHRINK_FRACTION caps any single cut at 25%, so bringing a >4x-typical
-# window down to RESIZE_ELIGIBLE_RATIO_FLOOR mathematically cannot happen
-# in one step without violating that cap. See
-# TestSuperGResize.test_extreme_oversized_window_converges_monotonically
-# for the disclosed bound on that specific case (strictly decaying,
-# provably terminates, never re-inflates -- not the same failure mode as
-# the compounding this margin exists to prevent).
-SUPER_G_RESIZE_MARGIN_FRACTION = 0.10
+# A PREVIOUS pass raised this to 0.10 after a random-layout benchmark found
+# a dominant window among many tiny dialogs losing ~10% on every SEPARATE
+# SUPER+G press. That was a symptomatic fix, not the real one, and this
+# session's own re-investigation found it: the actual bug was in
+# reference_area itself (see _typical_area's own docstring) -- a flat
+# population median let 14 tiny dialogs numerically outvote the ONE main
+# window, making an entirely ordinary window read as "5x+ oversized" and
+# eligible for repeated resizing purely because of how many small windows
+# happened to be open. Instrumented directly (per this session's own
+# methodology): a TINY window's own incremental placement step was the
+# one choosing to shrink the unrelated giant neighbor, purely because a
+# skewed reference made that neighbor look "cheap" to shrink relative to
+# the (contaminated) typical size -- not because the giant window was
+# ever actually in anyone's way. With _typical_area's size-cluster model
+# fixing that root cause, raising the margin is no longer needed: reverted
+# to 0.02, and the SAME three reproducing layouts that used to compound
+# (moderate ~2.8-7x and extreme ~5.4x oversized windows among many tiny
+# dialogs) now resize ZERO times across 8 repeated runs at this original
+# margin, because they're correctly never considered eligible in the
+# first place -- not because the bar to accept a resize got raised, but
+# because reference_area no longer says they're oversized at all. Raising
+# a margin to paper over a broken reference would have kept passing this
+# specific benchmark while leaving the underlying model wrong for every
+# other window count and dialog ratio it wasn't tuned against.
+SUPER_G_RESIZE_MARGIN_FRACTION = 0.02
 
 
 def _resize_fraction_cost(scale, prominence):
@@ -771,24 +775,81 @@ def _is_already_coherent(eligible, fixed_rects, viewport_center, gap):
             if coverage is not None and coverage >= ADJACENCY_COVERAGE_THRESHOLD:
                 adjacency[a].add(b)
                 adjacency[b].add(a)
-    seen = set()
-    stack = [addrs[0]]
-    while stack:
-        addr = stack.pop()
-        if addr in seen:
+
+    # Connected COMPONENTS, plural -- not one required global component.
+    # Live-verified false negative: two individually-perfect, already-
+    # centered 2x2 grids sitting apart from each other (e.g. one app's
+    # windows grouped on the left, an unrelated app's grouped on the
+    # right -- a deliberate, sensible arrangement, not a mistake) used to
+    # get rearranged into one supercluster, moving every window by
+    # thousands of pixels, purely because requiring ALL windows to share
+    # ONE component conflated "coherent" with "connected to everything
+    # else," which are not the same claim (see this function's own module
+    # comment). Multiple components are fine PROVIDED each non-trivial one
+    # (2+ windows) is itself a reasonably-shaped local cluster, and most
+    # windows aren't each their own isolated singleton -- that second
+    # condition is what still correctly rejects a genuinely SCATTERED
+    # desktop (many windows with no real neighbor at all), which is a
+    # real bad case this check must not start calling "coherent" just for
+    # having relaxed the single-component requirement.
+    unvisited = set(addrs)
+    components = []
+    while unvisited:
+        start = next(iter(unvisited))
+        seen, stack = set(), [start]
+        while stack:
+            addr = stack.pop()
+            if addr in seen:
+                continue
+            seen.add(addr)
+            stack.extend(adjacency[addr] - seen)
+        components.append(seen)
+        unvisited -= seen
+
+    def edge_gap(r1, r2):
+        xg = max(r1[0] - r2[2], r2[0] - r1[2], 0)
+        yg = max(r1[1] - r2[3], r2[1] - r1[3], 0)
+        return math.hypot(xg, yg) if (xg and yg) else max(xg, yg)
+
+    singletons = [c for c in components if len(c) == 1]
+    # At most a small handful of genuinely isolated windows (an
+    # intentional standalone dialog or two) may coexist with real
+    # clusters; if MOST windows have no real neighbor at all, that's a
+    # scattered desktop, not a collection of deliberate small clusters.
+    if len(singletons) > max(1, len(addrs) // 4):
+        return False
+    # A singleton only reads as a DELIBERATE standalone dialog when it
+    # actually sits apart -- live-verified false positive: a window
+    # merely a few dozen pixels past its would-be flush-adjacency gap
+    # (72px, on a 400x300 window) still reads as "should be tucked into
+    # the cluster it's right next to," not "intentionally separate,"
+    # even though it technically fails the strict flush-adjacency test.
+    # Self-relative (own smaller dimension), not a flat pixel count, so
+    # this scales sensibly across dialog and main-window sizes alike.
+    for singleton in singletons:
+        addr = next(iter(singleton))
+        r = rects[addr]
+        own_short = max(min(r[2] - r[0], r[3] - r[1]), 1.0)
+        nearest = min((edge_gap(r, rects[other]) for other in addrs if other != addr), default=float("inf"))
+        if nearest < own_short:
+            return False  # close enough to a neighbor that it reads as unfinished, not deliberate
+
+    for component in components:
+        if len(component) < 2:
             continue
-        seen.add(addr)
-        stack.extend(adjacency[addr] - seen)
-    if len(seen) != len(addrs):
-        return False  # not one connected cluster -- a real rearrangement may be needed
+        member_rects = [rects[a] for a in component]
+        cxs0 = [r[0] for r in member_rects]; cys0 = [r[1] for r in member_rects]
+        cxs1 = [r[2] for r in member_rects]; cys1 = [r[3] for r in member_rects]
+        c_w, c_h = max(cxs1) - min(cxs0), max(cys1) - min(cys0)
+        c_long, c_short = max(c_w, c_h), max(min(c_w, c_h), 1.0)
+        if c_long / c_short > ALREADY_GOOD_ASPECT_RATIO_MAX:
+            return False  # this specific cluster is itself a bad (e.g. axis-concentrated) shape
 
     xs0 = [r[0] for r in all_rects]; ys0 = [r[1] for r in all_rects]
     xs1 = [r[2] for r in all_rects]; ys1 = [r[3] for r in all_rects]
     bbox_w = max(xs1) - min(xs0)
     bbox_h = max(ys1) - min(ys0)
-    long_side, short_side = max(bbox_w, bbox_h), max(min(bbox_w, bbox_h), 1.0)
-    if long_side / short_side > ALREADY_GOOD_ASPECT_RATIO_MAX:
-        return False
+    short_side = max(min(bbox_w, bbox_h), 1.0)
 
     bbox_cx, bbox_cy = (min(xs0) + max(xs1)) / 2, (min(ys0) + max(ys1)) / 2
     tolerance = short_side * ALREADY_GOOD_CENTER_TOLERANCE_FACTOR
@@ -796,6 +857,64 @@ def _is_already_coherent(eligible, fixed_rects, viewport_center, gap):
         return False
 
     return True
+
+
+# A window's area ratio to the next larger one, above which they're
+# considered different SIZE CLASSES rather than variations of the same
+# class -- e.g. a 1600x1000 main window and a 250x150 dialog (ratio ~43x)
+# are obviously different classes; four 900x700 windows and one 850x680
+# one (ratio ~1.1x) are obviously the same class. 2.25 matches
+# RESIZE_ELIGIBLE_RATIO_FLOOR's own area-ratio (1.5 linear, squared) --
+# the same "meaningfully bigger" boundary already established and tested
+# for deciding whether ONE window is oversized is reused here to decide
+# whether TWO windows belong to the same size class, rather than
+# inventing an unrelated second number.
+SIZE_CLASS_RATIO = RESIZE_ELIGIBLE_RATIO_FLOOR ** 2
+
+
+def _typical_area(eligible):
+    """The reference "typical window size" for the whole pass -- used both
+    for composition mass-weighting (window_mass) and resize eligibility
+    (_mass_ratio). NOT a flat population median: a live random-layout
+    benchmark found a real bug in that model -- 14 tiny dialogs
+    numerically outvoting the ONE main window drags a population median
+    down near the dialogs' own size, making an entirely ordinary main
+    window look "5x oversized" and eligible for repeated SUPER+G
+    resizing purely because of how many small utility windows happened to
+    be open, not because it was actually too big for anything.
+
+    Fixed by asking a different, more representative question: which
+    SIZE CLASS actually occupies the most of the desktop, by total area,
+    not by window count? Windows are grouped into classes by area ratio
+    (see SIZE_CLASS_RATIO); the class with the greatest COMBINED area
+    wins, and that class's own median area is the reference. This
+    correctly recognizes a lone 1600x1000 window as its own, entirely
+    legitimate size class (its class's total area, 1.6M, beats 14 tiny
+    dialogs' combined ~400-500K, so it becomes its own reference and
+    reads as "typical," not "oversized") while still correctly picking
+    the dominant class when there genuinely are several similarly-large
+    windows (8x 900x700 outweighs 1 tiny dialog by total area either
+    way, same as the old median already handled correctly). Verified
+    against both distributions explicitly, not assumed.
+
+    Falls back to the single-cluster case (equivalent to a population
+    median within that one cluster) whenever every window's area is
+    within SIZE_CLASS_RATIO of its neighbors -- i.e. this is a strict
+    refinement of the old model for the case it got right, not a
+    different formula that happens to also work there.
+    """
+    areas = sorted(w["size"][0] * w["size"][1] for w in eligible)
+    if not areas:
+        return 1.0
+    clusters = [[areas[0]]]
+    for a in areas[1:]:
+        if a / clusters[-1][-1] <= SIZE_CLASS_RATIO:
+            clusters[-1].append(a)
+        else:
+            clusters.append([a])
+    dominant = max(clusters, key=sum)
+    mid = len(dominant) // 2
+    return dominant[mid] if len(dominant) % 2 else (dominant[mid - 1] + dominant[mid]) / 2
 
 
 def auto_arrange(eligible, fixed, monitor_bounds, gap):
@@ -843,14 +962,7 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap):
 
     ordered = sorted(eligible, key=sort_key)
 
-    # A shared "typical window size" for the whole pass, so every window's
-    # mass in the global composition term is weighed against the same
-    # yardstick regardless of placement order -- median rather than mean
-    # so one unusually large or small window in the group doesn't skew
-    # what "typical" means for everyone else's weighting.
-    areas = sorted(w["size"][0] * w["size"][1] for w in eligible)
-    mid = len(areas) // 2
-    reference_area = areas[mid] if len(areas) % 2 else (areas[mid - 1] + areas[mid]) / 2
+    reference_area = _typical_area(eligible)
 
     fixed_rects = [rect_for(*_xywh(w)) for w in fixed]
     placed = {}  # {address: (x, y, w, h)} -- FINAL geometry, mutated in place when
