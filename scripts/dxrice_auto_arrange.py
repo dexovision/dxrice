@@ -79,7 +79,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, batch_async, move_window_exact_lua, resize_window_exact_lua
 from dxrice_auto_place_window import (get_monitor_bounds, live_gap, rect_for, overlaps,
                                        composition_penalty, composition_cost, window_mass, mass_center,
-                                       MIN_USABLE_WIDTH, MIN_USABLE_HEIGHT, MAX_SHRINK_FRACTION)
+                                       MIN_USABLE_WIDTH, MIN_USABLE_HEIGHT, MAX_SHRINK_FRACTION,
+                                       _flush_coverage, _nearest_for_candidates)
 
 _DEBUG = os.environ.get("DXRICE_DEBUG") == "1"
 
@@ -211,7 +212,17 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
 
     xs = {cx0 - nw / 2}
     ys = {cy0 - nh / 2}
-    for (ox0, oy0, ox1, oy1) in obstacle_rects:
+    # See dxrice_auto_place_window.CANDIDATE_ANCHOR_CAP's own comment --
+    # same O(n^2)-candidates-times-O(n)-scoring blowup, same fix: only the
+    # nearest obstacles (to this window's own current position, the point
+    # this search actually cares about being near) get to propose
+    # candidate x/y values when there are many more than that could
+    # plausibly matter. `free()` and every scoring term above still check
+    # every obstacle -- this only prunes which POSITIONS get proposed.
+    pruned = _nearest_for_candidates([(x0, y0, x1 - x0, y1 - y0) for x0, y0, x1, y1 in obstacle_rects],
+                                      current_pos)
+    for ox, oy, ow, oh in pruned:
+        ox0, oy0, ox1, oy1 = ox, oy, ox + ow, oy + oh
         xs.update((ox0, ox1, ox0 - nw - gap, ox1 + gap))
         ys.update((oy0, oy1, oy0 - nh - gap, oy1 + gap))
 
@@ -450,7 +461,28 @@ SUPER_G_RESIZE_COST_SCALE = 400.0
 # this change's own repeated-SUPER+G regression tests, including a
 # moderately (not pathologically) oversized window converging to a stable
 # result within a single re-run.
-SUPER_G_RESIZE_MARGIN_FRACTION = 0.02
+#
+# Raised from an original 0.02 after the deterministic random-layout
+# benchmark (dxrice_placement_benchmark.py, not just hand-picked scenarios)
+# found real cases neither this margin nor the floor alone had ever been
+# tested against: one dominant window among a swarm of tiny dialogs (area
+# ratio ~2.8-3x typical) kept losing another ~10% every SEPARATE SUPER+G
+# invocation at the old 0.02 margin -- each individual cut looked like a
+# real, if modest, improvement, so nothing ever said "stop" until many
+# presses later. 0.10 was verified directly against that same reproducing
+# layout: the resize now fires exactly ONCE and holds stable on every
+# subsequent run for a ~2.8-3x oversized window. A genuinely EXTREME
+# outlier (~5x+ typical area, one huge window among a dozen-plus tiny
+# dialogs) still takes a handful of monotonically-decaying, individually-
+# justified steps to settle even at this margin -- expected, not a bug:
+# MAX_SHRINK_FRACTION caps any single cut at 25%, so bringing a >4x-typical
+# window down to RESIZE_ELIGIBLE_RATIO_FLOOR mathematically cannot happen
+# in one step without violating that cap. See
+# TestSuperGResize.test_extreme_oversized_window_converges_monotonically
+# for the disclosed bound on that specific case (strictly decaying,
+# provably terminates, never re-inflates -- not the same failure mode as
+# the compounding this margin exists to prevent).
+SUPER_G_RESIZE_MARGIN_FRACTION = 0.10
 
 
 def _resize_fraction_cost(scale, prominence):
@@ -666,6 +698,106 @@ def _shift_is_safe(placed, shift, fixed_rects, gap):
     return True
 
 
+# A layout this session's own investigation kept finding SUPER+G reshuffle
+# even though it was already excellent by every human-legible measure (a
+# 2x2 grid, then a correctly-centered 3x3 grid) -- not because any single
+# candidate step was wrong, but because the incremental largest-first
+# REBUILD has no way to represent "this is already fine, stop" short of
+# every individual per-window decision happening to agree, and covariance-
+# based anisotropy (composition_cost's shape term) turned out NOT to be a
+# reliable judge of that at small N (see the stay-put veto's own comment
+# for the proof). Rather than chasing that per-candidate fragility further
+# with more special-case comparisons -- which broke the resize-settling
+# tests the one time it was tried (compares against the wrong baseline
+# once a genuine resize is mid-decision) -- this checks for "already
+# coherent" ONCE, structurally, before the rebuild ever starts, using
+# properties a picture of the layout can be judged by directly rather than
+# a 2nd-moment statistic: no invalid overlaps, every eligible window
+# reachable from every other through a real (not sliver) shared edge, the
+# whole group's own bounding box isn't dramatically elongated, and that
+# bbox is already close to the viewport center. A layout meeting all four
+# is returned completely unchanged -- true zero movement, zero resize, not
+# merely "small" movement -- which is what lets Case I (already-excellent
+# -> SUPER+G does nothing) hold for ANY window count and ANY of the
+# shapes this was checked against (2x2, 3x3, an L, a T, a staircase, an
+# asymmetric packed cluster -- see dxrice_test_placement.py's
+# TestAlreadyCoherentLayouts), not just the one 4-window case a narrower,
+# per-candidate patch happened to be discovered on.
+ADJACENCY_COVERAGE_THRESHOLD = 0.3
+
+# A composition whose overall footprint is more than this much longer than
+# it is wide (or vice versa) reads as a stack/row, not a cluster, no matter
+# how well-connected its pieces are -- a real stack IS one connected
+# component (each window touches its neighbor), so connectivity alone
+# can't tell the two apart. Evidenced against this file's own deliberately
+# bad inputs: 4/5/6-window vertical stacks measure 3.0/4.1/5.1 by this
+# ratio; the 2x2 and 3x3 grids this check exists to protect measure
+# 1.5/1.3. Chosen with real margin above the grids and well below the
+# stacks, not squeezed between them.
+ALREADY_GOOD_ASPECT_RATIO_MAX = 2.2
+
+# How far the bbox center may sit from the viewport center and still count
+# as "already centered", as a FRACTION of the bbox's own shorter side --
+# self-relative rather than a flat pixel count, since "off by 40px" reads
+# as centered for a 1200px-wide cluster and badly off for a 300px one.
+ALREADY_GOOD_CENTER_TOLERANCE_FACTOR = 0.5
+
+
+def _is_already_coherent(eligible, fixed_rects, viewport_center, gap):
+    """See this function's own call site (auto_arrange) for the reasoning.
+    Structural, not a scalar shape metric: overlap validity, adjacency-
+    graph connectivity, bbox aspect ratio, bbox centering. `fixed_rects`:
+    already-converted (x0,y0,x1,y1) rects."""
+    if len(eligible) <= 1:
+        return True
+    rects = {w["address"]: rect_for(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible}
+    all_rects = list(rects.values())
+
+    for i in range(len(all_rects)):
+        inflated = (all_rects[i][0] - gap, all_rects[i][1] - gap, all_rects[i][2] + gap, all_rects[i][3] + gap)
+        for j in range(len(all_rects)):
+            if i != j and overlaps(inflated, all_rects[j]):
+                return False
+        for f in fixed_rects:
+            if overlaps(inflated, f):
+                return False
+
+    addrs = list(rects.keys())
+    adjacency = {a: set() for a in addrs}
+    for i in range(len(addrs)):
+        for j in range(i + 1, len(addrs)):
+            a, b = addrs[i], addrs[j]
+            coverage = _flush_coverage(rects[a], rects[b], gap)
+            if coverage is not None and coverage >= ADJACENCY_COVERAGE_THRESHOLD:
+                adjacency[a].add(b)
+                adjacency[b].add(a)
+    seen = set()
+    stack = [addrs[0]]
+    while stack:
+        addr = stack.pop()
+        if addr in seen:
+            continue
+        seen.add(addr)
+        stack.extend(adjacency[addr] - seen)
+    if len(seen) != len(addrs):
+        return False  # not one connected cluster -- a real rearrangement may be needed
+
+    xs0 = [r[0] for r in all_rects]; ys0 = [r[1] for r in all_rects]
+    xs1 = [r[2] for r in all_rects]; ys1 = [r[3] for r in all_rects]
+    bbox_w = max(xs1) - min(xs0)
+    bbox_h = max(ys1) - min(ys0)
+    long_side, short_side = max(bbox_w, bbox_h), max(min(bbox_w, bbox_h), 1.0)
+    if long_side / short_side > ALREADY_GOOD_ASPECT_RATIO_MAX:
+        return False
+
+    bbox_cx, bbox_cy = (min(xs0) + max(xs1)) / 2, (min(ys0) + max(ys1)) / 2
+    tolerance = short_side * ALREADY_GOOD_CENTER_TOLERANCE_FACTOR
+    if math.hypot(bbox_cx - viewport_center[0], bbox_cy - viewport_center[1]) > tolerance:
+        return False
+
+    return True
+
+
 def auto_arrange(eligible, fixed, monitor_bounds, gap):
     """eligible / fixed: [{"address":..., "at":[x,y], "size":[w,h]}, ...].
     Returns [(address, new_x, new_y, new_w, new_h), ...] for EVERY eligible
@@ -680,6 +812,10 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap):
 
     mx0, my0, mx1, my1 = monitor_bounds
     viewport_center = ((mx0 + mx1) / 2, (my0 + my1) / 2)
+
+    fixed_rects_precheck = [rect_for(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in fixed]
+    if _is_already_coherent(eligible, fixed_rects_precheck, viewport_center, gap):
+        return [(w["address"], w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible]
 
     def raw_center(w):
         return (w["at"][0] + w["size"][0] / 2, w["at"][1] + w["size"][1] / 2)

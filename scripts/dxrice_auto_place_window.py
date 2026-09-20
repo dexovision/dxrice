@@ -630,6 +630,52 @@ def composition_penalty(cand, layout_rects, gap):
     return sliver + dead - align
 
 
+# Caps how many obstacles ever contribute their own edges as candidate
+# ANCHORS in find_free_position / find_least_disruptive_position /
+# _candidate_targets -- profiled at n=25 eligible windows: these three
+# functions each build their candidate set as every x-value crossed with
+# every y-value derived from EVERY obstacle's edges, an O(n) x n) = O(n^2)
+# candidate count, each then scored in O(n) time -- an O(n^3) cost PER
+# CALL that dominated Stage 2's own wall-clock time (0.58s of it for a
+# single try_make_room call at n=25, almost entirely inside
+# _candidate_targets's own candidate generation+scoring, not the cascade
+# resolution loop this file's other performance fix already bounded).
+# Rather than changing WHICH positions win (any change there risks
+# altering already-verified behavior), this only prunes WHICH OBSTACLES
+# get to propose candidate x/y values in the first place, to the
+# CANDIDATE_ANCHOR_CAP nearest (by center distance) to the point the
+# search actually cares about being near -- `free()` and every scoring
+# term still check the FULL, unpruned obstacle/layout set, so correctness
+# (never overlapping something far away, being weighed correctly in the
+# global composition) is completely unaffected; only how many CANDIDATE
+# POSITIONS get proposed changes, and only when there are meaningfully
+# more obstacles than this cap. An obstacle far from the point of
+# interest is exceedingly unlikely to ever produce the winning candidate
+# anyway (its edges are nowhere near where the search is actually
+# looking), so this is pruning by relevance, not by an arbitrary count --
+# per this session's own explicit "only consider windows that can
+# actually conflict" guidance. No-op for every realistic desktop window
+# count (this file's own test suite never exceeds this many eligible
+# windows in one call), verified by re-running the full suite unchanged.
+CANDIDATE_ANCHOR_CAP = 12
+
+
+def _nearest_for_candidates(obstacles, anchor, cap=CANDIDATE_ANCHOR_CAP):
+    """obstacles: [(x, y, w, h), ...]. Returns the `cap` closest (by center
+    distance to `anchor`) unchanged if there are already `cap` or fewer --
+    see CANDIDATE_ANCHOR_CAP's own comment for why this only prunes which
+    obstacles propose candidate x/y VALUES, never which obstacles are
+    checked for validity or counted in the composition."""
+    obstacles = list(obstacles)
+    if len(obstacles) <= cap:
+        return obstacles
+    ax, ay = anchor
+    def dist2(o):
+        ox, oy, ow, oh = o
+        return (ox + ow / 2 - ax) ** 2 + (oy + oh / 2 - ay) ** 2
+    return sorted(obstacles, key=dist2)[:cap]
+
+
 def find_free_position(new_size, others, center, gap, viewport=None, layout_others=None,
                         reference_area=None):
     """others: [(x, y, w, h), ...] of every OTHER floating window on this
@@ -750,7 +796,7 @@ def find_free_position(new_size, others, center, gap, viewport=None, layout_othe
     # read as composed rather than dropped in the middle.
     xs = {cx - nw / 2}
     ys = {cy - nh / 2}
-    for ox, oy, ow, oh in list(others) + list(layout_others):
+    for ox, oy, ow, oh in _nearest_for_candidates(list(others) + list(layout_others), center):
         xs.update((ox, ox + ow + gap, ox - nw - gap))
         ys.update((oy, oy + oh + gap, oy - nh - gap))
 
@@ -853,7 +899,7 @@ def find_least_disruptive_position(new_size, others, gap, current_pos, layout_ot
 
     xs = {cx0 - nw / 2}
     ys = {cy0 - nh / 2}
-    for ox, oy, ow, oh in others:
+    for ox, oy, ow, oh in _nearest_for_candidates(others, current_pos):
         xs.update((ox, ox + ow + gap, ox - nw - gap))
         ys.update((oy, oy + oh + gap, oy - nh - gap))
 
@@ -995,7 +1041,7 @@ def _candidate_targets(new_size, fixed_obstacles, layout_others, center, gap, to
 
     xs = {cx - nw / 2}
     ys = {cy - nh / 2}
-    for ox, oy, ow, oh in list(fixed_obstacles) + list(layout_others):
+    for ox, oy, ow, oh in _nearest_for_candidates(list(fixed_obstacles) + list(layout_others), center):
         xs.update((ox, ox + ow + gap, ox - nw - gap))
         ys.update((oy, oy + oh + gap, oy - nh - gap))
     candidates = [(x, y) for x in xs for y in ys]
