@@ -749,6 +749,75 @@ class TestSuperGResize(unittest.TestCase):
         r2 = arr.auto_arrange(round1, [], (0, 0, 1920, 1080), GAP)
         self.assertEqual(sorted(r1), sorted(r2), "5 identically-sized windows did not converge on a repeated run")
 
+    def test_moderately_oversized_window_converges_in_one_step(self):
+        """Found by dxrice_placement_benchmark.py's random-layout harness,
+        not a hand-picked scenario: one dominant window (~7x the group's
+        typical area) among 10 tiny dialogs kept losing another ~10% on
+        EVERY SEPARATE SUPER+G invocation at the old 0.02 margin -- each
+        individual cut looked like a real improvement, so nothing said
+        stop. At the current 0.10 margin, the resize fires exactly once
+        and holds stable on every subsequent run."""
+        eligible = [
+            self._mk("W0", 687, 548, 1390, 996), self._mk("W1", 1551, 114, 165, 141),
+            self._mk("W2", 2082, 816, 151, 191), self._mk("W3", 912, 119, 185, 142),
+            self._mk("W4", 2082, 591, 180, 190), self._mk("W5", 922, 266, 153, 184),
+            self._mk("W6", 675, 1549, 273, 203), self._mk("W7", 697, 1757, 216, 153),
+            self._mk("W8", 690, 27, 158, 144), self._mk("W9", 1170, 76, 169, 219),
+            self._mk("W10", 1080, 300, 165, 207),
+        ]
+        layout = eligible
+        sizes = []
+        for _ in range(4):
+            result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+            w0 = next(r for r in result if r[0] == "W0")
+            sizes.append((w0[3], w0[4]))
+            layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
+        self.assertEqual(sizes[1], sizes[2], f"W0 kept changing size across runs: {sizes}")
+        self.assertEqual(sizes[2], sizes[3], f"W0 kept changing size across runs: {sizes}")
+
+    def test_extreme_oversized_window_converges_monotonically(self):
+        """Companion to the moderate case above, also found by the random
+        benchmark: a window ~5.4x the group's typical area among 14 tiny
+        dialogs cannot reach RESIZE_ELIGIBLE_RATIO_FLOOR in a single step
+        without violating MAX_SHRINK_FRACTION's 25%-per-event cap. Verified
+        directly (not assumed): this specific 14-tiny-dialogs-to-1 ratio
+        takes 12 real, individually-justified cuts before stopping, by
+        which point the window has lost the large majority of its original
+        area -- a genuine, disclosed remaining characteristic (reference_area
+        is a simple median, which a 14:1 window-count skew drags down hard,
+        making an otherwise-ordinary main window look extremely oversized
+        by comparison) documented in this change's own report, NOT the
+        forbidden compounding pattern this test exists to rule out, which
+        has no bound and no decay at all. What IS asserted, because it's
+        the actual distinguishing line between the two: strictly
+        non-increasing size every round, and an EVENTUAL hard stop -- never
+        unbounded, never oscillating, never re-inflating."""
+        eligible = [
+            self._mk("W0", 193, 832, 1233, 888), self._mk("W1", 285, 412, 179, 211),
+            self._mk("W2", 1304, 239, 289, 149), self._mk("W3", 1478, 739, 291, 131),
+            self._mk("W4", 568, 254, 189, 196), self._mk("W5", 1064, 393, 289, 142),
+            self._mk("W6", 842, 1725, 208, 191), self._mk("W7", 382, 1725, 218, 132),
+            self._mk("W8", 329, 628, 250, 193), self._mk("W9", 1598, 141, 177, 142),
+            self._mk("W10", 762, 193, 165, 173), self._mk("W11", 1431, 975, 177, 190),
+            self._mk("W12", 35, 625, 179, 159), self._mk("W13", 1109, 540, 233, 145),
+            self._mk("W14", 223, 19, 220, 147),
+        ]
+        layout = eligible
+        areas = []
+        MAX_ROUNDS = 20
+        stable_round = None
+        for i in range(MAX_ROUNDS):
+            result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+            w0 = next(r for r in result if r[0] == "W0")
+            areas.append(w0[3] * w0[4])
+            layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
+            if len(areas) >= 2 and areas[-1] == areas[-2]:
+                stable_round = i
+                break
+        self.assertIsNotNone(stable_round, f"never reached a fixed point within {MAX_ROUNDS} rounds: {areas}")
+        for a, b in zip(areas, areas[1:]):
+            self.assertLessEqual(b, a, f"W0's area INCREASED at some round -- not monotonic: {areas}")
+
 
 class TestResizeMinimums(unittest.TestCase):
     """Section 2: resize policy. See dxrice_auto_place_window.MIN_USABLE_*
@@ -1366,6 +1435,94 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
         self.assertTrue(min(xs) < 0 or max(xs) > 1920 or min(ys) < 0 or max(ys) > 1080,
                          "with the whole monitor occupied by a fixed obstacle, eligible windows "
                          "have nowhere on-screen to go -- must not be clamped into it anyway")
+
+
+class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
+    """A structural (not shape-metric) fix for a real bug: composition_cost's
+    covariance-based anisotropy can be won by a candidate that is actually a
+    worse composition to a human eye (see the stay-put veto's own comment in
+    dxrice_auto_arrange.py -- a correctly-centered 2x2 grid initially got
+    reshuffled by SUPER+G, and a correctly-centered 3x3 grid still did even
+    after that first, narrower fix). Rather than adding a second, similarly
+    narrow per-candidate patch -- tried and reverted after it broke the
+    resize-settling tests -- auto_arrange now checks ONCE, structurally,
+    whether the layout is already coherent (no overlaps, one connected
+    adjacency component, not badly elongated, already centered) before the
+    incremental rebuild ever starts, and returns it completely unchanged if
+    so. These tests lock in that this generalizes to shapes it was never
+    written FOR specifically (3x3, L, T, a real overlapping staircase, an
+    asymmetric cluster), not just the 2x2 grid the bug was found on, while
+    still allowing genuinely bad layouts (an axis-concentrated stack) to be
+    rearranged."""
+
+    def _assert_untouched(self, name, eligible, gap=GAP2):
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
+        by_addr = {a: (x, y, w, h) for a, x, y, w, h in result}
+        for w in eligible:
+            addr = w["address"]
+            ox, oy = w["at"]; ow, oh = w["size"]
+            nx, ny, nw, nh = by_addr[addr]
+            self.assertEqual((nx, ny, nw, nh), (ox, oy, ow, oh),
+                              f"{name}: {addr} was touched even though the layout was already coherent")
+
+    def test_3x3_grid_stays_put(self):
+        w, h, gap = 280, 220, GAP2
+        total_w, total_h = 3 * w + 2 * gap, 3 * h + 2 * gap
+        left, top = 960 - total_w / 2, 540 - total_h / 2
+        eligible = [{"address": f"W{r*3+c}", "at": [left + c * (w + gap), top + r * (h + gap)], "size": [w, h]}
+                    for r in range(3) for c in range(3)]
+        self._assert_untouched("3x3 grid", eligible)
+
+    def test_l_shape_stays_put(self):
+        eligible = [
+            {"address": "A", "at": [660, 240], "size": [400, 300]},
+            {"address": "B", "at": [660, 545], "size": [400, 300]},
+            {"address": "C", "at": [1065, 545], "size": [400, 300]},
+        ]
+        self._assert_untouched("L-shape", eligible)
+
+    def test_t_shape_stays_put(self):
+        eligible = [
+            {"address": "A", "at": [660, 240], "size": [600, 250]},
+            {"address": "B", "at": [660, 495], "size": [295, 250]},
+            {"address": "C", "at": [960, 495], "size": [295, 250]},
+        ]
+        self._assert_untouched("T-shape", eligible)
+
+    def test_real_overlapping_staircase_stays_put(self):
+        """Each step genuinely shares part of an edge with the next -- a
+        pure corner-touching diagonal (no shared edge at all) is NOT
+        adjacency by this or any reasonable definition, so that variant is
+        deliberately not asserted to stay put here."""
+        w, h, gap = 300, 220, GAP2
+        eligible = [
+            {"address": "A", "at": [560, 220], "size": [w, h]},
+            {"address": "B", "at": [560 + w // 2 + gap, 220 + h + gap], "size": [w, h]},
+            {"address": "C", "at": [560 + w + 2 * gap, 220 + 2 * (h + gap)], "size": [w, h]},
+        ]
+        self._assert_untouched("staircase", eligible)
+
+    def test_asymmetric_coherent_cluster_stays_put(self):
+        eligible = [
+            {"address": "BIG", "at": [660, 300], "size": [500, 400]},
+            {"address": "s1", "at": [1165, 300], "size": [250, 195]},
+            {"address": "s2", "at": [1165, 500], "size": [250, 195]},
+        ]
+        self._assert_untouched("asymmetric cluster", eligible)
+
+    def test_bad_vertical_stack_is_not_exempted(self):
+        """The structural check must not accidentally make a genuinely bad
+        (axis-concentrated, off-center) layout look 'coherent' just because
+        it happens to be one connected component -- a stack IS one
+        connected component too, which is exactly why aspect-ratio and
+        centering are also required, not connectivity alone."""
+        eligible = [{"address": f"S{i}", "at": [900, i * 305], "size": [400, 300]} for i in range(4)]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
+        total_move = sum(
+            math.hypot(nx - w["at"][0], ny - w["at"][1])
+            for w, (a, nx, ny, nw, nh) in zip(eligible, result)
+        )
+        self.assertGreater(total_move, 100, "a genuinely bad vertical stack was left untouched")
 
 
 class TestRadialCompositionAlgorithmA(unittest.TestCase):
