@@ -75,18 +75,20 @@ genuine net win. There is no separate hardcoded "close enough to center"
 cutoff deciding this on its own; the two plans are always actually
 computed and compared.
 
-STAGE 3 -- resize, only as an actual last resort: evaluated only after
-Stage 1 and Stage 2 have both already been scored and the better of the
-two is still bad relative to the new window's own size (see
-try_resize_room's RESIZE_TRIGGER_MULTIPLE) -- i.e. rearranging alone
-couldn't produce a usable result. Shrinks exactly ONE existing window
-(never the new one), along just the axis actually blocking the new
-window, bounded by both a fraction of that window's own current size and
-an absolute usable-size floor (MIN_USABLE_WIDTH/HEIGHT) that no resize
-here may ever cross. Only applied when the resulting plan's total cost
-(placement distance + a real cost per pixel removed) beats the best
-rearrangement-only plan -- a resize that doesn't clearly help is never
-used.
+STAGE 3 -- resize, only when it genuinely helps: evaluated after Stage 1
+and Stage 2 have both already been scored, and its candidates are judged
+against that same score -- the actual whole-composition cost of the
+resulting layout (see composition_cost), not a bare "is the new window
+close to center" check (an earlier version used the latter and, per a
+live sizing audit, missed real improvements a modest resize could
+provide while the new window's own position still looked fine on its
+own). Shrinks exactly ONE existing window (never the new one), bounded by
+both a fraction of that window's own current size and an absolute
+usable-size floor (MIN_USABLE_WIDTH/HEIGHT) that no resize here may ever
+cross, with its own per-pixel cost scaled by how prominent that window is
+relative to the new one. Only applied when the resulting plan's total
+cost genuinely beats the best rearrangement-only plan -- a resize that
+doesn't clearly help the real objective is never used.
 
 Reads Hyprland's own event socket (.socket2.sock) directly -- the same
 plain-text openwindow/activewindowv2 protocol `socat`/`hyprctl --instance`
@@ -1168,12 +1170,23 @@ MAX_SHRINK_FRACTION = 0.25
 # not measured, same convention as this file's other weights.
 RESIZE_COST_PER_PIXEL = 1.2
 
-# Stage 3 is only even considered when the better of Stage 1's and Stage
-# 2's cost is still this many times the new window's own diagonal -- i.e.
-# only for outcomes that are genuinely bad, never as a routine alternative
-# to rearranging. A normal placement or ordinary make-room never approaches
-# this multiple in practice.
-RESIZE_TRIGGER_MULTIPLE = 1.5
+# (Formerly RESIZE_TRIGGER_MULTIPLE: a fixed "only consider resize when the
+# new window's own positional cost is this many times its diagonal" gate.
+# Removed after a live sizing audit (dxrice_test_placement.py's
+# TestResizeCompositionAware, and this change's own report) showed it was
+# measuring the wrong thing -- the new window's own distance to center has
+# no reliable relationship to whether the WHOLE composition is actually
+# bad. Two windows already sitting far apart from each other (each only
+# moderately close to center individually) produced a genuinely poor
+# composition (high anisotropy) that this gate never even let Stage 3
+# look at, while other cases with an equally "fine-looking" positional
+# cost turned out to have real, measurable composition improvements
+# available from a modest resize. try_resize_room now always evaluates its
+# candidates (cheap -- bounded by eligible-window count) and scores them
+# against the actual composition_cost of the whole resulting layout, the
+# same objective Stage 1 vs Stage 2 already decides by -- so "only resize
+# when it materially helps" is enforced by an honest comparison, not a
+# threshold guess.)
 
 
 def clamp_to_usable_size(w, h):
@@ -1193,28 +1206,32 @@ def clamp_to_usable_size(w, h):
 
 
 def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost):
-    """DECISION (investigated, not assumed): this stage is a deliberate,
-    intentionally-rare safety fallback -- kept, not redesigned or removed.
-    Across every synthetic test in dxrice_test_placement.py plus 10
-    deliberately adversarial real-layout scenarios on a live compositor
-    (a large centered window + a tiny dialog, a tiny centered window + a
-    large application, a narrow gap between two windows, an L of windows,
-    windows surrounding the viewport center, a dense 6-window cluster,
-    scattered far-apart windows, a huge window overlapping the viewport,
-    a fullscreen obstacle, and windows with extreme/mismatched aspect
-    ratios), Stage 1 and Stage 2 resolved every single one on their own --
-    this function never fired naturally once. That's evidence the infinite
-    canvas rarely if ever runs out of room to rearrange into, not that this
-    code is dead: an infinite canvas means Stage 2's spiral fallback always
-    eventually finds free space, so RESIZE_TRIGGER_MULTIPLE's bar (rearrange
-    alone still bad) is genuinely hard to clear outside a pathological,
-    extremely dense/gridlocked cluster. Kept specifically for that case
-    rather than removed, since it costs nothing when it doesn't fire (only
-    evaluated once Stage 1/2 are both already scored as bad) and is fully
-    bounded/tested when it does. Verified separately, by forcing the trigger
-    threshold directly, that the mechanism itself (variant selection, the
-    MIN_USABLE/MAX_SHRINK bounds, the explicit anchor correction below) is
-    correct -- see dxrice_test_placement.py's TestResizeMinimums.
+    """DECISION (investigated, not assumed): a live sizing audit (6
+    deterministic mixed-size scenarios, see this change's own report and
+    dxrice_test_placement.py's TestResizeCompositionAware) found the
+    PREVIOUS version of this stage -- gated behind a fixed "new window's
+    own positional cost is this many times its diagonal" trigger, and
+    scored only by that same new-window-only distance -- never fired at
+    all across any of the 6 scenarios, even ones where a modest resize
+    measurably improved the actual composition_cost of the whole layout
+    (2 large windows + 1 small one open sequentially: the trigger's
+    positional check looked "fine" every time, while the real objective
+    the rest of this file optimizes for was left clearly worse than it
+    needed to be). This version fixes that by using the SAME "always
+    compute honestly, compare, pick the winner" pattern Stage 1 vs Stage 2
+    already uses (see place_new_window) instead of a threshold guess:
+    every candidate resize is scored by the actual composition_cost of the
+    WHOLE resulting layout (new window + every eligible window, one of
+    them shrunk) plus the resize's own cost, and only returned when that
+    total genuinely beats `best_cost` -- which the caller now derives from
+    the SAME cost1/cost2_total values (including their own composition
+    term) used to choose between Stage 1 and Stage 2, not a bare
+    positional distance. The same audit also found forcing a resize can
+    make things WORSE (2 large windows side by side: shrinking either
+    one's height doesn't address the actual left-right spread causing the
+    bad composition) -- this is exactly why the comparison has to be
+    against the real objective, not assumed to help just because Stage 1/2
+    already looked mediocre.
 
     Why an EXISTING window and never the new one: the new window's size is
     what the application itself just asked for (or what a window rule
@@ -1229,16 +1246,19 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
     opening an app never silently changes that app, only ever its
     neighbour, and only when nothing short of that worked.
 
-    Only called once Stage 1 and Stage 2 have already both been scored
-    and the better of the two (`best_cost`) is still bad relative to the
-    new window's own size -- see RESIZE_TRIGGER_MULTIPLE. Tries shrinking
-    exactly ONE existing eligible window (never the new one, never more
-    than one per placement) just enough that the new window can land at a
-    clean, Stage-1-quality spot -- and only returns a plan when doing so
-    beats `best_cost` even after adding the resize's own cost, so a resize
-    that doesn't clearly help is never applied. Every candidate size is
-    bounded by both MAX_SHRINK_FRACTION of that window's own current size
-    and the absolute MIN_USABLE_* floor, whichever is stricter.
+    Tries shrinking exactly ONE existing eligible window (never the new
+    one, never more than one per placement) -- every OTHER eligible window
+    stays at its current position/size for this pass (Stage 2 already
+    covers general multi-window rearrangement; this stage's job is
+    narrowly "would trimming ONE window materially help"). Every candidate
+    size is bounded by both MAX_SHRINK_FRACTION of that window's own
+    current size and the absolute MIN_USABLE_* floor, whichever is
+    stricter. Resize cost is prominence-weighted (see prominence_weight):
+    a window at or below the new window's own size costs the base rate to
+    shrink, a substantially bigger/more important window costs
+    progressively more per pixel, so this stage doesn't casually carve a
+    chunk off whatever the biggest, most prominent app on the desktop
+    happens to be just because it was geometrically in the way.
 
     Tries FOUR shrink variants per window -- width from the right, width
     from the left, height from the bottom, height from the top -- rather
@@ -1256,18 +1276,16 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
     that was actually scored to be what actually happens.
     """
     nw, nh = new_size
-    new_diag = math.hypot(nw, nh)
-    if best_cost < RESIZE_TRIGGER_MULTIPLE * new_diag:
-        return None  # rearrangement alone is already good enough -- don't touch sizes
-
+    new_area = nw * nh
     fixed_rects = [rect_for(*r) for r in fixed_obstacles]
     best_plan = None
 
     for w in eligible:
         ow, oh = w["size"]
         ox, oy = w["at"]
+        other_eligible = [o for o in eligible if o["address"] != w["address"]]
         other_eligible_rects = [rect_for(o["at"][0], o["at"][1], o["size"][0], o["size"][1])
-                                 for o in eligible if o["address"] != w["address"]]
+                                 for o in other_eligible]
         fixed_and_others = other_eligible_rects + fixed_rects
 
         variants = []  # (shrunk_x, shrunk_y, shrunk_w, shrunk_h, shrink_amount)
@@ -1284,16 +1302,7 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
 
         # Same "how much more prominent is this window than the one being
         # placed" scaling prominence_weight already uses for Stage 2's
-        # movement cost -- a window at or below the new window's own size
-        # costs the base rate to shrink, a substantially bigger/more
-        # important window costs progressively more per pixel, so Stage 3
-        # doesn't casually carve a chunk off whatever the biggest, most
-        # prominent app on the desktop happens to be just because it was
-        # the one geometrically in the way. This is the direct fix for
-        # "some windows become extremely small while others stay huge":
-        # the SAME per-pixel rate previously applied no matter which
-        # window absorbed the shrink.
-        new_area = nw * nh
+        # movement cost -- see the docstring above.
         resize_prominence = prominence_weight(w["address"], {w["address"]: w}, new_area)
 
         for sx, sy, sw, sh, shrink_amount in variants:
@@ -1301,8 +1310,32 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost)
             obstacles_xywh.append((sx, sy, sw, sh))
             pos = find_free_position(new_size, obstacles_xywh, center, gap, layout_others=obstacles_xywh)
 
-            d = math.hypot(pos[0] + nw / 2 - center[0], pos[1] + nh / 2 - center[1])
-            cost = d + RESIZE_COST_PER_PIXEL * shrink_amount * resize_prominence
+            # Same TWO-TERM shape as cost1/cost2_total in place_new_window
+            # (see STAGE_DECISION_COMPOSITION_WEIGHT's own comment there):
+            # the new window's own distance to center as the PRIMARY
+            # signal, whole-composition cost as a secondary one at the
+            # SAME 0.3 weight -- not the raw composition_cost alone. An
+            # earlier version of this fix scored candidates by raw
+            # composition_cost with no distance term at all, which let a
+            # resize win against `best_cost` (itself d + 0.3*comp) purely
+            # from the scale mismatch between "compared at full weight"
+            # and "compared at 0.3 weight," not from any real improvement
+            # -- caught by comparing actual resulting com_err/anisotropy
+            # before and after: a candidate that "won" by ~230 points
+            # numerically produced a change of 0.0004 in anisotropy and
+            # 0.003px in com_err, i.e. no visible difference at all. Using
+            # the identical formula Stage 1/2 already use makes the
+            # comparison actually fair.
+            d3 = math.hypot(pos[0] + nw / 2 - center[0], pos[1] + nh / 2 - center[1])
+            cand_mass = window_mass(nw, nh, new_area)
+            whole_points = [(pos[0] + nw / 2, pos[1] + nh / 2, nw, nh, cand_mass),
+                            (sx + sw / 2, sy + sh / 2, sw, sh, window_mass(sw, sh, new_area))]
+            for o in other_eligible:
+                oox, ooy = o["at"]
+                oow, ooh = o["size"]
+                whole_points.append((oox + oow / 2, ooy + ooh / 2, oow, ooh, window_mass(oow, ooh, new_area)))
+            comp = composition_cost(whole_points, center)
+            cost = d3 + STAGE_DECISION_COMPOSITION_WEIGHT * comp + RESIZE_COST_PER_PIXEL * shrink_amount * resize_prominence
             if cost < best_cost and (best_plan is None or cost < best_plan[0]):
                 best_plan = (cost, pos, w["address"], (int(sx), int(sy)), (int(sw), int(sh)))
 
@@ -1490,8 +1523,24 @@ def place_new_window(address, workspace_id, gap):
     fixed_only = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1])
                   for w in same_ws if w.get("fullscreen")]
 
+    # Stage 1's own whole-composition cost -- computed UNCONDITIONALLY
+    # (not just when Stage 2 also succeeds) because Stage 3's baseline
+    # (`best_cost` below) needs it either way: a sizing audit found that
+    # comparing Stage 3 against a bare positional distance (no composition
+    # term at all) meant a genuinely bad-looking composition could still
+    # read as "good enough, don't bother resizing" as long as the new
+    # window itself happened to land near center -- see try_resize_room's
+    # own docstring for the concrete case this missed.
+    pos1_mass = window_mass(new_w, new_h, new_area)
+    stage1_points = [(ox + ow / 2, oy + oh / 2, ow, oh, window_mass(ow, oh, new_area))
+                      for ox, oy, ow, oh in layout_others]
+    stage1_points.append((pos1[0] + new_w / 2, pos1[1] + new_h / 2, new_w, new_h, pos1_mass))
+    comp_cost1 = composition_cost(stage1_points, center)
+    cost1 = d1 + STAGE_DECISION_COMPOSITION_WEIGHT * comp_cost1
+
     use_stage2 = False
     stage2 = try_make_room((new_w, new_h), eligible, fixed_only, center, gap) if eligible else None
+    cost2_total = None
     if stage2 is not None:
         pos2, moved = stage2
         d2 = math.hypot(pos2[0] + new_w / 2 - center[0], pos2[1] + new_h / 2 - center[1])
@@ -1521,12 +1570,6 @@ def place_new_window(address, workspace_id, gap):
         # secondary term, matching the same "primary distance/movement,
         # secondary composition" shape used everywhere else in this file
         # (see find_least_disruptive_position).
-        pos1_mass = window_mass(new_w, new_h, new_area)
-        stage1_points = [(ox + ow / 2, oy + oh / 2, ow, oh, window_mass(ow, oh, new_area))
-                          for ox, oy, ow, oh in layout_others]
-        stage1_points.append((pos1[0] + new_w / 2, pos1[1] + new_h / 2, new_w, new_h, pos1_mass))
-        comp_cost1 = composition_cost(stage1_points, center)
-
         stage2_points = []
         for w in eligible:
             addr = w["address"]
@@ -1540,7 +1583,6 @@ def place_new_window(address, workspace_id, gap):
         stage2_points.append((pos2[0] + new_w / 2, pos2[1] + new_h / 2, new_w, new_h, pos1_mass))
         comp_cost2 = composition_cost(stage2_points, center)
 
-        cost1 = d1 + STAGE_DECISION_COMPOSITION_WEIGHT * comp_cost1
         cost2_total = (d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
                        + STAGE_DECISION_COMPOSITION_WEIGHT * comp_cost2)
         if _DEBUG:
@@ -1551,23 +1593,21 @@ def place_new_window(address, workspace_id, gap):
         if cost2_total < cost1:
             use_stage2 = True
 
-    # Stage 3's trigger stays a plain positional check (see
-    # RESIZE_TRIGGER_MULTIPLE) -- deliberately NOT the composition cost
-    # above, so adding the angular-balance term can't make resize fire more
-    # often just because a composition score got numerically bigger. Stage
-    # 3 exists for "rearranging couldn't get the new window anywhere near
-    # center at all," which is a positional question, not a compositional
-    # one -- its own rarity (see try_resize_room's docstring) is preserved
-    # unchanged by this file's composition-model changes.
-    if use_stage2:
-        best_cost = d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
-    else:
-        best_cost = d1
+    # Stage 3's baseline is now the SAME composition-inclusive cost used to
+    # choose between Stage 1 and Stage 2 (cost1/cost2_total), not a bare
+    # positional distance -- see try_resize_room's own docstring for why
+    # that changed (a live audit found the old positional-only trigger
+    # missed real, measurable composition improvements a modest resize
+    # could provide, purely because the new window's own position looked
+    # "fine" even when the overall layout wasn't).
+    best_cost = cost2_total if use_stage2 else cost1
 
-    # Stage 3: only reached when neither rearranging nor a direct spot got
-    # close to the viewport center -- see RESIZE_TRIGGER_MULTIPLE. Never
-    # touches the new window's own size, never touches more than one
-    # existing window, and never crosses MIN_USABLE_WIDTH/HEIGHT.
+    # Stage 3: try_resize_room now always evaluates its candidates against
+    # this same objective and only returns a plan that genuinely beats it
+    # -- "only for outcomes that are genuinely bad" is enforced by that
+    # honest comparison, not a separate gate here. Never touches the new
+    # window's own size, never touches more than one existing window, and
+    # never crosses MIN_USABLE_WIDTH/HEIGHT.
     stage3 = try_resize_room((new_w, new_h), eligible, fixed_only, center, gap, best_cost) if eligible else None
 
     if stage3 is not None:

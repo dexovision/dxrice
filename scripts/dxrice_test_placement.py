@@ -588,6 +588,111 @@ class TestResizeMinimums(unittest.TestCase):
         self.assertAlmostEqual(orig_ratio, new_ratio, delta=0.05)
 
 
+class TestResizeCompositionAware(unittest.TestCase):
+    """A live sizing audit (6 deterministic mixed-size scenarios, see this
+    change's own report) found the PREVIOUS Stage 3 -- gated behind a fixed
+    "new window's own positional cost is this many times its diagonal"
+    trigger, and scored only by that same new-window-only distance -- never
+    fired at all across any of the 6 scenarios, even when a modest resize
+    measurably improved the real composition_cost of the whole layout. It
+    also found the FIRST fix attempt (scoring resize candidates by raw
+    composition_cost with no distance term, compared against a baseline
+    that weighs composition at 0.3) let a resize "win" a real desktop
+    scenario (one small window, one large new one) by ~230 points
+    numerically while changing the actual resulting anisotropy by 0.0004
+    and com_err by 0.003px -- a scale-mismatch artifact, not a real
+    improvement. These tests pin both corrected behaviors directly against
+    the real production functions."""
+
+    def _real_stage1_cost(self, existing, new_size, center=(960, 540), gap=GAP):
+        """Mirrors place_new_window's own cost1 computation exactly, so
+        these tests call try_resize_room with the SAME baseline the real
+        listener would -- not an arbitrary trigger value."""
+        others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in existing]
+        new_area = new_size[0] * new_size[1]
+        pos1 = apw.find_free_position(new_size, others, center, gap,
+                                       layout_others=others, reference_area=new_area)
+        d1 = math.hypot(pos1[0] + new_size[0] / 2 - center[0], pos1[1] + new_size[1] / 2 - center[1])
+        pos1_mass = apw.window_mass(new_size[0], new_size[1], new_area)
+        stage1_points = [(w["at"][0] + w["size"][0] / 2, w["at"][1] + w["size"][1] / 2,
+                           w["size"][0], w["size"][1], apw.window_mass(w["size"][0], w["size"][1], new_area))
+                          for w in existing]
+        stage1_points.append((pos1[0] + new_size[0] / 2, pos1[1] + new_size[1] / 2,
+                               new_size[0], new_size[1], pos1_mass))
+        comp1 = apw.composition_cost(stage1_points, center)
+        return d1 + apw.STAGE_DECISION_COMPOSITION_WEIGHT * comp1
+
+    def test_declines_marginal_non_material_resize(self):
+        """One small existing window (250x150), one large new window
+        (1200x800): the only available resize is a 4% area trim of the
+        small window that changes the resulting composition by a
+        practically unmeasurable amount. Must be declined -- 'a resize
+        should happen only when its benefit materially improves the
+        overall composition,' not merely because a numeric comparison
+        technically favors it under a mismatched scale."""
+        existing = [{"address": "SML", "at": [835, 465], "size": [250, 150]}]
+        new_size = (1200, 800)
+        best_cost = self._real_stage1_cost(existing, new_size)
+        result = apw.try_resize_room(new_size, existing, [], (960, 540), GAP, best_cost)
+        self.assertIsNone(result, "a non-material resize (illusory numeric win, "
+                                   "no real composition change) must not fire")
+
+    def test_fires_on_genuine_material_improvement(self):
+        """Three medium (500x400) windows plus one oversized new window
+        (1600x1000): a moderate resize of ONE medium window measurably
+        improves the whole-composition cost (verified independently here,
+        not just by re-invoking the function under test) -- this is
+        exactly the case Stage 3 exists for and must fire on."""
+        existing = [{"address": "M1", "at": [100, 100], "size": [500, 400]},
+                    {"address": "M2", "at": [700, 100], "size": [500, 400]},
+                    {"address": "M3", "at": [100, 600], "size": [500, 400]}]
+        new_size = (1600, 1000)
+        center = (960, 540)
+        others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in existing]
+        new_area = new_size[0] * new_size[1]
+        pos1 = apw.find_free_position(new_size, others, center, GAP,
+                                       layout_others=others, reference_area=new_area)
+        best_cost = self._real_stage1_cost(existing, new_size)
+
+        result = apw.try_resize_room(new_size, existing, [], center, GAP, best_cost)
+        self.assertIsNotNone(result, "a genuine, material composition improvement was available "
+                                      "but Stage 3 declined to use it")
+        pos3, addr, xy, size = result
+
+        def independent_cost(pos_new, resized_addr, resized_xy, resized_size):
+            ref_area = sorted([w["size"][0] * w["size"][1] for w in existing] + [new_area])[len(existing) // 2]
+            pts = [(pos_new[0] + new_size[0] / 2, pos_new[1] + new_size[1] / 2,
+                     new_size[0], new_size[1], apw.window_mass(new_size[0], new_size[1], ref_area))]
+            for w in existing:
+                if w["address"] == resized_addr:
+                    x, y = resized_xy
+                    w_, h_ = resized_size
+                else:
+                    x, y = w["at"]
+                    w_, h_ = w["size"]
+                pts.append((x + w_ / 2, y + h_ / 2, w_, h_, apw.window_mass(w_, h_, ref_area)))
+            return apw.composition_cost(pts, center)
+
+        baseline_comp = independent_cost(pos1, None, (0, 0), (0, 0))
+        resized_comp = independent_cost(pos3, addr, xy, size)
+        self.assertLess(resized_comp, baseline_comp,
+                         "Stage 3 fired but the resulting composition isn't actually better")
+        # Must still respect the safety floor and only touch ONE window.
+        self.assertGreaterEqual(size[0], apw.MIN_USABLE_WIDTH)
+        self.assertGreaterEqual(size[1], apw.MIN_USABLE_HEIGHT)
+
+    def test_never_resizes_the_new_window(self):
+        """Structural guarantee, pinned directly: try_resize_room only ever
+        iterates `eligible` (existing windows) as candidates to shrink --
+        the new window's own size is never a resize target, regardless of
+        how good a plan that might numerically produce."""
+        existing = [{"address": "ONLY", "at": [100, 100], "size": [300, 300]}]
+        result = apw.try_resize_room((250, 200), existing, [], (960, 540), GAP, best_cost=999999)
+        if result is not None:
+            _, addr, _, _ = result
+            self.assertEqual(addr, "ONLY", "the only thing try_resize_room may ever resize is an existing window")
+
+
 class TestSettleDelayDocumentation(unittest.TestCase):
     """place_new_window's post-dispatch settle mechanism (see _settle_moves'
     own docstring) is a live-timing mitigation, not something synthetic
