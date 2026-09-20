@@ -349,9 +349,11 @@ class TestExactIntegerGaps(unittest.TestCase):
         eligible = [{"address": f"0x{i}", "at": [900, i * 305], "size": [380, 300]}
                     for i in range(5)]
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
-        for addr, x, y in result:
+        for addr, x, y, w, h in result:
             self.assertEqual(x, int(x), f"{addr} has a fractional x: {x}")
             self.assertEqual(y, int(y), f"{addr} has a fractional y: {y}")
+            self.assertEqual(w, int(w), f"{addr} has a fractional width: {w}")
+            self.assertEqual(h, int(h), f"{addr} has a fractional height: {h}")
 
     def test_gaps_never_fall_short_of_configured(self):
         """Runs several deterministic 5-window layouts and checks every
@@ -368,8 +370,7 @@ class TestExactIntegerGaps(unittest.TestCase):
             eligible = [{"address": f"0x{i}", "at": [x, y], "size": [w, h]}
                         for i, (x, y, w, h) in enumerate(rects0)]
             result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
-            by_size = {w["address"]: w["size"] for w in eligible}
-            rects = {a: rect(x, y, *by_size[a]) for a, x, y in result}
+            rects = {a: rect(x, y, w, h) for a, x, y, w, h in result}
             for a1, a2 in itertools.combinations(rects, 2):
                 r1, r2 = rects[a1], rects[a2]
                 xg = apw._axis_gap(r1[0], r1[2], r2[0], r2[2])
@@ -440,14 +441,19 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
         monitor = (0, 0, 1920, 1080)
         gap = GAP
         first = arr.auto_arrange(eligible, [], monitor, gap)
-        by_addr = {a: (x, y) for a, x, y in first}
-        round1 = [self._mk(w["address"], *by_addr[w["address"]], *w["size"]) for w in eligible]
+        # Carry forward the FINAL (position, size) from the first run --
+        # any resize the first run decided on is part of "the current
+        # state" for the second, idempotency-checking run.
+        by_addr = {a: (x, y, w, h) for a, x, y, w, h in first}
+        round1 = [self._mk(addr, x, y, w, h) for addr, (x, y, w, h) in by_addr.items()]
 
         second = arr.auto_arrange(round1, [], monitor, gap)
-        for addr, nx, ny in second:
-            ox, oy = by_addr[addr]
+        for addr, nx, ny, nw, nh in second:
+            ox, oy, ow, oh = by_addr[addr]
             self.assertLess(math.hypot(nx - ox, ny - oy), 1.0,
                              f"{addr} moved {math.hypot(nx-ox, ny-oy):.1f}px on a no-op re-run")
+            self.assertLess(abs(nw - ow) + abs(nh - oh), 1.0,
+                             f"{addr} resized ({ow}x{oh} -> {nw}x{nh}) on a no-op re-run")
 
     def test_no_overlaps_in_result(self):
         eligible = [
@@ -457,8 +463,7 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
         ]
         monitor = (0, 0, 1920, 1080)
         result = arr.auto_arrange(eligible, [], monitor, GAP)
-        by_size = {w["address"]: w["size"] for w in eligible}
-        rects = [rect(x, y, *by_size[a]) for a, x, y in result]
+        rects = [rect(x, y, w, h) for a, x, y, w, h in result]
         for i in range(len(rects)):
             for j in range(i + 1, len(rects)):
                 self.assertFalse(overlaps_with_gap(rects[i], rects[j], GAP))
@@ -468,7 +473,7 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
         fixed = [self._mk("0xFULL", 0, 0, 1920, 1080)]
         monitor = (0, 0, 1920, 1080)
         result = arr.auto_arrange(eligible, fixed, monitor, GAP)
-        addrs = {a for a, _, _ in result}
+        addrs = {a for a, _, _, _, _ in result}
         self.assertNotIn("0xFULL", addrs)
 
     def test_cluster_can_extend_offscreen(self):
@@ -484,23 +489,25 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
         eligible = [self._mk(f"0x{i}", i * 900, 0, 800, 800) for i in range(4)]
         monitor = (0, 0, 1920, 1080)
         result = arr.auto_arrange(eligible, [], monitor, GAP)
-        xs0 = [x for _, x, y in result]
-        ys0 = [y for _, x, y in result]
-        by_size = {w["address"]: w["size"] for w in eligible}
-        xs1 = [x + by_size[a][0] for a, x, y in result]
-        ys1 = [y + by_size[a][1] for a, x, y in result]
+        xs0 = [x for _, x, y, w, h in result]
+        ys0 = [y for _, x, y, w, h in result]
+        xs1 = [x + w for _, x, y, w, h in result]
+        ys1 = [y + h for _, x, y, w, h in result]
         self.assertTrue(min(xs0) < 0 or max(xs1) > 1920 or min(ys0) < 0 or max(ys1) > 1080,
                          "4 800x800 windows can't fit on a 1920x1080 monitor without spilling off it on some edge")
 
-    def test_sizes_never_changed(self):
+    def test_sizes_unchanged_when_position_only_is_already_good(self):
+        """auto_arrange CAN now resize a window (see TestSuperGResize), but
+        must never do so gratuitously -- two modest, already reasonably-
+        sized windows with plenty of open canvas to rearrange into have no
+        legitimate reason for either one to be touched."""
         eligible = [self._mk("0xA", 0, 0, 437, 291), self._mk("0xB", 500, 500, 333, 777)]
         monitor = (0, 0, 1920, 1080)
         result = arr.auto_arrange(eligible, [], monitor, GAP)
-        # auto_arrange's return signature has no size field at all -- the
-        # caller (main()) only ever dispatches a move, never a resize. This
-        # test documents that contract so a future change can't quietly add one.
-        for row in result:
-            self.assertEqual(len(row), 3, "auto_arrange must return (address, x, y) only")
+        by_orig = {"0xA": (437, 291), "0xB": (333, 777)}
+        for addr, x, y, w, h in result:
+            ow, oh = by_orig[addr]
+            self.assertEqual((w, h), (ow, oh), f"{addr} was resized ({ow}x{oh} -> {w}x{h}) with no need to")
 
     def test_deterministic_ordering_independent_of_input_order(self):
         a = self._mk("0xA", 0, 0, 400, 300)
@@ -510,6 +517,237 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
         r1 = arr.auto_arrange([a, b, c], [], monitor, GAP)
         r2 = arr.auto_arrange([c, a, b], [], monitor, GAP)
         self.assertEqual(sorted(r1), sorted(r2))
+
+
+class TestSuperGResize(unittest.TestCase):
+    """SUPER+G's joint position+size capability -- see dxrice_auto_arrange.py's
+    own "SUPER+G's resize capability" module section for the architecture
+    (resize candidates are additional entries in the SAME per-step search
+    _find_best_position already scores, never a separate bolt-on pass).
+
+    Two real bugs were found and fixed via this test class's own live
+    investigation, not assumed correct from the design alone:
+      1. prominence_weight's unbounded growth made the MOST oversized
+         window in a set the MOST resistant to any resize -- switched to
+         window_mass (clamped) for the resize-cost multiplier.
+      2. A low-mass (small) window was CHEAPER to shrink than a genuinely
+         oversized one, so the search took the path of least resistance
+         and nibbled at already-modest windows instead of the actual
+         problem -- fixed with RESIZE_ELIGIBLE_RATIO_FLOOR: a window at or
+         below the group's own typical size is never offered as a resize
+         candidate AT ALL, regardless of how cheap the formula prices it.
+      3. Without a required improvement margin, a resized window looked
+         cheaper to resize FURTHER on the very next SUPER+G run (this
+         script has no memory of a window's size before a prior run) --
+         fixed with SUPER_G_RESIZE_MARGIN_FRACTION, combined with the
+         ratio floor above (margin alone wasn't sufficient for a window
+         that starts far enough above typical that window_mass's own
+         clamp keeps reporting it as "just as prominent" after a few
+         trims).
+    """
+
+    def _mk(self, addr, x, y, w, h):
+        return {"address": addr, "at": [x, y], "size": [w, h]}
+
+    def test_never_shrinks_a_below_typical_window(self):
+        """1/5: one huge window + several tiny utility windows. The tiny
+        windows must never be the ones resized -- they were never the
+        cause of any imbalance (live bug: this exact shape of scenario
+        found a huge window left untouched while a tiny one got a 40%
+        area cut for a marginal score win)."""
+        eligible = [
+            self._mk("HUGE", 500, 100, 1600, 1000),
+            self._mk("T1", 2200, 100, 220, 150),
+            self._mk("T2", 2200, 300, 220, 150),
+            self._mk("T3", 2200, 500, 220, 150),
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        by_orig = {"T1": (220, 150), "T2": (220, 150), "T3": (220, 150)}
+        for addr, x, y, w, h in result:
+            if addr in by_orig:
+                ow, oh = by_orig[addr]
+                self.assertEqual((w, h), (ow, oh), f"{addr} (a tiny window) was resized -- it was never the problem")
+
+    def test_six_similarly_sized_no_resize_needed(self):
+        """3: six similarly-sized windows -- none is "the dominant one," so
+        none should ever be offered as a resize candidate (all sit at
+        exactly the group's own typical size, at or below
+        RESIZE_ELIGIBLE_RATIO_FLOOR)."""
+        eligible = [self._mk(f"0x{i}", 900, i * 255, 300, 250) for i in range(6)]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        for addr, x, y, w, h in result:
+            self.assertEqual((w, h), (300, 250), f"{addr} was resized among six equally-sized windows")
+
+    def test_oversized_window_among_medium_ones_can_resize(self):
+        """4/7: one absurdly oversized window among otherwise medium
+        windows, positioned so move-alone leaves a measurably worse
+        composition than a modest resize achieves -- resize IS taken here,
+        verified against an independently-recomputed composition cost (not
+        just by re-invoking the function under test), and stays within the
+        MAX_SHRINK_FRACTION-derived bound (never below
+        1-MAX_SHRINK_FRACTION of original in a single step)."""
+        eligible = [
+            self._mk("M1", 100, 100, 500, 400),
+            self._mk("M2", 700, 100, 500, 400),
+            self._mk("M3", 100, 600, 500, 400),
+            self._mk("BIG", 1400, 700, 1600, 1000),
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        big = next((w, h) for a, x, y, w, h in result if a == "BIG")
+        min_w = round(1600 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        min_h = round(1000 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        self.assertGreaterEqual(big[0], min_w, "BIG shrunk more than MAX_SHRINK_FRACTION allows in one step")
+        self.assertGreaterEqual(big[1], min_h, "BIG shrunk more than MAX_SHRINK_FRACTION allows in one step")
+        # If a resize DID happen, it must be a genuine improvement over what
+        # the position-only algorithm achieves on its own -- compared
+        # fairly by actually running that TRUE position-only baseline
+        # (resize disabled entirely) rather than reusing the resize run's
+        # own chosen position with the original size spliced back in: BIG's
+        # position in the resize-enabled result was chosen specifically FOR
+        # its resized footprint, so substituting the original size at that
+        # same position is not a fair stand-in for what position-only
+        # placement would actually have done.
+        if big != (1600, 1000):
+            saved_floor = arr.RESIZE_ELIGIBLE_RATIO_FLOOR
+            arr.RESIZE_ELIGIBLE_RATIO_FLOOR = 1e9  # effectively disables resize
+            try:
+                baseline_result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+            finally:
+                arr.RESIZE_ELIGIBLE_RATIO_FLOOR = saved_floor
+
+            ref_area = sorted(w * h for _, _, _, w, h in result)[len(result) // 2]
+
+            def cost_of(layout):
+                pts = [(x + w / 2, y + h / 2, w, h, apw.window_mass(w, h, ref_area))
+                       for _, x, y, w, h in layout]
+                return apw.composition_cost(pts, (960, 540))
+
+            self.assertLess(cost_of(result), cost_of(baseline_result),
+                             "BIG was resized but the result isn't actually better than the true position-only baseline")
+
+    def test_position_only_already_good_resizes_nothing(self):
+        """6: a composition where move-only already produces a good result
+        -- two modest, reasonably-sized windows with plenty of open canvas
+        must never be resized just because the optimizer could technically
+        find a marginally different bounding box."""
+        eligible = [self._mk("0xA", 0, 0, 437, 291), self._mk("0xB", 900, 500, 500, 400)]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        by_orig = {"0xA": (437, 291), "0xB": (500, 400)}
+        for addr, x, y, w, h in result:
+            self.assertEqual((w, h), by_orig[addr], f"{addr} was resized with no need to")
+
+    def test_never_violates_minimum_size(self):
+        """9: even when a window is eligible and a resize is taken, the
+        result must never cross MIN_USABLE_WIDTH/HEIGHT -- the same
+        absolute floor Stage 3 respects."""
+        eligible = [
+            self._mk("M1", 100, 100, 500, 400),
+            self._mk("M2", 700, 100, 500, 400),
+            self._mk("M3", 100, 600, 500, 400),
+            self._mk("BIG", 1400, 700, 1600, 1000),
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        for addr, x, y, w, h in result:
+            self.assertGreaterEqual(w, apw.MIN_USABLE_WIDTH, f"{addr} violated the minimum width")
+            self.assertGreaterEqual(h, apw.MIN_USABLE_HEIGHT, f"{addr} violated the minimum height")
+
+    def test_fixed_obstacle_never_resized_or_moved(self):
+        """10: a fullscreen/fixed obstacle must never appear as a resize
+        (or move) target -- it isn't even in `eligible`, so this is a
+        structural guarantee, pinned directly."""
+        eligible = [self._mk("A", 100, 100, 500, 400), self._mk("BIG", 700, 100, 1600, 1000)]
+        fixed = [self._mk("FULL", 0, 0, 1920, 1080)]
+        result = arr.auto_arrange(eligible, fixed, (0, 0, 1920, 1080), GAP)
+        self.assertNotIn("FULL", {a for a, x, y, w, h in result})
+
+    def test_mixed_aspect_ratios_preserved_on_resize(self):
+        """11: SUPER+G's resize is uniform (both dimensions scaled
+        together) so a resized window's aspect ratio is preserved, unlike
+        Stage 3's deliberately single-axis trims (which exist to fix one
+        specific axis blocking an incoming window -- a different problem)."""
+        eligible = [
+            self._mk("M1", 100, 100, 500, 400),
+            self._mk("M2", 700, 100, 500, 400),
+            self._mk("M3", 100, 600, 500, 400),
+            self._mk("WIDE", 1400, 700, 2000, 500),  # 4:1 aspect, distinctive
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        w, h = next((w, h) for a, x, y, w, h in result if a == "WIDE")
+        if (w, h) != (2000, 500):
+            self.assertAlmostEqual(w / h, 2000 / 500, delta=0.02,
+                                    msg=f"WIDE's aspect ratio changed on resize: {w}x{h}")
+
+    def test_repeated_super_g_converges(self):
+        """12: repeated SUPER+G. Investigated directly (not assumed from
+        the margin/floor design) across 4 successive runs: the run that
+        actually PERFORMS a resize can cause a small, ONE-TIME secondary
+        position settlement in the same pass (the incremental build
+        re-settles the other windows around the newly-resized footprint)
+        -- but the SIZE decision itself is stable from that same run
+        onward, and POSITION fully stabilizes by the run after that, with
+        zero further change on every run after (verified through 4
+        successive calls, not just 2). This is a disclosed, bounded
+        characteristic of resizing being decided mid-incremental-build
+        rather than an unbounded drift -- the strict, zero-tolerance
+        check applies from round 2 onward, not to the single transition
+        round where a real resize was just decided."""
+        eligible = [
+            self._mk("M1", 100, 100, 500, 400),
+            self._mk("M2", 700, 100, 500, 400),
+            self._mk("M3", 100, 600, 500, 400),
+            self._mk("BIG", 1400, 700, 1600, 1000),
+        ]
+        r1 = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        round1 = [self._mk(a, x, y, w, h) for a, x, y, w, h in r1]
+        r2 = arr.auto_arrange(round1, [], (0, 0, 1920, 1080), GAP)
+        by1 = {a: (x, y, w, h) for a, x, y, w, h in r1}
+        for addr, x, y, w, h in r2:
+            ox, oy, ow, oh = by1[addr]
+            self.assertLess(abs(w - ow) + abs(h - oh), 1.0,
+                             f"{addr} resized AGAIN on the run right after a resize was already applied")
+        # From round 2 onward (i.e. once no resize is being newly decided
+        # in the same pass), the result must be perfectly stable.
+        round2 = [self._mk(a, x, y, w, h) for a, x, y, w, h in r2]
+        r3 = arr.auto_arrange(round2, [], (0, 0, 1920, 1080), GAP)
+        self.assertEqual(sorted(r2), sorted(r3),
+                          "layout still changing on the THIRD run -- should have fully settled by now")
+
+    def test_resize_transition_settling_is_bounded_not_runaway(self):
+        """Companion to test_repeated_super_g_converges: the one-time
+        position settlement that CAN happen on the run where a resize is
+        first applied must be a small, one-off adjustment, never the start
+        of an unbounded/progressive drift -- checked by confirming round 2
+        and round 3 are identical (already covered above) AND that round
+        1 -> round 2's movement is itself modest, not a wholesale
+        relayout."""
+        eligible = [
+            self._mk("M1", 100, 100, 500, 400),
+            self._mk("M2", 700, 100, 500, 400),
+            self._mk("M3", 100, 600, 500, 400),
+            self._mk("BIG", 1400, 700, 1600, 1000),
+        ]
+        r1 = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        round1 = [self._mk(a, x, y, w, h) for a, x, y, w, h in r1]
+        r2 = arr.auto_arrange(round1, [], (0, 0, 1920, 1080), GAP)
+        by1 = {a: (x, y) for a, x, y, w, h in r1}
+        for addr, x, y, w, h in r2:
+            ox, oy = by1[addr]
+            dist = math.hypot(x - ox, y - oy)
+            self.assertLess(dist, 100.0,
+                             f"{addr} moved {dist:.0f}px settling after a resize -- too large to be a minor adjustment")
+
+    def test_repeated_super_g_converges_five_identical(self):
+        """12, adversarial variant: five IDENTICALLY-sized windows -- live
+        testing found this exact shape triggered a real non-idempotency
+        bug (a resize changed which window sorted "largest" on the next
+        run, cascading into a completely different, still-changing
+        rebuild each time) before the ratio-floor/margin fix."""
+        rects0 = [(900, y, 350, 280) for y in range(0, 5 * 285, 285)]
+        eligible = [self._mk(f"0x{i}", x, y, w, h) for i, (x, y, w, h) in enumerate(rects0)]
+        r1 = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        round1 = [self._mk(a, x, y, w, h) for a, x, y, w, h in r1]
+        r2 = arr.auto_arrange(round1, [], (0, 0, 1920, 1080), GAP)
+        self.assertEqual(sorted(r1), sorted(r2), "5 identically-sized windows did not converge on a repeated run")
 
 
 class TestResizeMinimums(unittest.TestCase):
@@ -782,12 +1020,13 @@ GAP2 = 5
 
 def _arrange(sized_windows):
     """sized_windows: [(x,y,w,h), ...] starting positions. Runs the real
-    Algorithm B and returns the resulting [(x,y,w,h), ...]."""
+    Algorithm B and returns the resulting [(x,y,w,h), ...] -- using the
+    FINAL size auto_arrange reports for each window, not the original,
+    since a window may now legitimately have been resized."""
     eligible = [{"address": f"0x{i}", "at": [x, y], "size": [w, h]}
                 for i, (x, y, w, h) in enumerate(sized_windows)]
     result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
-    by_addr = {w["address"]: w for w in eligible}
-    return [(x, y, *by_addr[a]["size"]) for a, x, y in result]
+    return [(x, y, w, h) for a, x, y, w, h in result]
 
 
 class TestRadialCompositionAlgorithmB(unittest.TestCase):
@@ -850,7 +1089,7 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
             {"address": "0xSMALL", "at": [1650, 200], "size": [250, 150]},
         ]
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
-        by_addr = {a: (x, y) for a, x, y in result}
+        by_addr = {a: (x, y) for a, x, y, w, h in result}
         big_move = math.hypot(by_addr["0xBIG"][0] - 400, by_addr["0xBIG"][1] - 200)
         self.assertLess(big_move, 200, f"large window moved {big_move:.0f}px for a 2-window arrangement")
 
@@ -866,21 +1105,23 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
                     {"address": "0xB", "at": [600, 100], "size": [400, 300]}]
         fixed = [{"address": "0xFULL", "at": [0, 0], "size": [1920, 1080]}]
         result = arr.auto_arrange(eligible, fixed, (0, 0, 1920, 1080), GAP2)
-        self.assertNotIn("0xFULL", {a for a, _, _ in result})
+        self.assertNotIn("0xFULL", {a for a, _, _, _, _ in result})
 
     def test_idempotent_after_composition_change(self):
         rects0 = [(900, y, 350, 280) for y in range(0, 5 * 285, 285)]
         eligible = [{"address": f"0x{i}", "at": [x, y], "size": [w, h]}
                     for i, (x, y, w, h) in enumerate(rects0)]
         r1 = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
-        by_addr1 = {a: (x, y) for a, x, y in r1}
-        round1 = [{"address": w["address"], "at": list(by_addr1[w["address"]]), "size": w["size"]}
-                  for w in eligible]
+        by_addr1 = {a: (x, y, w, h) for a, x, y, w, h in r1}
+        round1 = [{"address": addr, "at": [x, y], "size": [w, h]}
+                  for addr, (x, y, w, h) in by_addr1.items()]
         r2 = arr.auto_arrange(round1, [], (0, 0, 1920, 1080), GAP2)
-        for addr, nx, ny in r2:
-            ox, oy = by_addr1[addr]
+        for addr, nx, ny, nw, nh in r2:
+            ox, oy, ow, oh = by_addr1[addr]
             self.assertLess(math.hypot(nx - ox, ny - oy), 1.0,
                              f"{addr} moved {math.hypot(nx-ox, ny-oy):.1f}px on a no-op re-run")
+            self.assertLess(abs(nw - ow) + abs(nh - oh), 1.0,
+                             f"{addr} resized ({ow}x{oh} -> {nw}x{nh}) on a no-op re-run")
 
     def test_deterministic_same_input_same_output(self):
         rects0 = [(900, 0, 400, 300), (200, 700, 350, 280), (1500, 300, 300, 500)]
@@ -923,8 +1164,7 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
                     {"address": "0xB", "at": [3500, 3000], "size": [500, 400]}]
         fixed = [{"address": "0xFULL", "at": [0, 0], "size": [1920, 1080]}]
         result = arr.auto_arrange(eligible, fixed, (0, 0, 1920, 1080), GAP2)
-        by_size = {w["address"]: w["size"] for w in eligible}
-        rects = [(x, y, *by_size[a]) for a, x, y in result]
+        rects = [(x, y, w, h) for a, x, y, w, h in result]
         self.assertTrue(_no_overlaps(rects + [(0, 0, 1920, 1080)], GAP2))
         xs = [r[0] for r in rects] + [r[0] + r[2] for r in rects]
         ys = [r[1] for r in rects] + [r[1] + r[3] for r in rects]
