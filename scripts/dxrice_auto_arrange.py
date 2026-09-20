@@ -256,7 +256,7 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
         # is.
         if placed_points:
             comp_ref = mass_center(placed_points) or viewport_center
-            total += composition_cost(placed_points + [(px, py, cand_mass)], comp_ref)
+            total += composition_cost(placed_points + [(px, py, nw, nh, cand_mass)], comp_ref)
         if cluster_bbox is not None:
             bx0_, by0_, bx1_, by1_ = cluster_bbox
             new_w = max(bx1_, cand[2]) - min(bx0_, cand[0])
@@ -357,10 +357,23 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap):
             )
         pos = _find_best_position(size, obstacle_rects, gap, raw_center(w), bearing_unit, cluster_centroid,
                                    cluster_bbox, placed_points, viewport_center, reference_area)
+        # Rounded to integers THE MOMENT a position is decided, before it
+        # can be used as the geometric basis (an edge/corner candidate) for
+        # any LATER window in this same pass. Found live: two windows meant
+        # to be exactly gap-apart came out 1px short after dispatch --
+        # traced to a fractional position surviving from one window's own
+        # placement, inherited by a later window's candidate generation
+        # (which crosses EVERY already-placed window's edges), then
+        # compounding through the chain. A fractional pixel offset the same
+        # for two windows cancels out of their gap exactly; two DIFFERENT
+        # fractional offsets, each independently rounded at dispatch time,
+        # do not. Rounding here, once, keeps every candidate downstream
+        # exact-integer, so relative gaps can never drift.
+        pos = (round(pos[0]), round(pos[1]))
         placed.append((w["address"], pos[0], pos[1], size[0], size[1]))
         rect = rect_for(pos[0], pos[1], size[0], size[1])
         obstacle_rects.append(rect)
-        placed_points.append((pos[0] + size[0] / 2, pos[1] + size[1] / 2,
+        placed_points.append((pos[0] + size[0] / 2, pos[1] + size[1] / 2, size[0], size[1],
                                window_mass(size[0], size[1], reference_area)))
         cluster_bbox = rect if cluster_bbox is None else (
             min(cluster_bbox[0], rect[0]), min(cluster_bbox[1], rect[1]),
@@ -388,10 +401,23 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap):
                 hi = mid
         full_shift = (full_shift[0] * lo, full_shift[1] * lo)
 
+    # Rounded once, applied to every window identically -- since `placed`
+    # is already exact-integer (see above), adding the SAME integer shift
+    # to all of them can never perturb a relative gap between any two.
+    shift_x, shift_y = round(full_shift[0]), round(full_shift[1])
+    # A fixed-obstacle-scaled shift (the branch above) was deliberately
+    # found to be exactly at the edge of safe -- rounding it could in
+    # principle nudge it the wrong way. "No overlaps" is a hard, always-on
+    # invariant in this file (see this function's own module docstring),
+    # so re-verify after rounding and fall back to truncating toward zero
+    # (strictly more conservative than round-to-nearest, never less) if
+    # rounding-to-nearest happened to cross the line.
+    if fixed_rects and not _shift_is_safe(just_rects, (shift_x, shift_y), fixed_rects, gap):
+        shift_x, shift_y = math.trunc(full_shift[0]), math.trunc(full_shift[1])
+
     results = []
     for address, x, y, w, h in placed:
-        nx, ny = x + full_shift[0], y + full_shift[1]
-        results.append((address, nx, ny))
+        results.append((address, x + shift_x, y + shift_y))
     return results
 
 

@@ -220,11 +220,22 @@ class TestProminenceWeighting(unittest.TestCase):
         )
         cost2 = d2 + apw.MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
 
-        # Stage 1 (leave the big window alone) must win -- the whole point
-        # of this test is that relocating BIG for a perfectly-centered tiny
-        # dialog is no longer cheaper than just placing the dialog beside it.
-        self.assertLess(d1, cost2,
-                         "prominence weighting regressed -- the large window would be evicted again")
+        # try_make_room now evaluates SEVERAL candidate targets for the
+        # dialog (see _candidate_targets), not just the bare dead-center
+        # spot -- so it can itself discover "place the dialog beside BIG,
+        # evict nothing" as its own best plan, which is a strictly BETTER
+        # outcome than the old single-candidate version (which always tried
+        # dead-center first and had to be argued out of evicting BIG by
+        # prominence weighting alone). Assert the actual invariant directly:
+        # BIG must never be the one that moves for a dialog smaller than it.
+        self.assertNotIn("0xBIG", moved,
+                          "the large window was evicted for a tiny, lower-prominence dialog")
+        # And Stage 1 must never come out WORSE than whatever Stage 2 found
+        # -- ties are fine (Stage 2 converging on the same non-evicting
+        # answer as Stage 1 is the correct behavior here, not a regression).
+        self.assertLessEqual(d1, cost2 + 1e-6,
+                              "Stage 1 (leave BIG alone) must not lose to a Stage 2 "
+                              "plan that evicts a more prominent window")
 
     def test_small_existing_window_still_moves_cheaply_for_large_new_one(self):
         """The mirror case (scenario B): a tiny existing window sitting where
@@ -327,6 +338,95 @@ class TestDeadGapPenalty(unittest.TestCase):
         self.assertLessEqual(p, apw.DEAD_GAP_CAP * apw.DEAD_GAP_WEIGHT + 0.01)
 
 
+class TestExactIntegerGaps(unittest.TestCase):
+    """Live bug: two windows meant to be exactly gap-apart came out 1px
+    short after a real SUPER+G dispatch, traced to a fractional position
+    surviving from one window's own placement and compounding through
+    later windows' candidate generation, then two DIFFERENT fractional
+    offsets getting independently rounded at dispatch time."""
+
+    def test_all_final_positions_are_integers(self):
+        eligible = [{"address": f"0x{i}", "at": [900, i * 305], "size": [380, 300]}
+                    for i in range(5)]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
+        for addr, x, y in result:
+            self.assertEqual(x, int(x), f"{addr} has a fractional x: {x}")
+            self.assertEqual(y, int(y), f"{addr} has a fractional y: {y}")
+
+    def test_gaps_never_fall_short_of_configured(self):
+        """Runs several deterministic 5-window layouts and checks every
+        adjacent (flush) pair lands at exactly the configured gap, never
+        1px short -- the exact live symptom this fixes."""
+        import itertools
+        layouts = [
+            [(900, i * 305, 380, 300) for i in range(5)],           # vertical stack
+            [(i * 355, 900, 350, 280) for i in range(5)],           # horizontal row
+            [(900, 0, 400, 300), (200, 700, 350, 280), (1500, 300, 300, 500),
+             (600, 1200, 450, 300), (-300, 500, 380, 320)],          # scattered
+        ]
+        for rects0 in layouts:
+            eligible = [{"address": f"0x{i}", "at": [x, y], "size": [w, h]}
+                        for i, (x, y, w, h) in enumerate(rects0)]
+            result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
+            by_size = {w["address"]: w["size"] for w in eligible}
+            rects = {a: rect(x, y, *by_size[a]) for a, x, y in result}
+            for a1, a2 in itertools.combinations(rects, 2):
+                r1, r2 = rects[a1], rects[a2]
+                xg = apw._axis_gap(r1[0], r1[2], r2[0], r2[2])
+                yg = apw._axis_gap(r1[1], r1[3], r2[1], r2[3])
+                if yg == 0.0 and 0 < xg < 50:
+                    self.assertGreaterEqual(xg, GAP2 - 0.001,
+                                             f"{a1}/{a2} gap {xg} falls short of configured {GAP2}")
+                if xg == 0.0 and 0 < yg < 50:
+                    self.assertGreaterEqual(yg, GAP2 - 0.001,
+                                             f"{a1}/{a2} gap {yg} falls short of configured {GAP2}")
+
+
+class TestCenteredWindowConfidenceLoophole(unittest.TestCase):
+    """Live bug: an L-shaped 3-window layout, asked to make room for a
+    window that happens to land exactly at viewport center, relocated the
+    other two into a dead-center-straddling vertical LINE instead of
+    keeping the zero-movement L-notch fill -- because excluding the
+    centered window from the angular calculation (correct: it has no
+    stable angle) ALSO excluded its mass from the confidence count,
+    leaving only 2 angle-bearing points, which are always confidence-gated
+    to zero penalty regardless of how many other real windows exist."""
+
+    def test_confidence_counts_centered_window_too(self):
+        # Two points on the same axis (a real stack pattern) plus a third
+        # window sitting exactly at the reference point. Nominal 100x100
+        # size on all three -- this test is about the CONFIDENCE/mass
+        # bookkeeping, not real window dimensions.
+        above = (960, 100, 100, 100, 1.0)
+        below = (960, 980, 100, 100, 1.0)
+        centered = (960, 540, 100, 100, 1.0)
+        cost_with_centered = apw.composition_cost([above, below, centered], (960, 540))
+        cost_without = apw.composition_cost([above, below], (960, 540))
+        # The centered window must not make the OTHER two's alignment look
+        # free -- it should cost at least as much (ideally more, since a
+        # real 3rd window now exists) as the 2-point case, never less. In
+        # the covariance model this holds by construction (no separate
+        # angle-exclusion exists at all anymore -- every point, including
+        # one sitting exactly at the reference, is one uniform contribution
+        # to the same matrix), but the property itself is worth pinning.
+        self.assertGreaterEqual(cost_with_centered, cost_without - 1.0,
+                                 "a window landing at dead center must not erase the "
+                                 "elongation penalty for the other two")
+
+    def test_three_way_still_penalized_when_third_is_centered(self):
+        """Direct check: with a centered 3rd window, two aligned flanking
+        windows must score WORSE than if the two flanking windows were
+        instead placed on perpendicular axes (still with the 3rd at center)."""
+        centered = (960, 540, 100, 100, 1.0)
+        aligned = [(960, 100, 100, 100, 1.0), (960, 980, 100, 100, 1.0), centered]
+        perpendicular = [(960, 100, 100, 100, 1.0), (1420, 540, 100, 100, 1.0), centered]
+        cost_aligned = apw.composition_cost(aligned, (960, 540))
+        cost_perp = apw.composition_cost(perpendicular, (960, 540))
+        self.assertLess(cost_perp, cost_aligned,
+                         "two flanking windows on the same axis (with a centered 3rd) "
+                         "must score worse than two on perpendicular axes")
+
+
 class TestAutoArrangeAlgorithmB(unittest.TestCase):
     def _mk(self, addr, x, y, w, h):
         return {"address": addr, "at": [x, y], "size": [w, h]}
@@ -372,14 +472,25 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
         self.assertNotIn("0xFULL", addrs)
 
     def test_cluster_can_extend_offscreen(self):
+        # 4 800x800 windows can't fit within BOTH the monitor's width and
+        # height at once (a tight 2x2 grid needs ~1605px wide but ~1605px
+        # tall too, and the monitor is only 1080 tall) -- some edge must
+        # spill off-screen. Which axis spills is a legitimate outcome of
+        # the composition search (a smarter joint arrangement may choose
+        # to fit cleanly on ONE axis and spill on the other, e.g. a compact
+        # 2x2 grid that fits the 1920-wide monitor horizontally and
+        # overflows vertically instead) -- so this checks the whole
+        # bounding box, not one hardcoded axis.
         eligible = [self._mk(f"0x{i}", i * 900, 0, 800, 800) for i in range(4)]
         monitor = (0, 0, 1920, 1080)
         result = arr.auto_arrange(eligible, [], monitor, GAP)
         xs0 = [x for _, x, y in result]
+        ys0 = [y for _, x, y in result]
         by_size = {w["address"]: w["size"] for w in eligible}
         xs1 = [x + by_size[a][0] for a, x, y in result]
-        self.assertTrue(min(xs0) < 0 or max(xs1) > 1920,
-                         "4 800x800 windows can't fit on a 1920-wide monitor without spilling off it")
+        ys1 = [y + by_size[a][1] for a, x, y in result]
+        self.assertTrue(min(xs0) < 0 or max(xs1) > 1920 or min(ys0) < 0 or max(ys1) > 1080,
+                         "4 800x800 windows can't fit on a 1920x1080 monitor without spilling off it on some edge")
 
     def test_sizes_never_changed(self):
         eligible = [self._mk("0xA", 0, 0, 437, 291), self._mk("0xB", 500, 500, 333, 777)]
@@ -478,20 +589,34 @@ class TestResizeMinimums(unittest.TestCase):
 
 
 class TestSettleDelayDocumentation(unittest.TestCase):
-    """place_new_window's post-dispatch settle delay (see its own comment)
-    is a live-timing mitigation, not something synthetic geometry tests can
-    exercise -- this test only documents that it's actually present, so a
+    """place_new_window's post-dispatch settle mechanism (see _settle_moves'
+    own docstring) is a live-timing mitigation, not something synthetic
+    geometry tests can exercise -- this test only documents that it's
+    actually present and actually called after every dispatch branch, so a
     future refactor can't silently drop it without at least a test noticing.
-    Live confirmation: a 40-cycle burst-spawn soak test hit exactly one real
-    overlap before this fix; an 8-burst/48-window rapid-fire stress test
-    (spawning FASTER than the soak that found the bug) hit zero after it."""
 
-    def test_settle_delay_present_in_source(self):
+    History: this was originally a flat `time.sleep(0.03)` after every
+    dispatch. Live testing (a 22-window rapid burst on the real compositor,
+    spawned every 120ms under real system load) found that flat sleep was
+    NOT always enough -- 30 confirmed genuine pixel-overlapping pairs were
+    produced, all traced to the same race: a later placement's
+    `hyprctl clients` read caught an earlier move still at its pre-move
+    position because Hyprland hadn't actually applied it within 30ms yet.
+    Replaced with _settle_moves(), which polls for the dispatched
+    position/size to actually be confirmed (bounded, not indefinite). The
+    same 22-window burst produced zero true overlaps after this change."""
+
+    def test_settle_moves_present_and_called(self):
         import inspect
+        self.assertTrue(hasattr(apw, "_settle_moves"),
+                         "_settle_moves was removed -- see its docstring for "
+                         "the real, live-confirmed race it closes")
         src = inspect.getsource(apw.place_new_window)
-        self.assertIn("time.sleep(0.03)", src,
-                       "place_new_window's post-dispatch settle delay was removed -- "
-                       "see the comment above it for the race this closes")
+        self.assertEqual(src.count("_settle_moves("), 3,
+                          "place_new_window should call _settle_moves() after "
+                          "each of its three dispatch branches (stage1/stage2/"
+                          "stage3) -- a branch dispatching without settling "
+                          "reopens the overlap race _settle_moves exists to close")
 
 
 # ============================================================================
