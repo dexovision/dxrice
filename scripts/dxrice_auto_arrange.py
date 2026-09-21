@@ -74,6 +74,7 @@ never a forced step every run performs.
 import math
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, batch_async, move_window_exact_lua, resize_window_exact_lua
@@ -175,6 +176,33 @@ BEARING_WEIGHT = 0.0
 # against the cluster's own (translation-invariant) center fixed it.
 
 
+# How many of the nearest obstacles also contribute STAGGERED (deliberately
+# not corner-aligned) candidate positions -- see the block in
+# _find_best_position that uses it. Kept small on purpose: these are cheap
+# because they're added as explicit pairs rather than cross-multiplied
+# (see that block), but they're still work per window per step.
+#
+# A NOTE ON WHAT IS DELIBERATELY *NOT* HERE. This pass first tried to make
+# arrangements less grid-like by adding a global "directional balance"
+# score -- the mass-weighted mean resultant length of the directions from
+# the cluster centre to each window, penalised when they bunch to one side.
+# It was removed after it demonstrably made things worse, and the reason is
+# worth keeping: that statistic is blind to collinearity. Opposite
+# directions cancel, so a straight vertical stack of three windows scores a
+# PERFECT zero on it -- the metric actively rewarded the one arrangement
+# this file works hardest to avoid, and a 3-window case that previously
+# broke into an L came out as a clean stack instead (caught by
+# test_gap_exact_where_adjacent).
+#
+# composition_cost's covariance/anisotropy term already handles "spread
+# along a single axis" correctly, precisely because eigenvalues DO see
+# collinearity. So the grid-iness is not fixed by adding another global
+# shape metric to argue with the proven one; it is fixed structurally, by
+# making non-lattice positions REACHABLE (below) so the existing objective
+# can choose them on their real merits.
+ORGANIC_STAGGER_ANCHORS = 4
+
+
 def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cluster_centroid,
                          cluster_bbox, placed_points, viewport_center, reference_area):
     """Same comprehensive candidate generation as
@@ -226,7 +254,47 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
         xs.update((ox0, ox1, ox0 - nw - gap, ox1 + gap))
         ys.update((oy0, oy1, oy0 - nh - gap, oy1 + gap))
 
+    # STAGGERED candidates, for the nearest few obstacles only.
+    #
+    # Every value added above is one of an obstacle's own edges (or that
+    # edge plus a gap), so every candidate position the search could even
+    # SEE was flush-aligned with some existing window on at least one axis.
+    # That is a lattice, and a lattice is why the results kept coming out
+    # looking like a grid: an organic position was never rejected by the
+    # scoring, it was never a candidate in the first place. No weighting
+    # change can fix an option that does not exist.
+    #
+    # These are the missing options: beside a neighbour, but deliberately
+    # NOT corner-aligned with it -- centre-aligned against its span, and
+    # offset into its thirds. Derived from the neighbour's own geometry, so
+    # there is no fixed direction, no ordering and no template; they simply
+    # make "touching, but stepped" reachable so the existing objective can
+    # choose it when it genuinely scores better.
+    #
+    # These are added as explicit (x, y) PAIRS below rather than as more
+    # values in the xs/ys sets, and that distinction is load-bearing twice
+    # over. Feeding them into the sets cross-multiplies them: a staggered x
+    # would pair with a staggered y to produce a position diagonally off
+    # some corner, flush with nothing, which is dead space by construction
+    # -- that regression showed up immediately as a 310px "gap" where 5px
+    # was configured. It also squares the candidate count (measured: the
+    # suite went from 0.5s to 5.3s). Pairing them explicitly keeps every
+    # staggered candidate flush-with-gap on one axis and merely stepped
+    # along the other, which is the whole intent, and costs a handful of
+    # candidates per anchor instead of a multiple of all of them.
+    staggered = []
+    for ox, oy, ow, oh in pruned[:ORGANIC_STAGGER_ANCHORS]:
+        y_offsets = (oy + (oh - nh) / 2, oy + oh / 3, oy + oh - oh / 3 - nh)
+        x_offsets = (ox + (ow - nw) / 2, ox + ow / 3, ox + ow - ow / 3 - nw)
+        for sy in y_offsets:
+            staggered.append((ox + ow + gap, sy))   # beside it, stepped vertically
+            staggered.append((ox - nw - gap, sy))
+        for sx in x_offsets:
+            staggered.append((sx, oy + oh + gap))   # below/above it, stepped horizontally
+            staggered.append((sx, oy - nh - gap))
+
     candidates = [(x, y) for x in xs for y in ys if free(x, y)]
+    candidates.extend(c for c in staggered if free(*c))
 
     if not candidates:
         # Every edge-derived spot conflicts with something -- spiral
@@ -324,54 +392,26 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
 
     best = min(candidates, key=lambda p: score(*p))
 
-    # Stay-put veto: composition_cost's anisotropy term is a 2nd-moment
-    # statistic over a handful of window centers, and this session's own
-    # investigation found it can be won by a candidate that is actually a
-    # WORSE composition to a human eye -- live evidence: a tight, already-
-    # centered, already-gapped 2x2 grid of 4 identical windows (bbox growth
-    # 0, two full-edge alignments, aniso a benign 0.38 from the grid's own
-    # non-square aspect ratio) lost to a candidate that yanked one window
-    # far above the cluster (bbox growth +205px, only one alignment, real
-    # movement) purely because that disconnected placement happened to pull
-    # 3-of-4 centers onto a shared x-coordinate, driving aniso down to a
-    # near-perfect 0.01 by coincidence, not by being a better composition.
-    # A single global ANGULAR_PENALTY_SCALE cannot fix this: this file's own
-    # documented stack-vs-side-break calibration (see that constant's
-    # comment) NEEDS the anisotropy term strong enough to overrule a ~305px
-    # compactness disadvantage in the other direction, and this new failure
-    # needs it weak enough not to overrule a 0-vs-205px one -- solved
-    # algebraically, the two requirements have no common scale (verified:
-    # the grid case demands ANGULAR_PENALTY_SCALE below ~1865, the
-    # calibration case demands it above ~1964 with real margin). Retuning
-    # the shared weight cannot be correct; the fix has to catch the
-    # SPECIFIC failure mode instead.
+    # (A "stay-put veto" used to sit here: if the window's own current
+    # position was still a legal candidate and was no worse than the
+    # winner on bbox growth AND strictly better on edge alignment, it won
+    # instead. It was added to stop composition_cost's anisotropy term --
+    # a 2nd-moment statistic that a degenerate, near-collinear candidate
+    # can game -- from yanking a window out of an already-good 2x2 grid.
     #
-    # The distinguishing signal is exactly the one Stage 3's own Case-F fix
-    # (dxrice_auto_place_window.py's best_direct_distance gate) established
-    # this session: a candidate that wins ONLY on the metric being
-    # investigated, while being simultaneously no better on every other
-    # independently-verifiable geometric signal, is the fingerprint of
-    # gaming that metric rather than a genuine improvement. Here: if the
-    # window's own CURRENT position is itself a legitimate (free) candidate
-    # -- i.e. nothing else has claimed that spot -- and it is AT LEAST AS
-    # GOOD as the naive winner on bbox growth AND on edge-alignment, then
-    # the naive winner's only possible advantage is the anisotropy term,
-    # which this investigation just proved is not trustworthy enough to be
-    # sufficient on its own. Deliberately does NOT compare movement (0 for
-    # stay-put by construction, so it would trivially always look "better"
-    # and this veto would fire far too often) or the composition term
-    # itself (that's the metric being distrusted, not used as a tiebreak).
-    # Only engages when stay-put is genuinely available -- during a real
-    # incremental rebuild most windows' original spots ARE claimed by
-    # something else by the time they're evaluated, so this cannot block a
-    # genuine, necessary relocation (including the stack-vs-side-break
-    # case above, where neither candidate is the window's own current
-    # position at all).
-    stay_put = (cx0 - nw / 2, cy0 - nh / 2)
-    if stay_put != best and stay_put in candidates:
-        if growth_of(*stay_put) <= growth_of(*best) and alignment_of(*stay_put) < alignment_of(*best):
-            best = stay_put
-
+    # It has been removed, for two measured reasons. First it is
+    # redundant: _shape_is_coherent now catches an already-good
+    # arrangement BEFORE the incremental rebuild ever starts, which is a
+    # strictly better place to make that decision, and the whole suite
+    # passes without the veto. Second, and worse, it was actively
+    # harmful -- because it preferred whichever option was more
+    # edge-ALIGNED, it systematically preferred staying inside a
+    # perfectly-aligned vertical stack, i.e. it protected the exact
+    # pathology this file works hardest to break. Measured directly: with
+    # the veto in place a 3-window vertical stack survived a full
+    # SUPER+G as a stack (axial concentration R=0.97); with it removed
+    # the same input breaks into a stepped arrangement (R=0.28) on the
+    # first press.)
     return best, score(*best)
 
 
@@ -741,18 +781,51 @@ ADJACENCY_COVERAGE_THRESHOLD = 0.3
 # stacks, not squeezed between them.
 ALREADY_GOOD_ASPECT_RATIO_MAX = 2.2
 
-# How far the bbox center may sit from the viewport center and still count
-# as "already centered", as a FRACTION of the bbox's own shorter side --
-# self-relative rather than a flat pixel count, since "off by 40px" reads
-# as centered for a 1200px-wide cluster and badly off for a 300px one.
-ALREADY_GOOD_CENTER_TOLERANCE_FACTOR = 0.5
+# How far the composition's bbox center may sit from the viewport center
+# and still count as "already centered", as a FRACTION OF THE VIEWPORT's
+# shorter side.
+#
+# This is measured against the VIEWPORT, not against the composition's own
+# bbox, and that distinction is the whole point. Scaling the dead zone to
+# the composition looks self-relative and reasonable right up until the
+# composition is large: a 3130x2585 cluster got a 1292px tolerance, so it
+# could sit 400px off-center forever and every press would call it
+# centered -- exactly backwards, since a composition bigger than the
+# screen is the one case where most of it is off-screen and being centered
+# actually matters. The viewport is the thing the user is looking THROUGH,
+# so it is the only frame in which "off center" means anything to them.
+#
+# 0.15 of this display's 1080px short side is ~162px. The number is a
+# perceptual threshold, not a fitted one: a composition whose center sits
+# within about a sixth of the screen's short side of the screen's own
+# center reads as centered to the eye, and moving every window to correct
+# a bias that small is churn the user did not ask for. Past it the cluster
+# visibly sits off to one side. It is also orders of magnitude above the
+# sub-pixel rounding noise that would otherwise nudge a settled workspace
+# on every press, and comfortably below the ~400px residual on a large
+# composition that exposed the bbox-relative version of this as wrong.
+# Recentering is idempotent at any tolerance (after one press the offset
+# is exactly zero), so this only decides how much drift is tolerated --
+# never whether repeated presses converge.
+RECENTER_TOLERANCE_FACTOR = 0.15
 
 
-def _is_already_coherent(eligible, fixed_rects, viewport_center, gap):
-    """See this function's own call site (auto_arrange) for the reasoning.
-    Structural, not a scalar shape metric: overlap validity, adjacency-
-    graph connectivity, bbox aspect ratio, bbox centering. `fixed_rects`:
-    already-converted (x0,y0,x1,y1) rects."""
+def _shape_is_coherent(eligible, fixed_rects, gap):
+    """Is the composition's own SHAPE already good -- overlap validity,
+    adjacency-graph connectivity, per-cluster aspect ratio? Deliberately
+    says NOTHING about where that composition sits relative to the
+    viewport -- that half is _recenter_shift's job.
+
+    The split matters and is the whole basis of SUPER+G's viewport
+    behavior: on an infinite canvas "this arrangement is good" and "this
+    arrangement is currently on screen" are independent facts. A perfectly
+    good composition that the user has simply panned away from is not a
+    layout problem at all -- it needs the CAMERA brought back, not the
+    windows rebuilt. Before this split, being off-screen made the whole
+    check return False, which sent a perfectly good arrangement through a
+    full incremental rebuild and reshuffled it for no reason, purely
+    because the viewport had moved. `fixed_rects`: already-converted
+    (x0,y0,x1,y1) rects."""
     if len(eligible) <= 1:
         return True
     rects = {w["address"]: rect_for(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible}
@@ -846,18 +919,50 @@ def _is_already_coherent(eligible, fixed_rects, viewport_center, gap):
         if c_long / c_short > ALREADY_GOOD_ASPECT_RATIO_MAX:
             return False  # this specific cluster is itself a bad (e.g. axis-concentrated) shape
 
-    xs0 = [r[0] for r in all_rects]; ys0 = [r[1] for r in all_rects]
-    xs1 = [r[2] for r in all_rects]; ys1 = [r[3] for r in all_rects]
-    bbox_w = max(xs1) - min(xs0)
-    bbox_h = max(ys1) - min(ys0)
-    short_side = max(min(bbox_w, bbox_h), 1.0)
+    return True
+
+
+def _recenter_shift(eligible, fixed_rects, viewport_center, viewport_size, gap):
+    """The single rigid (dx, dy) that brings the composition's own bounding
+    box center onto `viewport_center` -- i.e. what moving the CAMERA to look
+    at the workspace would amount to, expressed the only way a compositor
+    with no camera of its own can express it.
+
+    Returns (0.0, 0.0) when the composition is already within tolerance, so
+    an already-centered workspace is left byte-identical rather than nudged
+    by a pixel or two every press.
+
+    This is deliberately ONE uniform translation applied to every window:
+    every relative position, gap and adjacency in the composition is
+    preserved exactly, which is what makes it a viewport move rather than a
+    re-layout. Scaled down (never up) if applying it in full would push the
+    group into a FIXED fullscreen obstacle -- "no overlaps" outranks
+    "centered," the same precedence auto_arrange's own final recenter
+    already uses."""
+    if not eligible:
+        return (0.0, 0.0)
+    rects = [rect_for(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible]
+    xs0 = [r[0] for r in rects]; ys0 = [r[1] for r in rects]
+    xs1 = [r[2] for r in rects]; ys1 = [r[3] for r in rects]
+    viewport_short_side = max(min(viewport_size[0], viewport_size[1]), 1.0)
 
     bbox_cx, bbox_cy = (min(xs0) + max(xs1)) / 2, (min(ys0) + max(ys1)) / 2
-    tolerance = short_side * ALREADY_GOOD_CENTER_TOLERANCE_FACTOR
-    if math.hypot(bbox_cx - viewport_center[0], bbox_cy - viewport_center[1]) > tolerance:
-        return False
+    dx = viewport_center[0] - bbox_cx
+    dy = viewport_center[1] - bbox_cy
+    if math.hypot(dx, dy) <= viewport_short_side * RECENTER_TOLERANCE_FACTOR:
+        return (0.0, 0.0)
 
-    return True
+    just_rects = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible]
+    if fixed_rects and not _shift_is_safe(just_rects, (dx, dy), fixed_rects, gap):
+        lo, hi = 0.0, 1.0
+        for _ in range(20):
+            mid = (lo + hi) / 2
+            if _shift_is_safe(just_rects, (dx * mid, dy * mid), fixed_rects, gap):
+                lo = mid
+            else:
+                hi = mid
+        dx, dy = dx * lo, dy * lo
+    return (float(round(dx)), float(round(dy)))
 
 
 # A window's area ratio to the next larger one, above which they're
@@ -918,7 +1023,7 @@ def _typical_area(eligible):
     return dominant[mid] if len(dominant) % 2 else (dominant[mid - 1] + dominant[mid]) / 2
 
 
-def auto_arrange(eligible, fixed, monitor_bounds, gap):
+def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
     """eligible / fixed: [{"address":..., "at":[x,y], "size":[w,h]}, ...].
     Returns [(address, new_x, new_y, new_w, new_h), ...] for EVERY eligible
     window (not just ones that changed -- the caller compares against each
@@ -926,6 +1031,12 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap):
     dispatching). Size differs from the input only for a window this pass
     decided to resize (see _choose_size_and_position); every other window's
     size is returned unchanged.
+
+    allow_resize=False computes POSITIONS ONLY against the sizes given,
+    proposing no size changes at all. main() uses this for its second pass
+    after a resize has actually landed, so the final positions are always
+    computed against the sizes windows REALLY ended up with rather than the
+    ones that were requested -- see main() for the gap bug that requires.
     """
     if not eligible:
         return []
@@ -934,8 +1045,38 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap):
     viewport_center = ((mx0 + mx1) / 2, (my0 + my1) / 2)
 
     fixed_rects_precheck = [rect_for(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in fixed]
-    if _is_already_coherent(eligible, fixed_rects_precheck, viewport_center, gap):
-        return [(w["address"], w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible]
+    if _shape_is_coherent(eligible, fixed_rects_precheck, gap):
+        # The arrangement itself is already good. The only things that can
+        # still be wrong are WHERE THE CAMERA IS, and whether some window is
+        # disproportionately sized.
+        #
+        # Taking the camera-only shortcut is provably equivalent to the full
+        # path exactly when no window is even resize-ELIGIBLE: eligibility
+        # (see RESIZE_ELIGIBLE_RATIO_FLOOR) is a hard precondition for every
+        # resize candidate the incremental build can generate, so if nothing
+        # clears it there is definitively no size decision available to
+        # make, and the rebuild could only ever have reproduced the same
+        # sizes it started with. When something IS eligible, fall through
+        # and let the real objective -- including the whole-composition
+        # resize comparison -- decide, rather than silently skipping a size
+        # question this shortcut isn't entitled to answer.
+        dx, dy = _recenter_shift(eligible, fixed_rects_precheck, viewport_center,
+                                 (mx1 - mx0, my1 - my0), gap)
+        unchanged = [(w["address"], w["at"][0], w["at"][1], w["size"][0], w["size"][1])
+                     for w in eligible]
+        if (dx, dy) == (0.0, 0.0):
+            # Good shape AND already on screen: nothing to do, full stop.
+            # This unconditional no-op is also what keeps repeated presses
+            # from compounding a resize -- once a pass has settled a window
+            # to a new size and centred the result, the next press must not
+            # get another opinion about that size.
+            return unchanged
+        reference_area = _typical_area(eligible)
+        nothing_resizable = all(
+            _mass_ratio(w["size"][0], w["size"][1], reference_area) <= RESIZE_ELIGIBLE_RATIO_FLOOR
+            for w in eligible)
+        if nothing_resizable:
+            return [(a, x + dx, y + dy, w, h) for a, x, y, w, h in unchanged]
 
     def raw_center(w):
         return (w["at"][0] + w["size"][0] / 2, w["at"][1] + w["size"][1] / 2)
@@ -1061,7 +1202,7 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap):
 
         return [(address, x + shift_x, y + shift_y, w, h) for address, (x, y, w, h) in placed.items()]
 
-    result = _build(allow_resize=True)
+    result = _build(allow_resize=allow_resize)
 
     orig_sizes = {w["address"]: tuple(w["size"]) for w in eligible}
     any_resize = any((w, h) != orig_sizes[a] for a, x, y, w, h in result)
@@ -1116,6 +1257,46 @@ def _xywh(w):
     return (w["at"][0], w["at"][1], w["size"][0], w["size"][1])
 
 
+def _settle_sizes(addresses, workspace_id, timeout=1.0, poll=0.02):
+    """Re-read this workspace until every address in `addresses` reports the
+    same size on two consecutive reads, then return the fresh floating
+    client list (or None if it can't be read).
+
+    Waits for STABILITY, never for a specific requested size -- that
+    distinction is the entire point. A client may legitimately decline the
+    size it was asked for (a terminal quantised to character cells, a
+    window with a minimum size), so waiting for the requested size would
+    burn the whole timeout AND still hand back geometry that never
+    happened. Two consecutive agreeing reads mean "this client has finished
+    reacting," whatever it actually decided to become.
+
+    The timeout is a ceiling against a pathologically animated client, not
+    an estimate of how long a resize takes; the common case agrees within a
+    poll or two."""
+    remaining = set(addresses)
+    last_seen = {}
+    clients = None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        fresh = hyprctl_json(["clients"])
+        if fresh:
+            clients = fresh
+            for w in fresh:
+                addr = w.get("address")
+                if addr in remaining:
+                    size = tuple(w.get("size", ()))
+                    if last_seen.get(addr) == size:
+                        remaining.discard(addr)
+                    last_seen[addr] = size
+        if not remaining:
+            break
+        time.sleep(poll)
+    if clients is None:
+        return None
+    return [w for w in clients
+            if w.get("floating") and w.get("workspace", {}).get("id") == workspace_id]
+
+
 def main():
     ws = hyprctl_json(["activeworkspace"])
     if not ws:
@@ -1145,13 +1326,48 @@ def main():
 
     results = auto_arrange(eligible, fixed, monitor, gap)
 
-    exprs = []
-    moved = 0
-    resized = 0
     THRESHOLD = 1.0  # sub-pixel differences from floating point aren't a real move/resize
     by_addr = {w["address"]: w for w in eligible}
+    resize_exprs = []
     for address, nx, ny, nw, nh in results:
-        w = by_addr[address]
+        ow, oh = by_addr[address]["size"]
+        if abs(nw - ow) > THRESHOLD or abs(nh - oh) > THRESHOLD:
+            resize_exprs.append((address, int(round(nw)), int(round(nh))))
+
+    resized = len(resize_exprs)
+    if resize_exprs:
+        # A window is free to NOT become the size it was asked for. Clients
+        # with size increments (a terminal quantised to whole character
+        # cells) or a minimum size land on their own nearest legal size
+        # instead -- and every neighbour's position in `results` was
+        # computed assuming the REQUESTED size, so whatever the client
+        # actually did shows up on screen as a dead strip that no amount of
+        # looking at it fixes. (It only ever corrected itself when the user
+        # nudged a window and pressed SUPER+G again -- because THAT run
+        # finally read the real sizes. This is that bug.)
+        #
+        # So: land the resizes first, wait for the sizes to stop moving,
+        # then compute the final positions against what the windows really
+        # became. Second pass is positions-only (allow_resize=False), so
+        # this can't turn into a resize feedback loop, and it costs nothing
+        # on the overwhelmingly common no-resize path, which returns above
+        # without ever getting here.
+        batch_async([resize_window_exact_lua(w, h, a) for a, w, h in resize_exprs])
+        settled = _settle_sizes([a for a, _, _ in resize_exprs], workspace_id)
+        if settled:
+            eligible = [w for w in settled
+                        if not w.get("fullscreen") and w.get("address") in by_addr]
+            fixed = [w for w in settled if w.get("fullscreen")]
+            if eligible:
+                results = auto_arrange(eligible, fixed, monitor, gap, allow_resize=False)
+                by_addr = {w["address"]: w for w in eligible}
+
+    exprs = []
+    moved = 0
+    for address, nx, ny, nw, nh in results:
+        w = by_addr.get(address)
+        if not w:
+            continue
         ox, oy = w["at"]
         ow, oh = w["size"]
         size_changed = abs(nw - ow) > THRESHOLD or abs(nh - oh) > THRESHOLD
@@ -1162,11 +1378,9 @@ def main():
             # the exact top-left this pass actually scored against -- never
             # rely on Hyprland's own anchor matching what was computed here.
             exprs.append(resize_window_exact_lua(int(round(nw)), int(round(nh)), address))
-            resized += 1
         if size_changed or pos_changed:
             exprs.append(move_window_exact_lua(int(round(nx)), int(round(ny)), address))
-            if not size_changed:
-                moved += 1
+            moved += 1
         if _DEBUG:
             print(f"DEBUG {w.get('title','')[:30]!r} ({ox},{oy},{ow}x{oh}) -> "
                   f"({nx:.0f},{ny:.0f},{nw:.0f}x{nh:.0f})", file=sys.stderr)
@@ -1174,7 +1388,7 @@ def main():
     if exprs:
         batch_async(exprs)
     print(f"Arranged {len(eligible)} window(s); {moved} moved, {resized} resized, "
-          f"{len(eligible) - moved - resized} already in place.")
+          f"{max(0, len(eligible) - moved)} already in place.")
     if fixed:
         print(f"Left {len(fixed)} fullscreen/maximized window(s) untouched.")
 

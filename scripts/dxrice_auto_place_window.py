@@ -104,7 +104,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import (hyprctl_json, move_window_exact_async, move_window_exact_lua,
-                             batch_async, resize_window_exact_lua)
+                             batch_async, resize_window_exact_lua, dispatch_async)
 import dxrice_singleton
 import dxrice_xdg
 
@@ -1517,6 +1517,87 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost,
 _DEBUG = os.environ.get("DXRICE_DEBUG") == "1"
 
 
+# ---- startup sizing: is a newly-mapped window suspiciously undersized? ----
+#
+# Some applications map at a size nobody would choose -- a main window that
+# comes up at 500x350 on a 1920x1080 display is not a considered decision,
+# it is a toolkit default nobody overrode. Others map small because small
+# is CORRECT: a confirmation dialog, a colour picker, a utility palette.
+# Guessing wrong in either direction is worse than doing nothing, so this
+# deliberately only acts in the band where the evidence is one-sided, and
+# leaves everything else exactly as the application asked for it.
+#
+# All thresholds are fractions of the actual viewport, never pixel
+# constants: "too small to be a main window" means something different on a
+# 4K panel than on a 1366x768 laptop, and a hardcoded 600 would be wrong on
+# both.
+#
+# Below DIALOG_AREA_FRACTION of the viewport a window is dialog-sized and
+# is never touched. An application's MAIN window is essentially never 2% of
+# the screen, while dialogs very often are, so in that range "leave it
+# alone" is right far more often than any enlargement would be.
+STARTUP_DIALOG_AREA_FRACTION = 0.05
+# Between that and this, a window is too big to be a dialog but too small
+# to be a deliberate main-window size -- the only band where enlarging is
+# defensible.
+STARTUP_UNDERSIZED_AREA_FRACTION = 0.12
+# What "comfortable" means, as a fraction of viewport area. Aspect ratio is
+# always preserved -- the application chose its shape even if it did not
+# meaningfully choose its size.
+STARTUP_COMFORTABLE_AREA_FRACTION = 0.18
+# No single dimension may exceed this fraction of the viewport as a result
+# of startup sizing, so an extreme aspect ratio can't produce something
+# absurdly wide or tall.
+STARTUP_MAX_DIMENSION_FRACTION = 0.6
+
+
+def comfortable_startup_size(win, siblings, viewport_w, viewport_h):
+    """The size a newly-mapped window should actually be placed at.
+
+    Returns the window's own current size unchanged in every case except
+    the narrow one this exists for: a window with no same-class window
+    already open, sized into the "too big for a dialog, too small to be
+    deliberate" band, which gets scaled up along its own aspect ratio to a
+    comfortable area.
+
+    `siblings`: the other windows already on this workspace. A window whose
+    class is ALREADY on screen is treated as a secondary window of a
+    running application -- a dialog, a preferences panel, a file chooser --
+    and is never resized. That single signal does most of the work here and
+    needs no per-application knowledge: toolkits give a dialog the same
+    app-id as the application that spawned it, so "something of this class
+    is already running" is a strong, general, and cheap indicator that this
+    window is subordinate to it rather than a main window in its own right.
+    """
+    w, h = win.get("size", (0, 0))[0], win.get("size", (0, 0))[1]
+    if w <= 0 or h <= 0:
+        return w, h
+    viewport_area = max(1.0, float(viewport_w) * float(viewport_h))
+    area_fraction = (w * h) / viewport_area
+
+    if area_fraction >= STARTUP_UNDERSIZED_AREA_FRACTION:
+        return w, h                      # already a reasonable size
+    if area_fraction < STARTUP_DIALOG_AREA_FRACTION:
+        return w, h                      # dialog-sized: small is the point
+
+    own_class = (win.get("class") or win.get("initialClass") or "").lower()
+    if own_class:
+        for other in siblings:
+            other_class = (other.get("class") or other.get("initialClass") or "").lower()
+            if other_class == own_class:
+                return w, h              # secondary window of a running app
+
+    scale = math.sqrt((STARTUP_COMFORTABLE_AREA_FRACTION * viewport_area) / (w * h))
+    if scale <= 1.0:
+        return w, h
+    max_w = viewport_w * STARTUP_MAX_DIMENSION_FRACTION
+    max_h = viewport_h * STARTUP_MAX_DIMENSION_FRACTION
+    scale = min(scale, max_w / w if w > 0 else scale, max_h / h if h > 0 else scale)
+    if scale <= 1.0:
+        return w, h
+    return int(round(w * scale)), int(round(h * scale))
+
+
 def _settle_moves(expected, timeout=2.0, poll=0.01):
     """Block until every address in `expected` reports the position (and,
     if given, size) that was just dispatched, or `timeout` elapses.
@@ -1640,8 +1721,13 @@ def place_new_window(address, workspace_id, gap):
     if _DEBUG:
         print(f"DEBUG t={time.time():.3f} address={address} found={new_win is not None} floating={new_win.get('floating') if new_win else None} poll_elapsed={time.time()-(deadline-2.0):.3f}", file=sys.stderr, flush=True)
     # (poll_elapsed above is relative to this function's 2.0s existence-poll deadline)
-    if not new_win or not new_win.get("floating"):
-        return
+    if not new_win:
+        return "gone"
+    if not new_win.get("floating"):
+        # Tiled right now. It may become floating later (see main()'s
+        # changefloatingmode handling) -- say so rather than silently
+        # dropping it forever.
+        return "not-floating"
 
     # Hyprland's own real fullscreen state (0 = normal, 2 = fullscreen,
     # confirmed live) -- a fullscreened/maximized window has no sensible
@@ -1652,9 +1738,8 @@ def place_new_window(address, workspace_id, gap):
     if new_win.get("fullscreen", 0) != 0:
         if _DEBUG:
             print(f"DEBUG address={address} skipped: fullscreen={new_win.get('fullscreen')}", file=sys.stderr, flush=True)
-        return
+        return "fullscreen"
 
-    new_w, new_h = new_win["size"][0], new_win["size"][1]
     mx0, my0, mx1, my1 = get_monitor_bounds()
 
     same_ws = [w for w in clients
@@ -1662,8 +1747,40 @@ def place_new_window(address, workspace_id, gap):
                and w.get("address") != address]
     if _DEBUG:
         print(f"DEBUG same_ws count={len(same_ws)} workspace_id={workspace_id}", file=sys.stderr, flush=True)
+
+    # Startup sizing happens BEFORE any placement maths, and the placement
+    # then runs against whatever size the window actually ended up at --
+    # never against the size it was asked to become. Same reasoning as the
+    # settle loop above: a position computed for a size the window does not
+    # have is a gap or an overlap on screen, and the client is entitled to
+    # refuse (size increments, a minimum size). So dispatch, wait for the
+    # size to stop moving, re-read, and carry on with the truth.
+    want_w, want_h = comfortable_startup_size(new_win, same_ws, mx1 - mx0, my1 - my0)
+    if (want_w, want_h) != (new_win["size"][0], new_win["size"][1]):
+        if _DEBUG:
+            print(f"DEBUG address={address} startup-resize {new_win['size']} -> {(want_w, want_h)}",
+                  file=sys.stderr, flush=True)
+        dispatch_async(resize_window_exact_lua(want_w, want_h, address))
+        stable_since = None
+        for _ in range(8):
+            time.sleep(0.015)
+            clients = hyprctl_json(["clients"]) or clients
+            probe = find_window(clients, address)
+            if not probe:
+                break
+            new_win = probe
+            size_now = tuple(probe.get("size", ()))
+            if size_now == stable_since:
+                break
+            stable_since = size_now
+        same_ws = [w for w in clients
+                   if w.get("floating") and w.get("workspace", {}).get("id") == workspace_id
+                   and w.get("address") != address]
+
+    new_w, new_h = new_win["size"][0], new_win["size"][1]
+
     if not same_ws:
-        return  # first window on this workspace -- nothing to avoid
+        return "placed"  # first window on this workspace -- nothing to avoid
 
     # The middle of the current viewport in absolute canvas coordinates --
     # not a bound, just the point new placements try to land closest to.
@@ -1845,6 +1962,7 @@ def place_new_window(address, workspace_id, gap):
             print(f"DEBUG using STAGE 1: pos={pos1} new_size=({new_w},{new_h}) center={center}", file=sys.stderr, flush=True)
         move_window_exact_async(int(pos1[0]), int(pos1[1]), address)
         _settle_moves({address: {"at": (int(pos1[0]), int(pos1[1]))}})
+    return "placed"
 
 
 def main():
@@ -1862,6 +1980,10 @@ def main():
           file=sys.stderr, flush=True)
 
     buf = ""
+    # Windows seen at openwindow but not placeable at that instant (mapped
+    # fullscreen, or mapped tiled), kept so a later state change can be
+    # acted on exactly once. {address: workspace_id}.
+    _deferred = {}
     while True:
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
@@ -1889,13 +2011,54 @@ def main():
                                     gap = live_gap()
                                     last_gap_check = time.time()
                                 try:
-                                    place_new_window(addr, ws_id, gap)
+                                    status = place_new_window(addr, ws_id, gap)
                                 except Exception as e:
                                     # One window failing to place must never take
                                     # the listener down, but silently swallowing it
                                     # is how this went unnoticed before -- say so.
                                     print(f"placement failed for {addr} on ws {ws_id}: "
                                           f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
+                                    status = None
+                                if status in ("fullscreen", "not-floating"):
+                                    # Not placeable RIGHT NOW, but it may
+                                    # become placeable -- see _deferred below.
+                                    _deferred[addr] = ws_id
+                                elif status == "placed":
+                                    _deferred.pop(addr, None)
+                        elif line.startswith("closewindow>>"):
+                            _deferred.pop("0x" + line[len("closewindow>>"):].strip(), None)
+                        elif line.startswith("fullscreen>>") or line.startswith("changefloatingmode>>"):
+                            # An application that MAPS fullscreen or tiled and
+                            # only later becomes an ordinary floating window
+                            # used to be lost: openwindow was the only event
+                            # this listener ever subscribed to, so the window
+                            # was judged once, at the one moment it was
+                            # guaranteed to be ineligible, and never looked at
+                            # again. That is exactly why a game launcher like
+                            # Sober -- which comes up fullscreen and is later
+                            # dropped to a floating window -- never got placed.
+                            #
+                            # Re-check only the windows actually deferred
+                            # above, and only until one of them is placed
+                            # once. Note Hyprland's fullscreen>> carries no
+                            # address, which is why this re-checks the
+                            # deferred set rather than trusting the payload.
+                            #
+                            # This cannot feed back on itself: nothing in this
+                            # file ever changes a window's fullscreen or
+                            # floating state -- it only moves and resizes --
+                            # so a placement can never emit the events that
+                            # would re-trigger it, and _deferred.pop() makes
+                            # each window placeable exactly once regardless.
+                            for pending_addr, pending_ws in list(_deferred.items()):
+                                try:
+                                    status = place_new_window(pending_addr, pending_ws, gap)
+                                except Exception as e:
+                                    print(f"deferred placement failed for {pending_addr}: "
+                                          f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
+                                    continue
+                                if status in ("placed", "gone"):
+                                    _deferred.pop(pending_addr, None)
         except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
             print(f"socket2 unavailable ({type(e).__name__}: {e}) -- retrying in 1s",
                   file=sys.stderr, flush=True)
