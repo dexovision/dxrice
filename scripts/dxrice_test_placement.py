@@ -13,6 +13,7 @@ about the desktop" constant between runs.
 
 Run: python3 scripts/dxrice_test_placement.py [-v]
 """
+import random
 import math
 import os
 import sys
@@ -1818,6 +1819,54 @@ class TestRadialCompositionAlgorithmA(unittest.TestCase):
         naive_rects = layout_others + [(900, 1015, *new_size)]
         R_naive, _, _ = _shape_metrics(naive_rects, CENTER)
         self.assertLessEqual(R1, R_naive)
+
+
+class TestCompositionPenaltyFusedPass(unittest.TestCase):
+    """composition_penalty fuses three helpers into one loop for speed.
+
+    The helpers stay as the canonical definitions (the adjacency coherence
+    check and their own tests still use them), so the fused copy could
+    drift from them silently. This pins the two together on randomised
+    geometry, which is the only thing that makes that duplication safe."""
+
+    @staticmethod
+    def _unfused(cand, layout_rects, gap):
+        if not layout_rects:
+            return 0.0
+        best = None
+        for r in layout_rects:
+            frac = apw._flush_coverage(cand, r, gap)
+            if frac is not None:
+                best = frac if best is None else max(best, frac)
+        sliver = apw.SLIVER_PENALTY_MAX * (1.0 - best) if best is not None else 0.0
+        align = apw.ALIGN_BONUS * apw._edge_alignment_count(cand, layout_rects)
+        dead = apw._dead_gap_penalty(cand, layout_rects, gap)
+        return sliver + dead - align
+
+    def test_fused_pass_matches_the_individual_helpers(self):
+        rng = random.Random(90210)
+        for trial in range(3000):
+            n = rng.randint(1, 6)
+            rects = []
+            for _ in range(n):
+                x = rng.randint(-600, 1600); y = rng.randint(-600, 1200)
+                w = rng.choice([120, 250, 400, 620, 900]); h = rng.choice([90, 160, 300, 480, 700])
+                rects.append((x, y, x + w, y + h))
+            # Bias candidates towards exactly-flush and near-flush offsets,
+            # so the tolerance branches are actually exercised rather than
+            # just the generic "far away" case.
+            base = rects[rng.randrange(len(rects))]
+            off = rng.choice([GAP, GAP, GAP + 0.5, GAP + 2, GAP + 40, 300])
+            cw = rng.choice([200, 400, 700]); ch = rng.choice([150, 300, 550])
+            if rng.random() < 0.5:
+                cx, cy = base[2] + off, base[1] + rng.choice([0, 30, -30])
+            else:
+                cx, cy = base[0] + rng.choice([0, 30, -30]), base[3] + off
+            cand = (cx, cy, cx + cw, cy + ch)
+            self.assertAlmostEqual(
+                apw.composition_penalty(cand, rects, GAP),
+                self._unfused(cand, rects, GAP), places=9,
+                msg=f"fused pass drifted from the helpers: cand={cand} rects={rects}")
 
 
 class TestViewportRecenter(unittest.TestCase):
