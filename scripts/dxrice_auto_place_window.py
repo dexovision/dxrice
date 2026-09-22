@@ -201,6 +201,13 @@ SLIVER_PENALTY_MAX = 140.0
 ALIGN_BONUS = 22.0
 ALIGN_EPS = 1.5
 
+# How close to exactly `gap` two facing edges must sit to count as "flush
+# neighbours" (see _flush_coverage). Numerically equal to ALIGN_EPS today,
+# but a DIFFERENT question -- one is "are these two edges on the same
+# line", the other is "is this pair separated by the configured gap" --
+# so it gets its own name rather than sharing that constant by accident.
+FLUSH_TOL = 1.5
+
 # Cost per pixel of dead (unusable) space left between a candidate and a
 # neighbour it lands near but not flush against -- see _dead_gap_penalty.
 # Raised from an original 1.2 once ANGULAR_PENALTY_SCALE (2000) existed: a
@@ -237,7 +244,7 @@ def _axis_gap(a0, a1, b0, b1):
     return 0.0
 
 
-def _flush_coverage(cand, r, gap, tol=1.5):
+def _flush_coverage(cand, r, gap, tol=FLUSH_TOL):
     """None if `cand` and `r` aren't flush neighbors (separated by ~gap on
     exactly one axis while overlapping on the other) -- otherwise the
     fraction (0..1) of the shorter edge's length that's actually shared,
@@ -245,8 +252,21 @@ def _flush_coverage(cand, r, gap, tol=1.5):
     thin corner-only sliver."""
     cx0, cy0, cx1, cy1 = cand
     rx0, ry0, rx1, ry1 = r
-    xgap = _axis_gap(cx0, cx1, rx0, rx1)
-    ygap = _axis_gap(cy0, cy1, ry0, ry1)
+    # _axis_gap inlined on both axes: this is the single hottest function
+    # in the arrange pass (~150k calls at n=30, each paying two more
+    # Python call frames). Identical logic, see _axis_gap's own docstring.
+    if cx1 <= rx0:
+        xgap = rx0 - cx1
+    elif rx1 <= cx0:
+        xgap = cx0 - rx1
+    else:
+        xgap = 0.0
+    if cy1 <= ry0:
+        ygap = ry0 - cy1
+    elif ry1 <= cy0:
+        ygap = cy0 - ry1
+    else:
+        ygap = 0.0
     if abs(xgap - gap) < tol and ygap == 0.0:
         overlap = min(cy1, ry1) - max(cy0, ry0)
         span = min(cy1 - cy0, ry1 - ry0)
@@ -261,11 +281,20 @@ def _flush_coverage(cand, r, gap, tol=1.5):
 def _edge_alignment_count(cand, rects):
     cx0, cy0, cx1, cy1 = cand
     aligned_x = aligned_y = False
+    # `-EPS < d < EPS` rather than `abs(d) < EPS`: identical test, but it
+    # drops ~800k builtin calls per arrange pass at n=30. Same early break.
+    neg_eps = -ALIGN_EPS
     for rx0, ry0, rx1, ry1 in rects:
-        if not aligned_x and (abs(cx0 - rx0) < ALIGN_EPS or abs(cx1 - rx1) < ALIGN_EPS):
-            aligned_x = True
-        if not aligned_y and (abs(cy0 - ry0) < ALIGN_EPS or abs(cy1 - ry1) < ALIGN_EPS):
-            aligned_y = True
+        if not aligned_x:
+            d0 = cx0 - rx0
+            d1 = cx1 - rx1
+            if (neg_eps < d0 < ALIGN_EPS) or (neg_eps < d1 < ALIGN_EPS):
+                aligned_x = True
+        if not aligned_y:
+            d0 = cy0 - ry0
+            d1 = cy1 - ry1
+            if (neg_eps < d0 < ALIGN_EPS) or (neg_eps < d1 < ALIGN_EPS):
+                aligned_y = True
         if aligned_x and aligned_y:
             break
     return int(aligned_x) + int(aligned_y)
@@ -293,9 +322,22 @@ def _dead_gap_penalty(cand, layout_rects, gap):
     The penalty is capped so a candidate is never dragged across a large
     distance purely to close a gap."""
     worst = 0.0
-    for r in layout_rects:
-        xg = _axis_gap(cand[0], cand[2], r[0], r[2])
-        yg = _axis_gap(cand[1], cand[3], r[1], r[3])
+    cx0, cy0, cx1, cy1 = cand
+    for rx0, ry0, rx1, ry1 in layout_rects:
+        # _axis_gap inlined on both axes -- same reason as in
+        # _flush_coverage: this loop runs once per obstacle per candidate.
+        if cx1 <= rx0:
+            xg = rx0 - cx1
+        elif rx1 <= cx0:
+            xg = cx0 - rx1
+        else:
+            xg = 0.0
+        if cy1 <= ry0:
+            yg = ry0 - cy1
+        elif ry1 <= cy0:
+            yg = cy0 - ry1
+        else:
+            yg = 0.0
         # Only count neighbours actually FACING the candidate on one axis
         # (overlapping on the other) -- a diagonal neighbour isn't leaving
         # a dead strip between them, it's just elsewhere.
@@ -409,12 +451,19 @@ def _axial_concentration(weighted_angles):
 def mass_center(weighted_rects):
     """weighted_rects: [(cx, cy, w, h, mass), ...]. Returns (com_x, com_y),
     or None if there's no mass at all (empty list)."""
-    total_w = sum(m for _, _, _, _, m in weighted_rects)
+    # One pass instead of three. The accumulation order is the same one
+    # sum() uses (left to right from 0), so this is bit-identical to the
+    # three-sum version it replaces -- it just stops walking the list
+    # twice more. This is on the hottest path in the whole arrange pass.
+    total_w = 0.0
+    sx = sy = 0.0
+    for cx, cy, _w, _h, m in weighted_rects:
+        total_w += m
+        sx += cx * m
+        sy += cy * m
     if total_w <= 0:
         return None
-    com_x = sum(cx * m for cx, cy, _, _, m in weighted_rects) / total_w
-    com_y = sum(cy * m for cx, cy, _, _, m in weighted_rects) / total_w
-    return (com_x, com_y)
+    return (sx / total_w, sy / total_w)
 
 
 def covariance_matrix(weighted_rects, ref_point):
@@ -432,15 +481,18 @@ def covariance_matrix(weighted_rects, ref_point):
     normalized by total mass so its scale doesn't depend on how many
     windows are in the set."""
     rx, ry = ref_point
-    total = sum(m for _, _, _, _, m in weighted_rects)
-    if total <= 0:
-        return 0.0, 0.0, 0.0
+    # `total` accumulates in the same pass as the moments rather than in a
+    # separate sum() over the same list -- identical arithmetic, one walk.
+    total = 0.0
     Cxx = Cyy = Cxy = 0.0
     for cx, cy, w, h, m in weighted_rects:
+        total += m
         dx, dy = cx - rx, cy - ry
         Cxx += m * (dx * dx + (w * w) / 12.0)
         Cyy += m * (dy * dy + (h * h) / 12.0)
         Cxy += m * (dx * dy)
+    if total <= 0:
+        return 0.0, 0.0, 0.0
     return Cxx / total, Cyy / total, Cxy / total
 
 
@@ -619,14 +671,83 @@ def composition_penalty(cand, layout_rects, gap):
     layout to compose with yet (an empty/absent `layout_rects`)."""
     if not layout_rects:
         return 0.0
+    # All three terms fused into ONE pass over layout_rects.
+    #
+    # This is the single hottest loop in a SUPER+G pass -- it runs once per
+    # obstacle per candidate position -- and the three helpers it replaces
+    # walked the same list three times while _flush_coverage and
+    # _dead_gap_penalty each independently recomputed the SAME two axis
+    # gaps for the same pair of rectangles. Fused, the gaps are computed
+    # once and all three terms are derived from them.
+    #
+    # The arithmetic is identical, not merely equivalent-looking, and
+    # _flush_coverage / _edge_alignment_count / _dead_gap_penalty remain
+    # the canonical definitions (still used by the adjacency coherence
+    # check and by their own tests). test_composition_penalty_fused_pass_
+    # matches_the_individual_helpers pins the two against each other on
+    # randomised geometry so this copy can never silently drift from them.
+    #
+    # The one deliberate difference: the alignment scan no longer breaks
+    # early once both axes are satisfied, because the other two terms need
+    # the rest of the list anyway. Same result, strictly less loop
+    # overhead than three separate traversals.
+    cx0, cy0, cx1, cy1 = cand
+    neg_eps = -ALIGN_EPS
     best_coverage = None
-    for r in layout_rects:
-        frac = _flush_coverage(cand, r, gap)
+    worst_dead = 0.0
+    aligned_x = aligned_y = False
+    for rx0, ry0, rx1, ry1 in layout_rects:
+        if cx1 <= rx0:
+            xgap = rx0 - cx1
+        elif rx1 <= cx0:
+            xgap = cx0 - rx1
+        else:
+            xgap = 0.0
+        if cy1 <= ry0:
+            ygap = ry0 - cy1
+        elif ry1 <= cy0:
+            ygap = cy0 - ry1
+        else:
+            ygap = 0.0
+
+        # --- flush coverage (see _flush_coverage) ---
+        frac = None
+        if -FLUSH_TOL < (xgap - gap) < FLUSH_TOL and ygap == 0.0:
+            overlap = min(cy1, ry1) - max(cy0, ry0)
+            span = min(cy1 - cy0, ry1 - ry0)
+            frac = overlap / span if span > 0 else 0.0
+        elif -FLUSH_TOL < (ygap - gap) < FLUSH_TOL and xgap == 0.0:
+            overlap = min(cx1, rx1) - max(cx0, rx0)
+            span = min(cx1 - cx0, rx1 - rx0)
+            frac = overlap / span if span > 0 else 0.0
         if frac is not None:
             best_coverage = frac if best_coverage is None else max(best_coverage, frac)
+
+        # --- dead gap (see _dead_gap_penalty) ---
+        if ygap == 0.0 and gap < xgap < MIN_USABLE_WIDTH:
+            d = xgap - gap
+            if d > worst_dead:
+                worst_dead = d
+        if xgap == 0.0 and gap < ygap < MIN_USABLE_HEIGHT:
+            d = ygap - gap
+            if d > worst_dead:
+                worst_dead = d
+
+        # --- edge alignment (see _edge_alignment_count) ---
+        if not aligned_x:
+            d0 = cx0 - rx0
+            d1 = cx1 - rx1
+            if (neg_eps < d0 < ALIGN_EPS) or (neg_eps < d1 < ALIGN_EPS):
+                aligned_x = True
+        if not aligned_y:
+            d0 = cy0 - ry0
+            d1 = cy1 - ry1
+            if (neg_eps < d0 < ALIGN_EPS) or (neg_eps < d1 < ALIGN_EPS):
+                aligned_y = True
+
     sliver = SLIVER_PENALTY_MAX * (1.0 - best_coverage) if best_coverage is not None else 0.0
-    align = ALIGN_BONUS * _edge_alignment_count(cand, layout_rects)
-    dead = _dead_gap_penalty(cand, layout_rects, gap)
+    align = ALIGN_BONUS * (int(aligned_x) + int(aligned_y))
+    dead = min(worst_dead, DEAD_GAP_CAP) * DEAD_GAP_WEIGHT
     return sliver + dead - align
 
 

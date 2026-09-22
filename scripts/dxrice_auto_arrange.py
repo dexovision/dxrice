@@ -234,9 +234,18 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
     cand_mass = window_mass(nw, nh, reference_area)
 
     def free(x, y):
-        cand = (x, y, x + nw, y + nh)
-        inflated = (cand[0] - gap, cand[1] - gap, cand[2] + gap, cand[3] + gap)
-        return not any(overlaps(inflated, r) for r in obstacle_rects)
+        # overlaps() inlined: this runs for every candidate against every
+        # obstacle, and the generator plus call frame it replaces were
+        # together the second-largest cost in the pass. Identical test and
+        # identical short-circuit order.
+        ax0 = x - gap
+        ay0 = y - gap
+        ax1 = x + nw + gap
+        ay1 = y + nh + gap
+        for bx0, by0, bx1, by1 in obstacle_rects:
+            if not (ax1 <= bx0 or ax0 >= bx1 or ay1 <= by0 or ay0 >= by1):
+                return False
+        return True
 
     xs = {cx0 - nw / 2}
     ys = {cy0 - nh / 2}
@@ -295,6 +304,14 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
 
     candidates = [(x, y) for x in xs for y in ys if free(x, y)]
     candidates.extend(c for c in staggered if free(*c))
+    # A stepped candidate can coincide exactly with a lattice one (a
+    # center-aligned offset against a same-height neighbour, most often),
+    # and scoring an identical coordinate twice is pure waste. dict.fromkeys
+    # preserves first-occurrence order, and min() returns the FIRST minimal
+    # element, so the winner is unchanged -- this only removes duplicate
+    # evaluations, never a distinct position.
+    if len(candidates) > 1:
+        candidates = list(dict.fromkeys(candidates))
 
     if not candidates:
         # Every edge-derived spot conflicts with something -- spiral
@@ -322,6 +339,15 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
 
     bx, by = bearing_unit
     ccx, ccy = cluster_centroid
+
+    # Hoisted out of score(): `placed_points` does not change while this
+    # window's candidates are being evaluated, so the cluster's own mass
+    # center is the SAME value for every one of them -- it was being
+    # recomputed from scratch per candidate, which profiling showed as one
+    # of the two largest costs in the whole pass (at n=30: ~9k redundant
+    # O(n) recomputations). Same value, computed once; nothing about which
+    # candidate wins changes.
+    comp_ref = (mass_center(placed_points) or viewport_center) if placed_points else None
 
     def score(x, y):
         px, py = x + nw / 2, y + nh / 2
@@ -356,7 +382,6 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
         # build; only the final shift may care where the viewport actually
         # is.
         if placed_points:
-            comp_ref = mass_center(placed_points) or viewport_center
             total += composition_cost(placed_points + [(px, py, nw, nh, cand_mass)], comp_ref)
         if cluster_bbox is not None:
             bx0_, by0_, bx1_, by1_ = cluster_bbox
