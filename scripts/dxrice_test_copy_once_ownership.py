@@ -10,6 +10,7 @@ shortcuts, that predates the copy_once_snapshots mechanism and was
 previously misclassified as foreign and overwritten.
 """
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -252,6 +253,66 @@ class TestRealConfigDockIncident(OwnershipTestBase):
         ownership.claim_snapshot("waybar/config-dock", self.config_home, self.state_dir, self.repo_dir)
         snap = ownership._snapshot_path(self.state_dir, "waybar/config-dock")
         self.assertEqual(snap.read_bytes(), (self.repo_dir / "waybar/config-dock").read_bytes())
+
+
+class TestAdversarialRobustness(OwnershipTestBase):
+    """Found during the installer ownership audit: classify_one must never
+    crash on a hostile or damaged filesystem state, and must never let
+    that damage become a write path."""
+
+    def test_unreadable_live_file_with_existing_snapshot_does_not_crash(self):
+        live = self.write_live("waybar/config-dock", {"name": "waybar-dock"})
+        self.write_snapshot("waybar/config-dock", {"name": "waybar-dock"})
+        os.chmod(live, 0o000)
+        try:
+            state, detail = self.classify("waybar/config-dock")
+        finally:
+            os.chmod(live, 0o644)
+        # Must not crash, and must land on a state that can never trigger
+        # a write -- MODIFIED and UNCHANGED are the only two options here,
+        # both always safe.
+        self.assertIn(state, (ownership.DXRICE_OWNED_MODIFIED, ownership.DXRICE_OWNED_UNCHANGED))
+
+    def test_directory_where_a_file_is_expected_does_not_crash(self):
+        live = self.config_home / "waybar" / "config-dock"
+        live.mkdir(parents=True)
+        state, detail = self.classify("waybar/config-dock")
+        self.assertEqual(state, ownership.UNKNOWN)
+
+    def test_directory_at_snapshot_path_does_not_crash(self):
+        live = self.write_live("waybar/config-dock", {"name": "waybar-dock"})
+        snap = ownership._snapshot_path(self.state_dir, "waybar/config-dock")
+        snap.mkdir(parents=True)
+        state, detail = self.classify("waybar/config-dock")
+        # A snapshot "existing" as a directory still counts as present --
+        # the state must be one that never triggers a write.
+        self.assertIn(state, (ownership.DXRICE_OWNED_MODIFIED, ownership.DXRICE_OWNED_UNCHANGED))
+
+    def test_corrupted_snapshot_can_never_cause_an_overwrite_eligible_state(self):
+        # A snapshot that exists but is garbage (truncated, bit-rotted,
+        # whatever) must never cause classification to fall through to
+        # LEGACY_DXRICE/FOREIGN/UNKNOWN -- its mere presence is what keeps
+        # this file out of every overwrite-eligible branch, regardless of
+        # its content.
+        self.write_live("waybar/config-dock", REAL_CONFIG_DOCK)
+        snap = ownership._snapshot_path(self.state_dir, "waybar/config-dock")
+        snap.parent.mkdir(parents=True, exist_ok=True)
+        snap.write_bytes(b"\x00\x01\x02 not even close to valid JSON \xff\xfe")
+        state, detail = self.classify("waybar/config-dock")
+        self.assertIn(state, (ownership.DXRICE_OWNED_MODIFIED, ownership.DXRICE_OWNED_UNCHANGED))
+        # And the live file must obviously still be untouched.
+        live_text = json.loads((self.config_home / "waybar/config-dock").read_text())
+        self.assertIn("custom/discord", live_text)
+
+    def test_stale_snapshot_from_an_older_repo_template_is_still_safe(self):
+        # The repo's template for this file can change between DXrice
+        # versions -- a snapshot seeded long ago, from an older template,
+        # must still only ever land on a no-write state, never cause a
+        # reclassification into something replaceable.
+        self.write_live("waybar/config-dock", REAL_CONFIG_DOCK)
+        self.write_snapshot("waybar/config-dock", {"name": "waybar-dock", "modules-left": []})  # old, bare template
+        state, detail = self.classify("waybar/config-dock")
+        self.assertEqual(state, ownership.DXRICE_OWNED_MODIFIED)
 
 
 class TestClassifyAll(OwnershipTestBase):

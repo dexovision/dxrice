@@ -747,21 +747,42 @@ reconcile_copy_once_ownership() {
                     # Positively DXrice's own, already in the shape the
                     # repo ships today -- nothing to replace, just backfill
                     # the snapshot it never got. Never reads or rewrites
-                    # the live file.
-                    python3 "$ownership_py" claim-snapshot "$rel" "$CONFIG_HOME" "$STATE_DIR" "$REPO_DIR" \
-                        && ok "~/.config/$rel recognized as your existing DXrice deployment -- left exactly as it is."
+                    # the live file. Failure here (e.g. an unwritable
+                    # state dir) leaves the live file untouched either
+                    # way -- warn and move on rather than letting a bare
+                    # `&&` list's nonzero status take the whole install
+                    # down via set -e over something that was never going
+                    # to touch the user's file in the first place.
+                    if python3 "$ownership_py" claim-snapshot "$rel" "$CONFIG_HOME" "$STATE_DIR" "$REPO_DIR"; then
+                        ok "~/.config/$rel recognized as your existing DXrice deployment -- left exactly as it is."
+                    else
+                        warn "Couldn't record ~/.config/$rel as a known DXrice deployment (non-fatal) --"
+                        info "the file itself is untouched; this will be retried on the next run."
+                    fi
                     continue
                 fi
                 # old-shaped: a genuine pre-Quickshell DXrice file. Same
                 # upgrade offer the old per-file checks used.
                 warn "~/.config/$rel is from a much older version of this rice."
                 info "It predates the current layout, so it won't pick that up on its own."
+                if [ -L "$CONFIG_HOME/$rel" ]; then
+                    info "Note: this path is currently a symlink -- replacing it backs up and"
+                    info "preserves whatever it points to, but points this path at a plain file"
+                    info "afterward instead of your symlink."
+                fi
                 if ask_yes_no "Back it up and let the current version deploy instead?" Y; then
                     mkdir -p "$STATE_DIR/backups"
                     local backup="$STATE_DIR/backups/${rel//\//_}.$(date +%s).bak"
-                    cp "$CONFIG_HOME/$rel" "$backup"
-                    rm -f "$CONFIG_HOME/$rel"
-                    ok "Backed up to $backup and removed the live copy -- deploying the current version next."
+                    if ! cp "$CONFIG_HOME/$rel" "$backup"; then
+                        warn "Backup to $backup failed -- leaving ~/.config/$rel exactly as it is."
+                    elif ! cmp -s "$CONFIG_HOME/$rel" "$backup"; then
+                        warn "Backup at $backup doesn't match the original -- leaving ~/.config/$rel"
+                        info "exactly as it is rather than risk deleting it on an unverified backup."
+                        rm -f "$backup"
+                    else
+                        rm -f "$CONFIG_HOME/$rel"
+                        ok "Backed up to $backup and removed the live copy -- deploying the current version next."
+                    fi
                 else
                     warn "Leaving ~/.config/$rel as-is -- it'll keep looking like the old rice until"
                     info "you either edit it by hand or re-run install and say yes here."
@@ -1057,7 +1078,14 @@ PYEOF
 do_deploy() {
     info "Deploying configs (anything you've hand-edited is protected)..."
     mkdir -p "$CONFIG_HOME"/{hypr,kitty,waybar,mako,wofi}
-    python3 "$REPO_DIR/scripts/dxrice_deploy.py" "$REPO_DIR"
+    if ! python3 "$REPO_DIR/scripts/dxrice_deploy.py" "$REPO_DIR"; then
+        err "Deploying configs failed (see the Python error above) -- stopping here rather than"
+        info "continuing into theme rendering and systemd setup against a half-deployed state."
+        info "Every individual file write above is all-or-nothing (atomic), so whatever it did"
+        info "reach is correctly in place -- re-run './install.sh' (or 'update') once you've"
+        info "resolved whatever the error above points at to pick up the rest."
+        exit 1
+    fi
 
     echo ""
     info "Rendering theme (waybar/wofi/mako/kitty/hyprlock from theme.json)..."

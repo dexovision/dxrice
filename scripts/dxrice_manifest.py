@@ -9,15 +9,57 @@ change. Older versions of this rice also deployed .py/.sh scripts into
 ~/scripts; the manifest's records of those are now only used to clean up
 those legacy copies (see dxrice_deploy.cleanup_legacy_scripts), since
 scripts now run straight out of the git checkout instead.
+
+deploy_file used to have a fifth outcome, "adopted": a file with no
+manifest record (i.e. one this exact mechanism has no memory of ever
+deploying) that differs from the current template got silently backed up
+and overwritten, no confirmation, every time. That is the identical
+invariant violation that motivated dxrice_copy_once_ownership.py's whole
+ownership model, just reachable through a second, independent mechanism --
+and a more dangerous one in practice, since every TARGETS entry in
+dxrice_apply_theme.py (waybar/style.css, wofi/style.css, mako/config,
+kitty/kitty.conf, hyprlock.conf, gtk_style.css) and dxrice_deploy.py's
+STATIC_FILES (wofi/config) are exactly the kind of file most Linux users
+already have hand-customized from some entirely unrelated, pre-dxrice
+setup. "No record of deploying this" is proof of nothing -- it is
+identical to the config-dock incident's root cause, applied here with no
+confirmation prompt at all. A file in this state is now left completely
+alone (reported as "unrecognized") instead of ever being adopted.
 """
 import hashlib
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_xdg
+
+
+def atomic_write_bytes(path, data: bytes):
+    """Writes data to path via a temp file + atomic rename, so a process
+    killed mid-write (crash, OOM, power loss) leaves the ORIGINAL file
+    exactly as it was rather than truncated or half-written -- never a
+    corrupted mix of old and new content. Used anywhere this rice writes
+    to a path that may already hold real content (a tracked template
+    update, an in-place structural migration of a user's live, customized
+    config) rather than a brand-new file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 HOME = Path(dxrice_xdg.real_home())
 STATE_DIR = Path(dxrice_xdg.state_dir())
@@ -62,7 +104,9 @@ def deploy_file(live_path, new_content: bytes, manifest: dict) -> str:
     """Write new_content to live_path, guarded by the manifest.
 
     Returns one of: 'installed', 'updated', 'unchanged',
-    'adopted' (pre-existing file backed up then taken over),
+    'unrecognized' (pre-existing file, no manifest record, differs from the
+    template -- ownership unproven, left completely untouched; see the
+    module docstring for why this is never auto-adopted),
     'skipped-modified' (left untouched -- user changed it since last deploy).
     """
     live_path = Path(live_path).expanduser()
@@ -70,8 +114,7 @@ def deploy_file(live_path, new_content: bytes, manifest: dict) -> str:
     new_hash = _sha256(new_content)
 
     if not live_path.exists():
-        live_path.parent.mkdir(parents=True, exist_ok=True)
-        live_path.write_bytes(new_content)
+        atomic_write_bytes(live_path, new_content)
         manifest["files"][key] = new_hash
         return "installed"
 
@@ -83,17 +126,16 @@ def deploy_file(live_path, new_content: bytes, manifest: dict) -> str:
         return "unchanged"
 
     if last_known is None:
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        backup_path = BACKUP_DIR / (key.replace("/", "_") + ".bak")
-        backup_path.write_bytes(live_path.read_bytes())
-        live_path.write_bytes(new_content)
-        manifest["files"][key] = new_hash
-        return "adopted"
+        # No manifest record is not evidence this is ours -- it is
+        # evidence of nothing. The hard invariant: if ownership cannot be
+        # proven, the file is preserved. Never written, never backed up
+        # (there is nothing safe to do with it, so nothing is done).
+        return "unrecognized"
 
     if current_hash != last_known:
         return "skipped-modified"
 
-    live_path.write_bytes(new_content)
+    atomic_write_bytes(live_path, new_content)
     manifest["files"][key] = new_hash
     return "updated"
 

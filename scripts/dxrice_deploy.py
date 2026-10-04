@@ -138,7 +138,7 @@ def _migrate_waybar_quicksettings(dst: Path) -> bool:
             entry["on-click"] = _QS_ON_CLICK
         entry.pop("on-click-right", None)
 
-    dst.write_text(json.dumps(cfg, indent=4))
+    dxrice_manifest.atomic_write_bytes(dst, json.dumps(cfg, indent=4).encode())
     return True
 
 
@@ -160,7 +160,7 @@ def _migrate_quicksettings_to_qs(dst: Path) -> bool:
             entry["on-click"] = _QS_ON_CLICK
             changed = True
     if changed:
-        dst.write_text(json.dumps(cfg, indent=4))
+        dxrice_manifest.atomic_write_bytes(dst, json.dumps(cfg, indent=4).encode())
     return changed
 
 
@@ -181,8 +181,7 @@ def deploy_copy_once(repo_dir: Path, manifest: dict, results: dict):
             else:
                 results[str(dst)] = "left-alone (never auto-overwritten)"
             continue
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(src.read_bytes())
+        dxrice_manifest.atomic_write_bytes(dst, src.read_bytes())
         dxrice_manifest.mark_deployed(dst, manifest)
         results[str(dst)] = "installed"
         # Keep a pristine copy of the repo template exactly as it looked at
@@ -195,7 +194,7 @@ def deploy_copy_once(repo_dir: Path, manifest: dict, results: dict):
         snapshot_dir.mkdir(parents=True, exist_ok=True)
         snapshot_path = snapshot_dir / rel.replace("/", "_")
         if not snapshot_path.exists():
-            snapshot_path.write_bytes(src.read_bytes())
+            dxrice_manifest.atomic_write_bytes(snapshot_path, src.read_bytes())
 
 
 def print_summary(results: dict):
@@ -203,19 +202,20 @@ def print_summary(results: dict):
     for path, result in results.items():
         by_result.setdefault(result, []).append(path)
 
-    order = ["installed", "adopted", "updated", "migrated (Quick Settings cluster added, your shortcuts untouched)",
+    order = ["installed", "updated", "migrated (Quick Settings cluster added, your shortcuts untouched)",
              "left-alone (never auto-overwritten)",
-             "unchanged", "skipped-modified", "removed (legacy copy -- scripts now run from the repo checkout)",
+             "unchanged", "skipped-modified", "unrecognized",
+             "removed (legacy copy -- scripts now run from the repo checkout)",
              "removed (now empty)", "left-alone (you edited this legacy copy -- remove it yourself if unwanted)",
              "left-alone (not something this rice put here)"]
     labels = {
         "installed": "Newly installed",
-        "adopted": "Took over pre-existing file (old version backed up)",
         "updated": "Updated to latest",
         "migrated (Quick Settings cluster added, your shortcuts untouched)": "Upgraded in place (Quick Settings cluster added, your shortcuts untouched)",
         "left-alone (never auto-overwritten)": "Left alone (yours to edit)",
         "unchanged": "Already up to date",
         "skipped-modified": "SKIPPED -- you edited this since the last deploy",
+        "unrecognized": "Left alone (already existed, no record of DXrice ever deploying it)",
         "removed (legacy copy -- scripts now run from the repo checkout)": "Cleaned up (old ~/scripts copy, no longer needed)",
         "removed (now empty)": "Cleaned up",
         "left-alone (you edited this legacy copy -- remove it yourself if unwanted)": "Left alone (you edited this old ~/scripts copy)",
@@ -232,6 +232,11 @@ def print_summary(results: dict):
     if by_result.get("skipped-modified"):
         print("\nTo take the new version of a skipped file anyway, delete it and re-run,")
         print("or diff it against the repo copy and merge by hand.")
+
+    if by_result.get("unrecognized"):
+        print("\nDXrice's own version of the file(s) above won't take effect until you move")
+        print("the existing one yourself -- delete or rename it, then re-run, if you want")
+        print("DXrice's version there instead.")
 
 
 def main():

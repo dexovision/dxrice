@@ -171,6 +171,13 @@ def render_templates(theme):
         print("Skipped (hand-edited since last Apply, left untouched):")
         for p in skipped:
             print(f"  - {p}")
+
+    unrecognized = [p for p, r in results.items() if r == "unrecognized"]
+    if unrecognized:
+        print("Left alone (already existed, no record of DXrice ever deploying it --")
+        print("delete or rename it yourself if you want DXrice's version there instead):")
+        for p in unrecognized:
+            print(f"  - {p}")
     return results
 
 
