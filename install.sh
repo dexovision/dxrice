@@ -727,6 +727,67 @@ check_stale_hyprland_lua() {
     fi
 }
 
+# A deployed waybar/config* file is copy-once (see dxrice_deploy.py) and is
+# only ever upgraded in place for one specific, already-known structural
+# change (adding the Quick Settings module group -- see that script's own
+# _migrate_waybar_quicksettings). A config from a genuinely ancient,
+# pre-dxrice rice -- a single waybar bar instead of this rice's four, no
+# Quick Settings concept at all -- doesn't match that narrow migration's
+# precondition and is simply left exactly as it was, forever. That's why a
+# machine coming from a much older setup can run this installer clean,
+# with hyprland.lua correctly replaced by the check above, and still
+# visually look like the old rice afterward: the bars themselves never got
+# the memo. Live-reported: exactly this, right after check_stale_hyprland_
+# lua + check_legacy_rice_checkout both ran successfully.
+#
+# Detected the same way as check_stale_hyprland_lua: by a marker, not a
+# byte-diff. Every CURRENT template names itself ("waybar-top"/"-left"/
+# "-right"/"-dock", one per file -- see dxrice_deploy.py's own four
+# COPY_ONCE_FILES), and that field survives every legitimate edit this
+# rice itself makes to the file: TaskbarManager.qml's own add-shortcut
+# flow round-trips the WHOLE parsed JSON object (confirmed by reading its
+# source), not just modules-left, so a live, user-customized config-dock
+# still carries "waybar-dock" after any number of added shortcuts. A
+# deployed file missing its own name, or that still references one of
+# LEGACY_SCRIPT_NAMES directly in an on-click/exec string, is provably not
+# a current dxrice config -- never a user's own legitimate customization.
+check_stale_waybar_configs() {
+    local names_re
+    names_re="$(_legacy_names_regex)"
+    local pairs=("config:waybar-top" "config-left:waybar-left" "config-right:waybar-right" "config-dock:waybar-dock")
+    local pair rel expected f
+    for pair in "${pairs[@]}"; do
+        rel="${pair%%:*}"
+        expected="${pair##*:}"
+        f="$CONFIG_HOME/waybar/$rel"
+        [ -f "$f" ] || continue
+
+        if grep -q "\"name\"[[:space:]]*:[[:space:]]*\"$expected\"" "$f" 2>/dev/null; then
+            continue  # already current-shaped, whatever else you've customized
+        fi
+
+        local reason="doesn't look like this rice's current four-bar layout"
+        if grep -qE "$names_re" "$f" 2>/dev/null; then
+            reason="still references this rice's own old, pre-Quickshell script names"
+        fi
+
+        warn "~/.config/waybar/$rel $reason."
+        info "This is from a much older version of this rice (or a different setup"
+        info "entirely) -- it predates the current look, so it's never going to pick"
+        info "that up just by itself."
+        if ask_yes_no "Back it up and let the current version deploy instead?" Y; then
+            mkdir -p "$STATE_DIR/backups"
+            local backup="$STATE_DIR/backups/waybar-$rel.$(date +%s).bak"
+            cp "$f" "$backup"
+            rm -f "$f"
+            ok "Backed up to $backup and removed the live copy -- deploying the current version next."
+        else
+            warn "Leaving ~/.config/waybar/$rel as-is -- it'll keep looking like the old rice"
+            info "until you either edit it by hand or re-run install and say yes here."
+        fi
+    done
+}
+
 # Narrower companion to check_stale_hyprland_lua: a hyprland.lua already on
 # the current repo-path scheme (so the check above leaves it alone) can
 # still predate a later change to one specific bind -- e.g. the taskbar
@@ -1000,6 +1061,7 @@ do_install() {
 
     step "Step 4/4 -- Deploying your rice"
     check_stale_hyprland_lua
+    check_stale_waybar_configs
     migrate_taskbar_bind
     check_legacy_rice_checkout
     local hypr_existed=0
@@ -1282,6 +1344,7 @@ do_update() {
 
     step "Redeploying"
     check_stale_hyprland_lua
+    check_stale_waybar_configs
     migrate_taskbar_bind
     check_legacy_rice_checkout
     local hypr_existed=0
