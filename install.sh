@@ -336,6 +336,15 @@ legacy_v2 = re.compile(
 )
 content = legacy_v2.sub("\n", content, count=1)
 
+# Each \n? above only ever eats ONE of the newlines adjoining a stripped
+# block, not the whole blank-line gap left behind -- across repeated
+# install/update runs that stacks into an ever-growing run of blank lines
+# before the re-appended block (confirmed live: 1 blank line after the
+# first run, 2 after the second, 3 after the third, unbounded). Collapsing
+# to a single trailing newline here, right before the block is
+# re-appended below, caps the gap at exactly one blank line forever.
+content = content.rstrip("\n") + "\n"
+
 with open(path, "w") as f:
     f.write(content)
 PYEOF
@@ -388,6 +397,11 @@ legacy_v2 = re.compile(
     r"dx\(\) \{\n(?:.*\n)*?\}\n"
 )
 content = legacy_v2.sub("\n", content, count=1)
+
+# Same blank-line-gap normalization as install_shell_alias -- leaves the
+# file exactly as if the block had never been there, not with a stray
+# trailing blank line from the strip.
+content = content.rstrip("\n") + "\n"
 
 with open(path, "w") as f:
     f.write(content)
@@ -1516,7 +1530,24 @@ do_update() {
 
         if [ "$stashed" = "1" ]; then
             info "Restoring your local repo edits..."
-            git stash pop || warn "Could not auto-restore stashed changes cleanly -- run 'git stash list' / 'git stash pop' by hand to recover them."
+            # A failed pop (merge conflict between your edit and the pulled
+            # change) can leave literal <<<<<<< conflict markers sitting in
+            # a tracked .py file -- confirmed live: redeploying straight
+            # through that state makes dxrice_deploy.py's own `import`
+            # crash with a raw Python SyntaxError traceback instead of a
+            # clear explanation. Stop here instead; the stash is never
+            # dropped on failure, so nothing is lost by stopping.
+            if ! git stash pop; then
+                err "Could not auto-restore your stashed local repo edits -- this usually means"
+                info "they conflict with what was just pulled. Your edits are safe in the stash"
+                info "(not lost), but the repo is left mid-conflict, so redeploying now would fail."
+                info "Resolve it by hand, then re-run './install.sh update':"
+                info "  git status               # see which file(s) conflict"
+                info "  <edit the conflicted file(s), remove the <<<<<<< / ======= / >>>>>>> markers>"
+                info "  git add <file>            # mark each one resolved"
+                info "  git stash drop            # once you're happy with the result"
+                exit 1
+            fi
         fi
     fi
 
