@@ -348,11 +348,17 @@ content = content.rstrip("\n") + "\n"
 # Atomic write: a process killed mid-write must never leave a truncated
 # shell rc file behind -- write to a temp file in the same directory, then
 # rename, so the original survives intact if anything goes wrong.
-tmp_path = path + ".dxrice.tmp"
+tmp_path = path + f".dxrice.{os.getpid()}.tmp"
+try:
+    existing_mode = os.stat(path).st_mode & 0o777
+except OSError:
+    existing_mode = None
 with open(tmp_path, "w") as f:
     f.write(content)
     f.flush()
     os.fsync(f.fileno())
+if existing_mode is not None:
+    os.chmod(tmp_path, existing_mode)
 os.replace(tmp_path, path)
 PYEOF
 
@@ -413,11 +419,17 @@ content = content.rstrip("\n") + "\n"
 # Atomic write: a process killed mid-write must never leave a truncated
 # shell rc file behind -- write to a temp file in the same directory, then
 # rename, so the original survives intact if anything goes wrong.
-tmp_path = path + ".dxrice.tmp"
+tmp_path = path + f".dxrice.{os.getpid()}.tmp"
+try:
+    existing_mode = os.stat(path).st_mode & 0o777
+except OSError:
+    existing_mode = None
 with open(tmp_path, "w") as f:
     f.write(content)
     f.flush()
     os.fsync(f.fileno())
+if existing_mode is not None:
+    os.chmod(tmp_path, existing_mode)
 os.replace(tmp_path, path)
 PYEOF
         after="$(cat "$rc" 2>/dev/null)"
@@ -947,11 +959,17 @@ content = re.sub(
 
 # Atomic write -- this rewrites a live, user-customized hyprland.lua in
 # place; a process killed mid-write must never leave it truncated.
-tmp_path = path + ".dxrice.tmp"
+tmp_path = path + f".dxrice.{os.getpid()}.tmp"
+try:
+    existing_mode = os.stat(path).st_mode & 0o777
+except OSError:
+    existing_mode = None
 with open(tmp_path, "w") as fh:
     fh.write(content)
     fh.flush()
     os.fsync(fh.fileno())
+if existing_mode is not None:
+    os.chmod(tmp_path, existing_mode)
 os.replace(tmp_path, path)
 PYEOF
 }
@@ -1092,11 +1110,17 @@ content = re.sub(r'mode\s*=\s*"[^"]*"', f'mode = "{mode}"', content, count=1)
 content = re.sub(r'position\s*=\s*"[^"]*"', f'position = "{pos}"', content, count=1)
 # Atomic write -- same reasoning as migrate_exec_to_systemd_units: this is
 # a live, user-customized file, never safe to truncate mid-write.
-tmp_path = target + ".dxrice.tmp"
+tmp_path = target + f".dxrice.{os.getpid()}.tmp"
+try:
+    existing_mode = os.stat(target).st_mode & 0o777
+except OSError:
+    existing_mode = None
 with open(tmp_path, "w") as f:
     f.write(content)
     f.flush()
     os.fsync(f.fileno())
+if existing_mode is not None:
+    os.chmod(tmp_path, existing_mode)
 os.replace(tmp_path, target)
 print(f"Detected monitor {name} ({mode} at {pos}) and wrote it into hyprland.lua")
 PYEOF

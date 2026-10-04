@@ -69,6 +69,33 @@ class TestAtomicWriteBytes(ManifestTestBase):
         leftovers = [p for p in self.tmp.iterdir() if p.name != "clean"]
         self.assertEqual(leftovers, [])
 
+    def test_preserves_existing_file_permissions(self):
+        # Found during release-candidate review: os.replace swaps in
+        # mkstemp's own default mode (0600), silently overwriting whatever
+        # permissions the original file actually had -- a content-only
+        # update must never also be a surprise permissions change.
+        target = self.live("permissioned")
+        target.write_bytes(b"original")
+        os.chmod(target, 0o644)
+        dxrice_manifest.atomic_write_bytes(target, b"updated")
+        self.assertEqual(target.stat().st_mode & 0o777, 0o644)
+
+    def test_preserves_unusually_strict_existing_permissions_too(self):
+        target = self.live("strict")
+        target.write_bytes(b"original")
+        os.chmod(target, 0o600)
+        dxrice_manifest.atomic_write_bytes(target, b"updated")
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+
+    def test_fresh_file_respects_umask_not_mkstemps_restrictive_default(self):
+        target = self.live("brand_new")
+        old_umask = os.umask(0o022)
+        try:
+            dxrice_manifest.atomic_write_bytes(target, b"data")
+        finally:
+            os.umask(old_umask)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o644)
+
     def test_failed_write_leaves_original_file_untouched(self):
         # Simulate a mid-write failure (e.g. disk full) by making the
         # write itself raise -- the original file must survive exactly as
