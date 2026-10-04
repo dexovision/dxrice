@@ -1672,6 +1672,122 @@ STARTUP_COMFORTABLE_AREA_FRACTION = 0.18
 STARTUP_MAX_DIMENSION_FRACTION = 0.6
 
 
+# Calibrated against real, live-observed geometry, not borrowed from
+# dxrice_auto_arrange.py's unrelated SIZE_CLASS_RATIO (2.25 -- that
+# constant answers "do these two windows belong to the same size class in
+# a COMPOSITION", a different question, and using it here was tried
+# first and PROVED wrong: the real VirtualBox "Settings" dialog (840x489)
+# against its own "Manager" window (960x756) is only a 1.77x area ratio,
+# comfortably under 2.25 -- the exact real case this feature exists for
+# would have been missed by its own threshold.
+#
+# The two real numbers that matter are on opposite sides of this line:
+# VirtualBox's Settings dialog vs its Manager is 1.77x (must be ABOVE the
+# threshold, so it anchors); Brave's own two independent windows, opened
+# from the same PID, are 1.33x (must stay BELOW it, so a second real
+# browser window is never forced to anchor beside the first). 1.5 sits
+# with real margin on both sides -- about 12% above the sibling-window
+# ratio, about 15% below the real dialog ratio -- rather than squeezed
+# against either.
+FAMILY_ANCHOR_SIZE_RATIO = 1.5
+
+
+def _find_family_anchor(new_win, siblings):
+    """Is this new window a DIALOG/UTILITY of an app that's already open,
+    rather than an independent window earning its own place in the
+    composition -- and if so, which existing window is it a dialog OF?
+
+    General signals only, no application names: sharing a PID covers an
+    app like VirtualBox, which spawns its Settings/disk-picker/notice
+    windows from the SAME process under a DIFFERENT window class ("Virtual
+    Box Manager" vs "VirtualBox") -- class alone would miss that family
+    relationship entirely. Sharing a class covers the more common case
+    where a toolkit gives a dialog the identical app-id as its parent.
+    Either signal alone is cheap and already available on every window;
+    neither needs any per-application knowledge.
+    
+    Requiring the candidate to be meaningfully SMALLER (FAMILY_ANCHOR_
+    SIZE_RATIO) than the window it would anchor to is what keeps this from
+    firing on a second, equally-large, genuinely independent window of the
+    same app -- Brave's own separate browser windows all share one PID,
+    and forcing them to stack next to each other would be exactly wrong.
+    A dialog reads as smaller than the window that spawned it; a sibling
+    window does not.
+
+    Among multiple qualifying candidates, the one most recently focused
+    (Hyprland's own focusHistoryID, 0 = currently focused) wins -- that's
+    the window the user was actually looking at when this one popped up,
+    which is a better signal than "the biggest one" when an app has
+    several same-family windows open already. Falls back to the largest
+    when focus history is unavailable or tied.
+
+    Returns the anchor window dict, or None if this doesn't look like a
+    dialog of anything already open (the normal composition placement
+    handles it in that case, unchanged)."""
+    new_w, new_h = new_win.get("size", (0, 0))
+    if new_w <= 0 or new_h <= 0:
+        return None
+    new_area = new_w * new_h
+    new_pid = new_win.get("pid")
+    new_class = (new_win.get("class") or new_win.get("initialClass") or "").lower()
+
+    candidates = []
+    for sib in siblings:
+        if sib.get("fullscreen"):
+            continue  # fixed furniture, not a family relationship
+        same_family = (new_pid is not None and sib.get("pid") == new_pid) or (
+            new_class and (sib.get("class") or sib.get("initialClass") or "").lower() == new_class
+        )
+        if not same_family:
+            continue
+        sw, sh = sib.get("size", (0, 0))
+        if sw <= 0 or sh <= 0:
+            continue
+        if (sw * sh) < new_area * FAMILY_ANCHOR_SIZE_RATIO:
+            continue  # not meaningfully bigger -- a sibling, not a parent
+        candidates.append(sib)
+
+    if not candidates:
+        return None
+    return min(candidates, key=lambda w: (w.get("focusHistoryID", 10**9), -(w["size"][0] * w["size"][1])))
+
+
+def _place_beside_anchor(anchor, new_w, new_h, obstacle_rects, gap, center):
+    """The best free position flush against one of `anchor`'s four edges,
+    centered on that edge -- or None if all four are blocked by something
+    else already on the workspace.
+
+    Deliberately does not clamp to the monitor or fall back to a
+    composition-aware search of its own: if the anchor itself currently
+    sits off-screen (a real, observed state on this infinite canvas -- see
+    the session note on desktop-wide drift), the dialog belongs right
+    beside it wherever that is, not wherever the viewport happens to be
+    looking. A press of SUPER+G brings the anchor and its now genuinely-
+    adjacent dialog back into view TOGETHER, as one connected shape,
+    which composition-aware placement could not guarantee if it ignored
+    the family relationship and reasoned about the dialog independently.
+    """
+    ax0, ay0, ax1, ay1 = rect_for(anchor["at"][0], anchor["at"][1], anchor["size"][0], anchor["size"][1])
+    acx, acy = (ax0 + ax1) / 2, (ay0 + ay1) / 2
+
+    candidates = [
+        (ax1 + gap, acy - new_h / 2),              # right of anchor, vertically centered
+        (ax0 - new_w - gap, acy - new_h / 2),      # left of anchor
+        (acx - new_w / 2, ay1 + gap),              # below anchor, horizontally centered
+        (acx - new_w / 2, ay0 - new_h - gap),      # above anchor
+    ]
+
+    def free(x, y):
+        cand = (x, y, x + new_w, y + new_h)
+        inflated = (cand[0] - gap, cand[1] - gap, cand[2] + gap, cand[3] + gap)
+        return not any(overlaps(inflated, r) for r in obstacle_rects)
+
+    valid = [(x, y) for x, y in candidates if free(x, y)]
+    if not valid:
+        return None
+    return min(valid, key=lambda p: math.hypot(p[0] + new_w / 2 - center[0], p[1] + new_h / 2 - center[1]))
+
+
 def comfortable_startup_size(win, siblings, viewport_w, viewport_h):
     """The size a newly-mapped window should actually be placed at.
 
@@ -1902,6 +2018,31 @@ def place_new_window(address, workspace_id, gap):
 
     if not same_ws:
         return "placed"  # first window on this workspace -- nothing to avoid
+
+    # A dialog/utility of an app that's already open (VirtualBox's
+    # Settings, a disk-image picker, a details popup) goes right beside
+    # the window it belongs to, not through the general composition
+    # placement below -- see _find_family_anchor's own docstring for why
+    # PID/class family membership plus a size gap is what identifies this,
+    # with no application names involved. This is a placement decision
+    # made exactly ONCE, at open time, same as everything else in this
+    # file; Hyprland's own window dragging is completely unaffected
+    # afterward, so the user remains free to drag it anywhere they like.
+    family_anchor = _find_family_anchor(new_win, same_ws)
+    if family_anchor is not None:
+        all_obstacle_rects = [rect_for(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in same_ws]
+        beside_center = ((mx0 + mx1) / 2, (my0 + my1) / 2)
+        beside_pos = _place_beside_anchor(family_anchor, new_w, new_h, all_obstacle_rects, gap, beside_center)
+        if beside_pos is not None:
+            if _DEBUG:
+                print(f"DEBUG address={address} placed beside family anchor "
+                      f"{family_anchor.get('address')} ({family_anchor.get('title','')[:30]!r}) at {beside_pos}",
+                      file=sys.stderr, flush=True)
+            dispatch_async(move_window_exact_lua(int(round(beside_pos[0])), int(round(beside_pos[1])), address))
+            return "placed"
+        # All four sides of the anchor were blocked -- fall through to the
+        # general algorithm below rather than leaving the window wherever
+        # Hyprland's own default floating-spawn position put it.
 
     # The middle of the current viewport in absolute canvas coordinates --
     # not a bound, just the point new placements try to land closest to.

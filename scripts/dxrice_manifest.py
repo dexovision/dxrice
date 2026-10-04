@@ -13,10 +13,14 @@ scripts now run straight out of the git checkout instead.
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 
-HOME = Path.home()
-STATE_DIR = HOME / ".local" / "state" / "dxrice"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dxrice_xdg
+
+HOME = Path(dxrice_xdg.real_home())
+STATE_DIR = Path(dxrice_xdg.state_dir())
 MANIFEST_PATH = STATE_DIR / "manifest.json"
 BACKUP_DIR = STATE_DIR / "backups"
 

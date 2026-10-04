@@ -34,8 +34,10 @@ import os
 import subprocess
 import sys
 
-HOME = os.path.expanduser("~")
-LIVE_THEME_JSON = os.path.join(HOME, ".config", "dxrice", "theme.json")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dxrice_xdg
+
+LIVE_THEME_JSON = os.path.join(dxrice_xdg.config_dir(), "theme.json")
 SAMPLE_GRID = 24
 
 

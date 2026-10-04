@@ -24,6 +24,11 @@ Item {
     anchors.fill: parent
     signal closeRequested()
 
+    // Read by Dock.qml (via ShellIsland's panelItem alias) so its own
+    // click-outside-to-dismiss region can suspend itself while this dialog
+    // is open -- see the fix note on addDialog below for why that's needed.
+    readonly property bool addDialogOpen: addDialog.visible
+
     // Drives the island's expanded height, so the surface fits the list rather
     // than every taskbar being padded out to a fixed 780px with dead space
     // under it (which is what the old fixed-size window did).
@@ -61,7 +66,7 @@ Item {
     // waybar/config-dock), separate from the top bar's own config -- this
     // still edits the same "modules-left" array inside that file, just a
     // different file than before.
-    readonly property string configPath: Quickshell.env("HOME") + "/.config/waybar/config-dock"
+    readonly property string configPath: Xdg.configHome + "/waybar/config-dock"
     readonly property string launcherId: "custom/launcher"
     readonly property var iconModes: ["auto", "text", "image"]
     readonly property var iconModeLabels: ["Automatic icon", "Text label", "Custom image"]
@@ -130,7 +135,7 @@ Item {
             "if command -v qs >/dev/null 2>&1; then exit 0; fi; " +
             "pkill -x waybar; sleep 0.3; " +
             "for c in config config-left config-right config-dock; do " +
-            "setsid waybar -c ~/.config/waybar/$c -s ~/.config/waybar/style.css >/dev/null 2>&1 & done"]
+            "setsid waybar -c \"" + Xdg.configHome + "/waybar/$c\" -s \"" + Xdg.configHome + "/waybar/style.css\" >/dev/null 2>&1 & done"]
     }
 
     function slugify(label) {
@@ -747,6 +752,16 @@ Item {
         }
     }
 
+    // A real, separate top-level window (not a rectangle drawn inside this
+    // panel's own surface) -- Dock.qml's own click-outside-to-dismiss mask
+    // has no way to know this window exists, so a click meant for THIS
+    // window's search field or text inputs was landing on Dock's full-
+    // screen dismiss catcher instead and closing the whole taskbar panel,
+    // tearing this dialog down with it (it's a child of `root`, which
+    // ShellIsland destroys once the panel collapses). Fixed at the source
+    // via `addDialogOpen` above, which Dock.qml reads to suspend its own
+    // dismiss region while this is open -- not by trying to teach this
+    // dialog anything about Dock's geometry.
     FloatingWindow {
         id: addDialog
         visible: false

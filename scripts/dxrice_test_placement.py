@@ -2162,5 +2162,183 @@ class TestResizeSettleGapCorrection(unittest.TestCase):
                           "must report the size the client ACTUALLY took")
 
 
+class TestFamilyAnchorPlacement(unittest.TestCase):
+    """A dialog/utility window of an already-open app (VirtualBox's own
+    Settings/disk-picker windows, which share its PID under a DIFFERENT
+    class) goes right beside the window it belongs to, not through the
+    general composition placement -- see _find_family_anchor and
+    _place_beside_anchor's own docstrings. Live-motivated: reported on the
+    real desktop as hover-detail popups and VirtualBox dialogs landing far
+    from the app they belonged to on this infinite canvas."""
+
+    def _win(self, addr, x, y, w, h, pid=None, cls="app", fullscreen=0, focus_hist=0):
+        return {"address": addr, "at": [x, y], "size": [w, h], "pid": pid,
+                "class": cls, "fullscreen": fullscreen, "focusHistoryID": focus_hist}
+
+    def test_same_pid_different_class_is_recognized_as_family(self):
+        """VirtualBox's exact real shape: main window class="VirtualBox
+        Manager", dialog class="VirtualBox", same pid -- class alone would
+        miss this; pid is what catches it."""
+        manager = self._win("M", 500, 300, 960, 756, pid=100, cls="VirtualBox Manager")
+        dialog = {"address": "D", "size": [400, 300], "pid": 100, "class": "VirtualBox", "fullscreen": 0}
+        anchor = apw._find_family_anchor(dialog, [manager])
+        self.assertIsNotNone(anchor)
+        self.assertEqual(anchor["address"], "M")
+
+    def test_same_class_different_pid_is_recognized_as_family(self):
+        """The more common case: a toolkit gives a dialog the SAME app-id
+        as its parent, but as a genuinely separate process."""
+        main = self._win("M", 500, 300, 900, 700, pid=200, cls="gimp")
+        dialog = {"address": "D", "size": [350, 250], "pid": 201, "class": "gimp", "fullscreen": 0}
+        anchor = apw._find_family_anchor(dialog, [main])
+        self.assertIsNotNone(anchor)
+        self.assertEqual(anchor["address"], "M")
+
+    def test_unrelated_pid_and_class_is_not_family(self):
+        other = self._win("O", 500, 300, 900, 700, pid=300, cls="discord")
+        dialog = {"address": "D", "size": [350, 250], "pid": 999, "class": "gimp", "fullscreen": 0}
+        self.assertIsNone(apw._find_family_anchor(dialog, [other]))
+
+    def test_second_independent_window_of_same_app_is_not_treated_as_a_dialog(self):
+        """The critical safety case: Brave's own separate browser windows
+        share one PID. A second, similarly-SIZED window must NOT be
+        forced to anchor beside the first -- only something meaningfully
+        SMALLER reads as a dialog of it."""
+        win1 = self._win("A", 500, 300, 925, 1040, pid=400, cls="brave-browser")
+        win2 = {"address": "B", "size": [925, 780], "pid": 400, "class": "brave-browser", "fullscreen": 0}
+        self.assertIsNone(apw._find_family_anchor(win2, [win1]),
+                           "a similarly-sized sibling window was wrongly treated as a dialog")
+
+    def test_calibration_matches_real_observed_geometry(self):
+        """Pins FAMILY_ANCHOR_SIZE_RATIO against the exact real numbers
+        that motivated it (see that constant's own comment): VirtualBox's
+        real Settings-dialog-vs-Manager ratio (1.77x) must anchor; Brave's
+        real independent-sibling-window ratio (1.33x) must not."""
+        manager = self._win("M", 700, 400, 960, 756, pid=100, cls="VirtualBox Manager")
+        settings = {"address": "S", "size": [840, 489], "pid": 100, "class": "VirtualBox", "fullscreen": 0}
+        self.assertIsNotNone(apw._find_family_anchor(settings, [manager]),
+                              "the real VirtualBox Settings-vs-Manager ratio (1.77x) was not recognized")
+
+        brave1 = self._win("B1", 700, 400, 925, 1040, pid=400, cls="brave-browser")
+        brave2 = {"address": "B2", "size": [925, 780], "pid": 400, "class": "brave-browser", "fullscreen": 0}
+        self.assertIsNone(apw._find_family_anchor(brave2, [brave1]),
+                           "the real Brave sibling-window ratio (1.33x) was wrongly treated as a dialog")
+
+    def test_meaningfully_smaller_same_pid_window_is_a_dialog(self):
+        win1 = self._win("A", 500, 300, 925, 1040, pid=400, cls="brave-browser")
+        popup = {"address": "P", "size": [400, 300], "pid": 400, "class": "brave-browser", "fullscreen": 0}
+        anchor = apw._find_family_anchor(popup, [win1])
+        self.assertIsNotNone(anchor)
+        self.assertEqual(anchor["address"], "A")
+
+    def test_fullscreen_sibling_is_never_a_family_anchor(self):
+        fs = self._win("F", 0, 0, 1920, 1080, pid=500, cls="game", fullscreen=2)
+        dialog = {"address": "D", "size": [400, 300], "pid": 500, "class": "game", "fullscreen": 0}
+        self.assertIsNone(apw._find_family_anchor(dialog, [fs]))
+
+    def test_multiple_candidates_prefers_most_recently_focused(self):
+        old = self._win("OLD", 500, 300, 960, 756, pid=600, cls="VirtualBox Manager", focus_hist=5)
+        recent = self._win("RECENT", 2000, 2000, 960, 756, pid=600, cls="VirtualBox Manager", focus_hist=0)
+        dialog = {"address": "D", "size": [400, 300], "pid": 600, "class": "VirtualBox", "fullscreen": 0}
+        anchor = apw._find_family_anchor(dialog, [old, recent])
+        self.assertEqual(anchor["address"], "RECENT")
+
+    def test_placed_flush_beside_anchor_with_configured_gap(self):
+        anchor = self._win("M", 500, 300, 960, 756, pid=100, cls="VirtualBox Manager")
+        pos = apw._place_beside_anchor(anchor, 400, 300, [], GAP, (960, 540))
+        self.assertIsNotNone(pos)
+        x, y = pos
+        ax0, ay0, ax1, ay1 = 500, 300, 1460, 1056
+        cand = (x, y, x + 400, y + 300)
+        # Must be flush (exactly `gap` away) on one axis and overlapping
+        # (or touching) on the other -- i.e. genuinely adjacent, not just
+        # "somewhere nearby".
+        touches_right = abs(cand[0] - ax1 - GAP) < 0.5
+        touches_left = abs(ax0 - cand[2] - GAP) < 0.5
+        touches_below = abs(cand[1] - ay1 - GAP) < 0.5
+        touches_above = abs(ay0 - cand[3] - GAP) < 0.5
+        self.assertTrue(touches_right or touches_left or touches_below or touches_above,
+                         f"not flush against the anchor: anchor=({ax0},{ay0},{ax1},{ay1}) cand={cand}")
+
+    def test_all_four_sides_blocked_returns_none(self):
+        """Falls through to the general algorithm rather than forcing an
+        overlap when every side of the anchor is genuinely surrounded."""
+        anchor = self._win("M", 1000, 1000, 400, 400, pid=100, cls="app")
+        gap = GAP
+        blockers = [
+            apw.rect_for(1000 + 400 + gap, 1000, 300, 400),       # right
+            apw.rect_for(1000 - 300 - gap, 1000, 300, 400),       # left
+            apw.rect_for(1000, 1000 + 400 + gap, 400, 300),       # below
+            apw.rect_for(1000, 1000 - 300 - gap, 400, 300),       # above
+        ]
+        pos = apw._place_beside_anchor(anchor, 300, 300, blockers, gap, (960, 540))
+        self.assertIsNone(pos)
+
+    def test_family_anchor_far_off_the_viewport_is_not_clamped(self):
+        """The anchor's own drifted position is respected exactly, even
+        far outside the monitor -- see _place_beside_anchor's own
+        docstring for why (SUPER+G brings both back into view TOGETHER
+        precisely because they end up genuinely adjacent)."""
+        anchor = self._win("M", 5000, -4000, 960, 756, pid=100, cls="VirtualBox Manager")
+        pos = apw._place_beside_anchor(anchor, 400, 300, [], GAP, (960, 540))
+        self.assertIsNotNone(pos)
+        x, y = pos
+        self.assertGreater(abs(x - 960) + abs(y - 540), 2000,
+                            "the far-off anchor's position was not respected")
+
+    def test_end_to_end_via_place_new_window(self):
+        """The real entry point: with hyprctl_json faked to a VirtualBox-
+        shaped workspace, a same-pid, smaller, different-class window
+        gets moved to a position genuinely flush against the main window,
+        not through the general Stage 1/2/3 algorithm."""
+        manager = {"address": "0xM", "at": [700, 400], "size": [960, 756], "pid": 100,
+                   "class": "VirtualBox Manager", "initialClass": "VirtualBox Manager",
+                   "floating": True, "fullscreen": 0, "workspace": {"id": 1}, "focusHistoryID": 0}
+        dialog = {"address": "0xD", "at": [50, 50], "size": [840, 489], "pid": 100,
+                  "class": "VirtualBox", "initialClass": "VirtualBox",
+                  "floating": True, "fullscreen": 0, "workspace": {"id": 1}, "focusHistoryID": 1}
+        state = {"clients": [manager, dict(dialog)]}
+        dispatched = []
+
+        def fake_clients(args, **kw):
+            if args and args[0] == "monitors":
+                return [{"x": 0, "y": 0, "width": 1920, "height": 1080, "focused": True}]
+            return state["clients"]
+
+        def fake_dispatch_async(expr):
+            dispatched.append(expr)
+            import re
+            m = re.search(r"x\s*=\s*(-?\d+),\s*y\s*=\s*(-?\d+)", expr)
+            if m:
+                for c in state["clients"]:
+                    if c["address"] == "0xD":
+                        c["at"] = [int(m.group(1)), int(m.group(2))]
+
+        saved_hyprctl = apw.hyprctl_json
+        saved_dispatch = apw.dispatch_async
+        apw.hyprctl_json = fake_clients
+        apw.dispatch_async = fake_dispatch_async
+        try:
+            status = apw.place_new_window("0xD", 1, GAP)
+        finally:
+            apw.hyprctl_json = saved_hyprctl
+            apw.dispatch_async = saved_dispatch
+
+        self.assertEqual(status, "placed")
+        self.assertTrue(dispatched, "no move was dispatched")
+        final = next(c for c in state["clients"] if c["address"] == "0xD")
+        mx0, my0 = 700, 400
+        mx1, my1 = 1660, 1156
+        fx0, fy0 = final["at"]
+        fx1, fy1 = fx0 + 840, fy0 + 489
+        touches_right = abs(fx0 - mx1 - GAP) < 1.0
+        touches_left = abs(mx0 - fx1 - GAP) < 1.0
+        touches_below = abs(fy0 - my1 - GAP) < 1.0
+        touches_above = abs(my0 - fy1 - GAP) < 1.0
+        self.assertTrue(touches_right or touches_left or touches_below or touches_above,
+                         f"dialog not placed flush against its family anchor: manager=({mx0},{my0},{mx1},{my1}) "
+                         f"dialog=({fx0},{fy0},{fx1},{fy1})")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

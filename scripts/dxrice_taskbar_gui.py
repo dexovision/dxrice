@@ -44,13 +44,13 @@ from dxrice_gtk_widgets import (
 )
 from dxrice_list_desktop_apps import list_desktop_apps
 import dxrice_apply_theme as apply_theme
+import dxrice_xdg
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SCRIPTS_DIR)
-HOME = os.path.expanduser("~")
-CONFIG_PATH = os.path.join(HOME, ".config", "waybar", "config")
-ICONS_DIR = os.path.join(HOME, ".config", "waybar", "icons")
-CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
+CONFIG_PATH = os.path.join(dxrice_xdg.config_home(), "waybar", "config")
+ICONS_DIR = os.path.join(dxrice_xdg.config_home(), "waybar", "icons")
+CSS_PATH = os.path.join(dxrice_xdg.config_dir(), "gtk_style.css")
 DEFAULT_ICON_SIZE = 24
 
 # The Theme app's own animation-speed setting, so Revealer expand/collapse

@@ -1,3 +1,4 @@
+singleton Xdg 1.0 Xdg.qml
 singleton Theme 1.0 Theme.qml
 singleton ShellSurface 1.0 ShellSurface.qml
 singleton PanelManager 1.0 PanelManager.qml

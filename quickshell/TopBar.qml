@@ -81,10 +81,20 @@ PanelWindow {
     focusable: PanelManager.current !== ""
     Shortcut { sequence: "Escape"; enabled: root.focusable; onActivated: PanelManager.closeCurrent() }
 
+    // Whether Quick Settings' Wifi-password dialog is open -- a real,
+    // separate top-level window (FloatingWindow) that this window's own
+    // full-screen dismiss catcher below has no way to see. Without this,
+    // clicking into its password field to type was being caught as "a
+    // click outside every island" and closing Quick Settings (destroying
+    // the dialog with it) instead of ever reaching the field -- same
+    // architectural gap, and same fix, as Dock.qml's taskbarModalOpen.
+    readonly property bool statusModalOpen: statusIsland.panelItem && statusIsland.panelItem.wifiDialogOpen
+
     // Whether one of THIS window's own panels (not Taskbar, that's Dock's)
     // is open -- the click-outside-to-dismiss region below only ever
     // expands while this is true.
-    readonly property bool anyIslandOpen: PanelManager.isOpen("calendar") || PanelManager.isOpen("quicksettings")
+    readonly property bool anyIslandOpen: (PanelManager.isOpen("calendar") || PanelManager.isOpen("quicksettings"))
+                                           && !root.statusModalOpen
 
     // Without this the transparent full-screen surface would swallow every
     // click on the desktop. The mask follows the islands' live geometry, so it
@@ -444,7 +454,6 @@ PanelWindow {
             onClicked: root.quickSettingsRequested()
         }
     }
-
 
     Component {
         id: quickSettingsComponent

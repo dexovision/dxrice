@@ -52,6 +52,16 @@ PanelWindow {
     focusable: PanelManager.isOpen("taskbar")
     Shortcut { sequence: "Escape"; enabled: root.focusable; onActivated: PanelManager.close("taskbar") }
 
+    // Whether TaskbarManager's own Add-Shortcut dialog is open -- a real,
+    // separate top-level window (FloatingWindow), not part of this surface.
+    // The catch-all region below must suspend itself while it's open: that
+    // dialog isn't excluded from "everywhere outside dockIsland", so a
+    // click meant for its search box or text fields was being caught by
+    // THIS window's own full-screen dismiss region instead of ever
+    // reaching the dialog, closing the whole taskbar panel (and the dialog
+    // with it) the moment the user tried to type into it.
+    readonly property bool taskbarModalOpen: dockIsland.panelItem && dockIsland.panelItem.addDialogOpen
+
     // Same click-outside-to-dismiss pattern as TopBar.qml: the input region
     // only ever extends past dockIsland while Taskbar is actually open, and
     // collapses back to nothing the instant it closes.
@@ -59,21 +69,21 @@ PanelWindow {
         Region { item: dockIsland }
         Region {
             x: 0; y: 0
-            width: PanelManager.isOpen("taskbar") ? root.width : 0
-            height: PanelManager.isOpen("taskbar") ? root.height : 0
+            width: (PanelManager.isOpen("taskbar") && !root.taskbarModalOpen) ? root.width : 0
+            height: (PanelManager.isOpen("taskbar") && !root.taskbarModalOpen) ? root.height : 0
         }
     }
 
     MouseArea {
         id: dismissArea
         anchors.fill: parent
-        enabled: PanelManager.isOpen("taskbar")
+        enabled: PanelManager.isOpen("taskbar") && !root.taskbarModalOpen
         onClicked: PanelManager.close("taskbar")
     }
 
     Binding { target: ShellSurface; property: "bottomEdgeHeight"; value: root.exclusiveZone }
 
-    readonly property string configPath: Quickshell.env("HOME") + "/.config/waybar/config-dock"
+    readonly property string configPath: Xdg.configHome + "/waybar/config-dock"
     property var shortcuts: []
 
     FileView {
@@ -136,7 +146,17 @@ PanelWindow {
                 delegate: Rectangle {
                     id: shortcutTile
                     required property var modelData
-                    width: ShellSurface.dockTile
+                    // A single icon glyph is narrow enough that this just
+                    // reduces to the same fixed square tile as before; a
+                    // text-label shortcut (a full app name, e.g. "Visual
+                    // Studio Code" rather than one glyph) grows the tile to
+                    // fit its own rendered width instead of forcing it into
+                    // that same fixed box, which is what was overlapping
+                    // neighboring tiles -- this reacts to whatever the label
+                    // actually is, so it holds for any name length or
+                    // shortcut count without a hardcoded case for "text
+                    // mode" specifically.
+                    width: Math.max(ShellSurface.dockTile, tileLabel.implicitWidth + Theme.padMd * 2)
                     height: ShellSurface.dockTile
                     radius: ShellSurface.chipRadius
                     color: tileArea.containsMouse ? Theme.layer1Hover : "transparent"
@@ -146,6 +166,7 @@ PanelWindow {
                     Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
 
                     Text {
+                        id: tileLabel
                         anchors.centerIn: parent
                         text: shortcutTile.modelData.glyph
                         font.family: Theme.fontFamily
@@ -191,5 +212,4 @@ PanelWindow {
         id: taskbarComponent
         TaskbarManager { onCloseRequested: PanelManager.close("taskbar") }
     }
-
 }

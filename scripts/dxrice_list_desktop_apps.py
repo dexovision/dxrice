@@ -11,15 +11,17 @@ import glob
 import json
 import os
 import re
+import sys
 
-HOME = os.path.expanduser("~")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dxrice_xdg
 
 
 def list_desktop_apps():
     """Returns [(name, cmd, icon_hint), ...], sorted by name, deduped by
     name (first match wins, matching the search order below: system-wide
     entries before the user's own)."""
-    dirs = ["/usr/share/applications", os.path.join(HOME, ".local/share/applications")]
+    dirs = ["/usr/share/applications", os.path.join(dxrice_xdg.data_home(), "applications")]
     seen = set()
     entries = []
     for d in dirs:
