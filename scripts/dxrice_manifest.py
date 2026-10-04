@@ -44,15 +44,34 @@ def atomic_write_bytes(path, data: bytes):
     corrupted mix of old and new content. Used anywhere this rice writes
     to a path that may already hold real content (a tracked template
     update, an in-place structural migration of a user's live, customized
-    config) rather than a brand-new file."""
+    config) rather than a brand-new file.
+
+    mkstemp creates the temp file at mode 0600, and os.replace swaps that
+    file in under the destination's name WITHOUT inheriting the
+    destination's own permission bits -- confirmed live: an existing 0644
+    file silently became 0600 after a single call. Explicitly carries over
+    the original file's mode when one exists, or applies the umask the
+    same way a plain `open(path, "w")` would for a brand-new file, so this
+    is never an accidental, silent permissions change on top of a content
+    update."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        existing_mode = path.stat().st_mode & 0o777
+    except OSError:
+        existing_mode = None
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        if existing_mode is not None:
+            os.chmod(tmp_name, existing_mode)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp_name, 0o666 & ~umask)
         os.replace(tmp_name, path)
     except BaseException:
         try:
@@ -96,8 +115,7 @@ def load_manifest() -> dict:
 
 
 def save_manifest(manifest: dict):
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
+    atomic_write_bytes(MANIFEST_PATH, json.dumps(manifest, indent=2).encode())
 
 
 def deploy_file(live_path, new_content: bytes, manifest: dict) -> str:
