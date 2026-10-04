@@ -159,9 +159,31 @@ def _unique_modid(cfg, modid, exclude=None):
     return f"{modid}{i}"
 
 
+def _wrap_shell_cmd(cmd):
+    """Embeds a user-typed command (itself meant to be shell-parsed, e.g.
+    it may legitimately contain its own quoted arguments like
+    --title='My App') inside the outer sh -c '...' wrapper this rice
+    stores on-click as.
+
+    Found live: naive string concatenation here breaks the instant cmd
+    contains a single quote with a SPACE inside it (e.g. --title='My Cool
+    App') -- bash's adjacent-quote-concatenation rule happens to paper
+    over a quoted value with no spaces, but a real multi-word quoted value
+    gets silently word-split and the command runs with only part of its
+    arguments. Confirmed: `fake_app --title='My Cool App' arg2` previously
+    ran as just `fake_app --title=My`. The standard POSIX technique for
+    nesting a single-quoted string inside another: close the quote, emit
+    an escaped literal quote, reopen the quote, for every embedded quote.
+    """
+    escaped = cmd.replace("'", "'\\''")
+    return f"sh -c '{escaped} >/dev/null 2>&1 &'"
+
+
 def _unwrap_shell_cmd(on_click):
     m = re.match(r"^sh -c '(.*) >/dev/null 2>&1 &'$", on_click or "")
-    return m.group(1) if m else (on_click or "")
+    if not m:
+        return on_click or ""
+    return m.group(1).replace("'\\''", "'")
 
 
 def icons_enabled(cfg):
@@ -198,7 +220,7 @@ def rebuild_module(cfg, modid):
     label = meta["dxrice_label"]
     cmd = meta["dxrice_cmd"]
     mode = meta.get("dxrice_icon_mode", "auto")
-    on_click = f"sh -c '{cmd} >/dev/null 2>&1 &'"
+    on_click = _wrap_shell_cmd(cmd)
 
     if mode == "image" and meta.get("dxrice_icon_path"):
         cfg[modid] = {
