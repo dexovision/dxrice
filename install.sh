@@ -1043,16 +1043,54 @@ check_legacy_rice_checkout() {
     done
 
     if ask_yes_no "Remove those stale alias lines and move the old checkout(s) out of the way?" Y; then
+        # Remove EXACTLY the lines found_lines recorded above -- the ones
+        # that already passed every check (alias-shaped, names a legacy
+        # script, resolves to a real existing checkout directory) -- by
+        # exact string match, never a fresh broad regex pass. Confirmed
+        # live: a prior version here used `grep -vE "$names_re"` against
+        # the WHOLE file, which matches that bare substring on ANY line
+        # regardless of alias-ness -- it silently deleted an unrelated
+        # comment and an unrelated echo string that merely mentioned
+        # "theme_gui.py" in passing, and even deleted a line from the dx()
+        # function install_shell_alias had just written in the same run,
+        # because "theme_gui.py" is a substring of "dxrice_theme_gui.py".
+        # Exact-line removal can't match either case: a comment/echo line
+        # was never in found_lines (it never matched alias[[:space:]]),
+        # and dxrice_theme_gui.py's actual line was never in found_lines
+        # either (install_shell_alias hadn't even run yet when detection
+        # happened, and that line was never an alias in the first place).
         for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
             [ -f "$rc" ] || continue
-            local tmp
-            tmp="$(mktemp)"
-            grep -vE "$names_re" "$rc" > "$tmp" 2>/dev/null || cp "$rc" "$tmp"
+            local lines_to_remove=()
+            local fl2
+            for fl2 in "${found_lines[@]}"; do
+                [ "${fl2%%:*}" = "$rc" ] && lines_to_remove+=("${fl2#*:}")
+            done
+            [ "${#lines_to_remove[@]}" -eq 0 ] && continue
+
+            local tmp existing_mode
+            tmp="$(mktemp "$(dirname "$rc")/.$(basename "$rc").XXXXXX")"
+            existing_mode="$(stat -c %a "$rc" 2>/dev/null || echo 644)"
+            local out_line keep lr
+            : > "$tmp"
+            while IFS= read -r out_line || [ -n "$out_line" ]; do
+                keep=1
+                for lr in "${lines_to_remove[@]}"; do
+                    if [ "$out_line" = "$lr" ]; then
+                        keep=0
+                        break
+                    fi
+                done
+                [ "$keep" = "1" ] && printf '%s\n' "$out_line" >> "$tmp"
+            done < "$rc"
+
             if ! cmp -s "$rc" "$tmp"; then
-                cp "$tmp" "$rc"
+                chmod "$existing_mode" "$tmp"
+                mv "$tmp" "$rc"
                 ok "Removed the stale alias line(s) from $rc"
+            else
+                rm -f "$tmp"
             fi
-            rm -f "$tmp"
         done
         mkdir -p "$STATE_DIR/backups"
         for d in "${uniq_dirs[@]}"; do
