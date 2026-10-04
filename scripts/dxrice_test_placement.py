@@ -328,16 +328,34 @@ class TestDeadGapPenalty(unittest.TestCase):
 
     def test_large_separation_is_not_penalised_as_dead(self):
         """Space wide enough to actually hold another window reads as a
-        deliberate separation, not a misalignment -- must not be charged."""
+        deliberate separation, not a misalignment -- must not be charged.
+        References DEAD_GAP_USABLE_WIDTH, not MIN_USABLE_WIDTH: those are
+        two different questions (dead-gap threshold vs. resize floor) that
+        used to share one constant by coincidence -- see that constant's
+        own comment for the live bug that caused them to be split."""
         neighbour = rect(0, 0, 400, 400)
-        far = rect(400 + GAP + apw.MIN_USABLE_WIDTH + 50, 0, 300, 400)
+        far = rect(400 + GAP + apw.DEAD_GAP_USABLE_WIDTH + 50, 0, 300, 400)
         self.assertEqual(apw._dead_gap_penalty(far, [neighbour], GAP), 0.0)
 
     def test_dead_gap_penalty_is_capped(self):
         neighbour = rect(0, 0, 400, 400)
-        worst = rect(400 + GAP + apw.MIN_USABLE_WIDTH - 1, 0, 300, 400)
+        worst = rect(400 + GAP + apw.DEAD_GAP_USABLE_WIDTH - 1, 0, 300, 400)
         p = apw._dead_gap_penalty(worst, [neighbour], GAP)
         self.assertLessEqual(p, apw.DEAD_GAP_CAP * apw.DEAD_GAP_WEIGHT + 0.01)
+
+    def test_live_180px_near_miss_is_now_penalised(self):
+        """LIVE REGRESSION: a real 7-window layout (browser/terminal/
+        Discord/settings-dialog/utility-dialog/large-app proportions) left
+        a reproducible, stable 180px gap below a large window with nothing
+        else nearby -- 180px sits above the OLD 160px threshold (so it
+        read as 'deliberate separation') but is nowhere near big enough to
+        hold the 226px-tall dialog sitting in it. Pins the exact real
+        geometry so this specific near-miss can never silently return."""
+        neighbour = rect(538, 602, 1716, 1000)  # the real "largeX" window
+        near_miss = rect(1198, 602 + 1000 + 180, 366, 226)  # real "utilX", 180px below
+        penalty = apw._dead_gap_penalty(near_miss, [neighbour], GAP)
+        self.assertGreater(penalty, 0.0,
+                            "a 180px gap with nothing in it must be penalised as dead space")
 
 
 class TestExactIntegerGaps(unittest.TestCase):
