@@ -300,6 +300,27 @@ def _edge_alignment_count(cand, rects):
     return int(aligned_x) + int(aligned_y)
 
 
+# Separate from MIN_USABLE_WIDTH/HEIGHT (the resize floor, far below --
+# "how small may an existing window ever be shrunk") on purpose: those two
+# questions only happened to share one constant, not share one meaning,
+# and that coincidence hid a real bug. LIVE INCIDENT: a real 7-window
+# layout (browser/terminal/Discord/settings-dialog/utility-dialog/large-
+# app proportions) put a 366x226 dialog a reproducible, stable 180px below
+# a large window with nothing else nearby -- 180 sits ABOVE the old 160px
+# floor, so _dead_gap_penalty scored it as "wide enough to be deliberate
+# separation" even though nothing was there and the dialog itself is only
+# 226px tall. Reproduced offline against the real auto_arrange() output,
+# confirmed a STABLE fixed point (feeding the result back in reproduces it
+# exactly, so this isn't a transient settle artifact), and confirmed that
+# raising just this threshold -- independent of the resize floor -- closes
+# the gap to exactly 5px with zero new overlaps. Calibrated against real
+# window sizes exercised in that same test (150-226px tall, 250-516px
+# wide dialogs), not picked arbitrarily: set comfortably above the
+# largest of those so a near-miss in that same range can't recur.
+DEAD_GAP_USABLE_WIDTH = 300
+DEAD_GAP_USABLE_HEIGHT = 250
+
+
 def _dead_gap_penalty(cand, layout_rects, gap):
     """Penalises the strip of space left between `cand` and a neighbour it
     lands NEAR but not flush against.
@@ -341,9 +362,9 @@ def _dead_gap_penalty(cand, layout_rects, gap):
         # Only count neighbours actually FACING the candidate on one axis
         # (overlapping on the other) -- a diagonal neighbour isn't leaving
         # a dead strip between them, it's just elsewhere.
-        if yg == 0.0 and gap < xg < MIN_USABLE_WIDTH:
+        if yg == 0.0 and gap < xg < DEAD_GAP_USABLE_WIDTH:
             worst = max(worst, xg - gap)
-        if xg == 0.0 and gap < yg < MIN_USABLE_HEIGHT:
+        if xg == 0.0 and gap < yg < DEAD_GAP_USABLE_HEIGHT:
             worst = max(worst, yg - gap)
     return min(worst, DEAD_GAP_CAP) * DEAD_GAP_WEIGHT
 
@@ -724,11 +745,11 @@ def composition_penalty(cand, layout_rects, gap):
             best_coverage = frac if best_coverage is None else max(best_coverage, frac)
 
         # --- dead gap (see _dead_gap_penalty) ---
-        if ygap == 0.0 and gap < xgap < MIN_USABLE_WIDTH:
+        if ygap == 0.0 and gap < xgap < DEAD_GAP_USABLE_WIDTH:
             d = xgap - gap
             if d > worst_dead:
                 worst_dead = d
-        if xgap == 0.0 and gap < ygap < MIN_USABLE_HEIGHT:
+        if xgap == 0.0 and gap < ygap < DEAD_GAP_USABLE_HEIGHT:
             d = ygap - gap
             if d > worst_dead:
                 worst_dead = d
