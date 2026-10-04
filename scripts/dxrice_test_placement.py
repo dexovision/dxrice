@@ -538,6 +538,40 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
             self.assertLess(abs(nw - ow) + abs(nh - oh), 1.0,
                              f"{addr} resized ({ow}x{oh} -> {nw}x{nh}) on a no-op re-run")
 
+    def test_symmetric_tie_converges_in_one_pass(self):
+        """LIVE REGRESSION found while adding silhouette-notch awareness
+        (_notch_penalty): a small dialog and a much wider window admit two
+        perfectly symmetric candidates -- dialog flush ABOVE or flush
+        BELOW the wide window -- tied on every quality term (composition,
+        dead-gap, notch: identical either way) and previously broken only
+        by preferring whichever needed less movement from the dialog's
+        CURRENT position. Once ties were grouped by a movement-free `core`
+        (to fix a DIFFERENT idempotency bug -- see _find_best_position's
+        own comment) and the pool broken by _notch_penalty alone, this
+        symmetric case lost its tiebreaker entirely: with notch ALSO tied,
+        Python's min() silently picked whichever candidate came first in
+        generation order, which itself correlates with current_pos just as
+        directly as the movement term it replaced -- so the dialog flipped
+        between above and below on every single press, forever. Fixed by
+        restoring the full (movement-inclusive) score as the FINAL
+        tiebreaker, after notch, so a genuine tie still resolves to
+        "stay roughly where you already are" instead of an arbitrary
+        ordering artifact."""
+        eligible = [
+            self._mk("dialog", 712, -338, 320, 240),
+            self._mk("wide", 889, -267, 1900, 400),
+        ]
+        monitor = (0, 0, 1920, 1080)
+        layout = eligible
+        rounds = []
+        for _ in range(4):
+            result = arr.auto_arrange(layout, [], monitor, GAP)
+            rounds.append(sorted(result))
+            layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
+        self.assertEqual(rounds[0], rounds[1], f"did not converge in one pass: {rounds[0]} vs {rounds[1]}")
+        self.assertEqual(rounds[1], rounds[2])
+        self.assertEqual(rounds[2], rounds[3])
+
     def test_no_overlaps_in_result(self):
         eligible = [
             self._mk("0xA", 0, 0, 400, 300),
@@ -697,35 +731,45 @@ class TestSuperGResize(unittest.TestCase):
         which auto_arrange itself now checks (via _final_cost) before ever
         returning a resized result.
 
-        THIRD re-pick, two independent algorithm corrections in sequence:
-        (1) _final_cost itself used to be blind to composition_penalty
-        (dead gaps/slivers/alignment), computing only composition_cost +
-        movement -- so it could keep a resize that locally looked justified
-        even when the completed layout left real, unblocked dead gaps a
-        move-only alternative never had. (2) separately, the "facing"
-        test inside composition_penalty/_dead_gap_penalty used to treat
-        ANY positive perpendicular overlap as a real facing relationship,
-        even an 8.7%-of-span sliver -- see DEAD_GAP_FACING_COVERAGE_
-        THRESHOLD's own comment. Each correction changed which seeds in
-        this shape family land on the "resize genuinely wins" side, so
-        this geometry was re-picked AFTER both fixes landed together
-        (picking it against only one, then fixing the other, kept
-        invalidating the previous pick) -- the objective working as
-        intended, not a lost capability.
+        FOURTH re-pick, three independent algorithm corrections in
+        sequence, each changing which seeds in this shape family land on
+        the "resize genuinely wins" side: (1) _final_cost itself used to
+        be blind to composition_penalty (dead gaps/slivers/alignment),
+        computing only composition_cost + movement -- so it could keep a
+        resize that locally looked justified even when the completed
+        layout left real, unblocked dead gaps a move-only alternative
+        never had. (2) the "facing" test inside composition_penalty/
+        _dead_gap_penalty used to treat ANY positive perpendicular overlap
+        as a real facing relationship, even an 8.7%-of-span sliver -- see
+        DEAD_GAP_FACING_COVERAGE_THRESHOLD's own comment. (3) silhouette-
+        notch awareness (_notch_penalty) was added, folded into the same
+        whole-composition safety check -- see that function's own
+        docstring for the user-reported "skinny side channel" defect it
+        closes. Picking a fixture against only a subset of these, then
+        landing the rest, kept invalidating the previous pick -- the
+        objective working as intended, not a lost capability.
 
-        Re-picked via a fresh 2000-seed sweep of the same shape (1 outlier
-        + 8 mediums, randomly scattered), filtered to seeds where resize
-        fires, holds across five consecutive presses, AND the completed
-        resize-enabled layout's own composition_penalty total is <= 0
-        (i.e. a genuine, clean win under the fully-corrected objective,
-        not merely 'a resize happened'). 328 of 2000 seeds qualified under
-        both fixes; this is seed 12 of that sweep."""
+        Re-picked via a fresh sweep of the same shape (1 outlier + 8
+        mediums, randomly scattered) under ALL THREE fixes together,
+        filtered to seeds where resize fires and holds across five
+        consecutive presses. Unlike the prior re-picks, no seed in a
+        1500-seed sweep landed on a fully dead-gap-AND-notch-clean result
+        (composition_penalty alone is clean -- zero dead gaps/slivers
+        everywhere -- but every firing seed leaves some residual notch
+        cost, confirmed via direct inspection: W0's mismatched width
+        against the 700-wide mediums around it is not fully resolvable by
+        resize alone without shrinking well past what's reasonable, which
+        _notch_penalty's own docstring already anticipates -- "not
+        expected to reach zero on every composition"). This is seed 251 of
+        400 checked, chosen for the lowest residual notch cost (1470)
+        among 35 stable-firing seeds; its own composition_penalty (dead-
+        gap/sliver/align) is fully clean at -374."""
         eligible = [
-            self._mk("W0", 1443, -50, 1600, 1000), self._mk("W1", 2193, 483, 700, 500),
-            self._mk("W2", 932, -308, 700, 500), self._mk("W3", 1063, -578, 700, 500),
-            self._mk("W4", 1034, 388, 700, 500), self._mk("W5", 622, 717, 700, 500),
-            self._mk("W6", 1385, 814, 700, 500), self._mk("W7", 1963, -134, 700, 500),
-            self._mk("W8", 1786, -597, 700, 500),
+            self._mk("W0", 1321, 751, 1600, 1000), self._mk("W1", 1066, 903, 700, 500),
+            self._mk("W2", 1867, 601, 700, 500), self._mk("W3", 1371, -95, 700, 500),
+            self._mk("W4", 1180, 855, 700, 500), self._mk("W5", 1503, -409, 700, 500),
+            self._mk("W6", 574, -186, 700, 500), self._mk("W7", 1366, 224, 700, 500),
+            self._mk("W8", 466, 449, 700, 500),
         ]
         layout = eligible
         sizes = []
@@ -742,33 +786,41 @@ class TestSuperGResize(unittest.TestCase):
         for s in sizes[1:]:
             self.assertEqual(s, sizes[0], f"W0 kept changing size across repeated runs: {sizes}")
 
-    def test_resize_only_kept_when_it_beats_the_true_moveonly_alternative(self):
-        """The whole-composition safety check itself: a resize that a
-        per-step local comparison would accept must still be DISCARDED
-        (falling back to the true move-only layout) if the COMPLETED
-        resize-enabled composition doesn't actually beat the completed
-        move-only one on the combined (composition + weighted-movement)
-        cost auto_arrange itself now checks before ever returning a
-        resized result. This exact geometry (a tidy pre-arranged grid of
-        10 mediums, an outlier placed off to the side) is the ORIGINAL
-        version of the test above, from before this safety check existed
-        -- back then it was accepted as a demonstration that resize still
-        works. Kept here specifically because the safety check now
-        reveals that acceptance was wrong: in this tidier geometry, the
-        windows are already close to good positions regardless of size,
-        so the per-step resize's composition benefit doesn't outweigh a
-        real move-only alternative -- unlike the scattered-start case
-        above, where resize also saves substantial real movement. Two
-        superficially-similar "big outlier among mediums" scenarios,
-        two different genuinely-correct outcomes -- exactly the "compare
-        the real alternatives, don't assume from population ratio alone"
-        behavior this session's own investigation was asked to prove."""
+    def test_resize_closes_a_real_notch_against_a_tidy_grid(self):
+        """SECOND re-pick of this fixture's own expectation, this time for
+        a GOOD reason rather than a bug: this used to assert resize must
+        NOT fire here (a tidy pre-arranged grid of 10 mediums, 500x400
+        each, plus a 950x750 outlier) because, before silhouette-notch
+        awareness existed, the per-step resize's composition benefit alone
+        didn't outweigh a real move-only alternative. Once notch awareness
+        landed, the real reason this exact geometry benefits from resize
+        became visible: 950x750 is not a clean multiple of the grid's
+        500x400 cells on either axis, so BIGGER sitting in the grid at its
+        own size leaves a genuine silhouette notch against its neighbours
+        (measured: 8100 total notch cost at full size vs 4836 after a 10%
+        shrink) -- exactly the "shrink 5-10% to eliminate a skinny channel
+        while preserving a useful size" trade-off the resize feature exists
+        for. Confirmed via the whole-composition safety check (not just a
+        per-step local score): the resized composition's _final_cost
+        genuinely beats the true move-only alternative's (9561 vs 11294),
+        and the result is stable (identical size) across five consecutive
+        presses -- a real, reachable, well-behaved win, not noise."""
         eligible = [self._mk(f"M{i}", (i % 5) * 510, (i // 5) * 410, 500, 400) for i in range(10)]
         eligible.append(self._mk("BIGGER", 2600, 100, 950, 750))
-        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
-        bigger = next(r for r in result if r[0] == "BIGGER")
-        self.assertEqual((bigger[3], bigger[4]), (950, 750),
-                          "a locally-justified but globally-worse resize was not caught by the safety check")
+        layout = eligible
+        sizes = []
+        for _ in range(5):
+            result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+            bigger = next(r for r in result if r[0] == "BIGGER")
+            sizes.append((bigger[3], bigger[4]))
+            layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
+        self.assertEqual(sizes[0], (855, 675), f"expected a clean 10% shrink closing the notch, got {sizes[0]}")
+        min_w = round(950 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        min_h = round(750 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        self.assertGreaterEqual(sizes[0][0], min_w, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
+        self.assertGreaterEqual(sizes[0][1], min_h, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
+        for s in sizes[1:]:
+            self.assertEqual(s, sizes[0], f"BIGGER kept changing size across repeated runs: {sizes}")
 
     def test_resize_rejected_when_it_introduces_a_real_dead_gap(self):
         """Root-cause regression: _final_cost used to compute ONLY
@@ -1531,8 +1583,20 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
                          f"just extending the stack (R={R_naive:.2f})")
 
     def test_existing_horizontal_stack_plus_one_breaks_concentration(self):
-        rects3 = _arrange([(0, 900, 350, 280), (355, 900, 350, 280), (710, 900, 350, 280)])
-        rects3.append((1065, 900, 350, 280))
+        """Horizontal sibling of
+        test_existing_vertical_stack_plus_one_breaks_concentration -- same
+        fix, same reason (see that test's own docstring): deriving the
+        "naive" baseline from an already-arranged 3-window sub-result
+        quietly depends on that sub-arrangement staying bad. Once
+        silhouette-notch awareness made the 3-window arrange come back as
+        a tighter, already-fairly-organic L-shape (R dropped from ~0.44 to
+        ~0.21) instead of the triangular spread it used to produce, the
+        "naive" baseline stopped being naive and the comparison became
+        meaningless -- not because the real 4-window arrangement (a clean,
+        notch-free 2x2 grid) got worse in any absolute sense. Stating the
+        bad (straight row) layout directly tests the real guarantee."""
+        rects3 = [(0, 900, 350, 280), (355, 900, 350, 280),
+                  (710, 900, 350, 280), (1065, 900, 350, 280)]
         R_naive, _, _ = _shape_metrics(rects3, CENTER)
 
         rects4 = _arrange(rects3)
@@ -1901,21 +1965,19 @@ class TestSuperGEquilibriumChange(unittest.TestCase):
 
         Shares its resize-firing geometry with
         test_disproportionate_outlier_among_a_real_population_can_resize --
-        see that test's docstring for why this exact fixture (seed 12 of a
-        2000-seed sweep) was re-picked after composition_penalty was folded
-        into _final_cost's whole-composition safety check AND the dead-gap
-        "facing" test was given a materiality threshold
-        (DEAD_GAP_FACING_COVERAGE_THRESHOLD)."""
+        see that test's docstring for why this exact fixture (seed 251, the
+        fourth re-pick) was chosen, including why its residual notch cost
+        is nonzero and expected to be."""
         resizing_layout = [
-            {"address": "W0", "at": [1443, -50], "size": [1600, 1000]},
-            {"address": "W1", "at": [2193, 483], "size": [700, 500]},
-            {"address": "W2", "at": [932, -308], "size": [700, 500]},
-            {"address": "W3", "at": [1063, -578], "size": [700, 500]},
-            {"address": "W4", "at": [1034, 388], "size": [700, 500]},
-            {"address": "W5", "at": [622, 717], "size": [700, 500]},
-            {"address": "W6", "at": [1385, 814], "size": [700, 500]},
-            {"address": "W7", "at": [1963, -134], "size": [700, 500]},
-            {"address": "W8", "at": [1786, -597], "size": [700, 500]},
+            {"address": "W0", "at": [1321, 751], "size": [1600, 1000]},
+            {"address": "W1", "at": [1066, 903], "size": [700, 500]},
+            {"address": "W2", "at": [1867, 601], "size": [700, 500]},
+            {"address": "W3", "at": [1371, -95], "size": [700, 500]},
+            {"address": "W4", "at": [1180, 855], "size": [700, 500]},
+            {"address": "W5", "at": [1503, -409], "size": [700, 500]},
+            {"address": "W6", "at": [574, -186], "size": [700, 500]},
+            {"address": "W7", "at": [1366, 224], "size": [700, 500]},
+            {"address": "W8", "at": [466, 449], "size": [700, 500]},
         ]
         cold = arr.auto_arrange([dict(w) for w in resizing_layout], [], (0, 0, 1920, 1080), GAP)
         cold_w0 = next(r for r in cold if r[0] == "W0")
@@ -2156,14 +2218,26 @@ class TestViewportRecenter(unittest.TestCase):
         display; windows legitimately remain outside the viewport."""
         # Deliberately more window area than the display has: 6 x 900x700
         # is 3.8Mpx against a 2.1Mpx viewport, so a correct arrangement
-        # MUST leave some of it outside the screen. (An earlier version of
-        # this test used windows that actually fitted, which proved
-        # nothing -- the solver was free to fit them and did.)
+        # MUST leave some of it outside the screen on AT LEAST ONE axis
+        # (by pigeonhole -- fitting inside both [0,1920] and [0,1080] would
+        # require <=2.1Mpx). An earlier version of this test used windows
+        # that actually fitted, which proved nothing -- the solver was free
+        # to fit them and did. A later version checked X overflow alone,
+        # which silently assumed the solver would always arrange this
+        # specific shape as a wide row rather than a column -- once
+        # silhouette-notch awareness could legitimately prefer a tighter
+        # 2-column grid for this geometry (which fits snugly in X at
+        # 58-1863 while still overflowing Y substantially), that
+        # assumption broke even though the actual invariant (not clamped
+        # to the monitor) still held. Checking both axes is the real,
+        # general invariant this test means to assert.
         wide = [{"address": f"W{i}", "at": [i * 905, 400], "size": [900, 700]} for i in range(6)]
         result = arr.auto_arrange(wide, [], (0, 0, 1920, 1080), GAP)
         xs0 = [x for _a, x, _y, _w, _h in result]
         xs1 = [x + w for _a, x, _y, w, _h in result]
-        self.assertTrue(min(xs0) < 0 or max(xs1) > 1920,
+        ys0 = [y for _a, _x, y, _w, _h in result]
+        ys1 = [y + h for _a, _x, y, _w, h in result]
+        self.assertTrue(min(xs0) < 0 or max(xs1) > 1920 or min(ys0) < 0 or max(ys1) > 1080,
                          "windows were clamped inside the monitor -- the canvas is supposed to be infinite")
 
 

@@ -81,7 +81,7 @@ from dxrice_hypr_ipc import hyprctl_json, batch_async, move_window_exact_lua, re
 from dxrice_auto_place_window import (get_monitor_bounds, live_gap, rect_for, overlaps,
                                        composition_penalty, composition_cost, window_mass, mass_center,
                                        MIN_USABLE_WIDTH, MIN_USABLE_HEIGHT, MAX_SHRINK_FRACTION,
-                                       _flush_coverage, _nearest_for_candidates)
+                                       _flush_coverage, _nearest_for_candidates, _notch_penalty)
 
 _DEBUG = os.environ.get("DXRICE_DEBUG") == "1"
 
@@ -202,9 +202,28 @@ BEARING_WEIGHT = 0.0
 # can choose them on their real merits.
 ORGANIC_STAGGER_ANCHORS = 4
 
+# How close two candidates' SCORES (the existing, dead-gap/sliver/
+# composition/movement objective, unchanged) must be before silhouette
+# notch is allowed to break the tie between them -- see _find_best_
+# position's own comment on why this is a tie-break, not an additive
+# term: a notch is real but structurally a SOFTER defect than a dead gap
+# (the neighbours in a notch ARE genuinely flush; the problem is a step
+# one axis removed), and letting it compete additively on equal footing
+# was measured to occasionally let it override a genuine dead-gap
+# difference, which must never happen. Fractional, matching this file's
+# own SUPER_G_RESIZE_MARGIN_FRACTION convention for "close enough to call
+# equivalent, not an independently-invented threshold; FLOOR exists
+# because `best_score` can legitimately be near zero (e.g. a candidate
+# already touching viewport centre), where a purely fractional margin
+# would collapse to nothing and let FLOATING POINT noise alone decide
+# which candidates enter the tie-break pool.
+NOTCH_TIEBREAK_MARGIN_FRACTION = 0.02
+NOTCH_TIEBREAK_MARGIN_FLOOR = 5.0
+
 
 def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cluster_centroid,
-                         cluster_bbox, placed_points, viewport_center, reference_area):
+                         cluster_bbox, placed_points, viewport_center, reference_area, notch_tiebreak=True,
+                         notch_fired=None):
     """Same comprehensive candidate generation as
     dxrice_auto_place_window.find_free_position (every existing obstacle's
     edges crossed in both axes, plus the window's own current position as
@@ -415,7 +434,114 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
     def alignment_of(x, y):
         return composition_penalty((x, y, x + nw, y + nh), obstacle_rects, gap)
 
-    best = min(candidates, key=lambda p: score(*p))
+    # Silhouette-notch awareness is deliberately NOT added directly into
+    # `score` above: a live trace found that even a small additive notch
+    # weight could occasionally outweigh a genuine dead-gap difference
+    # between two candidates -- e.g. a candidate with a real, unblocked
+    # 55px dead gap scored BETTER than a dead-gap-free alternative purely
+    # because it had a shallower notch. That is a strictly worse trade
+    # (dead gaps are a harder, more visible defect than a notch) and
+    # would have quietly weakened the dead-gap invariant this file
+    # otherwise maintains exactly. Also deliberately NOT folded into
+    # composition_penalty itself, since that function is shared with
+    # Algorithm A's single-new-window placement, which has its own
+    # hard-won "don't move existing windows for shape purity" balance --
+    # see STAGE_DECISION_COMPOSITION_WEIGHT's own history; a full-rebuild
+    # SUPER+G pass is a different context where every window's position
+    # is already up for reconsideration.
+    #
+    # Instead: `score` alone (dead-gap/sliver/composition/movement --
+    # everything already validated this session) picks the candidate pool
+    # that's genuinely tied for best, and notch only breaks ties WITHIN
+    # that pool -- the same "is this a real difference or just noise"
+    # question NOTCH_TIEBREAK_MARGIN_FRACTION's sibling constants already
+    # answer elsewhere in this file (e.g. SUPER_G_RESIZE_MARGIN_FRACTION).
+    # This structurally guarantees notch can never override a genuine
+    # improvement on any term that already mattered; it can only choose
+    # among alternatives `score` considers equivalent.
+    # One score() per candidate, cached -- `core` below is cheaply derived
+    # from the SAME value (subtracting a bare hypot, not re-running the
+    # whole composition/compactness/penalty pipeline a second time), so
+    # this whole block costs one score() pass regardless of notch_tiebreak.
+    scores = {p: score(*p) for p in candidates}
+
+    # The TRUE, original decision -- exactly what this function has always
+    # returned, with no notch involvement at all. This is now ALWAYS
+    # computed and is the default; notch_tiebreak can only ever override
+    # it with a DIFFERENT candidate that the ORIGINAL metric already
+    # considered comparably good (see below), never silently replace it
+    # as the primary criterion. An earlier version of this block computed
+    # a core-based tie pool and returned its sole member directly whenever
+    # the pool happened to have exactly one candidate -- which is the
+    # COMMON case -- quietly demoting movement from "a weighted factor in
+    # every decision" to "a tiebreaker used only among already-tied
+    # candidates" for every single placement, not just genuine ties.
+    # Caught via a randomized audit: with that version, enabling vs
+    # disabling the notch mechanism altogether produced IDENTICAL outputs
+    # across an entire 280-layout sweep (the tie pool almost always had
+    # exactly one member, so notch itself never got a say) while the
+    # movement-blind primary selection it introduced measurably worsened
+    # aggregate notch statistics anyway, via unrelated candidate churn.
+    full_best = min(candidates, key=lambda p: scores[p])
+
+    if notch_tiebreak:
+        # Grouping ties on the FULL score (score includes movement-from-
+        # current-position) was itself a second, subtler idempotency bug:
+        # movement is large on a "press 1" call (far from a scattered
+        # start) and small on a "press 2" call (already sitting where
+        # press 1 left it), so the SAME geometric alternatives fell inside
+        # the tie-break margin on one press and outside it on the other --
+        # live-reproduced as a 5-window layout that kept shifting by ~25px
+        # between two consecutive presses on an otherwise-settled
+        # composition. `core` strips the movement term out for the
+        # purpose of deciding what counts as "tied" -- it depends only on
+        # the candidate's geometry relative to the cluster already placed,
+        # never on where this window itself currently sits, so the same
+        # geometric situation groups the same way on every call regardless
+        # of press history.
+        def core(p):
+            x, y = p
+            px, py = x + nw / 2, y + nh / 2
+            return scores[p] - MOVEMENT_WEIGHT * math.hypot(px - cx0, py - cy0)
+
+        cores = {p: core(p) for p in candidates}
+        best_core = min(cores.values())
+        margin = abs(best_core) * NOTCH_TIEBREAK_MARGIN_FRACTION + NOTCH_TIEBREAK_MARGIN_FLOOR
+        near_best = [p for p in candidates if cores[p] <= best_core + margin]
+        # Only ever consider overriding `full_best` when it is ITSELF part
+        # of this near-tied pool -- i.e. the original metric already
+        # considered it comparably good to the alternatives, not clearly
+        # better. If `full_best` sits outside the pool (a decisive win on
+        # the original metric, typically via a real movement advantage),
+        # trust it outright and never consult notch at all.
+        if len(near_best) > 1 and cores[full_best] <= best_core + margin:
+            # Second part of the SAME idempotency fix: when two candidates
+            # are symmetric (e.g. a window can sit flush above OR below an
+            # obstacle with identical notch either way), notch doesn't
+            # distinguish them either -- and Python's min() then silently
+            # picks whichever happens to come first in `candidates`'
+            # generation order, which correlates with current_pos just as
+            # directly as the movement term itself did. Live-reproduced: a
+            # 2-window case alternated between "dialog above" and "dialog
+            # below" every press, each one a perfectly tied, perfectly
+            # valid choice on its own -- never converging. The real, FULL
+            # score (movement included) is the correct final tiebreaker
+            # here, not an arbitrary one: among candidates already
+            # equivalent on quality AND notch, preferring less movement is
+            # exactly "stay where you already are when nothing else cares"
+            # -- which is what made every OTHER tie in this file converge
+            # before notch existed, and restoring it as the last tiebreak
+            # (rather than the first, which is what caused the dead-gap
+            # and collinearity problems above) keeps that guarantee intact.
+            best = min(near_best,
+                        key=lambda p: (_notch_penalty((p[0], p[1], p[0] + nw, p[1] + nh), obstacle_rects, gap),
+                                        scores[p]))
+            if best != full_best and notch_fired is not None:
+                notch_fired[0] = True
+        else:
+            best = full_best
+    else:
+        best = full_best
 
     # (A "stay-put veto" used to sit here: if the window's own current
     # position was still a legal candidate and was no worse than the
@@ -622,7 +748,7 @@ def _mass_ratio(w, h, reference_area):
 
 def _choose_size_and_position(w, current_pos, bearing_unit, cluster_centroid, cluster_bbox,
                                placed, fixed_rects, viewport_center, reference_area, gap, resized_addrs,
-                               allow_resize=True):
+                               allow_resize=True, notch_tiebreak=True, notch_fired=None):
     """The joint decision for ONE window's incremental placement step:
     among (a) its own current size with no resize, (b) its own size
     shrunk to one of RESIZE_SCALE_STEPS, and (c) its own unchanged size
@@ -678,7 +804,8 @@ def _choose_size_and_position(w, current_pos, bearing_unit, cluster_centroid, cl
     # excellent composition, resize nothing."
     pos, score = _find_best_position((own_w, own_h), obstacle_rects_for(), gap, current_pos, bearing_unit,
                                       cluster_centroid, cluster_bbox, placed_points_for(),
-                                      viewport_center, reference_area)
+                                      viewport_center, reference_area, notch_tiebreak=notch_tiebreak,
+                                      notch_fired=notch_fired)
     best = (score, (own_w, own_h), pos, None)
     # Any resize (self or neighbor) must beat the position-only baseline by
     # at least this fraction to be taken at all -- see
@@ -722,7 +849,8 @@ def _choose_size_and_position(w, current_pos, bearing_unit, cluster_centroid, cl
                 continue
             pos_s, score_s = _find_best_position(sized, obstacle_rects_for(), gap, current_pos, bearing_unit,
                                                   cluster_centroid, cluster_bbox, placed_points_for(),
-                                                  viewport_center, reference_area)
+                                                  viewport_center, reference_area, notch_tiebreak=notch_tiebreak,
+                                                  notch_fired=notch_fired)
             total = score_s + _resize_fraction_cost(scale, self_prominence)
             if total < resize_threshold and total < best[0]:
                 best = (total, sized, pos_s, None)
@@ -748,7 +876,8 @@ def _choose_size_and_position(w, current_pos, bearing_unit, cluster_centroid, cl
             override = {n_addr: (round(ncx - snw / 2), round(ncy - snh / 2), snw, snh)}
             pos_n, score_n = _find_best_position((own_w, own_h), obstacle_rects_for(override), gap, current_pos,
                                                   bearing_unit, cluster_centroid, cluster_bbox,
-                                                  placed_points_for(override), viewport_center, reference_area)
+                                                  placed_points_for(override), viewport_center, reference_area,
+                                                  notch_tiebreak=notch_tiebreak, notch_fired=notch_fired)
             total = score_n + _resize_fraction_cost(scale, n_prominence)
             if total < resize_threshold and total < best[0]:
                 nx2, ny2, _, _ = override[n_addr]
@@ -1151,17 +1280,28 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
     reference_area = _typical_area(eligible)
     fixed_rects = [rect_for(*_xywh(w)) for w in fixed]
 
-    def _build(allow_resize):
+    def _build(allow_resize, notch_tiebreak=True):
         """Runs the full incremental build once, either allowing resize
-        decisions or not, and returns the finished [(addr,x,y,w,h), ...].
+        decisions or not, and returns (finished [(addr,x,y,w,h), ...],
+        notch_fired) -- notch_fired is True only if the notch tiebreak
+        ever actually picked a DIFFERENT candidate than the original
+        metric would have, anywhere in this build (see
+        _find_best_position's own comment on why that's rare in practice).
         Factored out so auto_arrange can run it TWICE (see the real
         whole-composition comparison right after this function) -- see
         that comparison's own comment for why a second run is necessary
-        at all."""
+        at all. The caller uses notch_fired to skip that second run
+        entirely when the first build never used notch-awareness anyway,
+        since the two runs would be byte-for-byte identical -- doubling a
+        whole incremental build for a tiebreak that didn't do anything is
+        pure waste, and was measured to roughly quadruple auto_arrange's
+        total cost across realistic window counts before this short-
+        circuit existed."""
         placed = {}  # {address: (x, y, w, h)} -- FINAL geometry, mutated in place when
                      # a neighbor is chosen as a resize target at a later step
         resized_addrs = set()  # each window may be a resize target at most once per pass
         cluster_bbox = None
+        notch_fired = [False]
 
         for i, w in enumerate(ordered):
             addr = w["address"]
@@ -1183,7 +1323,7 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
             chosen_size, pos, neighbor_resize = _choose_size_and_position(
                 w, raw_center(w), bearing_unit, cluster_centroid, cluster_bbox,
                 placed, fixed_rects, viewport_center, reference_area, gap, resized_addrs,
-                allow_resize=allow_resize)
+                allow_resize=allow_resize, notch_tiebreak=notch_tiebreak, notch_fired=notch_fired)
             # Rounded to integers THE MOMENT a position is decided, before it
             # can be used as the geometric basis (an edge/corner candidate) for
             # any LATER window in this same pass. Found live: two windows meant
@@ -1201,6 +1341,21 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
                 n_addr, nx2, ny2, snw, snh = neighbor_resize
                 placed[n_addr] = (nx2, ny2, snw, snh)
                 resized_addrs.add(n_addr)
+            # A window that shrinks ITSELF (the (b) branch inside
+            # _choose_size_and_position) must also be marked as resized --
+            # live-traced bug: `resized_addrs` was only ever updated for
+            # the NEIGHBOR-RESIZE branch above, so a window that resized
+            # itself at its own incremental step was never recorded, and
+            # a LATER step could still pick it as a not-yet-resized
+            # neighbor to shrink AGAIN. Reproduced live: a window shrunk to
+            # 0.75x at its own step, then shrunk by another 0.75x as a
+            # later neighbor target, compounded to 0.5625x total in ONE
+            # auto_arrange call -- a real, if rare, violation of "each
+            # window may be a resize target at most once per pass" (this
+            # loop's own comment above, already true for the neighbor-
+            # resize path, just not for this one).
+            if (chosen_size[0], chosen_size[1]) != (w["size"][0], w["size"][1]):
+                resized_addrs.add(addr)
             placed[addr] = (pos[0], pos[1], chosen_size[0], chosen_size[1])
             rect = rect_for(pos[0], pos[1], chosen_size[0], chosen_size[1])
             cluster_bbox = rect if cluster_bbox is None else (
@@ -1244,9 +1399,95 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         if fixed_rects and not _shift_is_safe(just_rects, (shift_x, shift_y), fixed_rects, gap):
             shift_x, shift_y = math.trunc(full_shift[0]), math.trunc(full_shift[1])
 
-        return [(address, x + shift_x, y + shift_y, w, h) for address, (x, y, w, h) in placed.items()]
+        return ([(address, x + shift_x, y + shift_y, w, h) for address, (x, y, w, h) in placed.items()],
+                notch_fired[0])
 
-    result = _build(allow_resize=allow_resize)
+    def _final_cost(built):
+        by_addr = {a: (x, y, w, h) for a, x, y, w, h in built}
+        pts = [(x + w / 2, y + h / 2, w, h, window_mass(w, h, reference_area)) for x, y, w, h in by_addr.values()]
+        comp = composition_cost(pts, viewport_center)
+        movement = sum(
+            math.hypot(x + w / 2 - (orig["at"][0] + orig["size"][0] / 2),
+                       y + h / 2 - (orig["at"][1] + orig["size"][1] / 2))
+            * window_mass(orig["size"][0], orig["size"][1], reference_area)
+            for orig in eligible for x, y, w, h in [by_addr[orig["address"]]]
+        )
+        # Found via a randomized audit, not assumed: this comparison used
+        # to be blind to composition_penalty (dead gaps, slivers, edge
+        # alignment) entirely, even though every PER-STEP candidate score
+        # during the incremental build includes it. A resize decided late
+        # in the build can locally win its own step's comparison while
+        # leaving a real, unblocked gap elsewhere in the FINISHED layout
+        # that the move-only alternative never has at all -- reproduced
+        # live: a resize that measurably improved composition_cost was
+        # kept even though it left a genuine, unblocked 122px gap against
+        # a neighbor, while disabling that exact resize produced the
+        # identical layout with zero dead-gap penalty anywhere. Summed
+        # once per window (as the "candidate") against every other
+        # window's rect, matching how composition_penalty is scored
+        # everywhere else in this file -- never double-counted per
+        # unordered pair. _notch_penalty included for the identical reason
+        # (see its own docstring and the notch-tiebreak comparison below).
+        all_rects = [rect_for(*xywh) for xywh in by_addr.values()]
+        penalty_total = sum(
+            composition_penalty(rect_for(*xywh), all_rects[:i] + all_rects[i + 1:], gap)
+            + _notch_penalty(rect_for(*xywh), all_rects[:i] + all_rects[i + 1:], gap)
+            for i, xywh in enumerate(by_addr.values())
+        )
+        return comp + MOVEMENT_WEIGHT * movement + penalty_total
+
+    def _quality_cost(built):
+        """Same as _final_cost MINUS the movement term -- a pure function
+        of the FINISHED geometry, not of where it started. Used only for
+        the notch-tiebreak-vs-plain gate right below: that gate compares
+        two alternatives built from the SAME input, so movement-from-orig
+        is not "which alternative cost less to reach," it is just noise
+        that happens to differ between presses (press 1 starts from a
+        scattered layout, so movement is large and dominates; press 2
+        starts from press 1's own settled output, so movement is small
+        and the OTHER terms dominate instead) -- live-reproduced: that
+        asymmetry alone flipped which alternative won between two
+        consecutive presses on an otherwise-identical window set, breaking
+        the one-pass-convergence guarantee this file maintains everywhere
+        else. Excluding movement makes this one decision a pure function
+        of the candidate geometry, independent of the starting layout, so
+        it answers the same way every time it is asked on the same
+        finished shapes -- which is exactly what idempotency requires."""
+        by_addr = {a: (x, y, w, h) for a, x, y, w, h in built}
+        pts = [(x + w / 2, y + h / 2, w, h, window_mass(w, h, reference_area)) for x, y, w, h in by_addr.values()]
+        comp = composition_cost(pts, viewport_center)
+        all_rects = [rect_for(*xywh) for xywh in by_addr.values()]
+        penalty_total = sum(
+            composition_penalty(rect_for(*xywh), all_rects[:i] + all_rects[i + 1:], gap)
+            + _notch_penalty(rect_for(*xywh), all_rects[:i] + all_rects[i + 1:], gap)
+            for i, xywh in enumerate(by_addr.values())
+        )
+        return comp + penalty_total
+
+    result, notch_fired = _build(allow_resize=allow_resize, notch_tiebreak=True)
+
+    # The per-step notch tie-break (see _find_best_position's own comment)
+    # only ever chooses among candidates ALREADY tied on the existing,
+    # dead-gap-safe score AT THE TIME of that one step -- but, exactly like
+    # the resize-vs-moveonly problem right below, a choice that's harmless
+    # against the geometry visible at ITS OWN step can still change which
+    # positions are available to LATER steps, and live testing found this
+    # occasionally introduced a real, unblocked dead gap several steps
+    # later that the plain (non-notch-aware) build never had. Same fix,
+    # same pattern already proven for resize: build the COMPLETE
+    # alternative with notch-tiebreak disabled too, and only keep the
+    # notch-aware result when it doesn't make the real, whole composition
+    # worse -- never "fewer notches" at the cost of a new dead gap.
+    # _quality_cost, not _final_cost, is deliberate here -- see its own
+    # docstring for the idempotency break a movement-sensitive comparison
+    # caused. Skipped entirely when notch never actually fired during the
+    # first build (see _build's own comment) -- a measured randomized audit
+    # found genuine notch ties are rare on naturally-scattered layouts, so
+    # this short-circuit is what keeps the common case cheap.
+    if notch_fired:
+        result_plain, _ = _build(allow_resize=allow_resize, notch_tiebreak=False)
+        if _quality_cost(result_plain) < _quality_cost(result):
+            result = result_plain
 
     orig_sizes = {w["address"]: tuple(w["size"]) for w in eligible}
     any_resize = any((w, h) != orig_sizes[a] for a, x, y, w, h in result)
@@ -1276,39 +1517,11 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
     # "resize fired," which the evidence above shows is not sufficient.
     # Only pays this doubled cost on the minority of calls where a resize
     # was even considered; the common (no resize) case returns above.
-    result_moveonly = _build(allow_resize=False)
-
-    def _final_cost(built):
-        by_addr = {a: (x, y, w, h) for a, x, y, w, h in built}
-        pts = [(x + w / 2, y + h / 2, w, h, window_mass(w, h, reference_area)) for x, y, w, h in by_addr.values()]
-        comp = composition_cost(pts, viewport_center)
-        movement = sum(
-            math.hypot(x + w / 2 - (orig["at"][0] + orig["size"][0] / 2),
-                       y + h / 2 - (orig["at"][1] + orig["size"][1] / 2))
-            * window_mass(orig["size"][0], orig["size"][1], reference_area)
-            for orig in eligible for x, y, w, h in [by_addr[orig["address"]]]
-        )
-        # Found via a randomized audit, not assumed: this comparison used
-        # to be blind to composition_penalty (dead gaps, slivers, edge
-        # alignment) entirely, even though every PER-STEP candidate score
-        # during the incremental build includes it. A resize decided late
-        # in the build can locally win its own step's comparison while
-        # leaving a real, unblocked gap elsewhere in the FINISHED layout
-        # that the move-only alternative never has at all -- reproduced
-        # live: a resize that measurably improved composition_cost was
-        # kept even though it left a genuine, unblocked 122px gap against
-        # a neighbor, while disabling that exact resize produced the
-        # identical layout with zero dead-gap penalty anywhere. Summed
-        # once per window (as the "candidate") against every other
-        # window's rect, matching how composition_penalty is scored
-        # everywhere else in this file -- never double-counted per
-        # unordered pair.
-        all_rects = [rect_for(*xywh) for xywh in by_addr.values()]
-        penalty_total = sum(
-            composition_penalty(rect_for(*xywh), all_rects[:i] + all_rects[i + 1:], gap)
-            for i, xywh in enumerate(by_addr.values())
-        )
-        return comp + MOVEMENT_WEIGHT * movement + penalty_total
+    result_moveonly, moveonly_notch_fired = _build(allow_resize=False, notch_tiebreak=True)
+    if moveonly_notch_fired:
+        result_moveonly_plain, _ = _build(allow_resize=False, notch_tiebreak=False)
+        if _quality_cost(result_moveonly_plain) < _quality_cost(result_moveonly):
+            result_moveonly = result_moveonly_plain
 
     cost_resize = _final_cost(result)
     cost_moveonly = _final_cost(result_moveonly)
