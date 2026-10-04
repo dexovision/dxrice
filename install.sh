@@ -388,7 +388,18 @@ PYEOF
             removed=1
         fi
     done
-    [ "$removed" = "1" ] && info "Open a new terminal (or re-source your shell rc) to drop them from your current shell."
+    # Deliberately NOT a bare `[ cond ] && info ...` here: that idiom
+    # returns the TEST's own exit status whenever the condition is false,
+    # and being this function's LAST statement makes that status become
+    # remove_shell_alias's own return value. Called as a plain statement
+    # (see do_uninstall), that silently kills the whole script under
+    # `set -e` any time nothing needed removing (e.g. a second uninstall
+    # run, or a user who never had the block) -- not an actual error, just
+    # the common case. Confirmed live: the sibling bug in check_dependencies
+    # below did exactly this and killed a real install partway through.
+    if [ "$removed" = "1" ]; then
+        info "Open a new terminal (or re-source your shell rc) to drop them from your current shell."
+    fi
 }
 
 # Lets a fresh install put the checkout wherever the user actually wants it,
@@ -496,7 +507,19 @@ check_dependencies() {
 
     install_hypr_ecosystem
     install_quickshell
-    [ "$PKG_MANAGER" != "pacman" ] && install_nerd_font_fallback
+    # CONFIRMED LIVE BUG (bash -x trace from a real install): a bare
+    # `[ cond ] && action` as a function's LAST statement makes that
+    # test's own exit status become check_dependencies's return value
+    # whenever cond is false -- which it always is on pacman, the most
+    # common case this installer runs on. check_dependencies is called as
+    # a plain statement in do_install (no ||/if guard), and with
+    # `set -euo pipefail` active, that silently killed the ENTIRE install
+    # right after printing "Quickshell present.", before Step 3/4 ever
+    # ran -- no error message from install.sh itself, just a dead script.
+    # An `if` never leaves its own exit status exposed this way.
+    if [ "$PKG_MANAGER" != "pacman" ]; then
+        install_nerd_font_fallback
+    fi
 }
 
 # Hyprland itself needs distro-specific handling: officially packaged on
