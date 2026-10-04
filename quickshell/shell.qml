@@ -42,6 +42,12 @@ ShellRoot {
         target: PanelManager
         function onCurrentChanged() {
             if (PanelManager.current === "theme") {
+                // Cancel a pending close first: without this, reopening
+                // within the close-animation window left closeTimer running
+                // from the earlier close, which still fired on schedule and
+                // tore the panel down right after the user had just asked
+                // to reopen it (see ThemeEditor.qml's cancelClose()).
+                if (themeLoader.item) themeLoader.item.cancelClose();
                 themeLoader.active = true;
             } else if (themeLoader.active) {
                 if (themeLoader.item) themeLoader.item.requestClose();

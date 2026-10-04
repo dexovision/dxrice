@@ -1305,11 +1305,31 @@ Item {
 
 
 
+    // Tracks the one live password dialog, if any -- see onPasswordNeeded
+    // below for why there must never be more than one at a time.
+    property var _activeWifiDialog: null
+
     WifiBackend {
         id: wifiBackend
         radioOn: root.wifiEnabled
         onPasswordNeeded: (ssid) => {
+            // Clicking "Connect" on a second network before resolving the
+            // first password prompt used to create a SECOND dialog while
+            // wifiDialogOpen stayed a single shared boolean: closing
+            // whichever dialog happened to be first set wifiDialogOpen back
+            // to false even though the second one was still open, silently
+            // re-arming TopBar's full-screen click-outside catcher underneath
+            // it. The next click into that still-open dialog's password
+            // field would then be swallowed exactly like the original bug
+            // this flag exists to prevent -- closing Quick Settings and, since
+            // the dialog is a child of `root`, destroying it mid-entry.
+            // Only ever one dialog now: a new request replaces, rather than
+            // joins, any dialog already open.
+            if (root._activeWifiDialog) {
+                root._activeWifiDialog.visible = false;
+            }
             const dlg = Qt.createComponent("WifiPasswordDialog.qml").createObject(root, { ssid: ssid });
+            root._activeWifiDialog = dlg;
             // WifiPasswordDialog is a real, separate top-level window (a
             // FloatingWindow, not a rectangle inside this panel's own
             // surface) -- same architectural gap as TaskbarManager's
@@ -1320,7 +1340,17 @@ Item {
             // Quick Settings -- destroying this dialog (a child of `root`)
             // before the user could enter a password at all.
             root.wifiDialogOpen = true;
-            dlg.visibleChanged.connect(() => { if (!dlg.visible) root.wifiDialogOpen = false; });
+            dlg.visibleChanged.connect(() => {
+                if (!dlg.visible) {
+                    // Guarded on identity: a stale close from a dialog that
+                    // was already replaced must never clear the flag (or the
+                    // reference) for the CURRENT one.
+                    if (root._activeWifiDialog === dlg) {
+                        root._activeWifiDialog = null;
+                        root.wifiDialogOpen = false;
+                    }
+                }
+            });
             dlg.submitted.connect((password) => wifiBackend.connectWithPassword(ssid, password));
             dlg.visible = true;
         }
