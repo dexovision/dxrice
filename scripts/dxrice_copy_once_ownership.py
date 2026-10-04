@@ -82,6 +82,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dxrice_manifest
 import dxrice_xdg
 
 MISSING = "MISSING"
@@ -187,7 +188,19 @@ def classify_one(rel: str, recognizer, config_home: Path, state_dir: Path):
 
     snap = _snapshot_path(state_dir, rel)
     if snap.exists():
-        if _sha256(live.read_bytes()) == _sha256(snap.read_bytes()):
+        try:
+            live_bytes = live.read_bytes()
+            snap_bytes = snap.read_bytes()
+        except OSError:
+            # Can't verify equality (e.g. the live file just became
+            # unreadable), but a snapshot's existence is independent proof
+            # DXrice deployed this at some point -- ownership isn't in
+            # question, only the comparison is. MODIFIED is the always-
+            # safe answer: it never triggers any write, same as UNCHANGED,
+            # and "can't verify, treat cautiously" is the honest read of
+            # this state rather than guessing it's still pristine.
+            return DXRICE_OWNED_MODIFIED, "could not verify against its snapshot"
+        if _sha256(live_bytes) == _sha256(snap_bytes):
             return DXRICE_OWNED_UNCHANGED, None
         return DXRICE_OWNED_MODIFIED, None
 
@@ -229,8 +242,7 @@ def claim_snapshot(rel: str, config_home: Path, state_dir: Path, repo_dir: Path)
     if not src.is_file():
         return False
     snap = _snapshot_path(state_dir, rel)
-    snap.parent.mkdir(parents=True, exist_ok=True)
-    snap.write_bytes(src.read_bytes())
+    dxrice_manifest.atomic_write_bytes(snap, src.read_bytes())
     return True
 
 

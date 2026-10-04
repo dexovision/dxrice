@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dxrice_manifest
 import dxrice_xdg
 
 REPO = Path(os.path.dirname(os.path.abspath(__file__))).parent
@@ -86,7 +87,7 @@ def check_one(repo_rel, live_path, snapshot_name, fix_baseline=False):
         # it honestly starts the clock from today instead of fabricating
         # false-positive drift against content you may have always had.
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        snapshot_path.write_text(current_repo_text)
+        dxrice_manifest.atomic_write_bytes(snapshot_path, current_repo_text.encode())
         return {
             "path": str(live_path),
             "status": "baseline-established",
@@ -109,7 +110,7 @@ def check_one(repo_rel, live_path, snapshot_name, fix_baseline=False):
             missing.append(identity)
 
     if fix_baseline:
-        snapshot_path.write_text(current_repo_text)
+        dxrice_manifest.atomic_write_bytes(snapshot_path, current_repo_text.encode())
 
     if not missing:
         return {"path": str(live_path), "status": "clean", "detail": None}
