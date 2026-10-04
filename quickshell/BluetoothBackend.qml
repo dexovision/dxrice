@@ -7,6 +7,11 @@ Item {
     id: root
     property bool radioOn: false
     property var devices: []
+    // False until the first device list actually resolves (all per-device
+    // info queries done), so UI bound to devices.length can tell "no data
+    // yet" apart from "scanned, found none/few" -- see the Expandable
+    // auto-collapse fix in QuickSettings.
+    property bool hasScanned: false
 
     onRadioOnChanged: if (radioOn) refresh()
 
@@ -46,6 +51,7 @@ Item {
                 list.push({ mac, name: root._pendingNames[mac] || mac, connected: info.connected, battery: info.battery });
             }
             root.devices = list;
+            root.hasScanned = true;
             return;
         }
         const mac = root.pendingMacs.shift();
