@@ -40,6 +40,19 @@ PanelWindow {
         root.closing = true;
         closeTimer.start();
     }
+    // Reopening while still mid-close (PanelManager.current leaving
+    // "theme" and coming right back within the close-animation window) used
+    // to be silently swallowed: closeTimer, already running from the
+    // original close, had no way to know the user changed their mind, so it
+    // fired on schedule and tore the whole panel down regardless -- the
+    // user's last action said "open" but the panel ended up closed with no
+    // feedback. shell.qml calls this before re-activating the loader so the
+    // pending close is cancelled instead of racing it.
+    function cancelClose() {
+        if (!root.closing) return;
+        closeTimer.stop();
+        root.closing = false;
+    }
     Timer { id: closeTimer; interval: Theme.durationEnter + 20; onTriggered: root.closeRequested() }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
