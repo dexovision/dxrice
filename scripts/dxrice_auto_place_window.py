@@ -446,6 +446,160 @@ def _dead_gap_penalty(cand, layout_rects, gap):
     return min(worst, DEAD_GAP_CAP) * DEAD_GAP_WEIGHT
 
 
+# How far two near-flush neighbours' OUTER (perpendicular) edges may differ
+# before it reads as a silhouette notch rather than ordinary imprecision --
+# set just above ALIGN_EPS/FLUSH_TOL's own precision tolerance, not an
+# independently-invented "how big is too big" number: anything this small
+# is rounding noise, not a visible step in the outline.
+NOTCH_MIN_DEPTH = 8.0
+
+# Cost per pixel of unblocked silhouette-notch depth -- see _notch_penalty's
+# own docstring for the live-measured evidence this closes. Deliberately
+# lighter than DEAD_GAP_WEIGHT: a notch is a softer defect than a true dead
+# gap (the two neighbours involved ARE genuinely flush -- the problem is
+# one axis removed, on their OTHER edges, and is very often only partially
+# avoidable at all when window heights/widths genuinely differ), but it
+# must still be steep enough to move the optimizer's choice toward a
+# shallower alternative when one exists at comparable cost.
+NOTCH_WEIGHT = 6.0
+NOTCH_CAP = 900.0
+
+
+def _region_is_occupied(region, all_rects, exclude):
+    """Does any rect OTHER than the two in `exclude` genuinely fill this
+    axis-aligned region? Same "is anything actually here" question as
+    _gap_is_blocked, applied to a perpendicular notch strip instead of a
+    facing-gap strip."""
+    rx0, ry0, rx1, ry1 = region
+    for ox0, oy0, ox1, oy1 in all_rects:
+        if (ox0, oy0, ox1, oy1) == exclude[0] or (ox0, oy0, ox1, oy1) == exclude[1]:
+            continue
+        if ox1 > rx0 + 0.6 and ox0 < rx1 - 0.6 and oy1 > ry0 + 0.6 and oy0 < ry1 - 0.6:
+            return True
+    return False
+
+
+def _notch_penalty(cand, layout_rects, gap):
+    """Penalises a SILHOUETTE NOTCH: live-traced, DISTINCT root cause from
+    the dead-gap/sliver family above. Two neighbours can be PERFECTLY flush
+    on their facing axis (zero dead-gap penalty, zero sliver penalty -- the
+    facing edge genuinely touches cleanly) while their OTHER, perpendicular
+    edges land a material distance apart, leaving an exposed step in the
+    composition's outer silhouette. The facing-axis checks structurally
+    cannot see this: they only ever look at the axis two rectangles are
+    disjoint on, never the axis they overlap on.
+
+    Found via a dedicated offline diagnostic (not the existing dead-gap
+    sweep, which measures something else entirely) after a direct user
+    report with a visual reference: "a window almost reaches another
+    window/cluster but leaves a skinny strip of unused space... along the
+    sides/outer edges." A randomized sweep (420 layouts, n=3..12, six
+    window-shape archetypes) found an unblocked silhouette notch in 72.6%
+    of them -- the dominant visual defect in this file, far more common
+    than genuine dead gaps, and entirely unscored before this. Live
+    example: two 1700x1100 windows stacked in a column, perfectly flush
+    top-to-bottom, but their LEFT edges differing by 394px because a third
+    window of a different size was placed between them earlier in the
+    build -- composition_penalty scored this pair at a clean 0.0 (nothing
+    wrong by the existing terms) despite the resulting 1700px-long, 394px-
+    deep unblocked gutter running the full height of the shorter column.
+
+    Deliberately scored on DEPTH alone (not depth x length, unlike this
+    module's own diagnostic classification, which uses both to decide
+    whether a notch is worth reporting at all) -- a cost that scaled with
+    length would reward making windows SHORTER/NARROWER purely to shrink
+    a notch's extent, which is exactly the "shrink things just because you
+    can" behavior ruled out elsewhere in this file. Only penalised when
+    nothing already fills the resulting strip (_region_is_occupied) -- a
+    third window genuinely occupying that space means it was never a
+    notch, matching _gap_is_blocked's identical principle for dead gaps.
+
+    Not expected to reach zero on every composition: when neighbouring
+    windows genuinely differ in height/width, SOME silhouette irregularity
+    is geometrically unavoidable without resizing one of them to match,
+    which is not always the right trade. What this term adds is the
+    thing that was completely missing -- a reason for the optimizer to
+    prefer the shallower of two otherwise-comparable alternatives, and for
+    a resize that genuinely closes a notch to be correctly credited as an
+    improvement (via composition_penalty's existing use in _final_cost and
+    every per-step candidate score)."""
+    worst = 0.0
+    cx0, cy0, cx1, cy1 = cand
+    for r in layout_rects:
+        rx0, ry0, rx1, ry1 = r
+        if cx1 <= rx0:
+            xg = rx0 - cx1
+        elif rx1 <= cx0:
+            xg = cx0 - rx1
+        else:
+            xg = 0.0
+        if cy1 <= ry0:
+            yg = ry0 - cy1
+        elif ry1 <= cy0:
+            yg = cy0 - ry1
+        else:
+            yg = 0.0
+
+        # Vertically-flush neighbours (stacked, overlapping on x) -- their
+        # LEFT and RIGHT edges are the perpendicular pair to check.
+        if xg == 0.0 and abs(yg - gap) < FLUSH_TOL:
+            overlap = min(cx1, rx1) - max(cx0, rx0)
+            span = min(cx1 - cx0, rx1 - rx0)
+            frac = overlap / span if span > 0 else 0.0
+            if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
+                top, bot = (cand, r) if cy1 <= ry0 else (r, cand)
+                tx0, ty0, tx1, ty1 = top
+                bx0, by0, bx1, by1 = bot
+                # LEFT side: whichever of top/bot sticks out further left
+                # leaves a notch beside the OTHER one, over the OTHER
+                # one's own y-range (the one that sticks out doesn't
+                # extend into that y-range at all, so nothing of its own
+                # could ever fill the strip).
+                if tx0 < bx0:
+                    depth, region = bx0 - tx0, (tx0, by0, bx0, by1)
+                else:
+                    depth, region = tx0 - bx0, (bx0, ty0, tx0, ty1)
+                if depth >= NOTCH_MIN_DEPTH and depth > worst \
+                        and not _region_is_occupied(region, layout_rects, (cand, r)):
+                    worst = depth
+                # RIGHT side: symmetric.
+                if tx1 > bx1:
+                    depth, region = tx1 - bx1, (bx1, by0, tx1, by1)
+                else:
+                    depth, region = bx1 - tx1, (tx1, ty0, bx1, ty1)
+                if depth >= NOTCH_MIN_DEPTH and depth > worst \
+                        and not _region_is_occupied(region, layout_rects, (cand, r)):
+                    worst = depth
+
+        # Horizontally-flush neighbours (side by side, overlapping on y) --
+        # their TOP and BOTTOM edges are the perpendicular pair to check.
+        if yg == 0.0 and abs(xg - gap) < FLUSH_TOL:
+            overlap = min(cy1, ry1) - max(cy0, ry0)
+            span = min(cy1 - cy0, ry1 - ry0)
+            frac = overlap / span if span > 0 else 0.0
+            if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
+                left, right = (cand, r) if cx1 <= rx0 else (r, cand)
+                lx0, ly0, lx1, ly1 = left
+                rx0_, ry0_, rx1_, ry1_ = right
+                # TOP side: symmetric to LEFT above, rotated 90 degrees.
+                if ly0 < ry0_:
+                    depth, region = ry0_ - ly0, (rx0_, ly0, rx1_, ry0_)
+                else:
+                    depth, region = ly0 - ry0_, (lx0, ry0_, lx1, ly0)
+                if depth >= NOTCH_MIN_DEPTH and depth > worst \
+                        and not _region_is_occupied(region, layout_rects, (cand, r)):
+                    worst = depth
+                # BOTTOM side: symmetric.
+                if ly1 > ry1_:
+                    depth, region = ly1 - ry1_, (rx0_, ry1_, rx1_, ly1)
+                else:
+                    depth, region = ry1_ - ly1, (lx0, ly1, lx1, ry1_)
+                if depth >= NOTCH_MIN_DEPTH and depth > worst \
+                        and not _region_is_occupied(region, layout_rects, (cand, r)):
+                    worst = depth
+    return min(worst, NOTCH_CAP) * NOTCH_WEIGHT
+
+
 # ============================================================================
 # GLOBAL composition model: mass-weighted center-of-mass + angular spread
 # ============================================================================
