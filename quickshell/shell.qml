@@ -84,6 +84,20 @@ ShellRoot {
         function hide(): void { PanelManager.close("taskbar"); }
     }
 
+    // Used by dxrice_force_close_window.py (SUPER+C) when the window it
+    // was asked to force-close turns out to be this shell process itself
+    // -- a settings panel (Theme/Taskbar/Quick Settings/Calendar) can hold
+    // keyboard focus, and SUPER+C force-closing "the focused window" must
+    // never be able to kill the user's own desktop shell just because a
+    // panel happened to have focus at that moment. Closes whatever's
+    // actually open instead, same as pressing Escape already does -- the
+    // correct behavior for "close what I'm looking at" here, not a
+    // workaround for the crash this prevents.
+    IpcHandler {
+        target: "shell"
+        function closeCurrent(): void { PanelManager.closeCurrent(); }
+    }
+
     // Opt-in, not wired to SUPER+L: see LockScreen.qml's own comment for
     // why a real Wayland session lock is a fundamentally higher-stakes
     // thing to trust than any of the panels above (fail-secure by design --
