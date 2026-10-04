@@ -917,14 +917,31 @@ def _shape_is_coherent(eligible, fixed_rects, gap):
     # scattered desktop, not a collection of deliberate small clusters.
     if len(singletons) > max(1, len(addrs) // 4):
         return False
-    # A singleton only reads as a DELIBERATE standalone dialog when it
-    # actually sits apart -- live-verified false positive: a window
-    # merely a few dozen pixels past its would-be flush-adjacency gap
-    # (72px, on a 400x300 window) still reads as "should be tucked into
-    # the cluster it's right next to," not "intentionally separate,"
-    # even though it technically fails the strict flush-adjacency test.
-    # Self-relative (own smaller dimension), not a flat pixel count, so
-    # this scales sensibly across dialog and main-window sizes alike.
+    # A singleton only reads as a DELIBERATE standalone dialog when it sits
+    # apart by a BOUNDED amount -- not too close (live-verified false
+    # positive: a window merely a few dozen pixels past its would-be
+    # flush-adjacency gap, 72px on a 400x300 window, still reads as "should
+    # be tucked into the cluster it's right next to," not "intentionally
+    # separate," even though it technically fails the strict flush-
+    # adjacency test), and -- found during a full-coverage randomized
+    # audit, NOT assumed -- not too far either. The lower bound alone has
+    # no ceiling: a window hundreds or thousands of pixels from everything
+    # else still passed as "deliberately standalone" provided it merely
+    # exceeded its own short side, which is a trivially low bar once a
+    # window has moved any real distance at all. Reproduced with a minimal
+    # 3-window case: a 338x194 dialog left 471px (2.43x its own short side)
+    # from its nearest neighbor, with nothing between them, was judged
+    # "coherent" and never even entered the rebuild that would have fixed
+    # it -- auto_arrange took the recenter-only shortcut and SUPER+G
+    # visibly did nothing for an obviously scattered desktop. Checked
+    # against this file's own existing validated case (a dialog genuinely
+    # left alone, 300x200, at 1.58x its own short side from the nearest
+    # cluster member) to confirm real margin exists between "still
+    # deliberate" and "actually scattered" before picking a boundary.
+    # Self-relative (own smaller dimension) on both bounds, not a flat
+    # pixel count, so this scales sensibly across dialog and main-window
+    # sizes alike.
+    SINGLETON_MAX_RATIO = 2.0
     for singleton in singletons:
         addr = next(iter(singleton))
         r = rects[addr]
@@ -932,6 +949,8 @@ def _shape_is_coherent(eligible, fixed_rects, gap):
         nearest = min((edge_gap(r, rects[other]) for other in addrs if other != addr), default=float("inf"))
         if nearest < own_short:
             return False  # close enough to a neighbor that it reads as unfinished, not deliberate
+        if nearest > own_short * SINGLETON_MAX_RATIO:
+            return False  # far enough that it reads as scattered, not a deliberate standalone placement
 
     for component in components:
         if len(component) < 2:
@@ -1269,7 +1288,27 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
             * window_mass(orig["size"][0], orig["size"][1], reference_area)
             for orig in eligible for x, y, w, h in [by_addr[orig["address"]]]
         )
-        return comp + MOVEMENT_WEIGHT * movement
+        # Found via a randomized audit, not assumed: this comparison used
+        # to be blind to composition_penalty (dead gaps, slivers, edge
+        # alignment) entirely, even though every PER-STEP candidate score
+        # during the incremental build includes it. A resize decided late
+        # in the build can locally win its own step's comparison while
+        # leaving a real, unblocked gap elsewhere in the FINISHED layout
+        # that the move-only alternative never has at all -- reproduced
+        # live: a resize that measurably improved composition_cost was
+        # kept even though it left a genuine, unblocked 122px gap against
+        # a neighbor, while disabling that exact resize produced the
+        # identical layout with zero dead-gap penalty anywhere. Summed
+        # once per window (as the "candidate") against every other
+        # window's rect, matching how composition_penalty is scored
+        # everywhere else in this file -- never double-counted per
+        # unordered pair.
+        all_rects = [rect_for(*xywh) for xywh in by_addr.values()]
+        penalty_total = sum(
+            composition_penalty(rect_for(*xywh), all_rects[:i] + all_rects[i + 1:], gap)
+            for i, xywh in enumerate(by_addr.values())
+        )
+        return comp + MOVEMENT_WEIGHT * movement + penalty_total
 
     cost_resize = _final_cost(result)
     cost_moveonly = _final_cost(result_moveonly)

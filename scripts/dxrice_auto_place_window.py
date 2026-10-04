@@ -226,6 +226,24 @@ FLUSH_TOL = 1.5
 # more than a large angular improvement is realistically worth.
 DEAD_GAP_WEIGHT = 8.0
 
+# How much of the shorter perpendicular span two rectangles must actually
+# share before they count as "facing" for dead-gap purposes at all -- see
+# _dead_gap_penalty's own docstring for the live-traced root cause this
+# closes. Before this existed, "facing" meant nothing more than `xgap==0.0`
+# / `ygap==0.0` -- i.e. ANY positive perpendicular overlap, however
+# trivial. A 338x194 window whose x-range merely overlapped a neighbour's
+# by 39 of 447px (8.7%) was judged "facing" it, and the huge facing
+# distance between two windows that happen to barely clip each other's
+# projection scored a near-maximum phantom dead-gap penalty (near
+# DEAD_GAP_CAP) -- enough to make a genuinely clean, flush candidate score
+# roughly 10x WORSE than one that left a real, unblocked 44px gap
+# elsewhere, because the "facing" test itself had no materiality
+# threshold. Same convention as ADJACENCY_COVERAGE_THRESHOLD (0.3) in
+# dxrice_auto_arrange.py -- "do these two rectangles genuinely face each
+# other" is the same kind of question there (is this a real adjacency)
+# and here (is this a real facing-gap), so it gets the same bar.
+DEAD_GAP_FACING_COVERAGE_THRESHOLD = 0.3
+
 # Still capped so a genuinely wide gap (already past MIN_USABLE_WIDTH/
 # HEIGHT and therefore not "dead" at all -- see _dead_gap_penalty) can
 # never be approached, and so this can only ever decide among candidates
@@ -404,15 +422,27 @@ def _dead_gap_penalty(cand, layout_rects, gap):
             yg = 0.0
         # Only count neighbours actually FACING the candidate on one axis
         # (overlapping on the other) -- a diagonal neighbour isn't leaving
-        # a dead strip between them, it's just elsewhere.
+        # a dead strip between them, it's just elsewhere. "Facing" itself
+        # requires a MATERIAL share of the shorter perpendicular span, not
+        # merely a nonzero overlap (see DEAD_GAP_FACING_COVERAGE_THRESHOLD)
+        # -- a sliver-thin overlap between two rectangles that barely clip
+        # each other's projection is not a real facing relationship.
         if yg == 0.0 and xg > gap:
-            d = xg - gap
-            if d > worst and not (xg >= MIN_USABLE_WIDTH and _gap_is_blocked(cand, r, layout_rects, "x")):
-                worst = d
+            overlap = min(cy1, ry1) - max(cy0, ry0)
+            span = min(cy1 - cy0, ry1 - ry0)
+            frac = overlap / span if span > 0 else 0.0
+            if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
+                d = xg - gap
+                if d > worst and not (xg >= MIN_USABLE_WIDTH and _gap_is_blocked(cand, r, layout_rects, "x")):
+                    worst = d
         if xg == 0.0 and yg > gap:
-            d = yg - gap
-            if d > worst and not (yg >= MIN_USABLE_HEIGHT and _gap_is_blocked(cand, r, layout_rects, "y")):
-                worst = d
+            overlap = min(cx1, rx1) - max(cx0, rx0)
+            span = min(cx1 - cx0, rx1 - rx0)
+            frac = overlap / span if span > 0 else 0.0
+            if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
+                d = yg - gap
+                if d > worst and not (yg >= MIN_USABLE_HEIGHT and _gap_is_blocked(cand, r, layout_rects, "y")):
+                    worst = d
     return min(worst, DEAD_GAP_CAP) * DEAD_GAP_WEIGHT
 
 
@@ -793,17 +823,27 @@ def composition_penalty(cand, layout_rects, gap):
 
         # --- dead gap (see _dead_gap_penalty's own docstring for the live
         # evidence this is a "is anything actually here" question, not a
-        # "is the gap narrower than some size" one) ---
+        # "is the gap narrower than some size" one) -- "facing" requires a
+        # MATERIAL share of the shorter perpendicular span, not merely a
+        # nonzero overlap (see DEAD_GAP_FACING_COVERAGE_THRESHOLD) ---
         if ygap == 0.0 and xgap > gap:
-            d = xgap - gap
-            if d > worst_dead and not (xgap >= MIN_USABLE_WIDTH
-                                        and _gap_is_blocked(cand, (rx0, ry0, rx1, ry1), layout_rects, "x")):
-                worst_dead = d
+            overlap = min(cy1, ry1) - max(cy0, ry0)
+            span = min(cy1 - cy0, ry1 - ry0)
+            frac = overlap / span if span > 0 else 0.0
+            if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
+                d = xgap - gap
+                if d > worst_dead and not (xgap >= MIN_USABLE_WIDTH
+                                            and _gap_is_blocked(cand, (rx0, ry0, rx1, ry1), layout_rects, "x")):
+                    worst_dead = d
         if xgap == 0.0 and ygap > gap:
-            d = ygap - gap
-            if d > worst_dead and not (ygap >= MIN_USABLE_HEIGHT
-                                        and _gap_is_blocked(cand, (rx0, ry0, rx1, ry1), layout_rects, "y")):
-                worst_dead = d
+            overlap = min(cx1, rx1) - max(cx0, rx0)
+            span = min(cx1 - cx0, rx1 - rx0)
+            frac = overlap / span if span > 0 else 0.0
+            if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
+                d = ygap - gap
+                if d > worst_dead and not (ygap >= MIN_USABLE_HEIGHT
+                                            and _gap_is_blocked(cand, (rx0, ry0, rx1, ry1), layout_rects, "y")):
+                    worst_dead = d
 
         # --- edge alignment (see _edge_alignment_count) ---
         if not aligned_x:
