@@ -151,9 +151,26 @@ Item {
         while ((modid + i) in root.cfg && (modid + i) !== exclude) i++;
         return modid + i;
     }
+    // Embeds a user-typed command (itself meant to be shell-parsed -- it
+    // may legitimately contain its own quoted arguments like --title='My
+    // App') inside the outer sh -c '...' wrapper this rice stores
+    // on-click as. Found live: naive string concatenation here breaks the
+    // instant cmd contains a single quote with a SPACE inside it -- bash's
+    // adjacent-quote-concatenation rule papers over a quoted value with no
+    // spaces, but a real multi-word quoted value gets silently word-split
+    // and the command runs with only part of its arguments (confirmed:
+    // `fake_app --title='My Cool App' arg2` previously ran as just
+    // `fake_app --title=My`). Standard POSIX technique for nesting a
+    // single-quoted string inside another: close the quote, emit an
+    // escaped literal quote, reopen the quote, for every embedded quote.
+    function wrapShellCmd(cmd) {
+        const escaped = cmd.replace(/'/g, "'\\''");
+        return "sh -c '" + escaped + " >/dev/null 2>&1 &'";
+    }
     function unwrapShellCmd(onClick) {
         const m = /^sh -c '(.*) >\/dev\/null 2>&1 &'$/.exec(onClick || "");
-        return m ? m[1] : (onClick || "");
+        if (!m) return onClick || "";
+        return m[1].replace(/'\\''/g, "'");
     }
     function iconsEnabled() {
         return root.cfg["dxrice_icons_enabled"] !== false;
@@ -179,7 +196,7 @@ Item {
         const label = meta.dxrice_label;
         const cmd = meta.dxrice_cmd;
         const mode = meta.dxrice_icon_mode || "auto";
-        const onClick = "sh -c '" + cmd + " >/dev/null 2>&1 &'";
+        const onClick = root.wrapShellCmd(cmd);
 
         if (mode === "image" && meta.dxrice_icon_path) {
             root.cfg[modid] = {

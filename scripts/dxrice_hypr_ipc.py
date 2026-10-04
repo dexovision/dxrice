@@ -39,7 +39,16 @@ def _send(cmd, timeout=2, want_reply=True):
     path = _socket_path()
     if not path:
         return b""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError:
+        # e.g. file-descriptor exhaustion -- every caller of every function
+        # in this module already wraps its own call in a broad try/except
+        # (this is invoked up to ~144 times/sec from the pan/drag loops),
+        # but this function's own job is "never raise, return b'' on any
+        # failure" -- the socket() call itself was the one line that could
+        # still escape that contract.
+        return b""
     s.settimeout(timeout)
     try:
         s.connect(path)

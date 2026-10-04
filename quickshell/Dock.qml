@@ -180,8 +180,18 @@ PanelWindow {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
+                            // Must mirror TaskbarManager.unwrapShellCmd's
+                            // un-escaping exactly -- this regex extracts
+                            // the STILL '\''-escaped inner command (see
+                            // TaskbarManager.wrapShellCmd for why it's
+                            // escaped that way), and execDetached's argv
+                            // form means sh -c here parses it as a fresh
+                            // script, not as text nested inside another
+                            // quote -- the escaping must be undone first or
+                            // every shortcut containing a quote throws a
+                            // shell syntax error instead of running.
                             const m = /^sh -c '(.*) >\/dev\/null 2>&1 &'$/.exec(shortcutTile.modelData.onClick);
-                            const cmd = m ? m[1] : shortcutTile.modelData.onClick;
+                            const cmd = m ? m[1].replace(/'\\''/g, "'") : shortcutTile.modelData.onClick;
                             if (cmd) Quickshell.execDetached(["sh", "-c", cmd]);
                         }
                     }
