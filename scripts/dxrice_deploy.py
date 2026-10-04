@@ -33,20 +33,21 @@ import dxrice_manifest
 import dxrice_xdg
 
 HOME = Path.home()
+CONFIG_HOME = Path(dxrice_xdg.config_home())
 
 STATIC_FILES = [
-    ("wofi/config", HOME / ".config/wofi/config"),
+    ("wofi/config", CONFIG_HOME / "wofi/config"),
 ]
 
 COPY_ONCE_FILES = [
-    ("hypr/hyprland.lua", HOME / ".config/hypr/hyprland.lua"),
-    ("waybar/config", HOME / ".config/waybar/config"),
+    ("hypr/hyprland.lua", CONFIG_HOME / "hypr/hyprland.lua"),
+    ("waybar/config", CONFIG_HOME / "waybar/config"),
     # The shell now has four independent waybar instances -- top clock,
     # left workspace strip, right status strip, bottom app dock -- each
     # its own personal, never-overwritten config, same as the top one.
-    ("waybar/config-left", HOME / ".config/waybar/config-left"),
-    ("waybar/config-right", HOME / ".config/waybar/config-right"),
-    ("waybar/config-dock", HOME / ".config/waybar/config-dock"),
+    ("waybar/config-left", CONFIG_HOME / "waybar/config-left"),
+    ("waybar/config-right", CONFIG_HOME / "waybar/config-right"),
+    ("waybar/config-dock", CONFIG_HOME / "waybar/config-dock"),
 ]
 
 LEGACY_SCRIPTS_DIR = HOME / "scripts"

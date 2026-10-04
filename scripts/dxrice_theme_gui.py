@@ -33,18 +33,18 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS_DIR)
 import dxrice_apply_theme as apply_theme
+import dxrice_xdg
 from dxrice_gtk_widgets import (
     animate_in, label as _label, load_css, make_card, make_debounced, make_row, make_section_title,
 )
 
-HOME = os.path.expanduser("~")
 REPO = os.path.dirname(SCRIPTS_DIR)
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = apply_theme.ensure_live_theme()
-PRESETS_DIR = os.path.join(HOME, ".config", "dxrice", "presets")
+PRESETS_DIR = os.path.join(dxrice_xdg.config_dir(), "presets")
 APPLY_SCRIPT = os.path.join(SCRIPTS_DIR, "dxrice_apply_theme.py")
 SYNC_SDDM_SCRIPT = os.path.join(SCRIPTS_DIR, "dxrice_sync_sddm_theme.py")
-CSS_PATH = os.path.join(HOME, ".config", "dxrice", "gtk_style.css")
+CSS_PATH = os.path.join(dxrice_xdg.config_dir(), "gtk_style.css")
 
 BUILTIN_PRESETS = {
     "Glass Charcoal": {

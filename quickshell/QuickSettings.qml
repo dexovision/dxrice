@@ -24,6 +24,12 @@ Item {
     width: parent.width
     signal closeRequested()
 
+    // Read by TopBar.qml (via ShellIsland's panelItem alias) so its own
+    // click-outside-to-dismiss region can suspend itself while the Wifi
+    // password dialog is open -- see wifiBackend.onPasswordNeeded below for
+    // why that's needed (same fix as TaskbarManager's addDialogOpen).
+    property bool wifiDialogOpen: false
+
     // ==================== LAYOUT CONTRACT ====================
     // `contentHeight` (read by TopBar.qml to size the island) must NEVER be
     // bound directly to the live pane's implicitHeight: this file's internals
@@ -1298,6 +1304,17 @@ Item {
         radioOn: root.wifiEnabled
         onPasswordNeeded: (ssid) => {
             const dlg = Qt.createComponent("WifiPasswordDialog.qml").createObject(root, { ssid: ssid });
+            // WifiPasswordDialog is a real, separate top-level window (a
+            // FloatingWindow, not a rectangle inside this panel's own
+            // surface) -- same architectural gap as TaskbarManager's
+            // Add-Shortcut dialog. Without wifiDialogOpen, TopBar.qml's own
+            // full-screen click-outside-to-dismiss region has no way to
+            // know this dialog exists, so clicking into its password field
+            // to type would be caught by that catcher instead and close
+            // Quick Settings -- destroying this dialog (a child of `root`)
+            // before the user could enter a password at all.
+            root.wifiDialogOpen = true;
+            dlg.visibleChanged.connect(() => { if (!dlg.visible) root.wifiDialogOpen = false; });
             dlg.submitted.connect((password) => wifiBackend.connectWithPassword(ssid, password));
             dlg.visible = true;
         }

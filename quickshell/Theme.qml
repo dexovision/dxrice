@@ -4,10 +4,11 @@ import Quickshell
 import Quickshell.Io
 
 // Shared design tokens for every DXrice Quickshell widget. Reads the same
-// live theme.json the GTK-era apps used (~/.config/dxrice/theme.json,
-// seeded from <repo>/theme/theme.json on first run by
-// scripts/dxrice_apply_theme.py) so this is never a second source of
-// truth -- editing colors still only ever happens in one file.
+// live theme.json the GTK-era apps used ($XDG_CONFIG_HOME/dxrice/theme.json,
+// falling back to ~/.config/dxrice/theme.json -- see Xdg.qml -- seeded from
+// <repo>/theme/theme.json on first run by scripts/dxrice_apply_theme.py) so
+// this is never a second source of truth -- editing colors still only ever
+// happens in one file.
 //
 // The rounding scale, motion curves, and layered surface colors below are
 // deliberately modeled on the Material 3 Expressive tokens end-4/dots-
@@ -24,7 +25,7 @@ import Quickshell.Io
 QtObject {
     id: root
 
-    readonly property string path: Quickshell.env("HOME") + "/.config/dxrice/theme.json"
+    readonly property string path: Xdg.configDir + "/theme.json"
 
     property var data: ({})
 

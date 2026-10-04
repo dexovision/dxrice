@@ -56,13 +56,27 @@ PanelWindow {
     // anywhere outside the panel has somewhere on THIS window's surface to
     // land; panelSurface below is what actually gets positioned/sized to
     // this box.
-    readonly property real panelWidth: 700
-    // Capped against the real screen, not just a bare 640: a fixed constant
-    // never grows from content (this window's sidebar/content already scroll
-    // internally, see catFlickable/contentFlick above), but a fixed constant
-    // can still be too tall for a short display -- and "fits its own
-    // Rectangle" is not the same claim as "fits on this screen."
-    readonly property real panelHeight: Math.min(640, (root.screen ? root.screen.height : 1080) - ShellSurface.topEdgeHeight - ShellSurface.gap)
+    // Scales with the real screen instead of one constant that only looks
+    // right at one resolution: wider screens give Wallpaper/Lock Screen's
+    // ResponsiveSplit previews real room to sit beside their controls,
+    // narrower screens (1536px class) stay at the already-verified 700
+    // floor. Every category's own content already sizes off this width via
+    // `parent.width` bindings, so widening it is a pure gain everywhere,
+    // never a source of new clipping.
+    readonly property real panelWidth: Math.round(Math.min(920, Math.max(700, (root.screen ? root.screen.width : 1920) * 0.46)))
+    // Content-driven, not one fixed slab for every category: a sparse
+    // category (Lock Screen, Experience) gets a shorter panel instead of
+    // the old "always 640, leave the rest bare" behavior -- the same
+    // fixed-height-Card problem this file's Lock Screen/Experience panes
+    // used to have, just one level up, at the panel itself. `maxPanelHeight`
+    // is still capped against the real screen (a fixed max, not a fixed
+    // value: "fits its own Rectangle" is not the same claim as "fits on
+    // this screen"), and `minPanelHeight` keeps the sidebar's 7 categories
+    // legible without needing its own internal scroll on every category.
+    readonly property real maxPanelHeight: Math.min(640, (root.screen ? root.screen.height : 1080) - ShellSurface.topEdgeHeight - ShellSurface.gap)
+    readonly property real minPanelHeight: Math.min(root.maxPanelHeight, 480)
+    readonly property real contentNaturalHeight: header.height + Theme.padLg * 2 + (paneLoader.item ? paneLoader.item.implicitHeight : 0)
+    readonly property real panelHeight: Math.max(root.minPanelHeight, Math.min(root.maxPanelHeight, root.contentNaturalHeight))
     readonly property real panelX: Math.round(((root.screen ? root.screen.width : 1920) - root.panelWidth) / 2)
     readonly property real panelY: ShellSurface.topEdgeHeight
 
@@ -93,7 +107,7 @@ PanelWindow {
     }
 
     readonly property string repoDir: Quickshell.shellDir + "/.."
-    readonly property string themeJsonPath: Quickshell.env("HOME") + "/.config/dxrice/theme.json"
+    readonly property string themeJsonPath: Xdg.configDir + "/theme.json"
 
     // ---- draft fields (mirrors theme.json 1:1; camelCase would need a
     // translation table for every read/write, so these stay snake_case) ----
@@ -182,7 +196,7 @@ PanelWindow {
         { key: "lock_blur_passes", label: "Blur passes", min: 0, max: 10, decimals: 0 },
         { key: "lock_blur_size", label: "Blur size", min: 0, max: 20, decimals: 0, unit: "px" },
         { key: "lock_blur_vibrancy", label: "Blur vibrancy", min: 0, max: 1, decimals: 2 },
-        { key: "lock_bg_opacity", label: "Input field background opacity", min: 0, max: 1, decimals: 2 },
+        { key: "lock_bg_opacity", label: "Input opacity", min: 0, max: 1, decimals: 2 },
     ]
     readonly property var fontSizeFields: [
         { key: "font_size_waybar", label: "Taskbar text size", min: 8, max: 24, decimals: 0 },
@@ -464,6 +478,12 @@ PanelWindow {
         Connections {
             target: root
             function onClosingChanged() { drawer.revealHeight = root.closing ? 0 : root.panelHeight; }
+            // panelHeight is content-driven now (see its own property
+            // comment) -- switching to a sparser or denser category while
+            // already open has to resize the drawer to match, using the
+            // same Behavior-driven animation as open/close, not just take
+            // effect on the next open.
+            function onPanelHeightChanged() { if (!root.closing) drawer.revealHeight = root.panelHeight; }
         }
 
         RectangularShadow {
@@ -738,16 +758,74 @@ PanelWindow {
         }
     }
 
+    // ==================== shared: a bordered content REGION, not a
+    // Card -- this is what keeps Theme from becoming Card-in-Card-in-Card.
+    // A region has no title chip, no card shadow, no card fill: it's a
+    // quiet frame around a composition (a preview, a specimen, a demo)
+    // that itself IS the content, the way Dashboard's left/center/right
+    // regions are frames around composition rather than settings lists. ====
+    component PreviewRegion: Rectangle {
+        default property alias data: inner.data
+        property real regionPadding: Theme.padLg
+        radius: ShellSurface.cardRadius
+        color: Theme.cardTone
+        border.width: Theme.borderWidth
+        border.color: Theme.borderFaint
+        implicitHeight: inner.implicitHeight + regionPadding * 2
+        Item {
+            id: inner
+            x: parent.regionPadding
+            y: parent.regionPadding
+            width: parent.width - parent.regionPadding * 2
+            implicitHeight: children.length > 0 ? children[0].implicitHeight : 0
+        }
+    }
+
+    // A big preview alongside its controls when there's room, stacked full-
+    // width when there isn't -- genuinely responsive (re-evaluates on any
+    // width change, e.g. this panel's own content-driven width growing on a
+    // wider screen -- see panelWidth above) rather than a layout tuned to
+    // look right at one specific resolution. Reads `.height` off each
+    // slot's actual child, not `.implicitHeight`: a plain Rectangle (the
+    // preview) never populates implicitHeight on its own the way a Column
+    // does, and `.height` is correct for both.
+    component ResponsiveSplit: Item {
+        id: splitRoot
+        default property alias media: mediaSlot.data
+        property alias aside: asideSlot.data
+        property real asideWidth: 260
+        property real breakpoint: 560
+        width: parent ? parent.width : implicitWidth
+        readonly property bool wide: width >= breakpoint
+        readonly property real mediaH: mediaSlot.children.length > 0 ? mediaSlot.children[0].height : 0
+        readonly property real asideH: asideSlot.children.length > 0 ? asideSlot.children[0].height : 0
+        height: wide ? Math.max(mediaH, asideH) : (mediaH + Theme.padLg + asideH)
+
+        Item {
+            id: mediaSlot
+            width: splitRoot.wide ? splitRoot.width - splitRoot.asideWidth - Theme.padLg : splitRoot.width
+            height: splitRoot.mediaH
+        }
+        Item {
+            id: asideSlot
+            width: splitRoot.wide ? splitRoot.asideWidth : splitRoot.width
+            x: splitRoot.wide ? mediaSlot.width + Theme.padLg : 0
+            y: splitRoot.wide ? 0 : mediaSlot.height + Theme.padLg
+            height: splitRoot.asideH
+        }
+    }
+
     Component {
         id: colorsPane
         Column {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.pad3xl
+            spacing: Theme.padLg
 
-            Text { text: "Presets"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-            // -- presets communicate visually (an actual mini palette),
-            // not as a row of plain text-labeled buttons the user has to
-            // read one at a time. --
+            Text { text: "Colors"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
+
+            // -- presets communicate visually (an actual mini palette), not
+            // as a row of plain text-labeled buttons the user has to read
+            // one at a time. --
             Flow {
                 width: parent.width
                 spacing: Theme.padSm
@@ -793,18 +871,91 @@ PanelWindow {
                 }
             }
 
-            // Grouped as Level-2 cards (see Card.qml) rather than
-            // hairline-divided sections -- the same grammar Quick Settings
-            // and Taskbar's own setting groups use, so Theme reads as part
-            // of the same shell rather than a plain settings dialog that
-            // happens to share a color palette with it.
+            // ---- the centerpiece: a real miniature SHELL, not a swatch
+            // grid -- a mock top bar with a status pill, a mock card inside
+            // a mock panel, and an accent button, all reading their fill
+            // straight from the live draft fields. This is "theme
+            // designer," not "list of hex values": the palette is judged
+            // by how it looks ON shell surfaces, which is the only thing
+            // that actually matters. ----
+            PreviewRegion {
+                width: parent.width
+                regionPadding: Theme.padLg
+                Column {
+                    width: parent.width
+                    spacing: Theme.padSm
+                    Text { text: "Live preview"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                    Rectangle {
+                        width: parent.width
+                        height: 190
+                        radius: ShellSurface.radius
+                        color: root._rgba(root.glass_bg, root.opacity_active)
+                        border.width: Theme.borderWidth
+                        border.color: root._rgba(root.glass_border, Math.min(root.border_opacity_active, 0.22))
+                        clip: true
+
+                        // mock top bar
+                        Item {
+                            x: Theme.padLg; y: Theme.padMd
+                            width: parent.width - Theme.padLg * 2
+                            height: ShellSurface.unit * 0.6
+                            Rectangle {
+                                width: 96; height: parent.height
+                                radius: height / 2
+                                color: root._rgba(root.glass_bg_active, root.opacity_idle)
+                                Text { anchors.centerIn: parent; text: "12:41"; color: "#" + root.glass_text_active; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                            }
+                            Rectangle {
+                                anchors.right: parent.right
+                                width: 64; height: parent.height
+                                radius: height / 2
+                                color: "#" + root.accent
+                                Text { anchors.centerIn: parent; text: "Wi-Fi"; color: "#ffffff"; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                            }
+                        }
+
+                        // mock card + accent button, demonstrating layer1/
+                        // layer2 lift and the accent against the real panel
+                        Rectangle {
+                            x: Theme.padLg; y: Theme.padLg * 2 + ShellSurface.unit * 0.6
+                            width: parent.width - Theme.padLg * 2
+                            height: 84
+                            radius: ShellSurface.cardRadius
+                            color: root._rgba(root.glass_bg_active, root.opacity_idle)
+                            border.width: Theme.borderWidth
+                            border.color: root._rgba(root.glass_border, 0.15)
+                            Column {
+                                x: Theme.padMd; y: Theme.padMd
+                                spacing: Theme.padSm
+                                Text { text: "Connectivity"; color: "#" + root.glass_text; opacity: 0.7; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                                Row {
+                                    spacing: Theme.padSm
+                                    Rectangle { width: 72; height: 32; radius: Theme.roundingSm; color: "#" + root.accent; opacity: 0.85
+                                        Text { anchors.centerIn: parent; text: "Active"; color: "#ffffff"; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                                    }
+                                    Rectangle { width: 72; height: 32; radius: Theme.roundingSm; color: root._rgba(root.glass_bg, 0.4); border.width: 1; border.color: root._rgba(root.glass_border, 0.15)
+                                        Text { anchors.centerIn: parent; text: "Idle"; color: "#" + root.glass_text; opacity: 0.7; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- color roles, below the preview they explain -- kept
+            // full-width (not side-by-side) so each role's subtitle has
+            // room to render without eliding: SettingRow's label/subtitle
+            // column sizes off the Card's own width, and halving that width
+            // for a 2-up layout truncated captions like "Waybar/wofi/kitty
+            // …" mid-word, which is worse than the single centerpiece
+            // preview above is worth trading for. ----
             Card {
                 width: parent.width
                 padding: Theme.pad2xl
                 title: "Glass Palette"
                 ColorList { width: parent.width; fields: root.colorFields }
             }
-
             Card {
                 width: parent.width
                 padding: Theme.pad2xl
@@ -820,47 +971,66 @@ PanelWindow {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
 
-            Card {
+            Text { text: "Transparency & Blur"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
+
+            // ---- the material preview is the primary element now, not a
+            // Card header above a slider list. Two panels side by side --
+            // idle and active material -- each shown against a NEUTRAL dark
+            // backdrop (not a colorful wallpaper stand-in): the whole point
+            // of Theme.qml's surfaceTone lift is that the shell's material
+            // stays a deliberate dark neutral regardless of what's behind
+            // it, and the old green gradient here was demonstrating the
+            // opposite of that -- a preview that only ever showed the
+            // panel looking green undercut the actual design principle
+            // instead of proving it. ----
+            PreviewRegion {
                 width: parent.width
-                padding: Theme.pad2xl
-                title: "Transparency & Blur"
-                // A real live preview of the opacity/border values against a
-                // colorful backdrop -- actual compositor blur only happens on
-                // a real Hyprland surface, so this is honestly just alpha +
-                // border (which is most of what these sliders change), not a
-                // blur simulation, but it's the same "see it, don't just read
-                // a number" idea as the Fonts specimen.
-                Item {
+                Row {
                     width: parent.width
-                    height: 130
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: Theme.roundingLg
-                        clip: true
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#3a6b4a" }
-                            GradientStop { position: 1.0; color: "#1a2e22" }
-                        }
+                    spacing: Theme.padLg
+                    Column {
+                        width: (parent.width - parent.spacing) / 2
+                        spacing: Theme.padXs
+                        Text { text: "Idle material"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
                         Rectangle {
-                            anchors.centerIn: parent
-                            width: parent.width * 0.62
-                            height: parent.height * 0.62
-                            radius: Theme.roundingMd
-                            color: root._rgba(root.glass_bg, root.opacity_idle)
-                            border.width: Theme.borderWidth
-                            border.color: Qt.rgba(1, 1, 1, root.border_opacity_idle)
-                            Text {
+                            width: parent.width; height: 120
+                            radius: Theme.roundingLg
+                            color: "#1c1c1e"
+                            Rectangle {
                                 anchors.centerIn: parent
-                                text: "Panel preview"
-                                color: "#ffffff"
-                                opacity: Theme.opacityFaint
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmaller
+                                width: parent.width * 0.7; height: parent.height * 0.7
+                                radius: Theme.roundingMd
+                                color: root._rgba(root.glass_bg, root.opacity_idle)
+                                border.width: Theme.borderWidth
+                                border.color: Qt.rgba(1, 1, 1, root.border_opacity_idle)
+                            }
+                        }
+                    }
+                    Column {
+                        width: (parent.width - parent.spacing) / 2
+                        spacing: Theme.padXs
+                        Text { text: "Active material"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                        Rectangle {
+                            width: parent.width; height: 120
+                            radius: Theme.roundingLg
+                            color: "#1c1c1e"
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: parent.width * 0.7; height: parent.height * 0.7
+                                radius: Theme.roundingMd
+                                color: root._rgba(root.glass_bg_active, root.opacity_active)
+                                border.width: Theme.borderWidth
+                                border.color: Qt.rgba(1, 1, 1, root.border_opacity_active)
                             }
                         }
                     }
                 }
+            }
 
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Controls"
                 SliderList { width: parent.width; fields: root.blurFields }
             }
         }
@@ -872,17 +1042,16 @@ PanelWindow {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
 
-            Card {
+            Text { text: "Layout"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
+
+            // Corner radius and window gaps are pure geometry -- a number
+            // by itself doesn't communicate "how rounded" or "how much
+            // space" the way an actual shape does.
+            PreviewRegion {
                 width: parent.width
-                padding: Theme.pad2xl
-                title: "Layout"
-                // Corner radius and window gaps are pure geometry -- a number
-                // by itself doesn't communicate "how rounded" or "how much
-                // space" the way an actual shape does.
                 Row {
                     width: parent.width
                     spacing: Theme.padLg
-
                     Column {
                         width: (parent.width - parent.spacing) / 2
                         spacing: Theme.padXs
@@ -890,9 +1059,9 @@ PanelWindow {
                         Rectangle {
                             width: 90; height: 90
                             radius: root.radius
-                            color: Theme.layer1
+                            color: Theme.layer2Active
                             border.width: Theme.borderWidth
-                            border.color: Theme.borderIdle
+                            border.color: Theme.border
                         }
                     }
                     Column {
@@ -901,13 +1070,37 @@ PanelWindow {
                         Text { text: "Window gaps"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
                         Row {
                             spacing: Math.max(2, root.hypr_gaps_in)
-                            Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer1; border.width: Theme.borderWidth; border.color: Theme.borderIdle }
-                            Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer1; border.width: Theme.borderWidth; border.color: Theme.borderIdle }
+                            Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer2Active; border.width: Theme.borderWidth; border.color: Theme.border }
+                            Rectangle { width: 42; height: 90; radius: root.hypr_rounding * 0.5; color: Theme.layer2Active; border.width: Theme.borderWidth; border.color: Theme.border }
                         }
                     }
                 }
+            }
 
-                SliderList { width: parent.width; fields: root.layoutFields }
+            // Grouped by what each setting actually governs, instead of one
+            // long undifferentiated list -- kept full-width per group
+            // (not side-by-side) so FillSlider's baked-in label never
+            // elides: it sizes its label text off the slab's own width,
+            // and a half-width slab truncated "Panel corner radius" down
+            // to "Panel corn…", the same class of regression the Colors
+            // pane's role cards had.
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Panel & Window Geometry"
+                SliderList { width: parent.width; fields: [root.layoutFields[0], root.layoutFields[1], root.layoutFields[4]] }
+            }
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Spacing"
+                SliderList { width: parent.width; fields: [root.layoutFields[2], root.layoutFields[3]] }
+            }
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Window Opacity & Border Gradient"
+                SliderList { width: parent.width; fields: [root.layoutFields[5], root.layoutFields[6], root.layoutFields[7]] }
             }
         }
     }
@@ -917,11 +1110,80 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
-            Card {
+
+            Text { text: "Lock Screen"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
+
+            // A real widescreen lock screen -- 16:9, the actual shape of a
+            // monitor -- with clock/date/password positioned the way a real
+            // desktop lock screen lays them out (upper-third clock, password
+            // pill in the lower third), not a tiny phone-shaped card. Every
+            // one of the 4 sliders below visibly changes something here.
+            // Same ResponsiveSplit as Wallpaper: controls sit beside the
+            // preview when there's room, below it when there isn't.
+            ResponsiveSplit {
                 width: parent.width
-                padding: Theme.pad2xl
-                title: "Lock Screen"
-                SliderList { width: parent.width; fields: root.lockFields }
+                asideWidth: 280
+                breakpoint: 620
+
+                Rectangle {
+                    id: lockPreviewFrame
+                    width: parent.width
+                    height: Math.min(420, width * 9 / 16)
+                    radius: Theme.roundingLg
+                    clip: true
+                    color: root.wallpaper ? "#1c1c1e" : "#26221c"
+                    Image {
+                        anchors.fill: parent
+                        source: root.wallpaper ? "file://" + root.wallpaper : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                    }
+                    // vibrancy/blur stand-in: a translucent veil whose own
+                    // opacity tracks lock_bg_opacity, same honesty as the
+                    // Blur pane -- real compositor blur only exists on an
+                    // actual Hyprland surface, this is the alpha it pairs
+                    // with, not a shader simulation.
+                    Rectangle { anchors.fill: parent; color: Qt.rgba(0.06, 0.06, 0.07, root.lock_bg_opacity) }
+                    Column {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: lockPreviewFrame.height * 0.16
+                        spacing: Theme.padXs
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "14:32"
+                            color: "#ffffff"
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Math.min(Theme.fontSizeHero, lockPreviewFrame.width * 0.09)
+                            font.weight: Font.Light
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "Thursday, September 17"
+                            color: "#ffffff"
+                            opacity: 0.75
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Math.min(Theme.fontSizeLarger, lockPreviewFrame.width * 0.022)
+                        }
+                    }
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: lockPreviewFrame.height * 0.68
+                        width: Math.min(280, lockPreviewFrame.width * 0.26)
+                        height: ShellSurface.rowHeight
+                        radius: Theme.roundingSm
+                        color: Qt.rgba(1, 1, 1, root.lock_bg_opacity * 0.08)
+                        border.width: Theme.borderWidth
+                        border.color: Qt.rgba(1, 1, 1, 0.15)
+                        Text { anchors.centerIn: parent; text: "Enter password"; color: "#ffffff"; opacity: 0.5; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                    }
+                }
+
+                aside: Card {
+                    width: parent.width
+                    padding: Theme.pad2xl
+                    title: "Controls"
+                    SliderList { width: parent.width; fields: root.lockFields }
+                }
             }
         }
     }
@@ -930,50 +1192,41 @@ PanelWindow {
         id: fontsPane
         Column {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.pad3xl
+            spacing: Theme.padLg
+
+            Text { text: "Fonts"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
 
             // ---- typography: a live specimen, not a text field in a box.
-            // Typing a new family updates the "Aa" + sample sentence
-            // immediately (previewFamily), but only commits to the real
-            // theme (and marks the draft dirty) once you leave the field --
-            // the same "see it before you commit it" idea Colors/Presets
-            // already use, just for text instead of swatches. ----
-            Card {
+            // Typing a new family updates every specimen below immediately,
+            // but only commits to the real theme (and marks the draft
+            // dirty) once you leave the field. Four roles instead of one
+            // "Aa" -- a heading, body copy, a monospace/stat readout, and
+            // this shell's own UI type -- so the family is judged the way
+            // it's actually used, not as one isolated glyph. ----
+            PreviewRegion {
                 width: parent.width
-                padding: Theme.pad2xl
-                title: "Typography"
-
-                Text {
-                    id: specimenGlyphs
-                    text: "Aa"
-                    color: Theme.textActive
-                    font.family: previewFamilyInput.text || Theme.fontFamily
-                    font.pixelSize: 48
-                    font.weight: Font.Light
-                }
-                Text {
-                    text: "The quick brown fox jumps over the lazy dog"
-                    color: Theme.text
-                    opacity: Theme.opacityFaint
-                    font.family: previewFamilyInput.text || Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeLarger
-                    wrapMode: Text.WordWrap
+                Column {
                     width: parent.width
-                }
+                    spacing: Theme.padMd
+                    Text { text: previewFamilyInput.text || Theme.fontFamily; color: Theme.textActive; font.family: previewFamilyInput.text || Theme.fontFamily; font.pixelSize: 32; font.weight: Font.DemiBold }
+                    Text { text: "The quick brown fox jumps over the lazy dog"; color: Theme.text; opacity: Theme.opacityFaint; font.family: previewFamilyInput.text || Theme.fontFamily; font.pixelSize: Theme.fontSizeLarger; wrapMode: Text.WordWrap; width: parent.width }
+                    Text { text: "14:32   92%   3.4 GB/s"; color: Theme.textActive; font.family: previewFamilyInput.text || Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge }
+                    Text { text: "Wi-Fi · Bluetooth · Do Not Disturb"; color: Theme.text; opacity: Theme.opacitySecondary; font.family: previewFamilyInput.text || Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
 
-                Item {
-                    width: parent.width
-                    height: 30
-                    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: previewFamilyInput.activeFocus ? Theme.accent : Theme.borderIdle }
-                    TextInput {
-                        id: previewFamilyInput
-                        anchors.fill: parent
-                        text: root.font_family
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeNormal
-                        verticalAlignment: TextInput.AlignVCenter
-                        onEditingFinished: { root.font_family = text; root.dirty = true; }
+                    Item {
+                        width: parent.width
+                        height: 30
+                        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: previewFamilyInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                        TextInput {
+                            id: previewFamilyInput
+                            anchors.fill: parent
+                            text: root.font_family
+                            color: Theme.textActive
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeNormal
+                            verticalAlignment: TextInput.AlignVCenter
+                            onEditingFinished: { root.font_family = text; root.dirty = true; }
+                        }
                     }
                 }
             }
@@ -997,10 +1250,91 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
+
+            Text { text: "Experience"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
+
+            // ---- three small, honest demonstrations instead of one big
+            // Card stretched to fill the panel with nothing in it: this
+            // category only has 3 real settings, so it stays exactly as
+            // compact as those 3 demonstrations need, per the explicit
+            // "don't add fake filler, allow content to stay compact" rule.
+            // Each PreviewRegion holds ONLY the live visualization -- a
+            // FillSlider crammed into a 1/3-width column truncated its own
+            // baked-in label down to a single letter ("S…"), the same
+            // truncation-from-halving bug as Colors/Layout above, just
+            // worse at a third of the width. The actual controls move to
+            // one full-width SliderList below instead, reusing the same
+            // fields array already declared for these 3 settings. ----
+            Row {
+                width: parent.width
+                spacing: Theme.padLg
+
+                PreviewRegion {
+                    width: (parent.width - parent.spacing * 2) / 3
+                    Column {
+                        width: parent.width
+                        spacing: Theme.padSm
+                        Text { text: "Animation speed"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                        Item {
+                            width: parent.width; height: 40
+                            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: Theme.layer2 }
+                            Rectangle {
+                                id: speedDot
+                                y: parent.height / 2 - 7
+                                width: 14; height: 14; radius: 7
+                                color: Theme.accent
+                                SequentialAnimation on x {
+                                    loops: Animation.Infinite
+                                    NumberAnimation { to: speedDot.parent.width - 14; duration: Math.max(60, root.anim_duration_ms * 2.8); easing.type: Easing.InOutQuad }
+                                    NumberAnimation { to: 0; duration: Math.max(60, root.anim_duration_ms * 2.8); easing.type: Easing.InOutQuad }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                PreviewRegion {
+                    width: (parent.width - parent.spacing * 2) / 3
+                    Column {
+                        width: parent.width
+                        spacing: Theme.padSm
+                        Text { text: "Spacing density"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                        Row {
+                            width: parent.width
+                            spacing: Math.round(8 * root.ui_density)
+                            Rectangle { width: 22; height: 22; radius: Theme.roundingXs; color: Theme.layer2 }
+                            Rectangle { width: 22; height: 22; radius: Theme.roundingXs; color: Theme.layer2 }
+                            Rectangle { width: 22; height: 22; radius: Theme.roundingXs; color: Theme.layer2 }
+                        }
+                    }
+                }
+
+                PreviewRegion {
+                    width: (parent.width - parent.spacing * 2) / 3
+                    Column {
+                        width: parent.width
+                        spacing: Theme.padSm
+                        Text { text: "Panel shadow"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                        Item {
+                            width: parent.width; height: 40
+                            RectangularShadow {
+                                anchors.fill: shadowSwatch
+                                radius: shadowSwatch.radius
+                                color: Theme.shadowColor
+                                blur: Theme.elevationBlur(3) * root.shadow_intensity
+                                spread: Theme.elevationSpread(3) * root.shadow_intensity
+                                offset.y: Theme.elevationOffsetY(3) * root.shadow_intensity
+                            }
+                            Rectangle { id: shadowSwatch; anchors.centerIn: parent; width: parent.width * 0.6; height: 24; radius: Theme.roundingSm; color: Theme.layer1 }
+                        }
+                    }
+                }
+            }
+
             Card {
                 width: parent.width
                 padding: Theme.pad2xl
-                title: "Experience"
+                title: "Controls"
                 SliderList { width: parent.width; fields: root.experienceFields }
             }
         }
@@ -1010,72 +1344,100 @@ PanelWindow {
         id: wallpaperPane
         Column {
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.pad3xl
+            spacing: Theme.padLg
 
-            // A real thumbnail instead of a text path -- "wallpaper should
-            // have a preview" means an actual image, not its filename.
-            Card {
+            Text { text: "Wallpaper"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
+
+            // A wallpaper WORKSPACE: a big, cinematic 16:9 preview -- the
+            // actual aspect ratio of a real desktop, not a small portrait-
+            // ish card -- with info/actions beside it when this panel is
+            // wide enough to afford that (see panelWidth/ResponsiveSplit
+            // above) and stacked below it otherwise. Never both narrow AND
+            // squeezed: below the breakpoint the preview keeps the full
+            // width, it just gives up sharing a row to get it.
+            ResponsiveSplit {
                 width: parent.width
-                padding: Theme.pad2xl
-                title: "Current Wallpaper"
-                Item {
+                asideWidth: 280
+
+                Rectangle {
+                    id: wallpaperPreviewFrame
                     width: parent.width
-                    height: 200
-                    Rectangle {
+                    height: Math.min(420, width * 9 / 16)
+                    radius: Theme.roundingLg
+                    color: Theme.layer1
+                    clip: true
+                    Image {
+                        id: wallpaperPreviewImage
                         anchors.fill: parent
-                        radius: Theme.roundingLg
-                        color: Theme.layer1
-                        clip: true
-                        Image {
-                            id: wallpaperPreviewImage
-                            anchors.fill: parent
-                            source: root.wallpaper ? "file://" + root.wallpaper : ""
-                            fillMode: Image.PreserveAspectCrop
-                            asynchronous: true
-                            visible: status === Image.Ready
+                        source: root.wallpaper ? "file://" + root.wallpaper : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        visible: status === Image.Ready
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        visible: wallpaperPreviewImage.status !== Image.Ready
+                        text: "No wallpaper set"
+                        color: Theme.text
+                        opacity: Theme.opacityMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmaller
+                    }
+                }
+
+                aside: Column {
+                    width: parent.width
+                    spacing: Theme.padLg
+
+                    Card {
+                        width: parent.width
+                        padding: Theme.pad2xl
+                        title: "Current wallpaper"
+                        Text { width: parent.width; text: root.wallpaper || "None set"; color: Theme.text; opacity: Theme.opacitySecondary; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; elide: Text.ElideMiddle }
+                        GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
+                    }
+
+                    Card {
+                        width: parent.width
+                        padding: Theme.pad2xl
+                        title: "Generate Theme"
+                        Text { width: parent.width; text: "Samples the wallpaper for a background tone and accent -- overwrites Colors below (Apply to keep, Revert to undo)."; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; wrapMode: Text.WordWrap }
+                        GlassButton {
+                            text: root.generatingFromWallpaper ? "Sampling..." : "Generate"
+                            variant: "primary"
+                            enabled: !root.generatingFromWallpaper
+                            onClicked: root.generateFromWallpaper()
                         }
                         Text {
-                            anchors.centerIn: parent
-                            visible: wallpaperPreviewImage.status !== Image.Ready
-                            text: "No wallpaper set"
-                            color: Theme.text
-                            opacity: 0.5
+                            visible: root.wallpaperGenerateError.length > 0
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: root.wallpaperGenerateError
+                            color: Theme.accent
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmaller
                         }
                     }
                 }
-                SettingRow {
-                    width: parent.width
-                    title: "Current wallpaper"
-                    subtitle: root.wallpaper
-                    GlassButton { text: "Choose..."; variant: "secondary"; onClicked: wallpaperDialog.open() }
-                }
             }
 
-            Card {
+            // The generated/current palette, shown as the same swatch
+            // language as Colors' presets -- so "Generate" visibly feeds
+            // back into the same visual system it modifies, rather than a
+            // button whose effect you can only see by switching tabs.
+            PreviewRegion {
                 width: parent.width
-                padding: Theme.pad2xl
-                title: "Match Theme to Wallpaper"
-                SettingRow {
+                Column {
                     width: parent.width
-                    title: "Generate colors from the current wallpaper"
-                    subtitle: "Samples it for a background tone and accent -- overwrites the Colors tab below (Apply to keep, Revert to undo)"
-                    GlassButton {
-                        text: root.generatingFromWallpaper ? "Sampling..." : "Generate"
-                        variant: "primary"
-                        enabled: !root.generatingFromWallpaper
-                        onClicked: root.generateFromWallpaper()
+                    spacing: Theme.padSm
+                    Text { text: "Resulting palette"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                    Row {
+                        spacing: Theme.padSm
+                        Rectangle { width: 36; height: 36; radius: Theme.roundingSm; color: "#" + root.glass_bg }
+                        Rectangle { width: 36; height: 36; radius: Theme.roundingSm; color: "#" + root.glass_bg_active }
+                        Rectangle { width: 36; height: 36; radius: Theme.roundingFull; color: "#" + root.accent }
+                        Rectangle { width: 36; height: 36; radius: Theme.roundingSm; color: "#" + root.glass_text }
                     }
-                }
-                Text {
-                    visible: root.wallpaperGenerateError.length > 0
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    text: root.wallpaperGenerateError
-                    color: Theme.accent
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmaller
                 }
             }
         }

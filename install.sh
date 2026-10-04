@@ -1,40 +1,85 @@
 #!/usr/bin/env bash
 # Installer / updater for the DXrice dotfiles.
 #
-#   ./install.sh            fresh install: asks where to put everything,
-#                            sanity checks, deps, input group, monitor
-#                            detection, deploy
-#   ./install.sh update     git pull (auto-stashing any local repo edits),
-#                            then re-deploy -- any file you've hand-edited
-#                            in ~/.config since the last deploy is left
-#                            alone, not overwritten. Theme colors and
-#                            taskbar shortcuts live in ~/.config, not the
-#                            repo, so this never touches your personal look.
-#                            Also offers to set up (or re-sync) the SDDM
-#                            login theme if SDDM is installed -- see
-#                            'sddm-theme' below; same needs-sudo prompt,
-#                            no separate command required.
-#   ./install.sh sddm-theme  deploy the DXrice login theme for SDDM (needs
-#                            sudo; only touches SDDM's own theme dir and
-#                            config -- never installs or enables a display
-#                            manager for you). Re-run any time you change
-#                            your wallpaper/colors and want the login
-#                            screen to match.
-#   ./install.sh help       show this usage text
+#   ./install.sh                 fresh install: asks where to put
+#                                 everything, sanity checks, deps, input
+#                                 group, monitor detection, deploy
+#   ./install.sh update          git pull (auto-stashing any local repo
+#                                 edits), then re-deploy -- any file you've
+#                                 hand-edited in $XDG_CONFIG_HOME since the
+#                                 last deploy is left alone, not
+#                                 overwritten. Theme colors and taskbar
+#                                 shortcuts live outside the repo, so this
+#                                 never touches your personal look. Also
+#                                 offers to set up (or re-sync) the SDDM
+#                                 login theme if SDDM is installed -- see
+#                                 'sddm-theme' below; same needs-sudo
+#                                 prompt, no separate command required.
+#   ./install.sh sddm-theme      deploy the DXrice login theme for SDDM
+#                                 (needs sudo; only touches SDDM's own
+#                                 theme dir and config -- never installs or
+#                                 enables a display manager for you).
+#                                 Re-run any time you change your
+#                                 wallpaper/colors and want the login
+#                                 screen to match.
+#   ./install.sh uninstall       removes DXrice's own integration (shell
+#                                 functions, recorded repo path, the SDDM
+#                                 theme if you confirm) -- never your
+#                                 saved theme/config/data, and never your
+#                                 deployed app config files.
+#   ./install.sh uninstall --purge
+#                                 uninstall, AND permanently delete your
+#                                 saved config/data/state after an explicit
+#                                 confirmation naming exactly what goes.
+#                                 Never the default -- always opt in.
+#   ./install.sh install --dry-run
+#   ./install.sh update --dry-run
+#                                 report exactly what install/update would
+#                                 do (packages, config init/migration,
+#                                 files deployed, whether sudo would be
+#                                 needed) without changing anything.
+#   ./install.sh help            show this usage text
 #
 # Everything this rice needs beyond real app config files (which have to
-# live where each app expects, e.g. ~/.config/waybar/) stays inside one
-# folder -- wherever you choose to put this checkout. Scripts run straight
-# out of it; nothing gets copied loose into $HOME. install.sh records that
-# folder's location in ~/.local/state/dxrice/repo_path so hyprland.lua's
-# keybinds (a plain text/Lua file deployed to a fixed dotfile path) can
-# still find it after it's moved.
+# live where each app expects, e.g. $XDG_CONFIG_HOME/waybar/) stays inside
+# one folder -- wherever you choose to put this checkout. Scripts run
+# straight out of it; nothing gets copied loose into $HOME. install.sh
+# records that folder's location in $XDG_STATE_HOME/dxrice/repo_path so
+# hyprland.lua's keybinds (a plain text/Lua file deployed to a fixed
+# dotfile path) can still find it after it's moved.
+#
+# Your saved theme/config lives in $XDG_CONFIG_HOME/dxrice (falling back to
+# ~/.config/dxrice), your data/backups in $XDG_DATA_HOME/dxrice, and
+# install.sh's own state in $XDG_STATE_HOME/dxrice -- installing, updating,
+# or reinstalling this repo NEVER overwrites any of those; see README.md's
+# "Configuration, data, state, and cache" section for the full guarantee.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
-STATE_DIR="$HOME/.local/state/dxrice"
-MODE="${1:-install}"
+# XDG Base Directory locations -- see scripts/dxrice_xdg.py for the same
+# resolution on the Python side. Never hardcode ~/.config/~/.local/* below
+# this point; use these instead so a user's own XDG_* override is honored.
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+DXRICE_CONFIG_DIR="$CONFIG_HOME/dxrice"
+DXRICE_DATA_DIR="$DATA_HOME/dxrice"
+STATE_DIR="$STATE_HOME/dxrice"
+
+# First non-flag argument is the mode (default: install); --dry-run and
+# --purge are flags that can appear anywhere alongside it.
+MODE=""
+DRY_RUN=0
+PURGE=0
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=1 ;;
+        --purge) PURGE=1 ;;
+        *) [ -z "$MODE" ] && MODE="$arg" ;;
+    esac
+done
+MODE="${MODE:-install}"
 
 # The Hyprland ecosystem itself needs distro-specific handling (see
 # install_hypr_ecosystem): native on Arch and openSUSE, third-party COPR on
@@ -107,7 +152,7 @@ banner() {
 }
 
 usage() {
-    sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # ask_yes_no "prompt" DEFAULT   (DEFAULT is Y or N)
@@ -297,6 +342,53 @@ PYEOF
     if [ "$added" = "1" ]; then
         info "Open a new terminal (or run 'source ~/.bashrc'/'source ~/.zshrc') to pick up any changes."
     fi
+}
+
+# Companion to install_shell_alias() for uninstall -- strips the same
+# begin/end-bracketed block (and both older unmarked forms) without adding
+# anything back.
+remove_shell_alias() {
+    local removed=0
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        [ -f "$rc" ] || continue
+        local before after
+        before="$(cat "$rc" 2>/dev/null)"
+        DXRICE_RC_PATH="$rc" python3 - <<'PYEOF'
+import os, re
+path = os.environ["DXRICE_RC_PATH"]
+with open(path) as f:
+    content = f.read()
+
+bracketed = re.compile(
+    r"\n?# BEGIN dxrice shell functions \(added by DXrice's install\.sh\)\n"
+    r"(?:.*\n)*?"
+    r"# END dxrice shell functions\n?"
+)
+content = bracketed.sub("\n", content, count=1)
+
+legacy_v1 = re.compile(
+    r"\n?# dxrice-update \(added by DXrice's install\.sh\)\n"
+    r"dxrice-update\(\) \{\n(?:.*\n)*?\}\n"
+)
+content = legacy_v1.sub("\n", content, count=1)
+
+legacy_v2 = re.compile(
+    r"\n?# dxrice-update / dx \(added by DXrice's install\.sh\)\n"
+    r"dxrice-update\(\) \{\n(?:.*\n)*?\}\n"
+    r"dx\(\) \{\n(?:.*\n)*?\}\n"
+)
+content = legacy_v2.sub("\n", content, count=1)
+
+with open(path, "w") as f:
+    f.write(content)
+PYEOF
+        after="$(cat "$rc" 2>/dev/null)"
+        if [ "$before" != "$after" ]; then
+            ok "Removed the 'dx' and 'dxrice-update' commands from $rc"
+            removed=1
+        fi
+    done
+    [ "$removed" = "1" ] && info "Open a new terminal (or re-source your shell rc) to drop them from your current shell."
 }
 
 # Lets a fresh install put the checkout wherever the user actually wants it,
@@ -531,10 +623,10 @@ install_nerd_font_fallback() {
         return
     fi
 
-    mkdir -p "$HOME/.local/share/fonts"
-    unzip -oq "$tmp/JetBrainsMono.zip" -d "$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+    mkdir -p "$DATA_HOME/fonts"
+    unzip -oq "$tmp/JetBrainsMono.zip" -d "$DATA_HOME/fonts/JetBrainsMonoNerdFont"
     rm -rf "$tmp"
-    command -v fc-cache >/dev/null 2>&1 && fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1
+    command -v fc-cache >/dev/null 2>&1 && fc-cache -f "$DATA_HOME/fonts" >/dev/null 2>&1
     ok "Installed JetBrainsMono Nerd Font."
 }
 
@@ -562,7 +654,7 @@ check_input_group() {
 # specific case and offer a backed-up replacement -- never touches a
 # hyprland.lua that isn't recognizably an old copy of this rice's own file.
 check_stale_hyprland_lua() {
-    local f="$HOME/.config/hypr/hyprland.lua"
+    local f="$CONFIG_HOME/hypr/hyprland.lua"
     [ -f "$f" ] || return 0
 
     if grep -q "dxrice_repo" "$f" 2>/dev/null; then
@@ -595,7 +687,7 @@ check_stale_hyprland_lua() {
 # manager moving from a kitty-terminal script to a GUI. Patches just that
 # one line in place, leaving every other keybind/customization untouched.
 migrate_taskbar_bind() {
-    local f="$HOME/.config/hypr/hyprland.lua"
+    local f="$CONFIG_HOME/hypr/hyprland.lua"
     [ -f "$f" ] || return 0
     grep -q "dxrice-manage-taskbar.sh" "$f" 2>/dev/null || return 0
 
@@ -618,7 +710,7 @@ check_hypr_drift() {
 }
 
 detect_monitor() {
-    local target="$HOME/.config/hypr/hyprland.lua"
+    local target="$CONFIG_HOME/hypr/hyprland.lua"
     command -v hyprctl >/dev/null 2>&1 || { warn "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
     python3 - "$target" <<'PYEOF'
 import json, re, subprocess, sys
@@ -652,7 +744,7 @@ PYEOF
 
 do_deploy() {
     info "Deploying configs (anything you've hand-edited is protected)..."
-    mkdir -p ~/.config/{hypr,kitty,waybar,mako,wofi}
+    mkdir -p "$CONFIG_HOME"/{hypr,kitty,waybar,mako,wofi}
     python3 "$REPO_DIR/scripts/dxrice_deploy.py" "$REPO_DIR"
 
     echo ""
@@ -676,7 +768,7 @@ verify_deploy() {
     echo ""
     info "Verifying deployed files..."
     local required=(
-        "$HOME/.config/hypr/hyprland.lua"
+        "$CONFIG_HOME/hypr/hyprland.lua"
         "$STATE_DIR/repo_path"
         "$REPO_DIR/scripts/dxrice_infinite_desktop_core.py"
         "$REPO_DIR/scripts/dxrice_auto_place_window.py"
@@ -732,7 +824,7 @@ verify_deploy() {
         fi
     fi
 
-    if [ -f "$HOME/.config/hypr/hyprland.conf" ]; then
+    if [ -f "$CONFIG_HOME/hypr/hyprland.conf" ]; then
         warn "You also have a leftover ~/.config/hypr/hyprland.conf."
         info "Hyprland prefers hyprland.lua when both exist, so this is harmless,"
         info "but it's dead weight -- safe to delete if you don't need it for anything else."
@@ -769,7 +861,7 @@ do_install() {
     check_stale_hyprland_lua
     migrate_taskbar_bind
     local hypr_existed=0
-    [ -f "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
+    [ -f "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
 
     do_deploy
     verify_deploy || true
@@ -832,6 +924,178 @@ do_sddm_theme() {
     sudo python3 "$REPO_DIR/scripts/dxrice_sync_sddm_theme.py"
 }
 
+# Removes DXrice's own integration points -- never your saved themes,
+# config, data, or state, and never the app config files it deployed into
+# real ~/.config/<app> directories (those are indistinguishable from your
+# own hand-edits by the time you'd uninstall, so deleting them
+# automatically would be guessing at what you want gone). A full wipe of
+# $DXRICE_CONFIG_DIR/$DXRICE_DATA_DIR/$STATE_DIR is a separate, explicit
+# --purge flag -- never the default, and it confirms exactly what it's
+# about to delete before doing it.
+do_uninstall() {
+    banner
+    local purge="$PURGE"
+
+    step "Removing DXrice integration"
+    remove_shell_alias
+
+    if [ -f "$STATE_DIR/repo_path" ]; then
+        rm -f "$STATE_DIR/repo_path"
+        ok "Removed the recorded repo location ($STATE_DIR/repo_path)"
+    fi
+
+    if [ -d /usr/share/sddm/themes/dxrice ] || [ -f /etc/sddm.conf.d/dxrice.conf ]; then
+        if ask_yes_no "The DXrice SDDM login theme is installed -- remove it too? (needs sudo)" Y; then
+            sudo rm -f /etc/sddm.conf.d/dxrice.conf
+            sudo rm -rf /usr/share/sddm/themes/dxrice
+            ok "SDDM theme and config removed -- SDDM will use its default theme on the next login."
+        else
+            info "Left in place. Remove later with: sudo rm -f /etc/sddm.conf.d/dxrice.conf && sudo rm -rf /usr/share/sddm/themes/dxrice"
+        fi
+    fi
+
+    echo ""
+    echo "${C_BOLD}${C_GREEN}Application removed.${C_RESET} User configuration and themes were preserved at:"
+    info "  Config: $DXRICE_CONFIG_DIR"
+    info "  Data:   $DXRICE_DATA_DIR"
+    info "  State:  $STATE_DIR"
+    info "Your deployed app configs (hyprland.lua, waybar, wofi, etc. under $CONFIG_HOME)"
+    info "were left exactly as they are -- delete them yourself if you want a clean slate."
+    info "This checkout ($REPO_DIR) was not deleted; remove it yourself if you're done with it."
+
+    if [ "$purge" = "1" ]; then
+        echo ""
+        warn "${C_BOLD}--purge requested.${C_RESET} This will PERMANENTLY DELETE:"
+        info "  $DXRICE_CONFIG_DIR  (your theme.json, colors, wallpaper choice, presets)"
+        info "  $DXRICE_DATA_DIR    (saved themes, migration/SDDM backups)"
+        info "  $STATE_DIR          (deploy manifest, repo_path)"
+        if ask_yes_no "Are you SURE you want to permanently delete these?" N; then
+            rm -rf "$DXRICE_CONFIG_DIR" "$DXRICE_DATA_DIR" "$STATE_DIR"
+            ok "Purged. Nothing of DXrice's remains outside this checkout and your deployed app configs."
+        else
+            info "Purge cancelled -- your config/data/state were left in place."
+        fi
+    else
+        echo ""
+        info "To also permanently delete your saved config/themes/data, re-run:"
+        info "  ./install.sh uninstall --purge"
+    fi
+}
+
+# Read-only: reports exactly what install/update would do without doing any
+# of it. Deliberately does not call check_platform/check_dependencies/
+# do_deploy/do_sddm_theme etc. directly -- those mutate or prompt -- this
+# re-derives the same decisions from cheap, side-effect-free inspection
+# instead, so "nothing below is actually changed" is a claim this function
+# can actually back up.
+do_dry_run() {
+    local for_mode="$1"
+    banner
+    echo ""
+    echo "${C_BOLD}${C_CYAN}DRY RUN${C_RESET} (${for_mode}) -- nothing below is actually changed."
+
+    step "Repository"
+    require_repo_layout
+    info "Checkout: $REPO_DIR"
+    if [ -f "$STATE_DIR/repo_path" ]; then
+        info "repo_path already recorded at $STATE_DIR/repo_path -- would leave it as-is."
+    else
+        info "Would create $STATE_DIR and record this checkout's location there."
+    fi
+
+    step "Package manager / dependencies"
+    local pm=""
+    if command -v pacman >/dev/null 2>&1; then pm="pacman"
+    elif command -v dnf >/dev/null 2>&1; then pm="dnf"
+    elif command -v apt-get >/dev/null 2>&1; then pm="apt"
+    elif command -v zypper >/dev/null 2>&1; then pm="zypper"
+    fi
+    if [ -z "$pm" ]; then
+        warn "No supported package manager detected -- would skip automatic dependency installation."
+    else
+        PKG_MANAGER="$pm"
+        info "Detected: $pm"
+        local -a general=() missing=()
+        case "$pm" in
+            pacman) general=("${GENERAL_PACMAN[@]}") ;;
+            dnf) general=("${GENERAL_DNF[@]}") ;;
+            apt) general=("${GENERAL_APT[@]}") ;;
+            zypper) general=("${GENERAL_ZYPPER[@]}") ;;
+        esac
+        for pkg in "${general[@]}"; do
+            _pkg_installed "$pkg" || missing+=("$pkg")
+        done
+        if [ "${#missing[@]}" -gt 0 ]; then
+            info "Would offer to install (needs sudo): ${missing[*]}"
+        else
+            ok "All general dependencies already present -- nothing to install."
+        fi
+        local -a hmissing=()
+        for pkg in "${HYPR_PACKAGES[@]}"; do
+            _pkg_installed "$pkg" || hmissing+=("$pkg")
+        done
+        [ "${#hmissing[@]}" -gt 0 ] && info "Would also offer Hyprland packages (needs sudo): ${hmissing[*]}"
+        if _pkg_installed quickshell || command -v qs >/dev/null 2>&1; then
+            ok "Quickshell already present."
+        else
+            info "Would offer to install Quickshell (needs sudo, pacman only -- other distros get manual instructions)."
+        fi
+    fi
+
+    step "Input group"
+    if id -nG "$USER" | grep -qw input; then
+        ok "Already in the 'input' group."
+    else
+        info "Would offer to add you to the 'input' group (needs sudo)."
+    fi
+
+    step "Config initialization / migration ($DXRICE_CONFIG_DIR)"
+    local theme_json="$DXRICE_CONFIG_DIR/theme.json"
+    if [ -f "$theme_json" ]; then
+        ok "Live theme config exists -- would be preserved exactly, never replaced."
+        local schema current
+        schema="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('schema_version', 0))" "$theme_json" 2>/dev/null || echo "?")"
+        current="$(cd "$REPO_DIR/scripts" && python3 -c "import dxrice_config_migrate as m; print(m.CURRENT_SCHEMA_VERSION)" 2>/dev/null || echo "?")"
+        if [ "$schema" != "$current" ] && [ "$schema" != "?" ] && [ "$current" != "?" ]; then
+            info "Schema version $schema is behind current ($current) -- would back up to"
+            info "$DXRICE_DATA_DIR/backups/<timestamp>/ and migrate (adds new keys only, never"
+            info "overwrites or removes anything you've already set)."
+        else
+            ok "Schema version is current -- no migration needed."
+        fi
+    else
+        info "No live config yet -- would initialize $theme_json from the repo's shipped"
+        info "default ($REPO_DIR/theme/theme.json)."
+    fi
+
+    step "App config deployment ($CONFIG_HOME)"
+    for rel in hypr/hyprland.lua waybar/config waybar/config-left waybar/config-right waybar/config-dock wofi/config; do
+        local dst="$CONFIG_HOME/$rel"
+        if [ -f "$dst" ]; then
+            ok "$rel exists -- copy-once, would be left exactly as you have it."
+        else
+            info "$rel missing -- would be created from the repo's default."
+        fi
+    done
+    info "waybar/wofi/mako/kitty/hyprlock's rendered theme files would be re-rendered from"
+    info "your live theme.json -- except any you've hand-edited since the last deploy"
+    info "(tracked in $STATE_DIR/manifest.json), which would be left untouched and reported."
+
+    step "SDDM"
+    if ! command -v sddm >/dev/null 2>&1; then
+        info "SDDM not detected -- would skip entirely (never installs a display manager)."
+    elif [ -f /etc/sddm.conf.d/dxrice.conf ]; then
+        info "DXrice SDDM theme already active -- would offer to re-sync it (needs sudo);"
+        info "declining leaves your current login screen untouched."
+    else
+        info "SDDM detected, no DXrice theme active yet -- would ask before touching anything"
+        info "(needs sudo); declining is the default and leaves SDDM completely alone."
+    fi
+
+    echo ""
+    echo "${C_BOLD}${C_CYAN}End of dry run.${C_RESET} Nothing was changed. Run without --dry-run to apply."
+}
+
 do_update() {
     banner
     require_repo_layout
@@ -878,7 +1142,7 @@ do_update() {
     check_stale_hyprland_lua
     migrate_taskbar_bind
     local hypr_existed=0
-    [ -s "$HOME/.config/hypr/hyprland.lua" ] && hypr_existed=1
+    [ -s "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
 
     record_repo_path
     install_shell_alias
@@ -920,9 +1184,12 @@ do_update() {
 }
 
 case "$MODE" in
-    install|"") do_install ;;
-    update) do_update ;;
+    install|"")
+        if [ "$DRY_RUN" = "1" ]; then do_dry_run install; else do_install; fi ;;
+    update)
+        if [ "$DRY_RUN" = "1" ]; then do_dry_run update; else do_update; fi ;;
     sddm-theme) do_sddm_theme ;;
+    uninstall) do_uninstall ;;
     help|-h|--help) usage ;;
     *) usage; exit 1 ;;
 esac

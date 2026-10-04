@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Renders theme.json into every app's real config and hot-reloads them.
 
-Live source of truth: ~/.config/dxrice/theme.json -- this is what the Theme
-GUI edits and what gets rendered by default. <repo>/theme/theme.json is only
-the shipped *default*, used to seed the live file the first time it's
+Live source of truth: $XDG_CONFIG_HOME/dxrice/theme.json (falling back to
+~/.config/dxrice/theme.json if that variable isn't set) -- this is what the
+Theme GUI edits and what gets rendered by default. <repo>/theme/theme.json
+is only the shipped *default*, used to seed the live file the first time it's
 needed (see ensure_live_theme()) and never written to again after that --
 same separation already used for waybar/config and taskbar shortcuts, so a
 personal color/opacity/radius tweak never shows up as a dirty tracked file
-in your own checkout.
+in your own checkout, and a repo update/reinstall can never overwrite it --
+see dxrice_config_migrate.py for how an existing live file gets new keys
+added (never blindly replaced) when the shipped default gains settings.
 Templates: <repo>/theme/*.template  (string.Template ${TOKENS})
 <repo> is this script's own parent-of-parent directory -- it runs straight
 out of the git checkout (never copied elsewhere), so it always finds its
@@ -25,12 +28,13 @@ from string import Template
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS_DIR)
 import dxrice_manifest
+import dxrice_xdg
+import dxrice_config_migrate
 
-HOME = os.path.expanduser("~")
 REPO = os.path.dirname(SCRIPTS_DIR)
 THEME_DIR = os.path.join(REPO, "theme")
 THEME_JSON = os.path.join(THEME_DIR, "theme.json")
-LIVE_THEME_JSON = os.path.join(HOME, ".config", "dxrice", "theme.json")
+LIVE_THEME_JSON = os.path.join(dxrice_xdg.config_dir(), "theme.json")
 
 
 def ensure_live_theme():
@@ -47,13 +51,18 @@ def ensure_live_theme():
         f.write(default_theme)
     return LIVE_THEME_JSON
 
+# Third-party apps' own config homes -- these follow $XDG_CONFIG_HOME too
+# (waybar/wofi/mako/kitty/Hyprland all resolve their own config the same
+# way), so a user who's set that variable gets it honored here as well, not
+# just for dxrice's own files.
+CONFIG_HOME = dxrice_xdg.config_home()
 TARGETS = {
-    "waybar_style.css.template": os.path.join(HOME, ".config/waybar/style.css"),
-    "wofi_style.css.template": os.path.join(HOME, ".config/wofi/style.css"),
-    "mako_config.template": os.path.join(HOME, ".config/mako/config"),
-    "kitty.conf.template": os.path.join(HOME, ".config/kitty/kitty.conf"),
-    "dxrice_gtk_style.css.template": os.path.join(HOME, ".config/dxrice/gtk_style.css"),
-    "hyprlock.conf.template": os.path.join(HOME, ".config/hypr/hyprlock.conf"),
+    "waybar_style.css.template": os.path.join(CONFIG_HOME, "waybar/style.css"),
+    "wofi_style.css.template": os.path.join(CONFIG_HOME, "wofi/style.css"),
+    "mako_config.template": os.path.join(CONFIG_HOME, "mako/config"),
+    "kitty.conf.template": os.path.join(CONFIG_HOME, "kitty/kitty.conf"),
+    "dxrice_gtk_style.css.template": os.path.join(dxrice_xdg.config_dir(), "gtk_style.css"),
+    "hyprlock.conf.template": os.path.join(CONFIG_HOME, "hypr/hyprlock.conf"),
 }
 
 
@@ -170,7 +179,7 @@ def _sub(content, pattern, replacement_fn, flags=0):
 
 
 def patch_hyprland_lua(theme):
-    path = os.path.join(HOME, ".config/hypr/hyprland.lua")
+    path = os.path.join(CONFIG_HOME, "hypr/hyprland.lua")
     if not os.path.exists(path):
         return
     with open(path) as f:
@@ -251,9 +260,9 @@ def reload_apps(reload_wallpaper):
         # Four independent waybar instances -- top clock, left workspace strip,
         # right status strip, bottom dock -- sharing one style.css. See
         # waybar/config-{left,right,dock} and hyprland.lua's autostart.
-        waybar_style = os.path.join(HOME, ".config/waybar/style.css")
+        waybar_style = os.path.join(CONFIG_HOME, "waybar/style.css")
         for config_name in ("config", "config-left", "config-right", "config-dock"):
-            config_path = os.path.join(HOME, ".config/waybar", config_name)
+            config_path = os.path.join(CONFIG_HOME, "waybar", config_name)
             if not os.path.exists(config_path):
                 continue
             subprocess.Popen(["setsid", "waybar", "-c", config_path, "-s", waybar_style],
@@ -275,6 +284,15 @@ def reload_apps(reload_wallpaper):
 def main():
     global theme_data
     theme_path = sys.argv[1] if len(sys.argv) > 1 else ensure_live_theme()
+
+    # Cheap and a no-op on every normal run (a file already at
+    # dxrice_config_migrate.CURRENT_SCHEMA_VERSION is read and left alone,
+    # no backup/write happens) -- only does anything, and only then backs
+    # up first, the one time an existing live file is behind the current
+    # schema. See that module's own docstring for the full contract.
+    for note in dxrice_config_migrate.migrate_file(theme_path):
+        print(note)
+
     try:
         with open(theme_path) as f:
             theme_data = json.load(f)
