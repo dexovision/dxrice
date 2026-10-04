@@ -88,6 +88,16 @@ MODE="${MODE:-install}"
 # under different names.
 HYPR_PACKAGES=(hyprland hyprlock hypridle hyprpaper xdg-desktop-portal-hyprland)
 
+# Script basenames from much older, pre-Quickshell versions of this rice
+# (back when it used plain bash scripts and had no dxrice_ prefix at all).
+# Shared by check_stale_hyprland_lua (does a DEPLOYED hyprland.lua still
+# point at these) and check_legacy_rice_checkout (is there an entire old
+# CHECKOUT of the rice still on disk, referenced by leftover shell
+# aliases) -- one list so a name added for one check is recognized by
+# both, rather than two independently-maintained regexes drifting apart.
+LEGACY_SCRIPT_NAMES=(manage-taskbar.sh reorder-taskbar.sh infinite_desktop_core.py
+    theme_gui.py floating_tile_toggle.py)
+
 GENERAL_PACMAN=(swaybg waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct
     pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol
     networkmanager network-manager-applet bluez bluez-utils blueman
@@ -676,6 +686,19 @@ check_input_group() {
 # silently, even after every other bug in this repo gets fixed. Detect that
 # specific case and offer a backed-up replacement -- never touches a
 # hyprland.lua that isn't recognizably an old copy of this rice's own file.
+# Turns LEGACY_SCRIPT_NAMES into a single alternation for grep -E/bash's
+# =~, with literal dots escaped -- shared so check_stale_hyprland_lua and
+# check_legacy_rice_checkout recognize exactly the same set of old names.
+_legacy_names_regex() {
+    local IFS='|'
+    local escaped=()
+    local name
+    for name in "${LEGACY_SCRIPT_NAMES[@]}"; do
+        escaped+=("${name//./\\.}")
+    done
+    echo "${escaped[*]}"
+}
+
 check_stale_hyprland_lua() {
     local f="$CONFIG_HOME/hypr/hyprland.lua"
     [ -f "$f" ] || return 0
@@ -685,7 +708,7 @@ check_stale_hyprland_lua() {
     fi
     # (dxrice_/dxrice-)? because even older copies of this rice, from before
     # scripts were renamed with that prefix, still used these same base names.
-    if ! grep -qE "(dxrice[-_])?(manage-taskbar\.sh|infinite_desktop_core\.py|theme_gui\.py|floating_tile_toggle\.py)" "$f" 2>/dev/null; then
+    if ! grep -qE "(dxrice[-_])?($(_legacy_names_regex))" "$f" 2>/dev/null; then
         return 0
     fi
 
@@ -718,6 +741,101 @@ migrate_taskbar_bind() {
     sed -i -E \
         's#hl\.dsp\.exec_cmd\("kitty -e " \.\. repo \.\. "/scripts/dxrice-manage-taskbar\.sh"\)#hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_taskbar_gui.py")#' \
         "$f"
+}
+
+# A machine that ran a much older, pre-dxrice version of this exact rice
+# (before the dxrice_ prefix, before Quickshell, back when the taskbar
+# manager was a plain bash script) can have that ENTIRE OLD CHECKOUT still
+# sitting on disk, with its own shell aliases pointing straight at it --
+# completely separate from, and invisible to, install_shell_alias/
+# remove_shell_alias, which only ever manage the single "# BEGIN/END
+# dxrice shell functions" block THIS installer writes. Left alone, the
+# old checkout and its aliases just sit there forever, confusingly
+# working alongside the current one. Live-reported: a fresh install next
+# to an ancient checkout at ~/hyprland-rice-main, with ~/.bashrc still
+# carrying its own `alias managetaskbar=...`/`alias reordertaskbar=...`
+# pointing straight at it.
+#
+# Detected the same way check_stale_hyprland_lua detects an old
+# hyprland.lua: by name, not by guessing at a path. Scans ~/.bashrc and
+# ~/.zshrc for a plain `alias ...=` line that mentions one of
+# LEGACY_SCRIPT_NAMES -- the current rice's own managed block never
+# generates a line like this, so a match here is never a false positive
+# against dxrice's own aliases, and never touches anything else the user
+# put in their own rc file (a dxrice-unrelated alias sitting right next to
+# one of these, like a personal shortcut or compiler alias, is left
+# completely alone).
+check_legacy_rice_checkout() {
+    local names_re
+    names_re="$(_legacy_names_regex)"
+    local rc found_dirs=() found_lines=()
+
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        [ -f "$rc" ] || continue
+        while IFS= read -r line; do
+            [[ "$line" =~ alias[[:space:]] ]] || continue
+            [[ "$line" =~ ($names_re) ]] || continue
+            local path dir
+            path=$(grep -oE "[^ \"']*(${names_re})" <<<"$line" | head -1)
+            [ -n "$path" ] || continue
+            # Every version of this rice old enough to use these names
+            # still kept them in a scripts/ subdirectory of the checkout
+            # root -- strip that suffix to get the root itself.
+            dir="${path%/scripts/*}"
+            [ -d "$dir" ] || continue
+            [ -d "$dir/scripts" ] || continue  # confirm it's a real checkout, not a stale/moved path
+            found_dirs+=("$dir")
+            found_lines+=("$rc:$line")
+        done < "$rc"
+    done
+
+    [ "${#found_dirs[@]}" -eq 0 ] && return 0
+
+    local -A seen=()
+    local uniq_dirs=() d
+    for d in "${found_dirs[@]}"; do
+        [ -n "${seen[$d]:-}" ] && continue
+        seen[$d]=1
+        uniq_dirs+=("$d")
+    done
+
+    warn "Found what looks like a much older checkout of this rice, from before it"
+    info "used the dxrice_ names or Quickshell:"
+    for d in "${uniq_dirs[@]}"; do
+        info "  $d"
+    done
+    info "Referenced by these leftover shell alias(es), outside anything this"
+    info "installer itself manages:"
+    local fl
+    for fl in "${found_lines[@]}"; do
+        info "  $fl"
+    done
+
+    if ask_yes_no "Remove those stale alias lines and move the old checkout(s) out of the way?" Y; then
+        for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+            [ -f "$rc" ] || continue
+            local tmp
+            tmp="$(mktemp)"
+            grep -vE "$names_re" "$rc" > "$tmp" 2>/dev/null || cp "$rc" "$tmp"
+            if ! cmp -s "$rc" "$tmp"; then
+                cp "$tmp" "$rc"
+                ok "Removed the stale alias line(s) from $rc"
+            fi
+            rm -f "$tmp"
+        done
+        mkdir -p "$STATE_DIR/backups"
+        for d in "${uniq_dirs[@]}"; do
+            local dest="$STATE_DIR/backups/$(basename "$d").$(date +%s)"
+            if mv "$d" "$dest"; then
+                ok "Moved $d to $dest (not deleted -- safe to remove by hand once you've confirmed you don't need anything from it)"
+            else
+                warn "Could not move $d -- leaving it in place."
+            fi
+        done
+        info "Open a new terminal (or re-source your shell rc) to drop the old aliases from your current shell."
+    else
+        warn "Leaving the old checkout and its aliases in place."
+    fi
 }
 
 # Root-cause fix for a real, previously-silent failure mode: hyprland.lua is
@@ -883,6 +1001,7 @@ do_install() {
     step "Step 4/4 -- Deploying your rice"
     check_stale_hyprland_lua
     migrate_taskbar_bind
+    check_legacy_rice_checkout
     local hypr_existed=0
     [ -f "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
 
@@ -1164,6 +1283,7 @@ do_update() {
     step "Redeploying"
     check_stale_hyprland_lua
     migrate_taskbar_bind
+    check_legacy_rice_checkout
     local hypr_existed=0
     [ -s "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
 
