@@ -2313,17 +2313,37 @@ def main():
     print(f"dxrice_auto_place_window: listening on {path} (pid {os.getpid()})",
           file=sys.stderr, flush=True)
 
-    buf = ""
-    # Windows seen at openwindow but not placeable at that instant (mapped
-    # fullscreen, or mapped tiled), kept so a later state change can be
-    # acted on exactly once. {address: workspace_id}.
-    _deferred = {}
     while True:
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.connect(path)
                 gap = live_gap()
                 last_gap_check = time.time()
+                # Both reset on every (re)connect, not just once at process
+                # start. Found during a full-codebase audit, reasoning
+                # through what a Hyprland restart actually does to this
+                # listener: socket2 only ever drops when Hyprland itself
+                # restarts/crashes, at which point every window address
+                # this process previously knew about is gone along with it.
+                # buf held over from the dead connection: recv() can return
+                # a line fragment with no trailing "\n" yet right as the
+                # socket drops -- carrying that into the fresh stream would
+                # prepend a stale, truncated fragment onto the first real
+                # event after reconnecting, corrupting its parse. _deferred
+                # held over: each stale entry's address no longer resolves
+                # to anything, and place_new_window's own existence poll
+                # takes up to a full 2 seconds to conclude "gone" per
+                # address -- the first fullscreen>>/changefloatingmode>>
+                # event after a restart would replay and block on EVERY
+                # stale entry before processing anything else, stalling
+                # this single-threaded listener for several seconds right
+                # when the user's just-restarted desktop needs it working.
+                buf = ""
+                # Windows seen at openwindow but not placeable at that
+                # instant (mapped fullscreen, or mapped tiled), kept so a
+                # later state change can be acted on exactly once.
+                # {address: workspace_id}.
+                _deferred = {}
                 while True:
                     chunk = s.recv(4096)
                     if not chunk:
