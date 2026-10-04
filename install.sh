@@ -788,6 +788,65 @@ check_stale_waybar_configs() {
     done
 }
 
+# Project history (this exact bug class has happened before -- see
+# 3413cb4's own commit message, "the earlier 'friend stuck on an old
+# waybar/config forever' bug"): the two checks above catch a copy-once
+# file by RECOGNIZING it as an old DXrice copy -- a specific, named
+# marker. That leaves a real gap they were never meant to cover: ANY
+# pre-existing file at one of these five paths, for ANY reason (a
+# completely unrelated hand-written Hyprland/waybar setup from before
+# DXrice was ever installed, a rice this isn't even a fork of, anything),
+# silently and permanently blocks DXrice's own version from ever
+# deploying -- COPY_ONCE_FILES in dxrice_deploy.py skips an existing file
+# unconditionally, full stop. The result looks identical from the
+# outside: install.sh runs clean, reports nothing wrong, and the actual
+# keybinds/bars/infinite-desktop experience this installer exists to set
+# up never shows up, with no error anywhere to explain why.
+#
+# General fix, independent of recognizing any specific marker: DXrice
+# itself records a pristine snapshot of a copy-once file the ONE time it
+# genuinely installs it fresh (see deploy_copy_once's own comment on
+# copy_once_snapshots/ -- written only on that exact branch, never on an
+# "adopt"/migrate path). So the snapshot's mere EXISTENCE is a direct,
+# first-party record of "DXrice itself put a copy of this file here at
+# some point on this machine" -- independent of whatever the user has
+# since done to the live copy (hand-edited it, or even reverted it to
+# look like something else entirely). Its ABSENCE, for a file that
+# nonetheless already exists live, means DXrice has never once deployed
+# its own version here: definitive, not a heuristic, and it needs no
+# per-file content inspection at all. This intentionally runs AFTER the
+# two checks above: anything they already recognized and replaced is
+# gone by the time this looks, so it only ever asks about files that are
+# still a genuine mystery to both of them.
+check_foreign_copy_once_files() {
+    local snapshot_dir="$STATE_DIR/copy_once_snapshots"
+    local pairs=("hypr/hyprland.lua" "waybar/config" "waybar/config-left" "waybar/config-right" "waybar/config-dock")
+    local rel f snap_name snap
+    for rel in "${pairs[@]}"; do
+        f="$CONFIG_HOME/$rel"
+        [ -e "$f" ] || continue
+        snap_name="${rel//\//_}"
+        snap="$snapshot_dir/$snap_name"
+        [ -e "$snap" ] && continue  # DXrice itself put this here before -- yours, leave it alone
+
+        warn "~/.config/$rel already exists, but DXrice has never deployed its own"
+        info "version here on this machine -- it might be left over from a different"
+        info "setup entirely, or just something you already had. Either way, DXrice's"
+        info "own version of this file won't take effect until it's out of the way."
+        if ask_yes_no "Back it up and let DXrice's own version deploy instead?" Y; then
+            mkdir -p "$STATE_DIR/backups"
+            local backup="$STATE_DIR/backups/${rel//\//_}.$(date +%s).bak"
+            cp "$f" "$backup"
+            rm -f "$f"
+            ok "Backed up to $backup and removed the live copy -- deploying DXrice's own version next."
+        else
+            warn "Leaving ~/.config/$rel as-is -- DXrice's own version of it will keep not"
+            info "taking effect until you either replace it by hand or re-run install and"
+            info "say yes here."
+        fi
+    done
+}
+
 # Narrower companion to check_stale_hyprland_lua: a hyprland.lua already on
 # the current repo-path scheme (so the check above leaves it alone) can
 # still predate a later change to one specific bind -- e.g. the taskbar
@@ -1062,6 +1121,7 @@ do_install() {
     step "Step 4/4 -- Deploying your rice"
     check_stale_hyprland_lua
     check_stale_waybar_configs
+    check_foreign_copy_once_files
     migrate_taskbar_bind
     check_legacy_rice_checkout
     local hypr_existed=0
@@ -1345,6 +1405,7 @@ do_update() {
     step "Redeploying"
     check_stale_hyprland_lua
     check_stale_waybar_configs
+    check_foreign_copy_once_files
     migrate_taskbar_bind
     check_legacy_rice_checkout
     local hypr_existed=0
