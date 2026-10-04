@@ -395,6 +395,31 @@ class TestDeadGapPenalty(unittest.TestCase):
                             "a 372px hole between two facing windows with nothing between them "
                             "must be penalised regardless of how large it is")
 
+    def test_sliver_overlap_is_not_treated_as_a_real_facing_relationship(self):
+        """LIVE REGRESSION (root cause): "facing" used to mean nothing more
+        than `xgap==0.0`/`ygap==0.0` -- ANY positive perpendicular overlap,
+        however trivial. Live-traced from a real SUPER+G incremental-build
+        step (n=6 randomized sweep): a 338x194-class candidate's x-range
+        merely overlapped a neighbor's by 39 of 447px (8.7% of the shorter
+        span) while separated by over 1000px on y -- that 8.7% sliver was
+        judged "facing," and the resulting near-DEAD_GAP_CAP phantom
+        penalty made a genuinely clean, flush candidate score roughly 10x
+        WORSE than one that left a real, unblocked 44px gap elsewhere.
+        DEAD_GAP_FACING_COVERAGE_THRESHOLD requires a MATERIAL share of the
+        shorter perpendicular span before two rectangles count as facing at
+        all, matching this file's own ADJACENCY_COVERAGE_THRESHOLD (0.3)
+        convention for "is this a real relationship." Pins the real
+        geometry: cand's x-range [1758, 3091] overlaps neighbour's
+        x-range [-329, 1797] by only 39px (8.7% of neighbour's 447px
+        width), with a 1023px y-separation -- must NOT be penalised as a
+        dead gap, unlike the genuine facing cases above."""
+        neighbour = rect(-329, 1408, 1797, 1750)  # width 447 (the shorter span)
+        cand = rect(1758, -121, 3091, 679)  # x-overlap is only [1758,1797] = 39px of 447
+        penalty = apw._dead_gap_penalty(cand, [neighbour], GAP)
+        self.assertEqual(penalty, 0.0,
+                          "a sliver-thin (8.7%) perpendicular overlap must not be treated as a real facing "
+                          "relationship and penalised as a dead gap")
+
 
 class TestExactIntegerGaps(unittest.TestCase):
     """Live bug: two windows meant to be exactly gap-apart came out 1px
@@ -666,33 +691,41 @@ class TestSuperGResize(unittest.TestCase):
     def test_disproportionate_outlier_among_a_real_population_can_resize(self):
         """Companion to the test above: resize must still be reachable when
         there genuinely IS a real, well-populated 'typical' size class that
-        a real outlier clearly and substantially exceeds. This exact
-        geometry was chosen from a 30-seed sweep specifically because it
-        SURVIVES this session's own whole-composition safety check (see
-        auto_arrange's own comment on why per-step local justification
-        isn't sufficient -- a live-instrumented sweep of a similar
-        distribution found the completed resize-enabled layout's actual
-        composition_cost was WORSE than the true move-only alternative in
-        9 of 16 cases where a resize locally looked justified at the time
-        it was decided). This is the harder, more honest bar: not merely
-        'did a resize fire,' but 'is the reached layout provably better
-        than the real alternative,' which auto_arrange itself now checks
-        before ever returning a resized result.
+        a real outlier clearly and substantially exceeds. This is the
+        harder, more honest bar: not merely 'did a resize fire,' but 'is
+        the reached layout provably better than the real alternative,'
+        which auto_arrange itself now checks (via _final_cost) before ever
+        returning a resized result.
 
-        The geometry was re-picked from that same seeded sweep when
-        staggered candidates landed (see ORGANIC_STAGGER_ANCHORS): the
-        layout used before now has a good enough POSITION-only answer that
-        resizing genuinely stopped being justified for it, which is the
-        objective working as intended, not a lost capability. Reachability
-        was re-measured over the sweep rather than assumed -- resize still
-        fires on 21 of 40 seeded layouts of this shape, and every one of
-        those holds its new size across four consecutive presses."""
+        THIRD re-pick, two independent algorithm corrections in sequence:
+        (1) _final_cost itself used to be blind to composition_penalty
+        (dead gaps/slivers/alignment), computing only composition_cost +
+        movement -- so it could keep a resize that locally looked justified
+        even when the completed layout left real, unblocked dead gaps a
+        move-only alternative never had. (2) separately, the "facing"
+        test inside composition_penalty/_dead_gap_penalty used to treat
+        ANY positive perpendicular overlap as a real facing relationship,
+        even an 8.7%-of-span sliver -- see DEAD_GAP_FACING_COVERAGE_
+        THRESHOLD's own comment. Each correction changed which seeds in
+        this shape family land on the "resize genuinely wins" side, so
+        this geometry was re-picked AFTER both fixes landed together
+        (picking it against only one, then fixing the other, kept
+        invalidating the previous pick) -- the objective working as
+        intended, not a lost capability.
+
+        Re-picked via a fresh 2000-seed sweep of the same shape (1 outlier
+        + 8 mediums, randomly scattered), filtered to seeds where resize
+        fires, holds across five consecutive presses, AND the completed
+        resize-enabled layout's own composition_penalty total is <= 0
+        (i.e. a genuine, clean win under the fully-corrected objective,
+        not merely 'a resize happened'). 328 of 2000 seeds qualified under
+        both fixes; this is seed 12 of that sweep."""
         eligible = [
-            self._mk("W0", -50, 565, 1600, 1000), self._mk("W1", -342, -78, 700, 500),
-            self._mk("W2", -118, 414, 700, 500), self._mk("W3", 1241, 367, 700, 500),
-            self._mk("W4", 2068, 177, 700, 500), self._mk("W5", 259, -408, 700, 500),
-            self._mk("W6", 1398, -542, 700, 500), self._mk("W7", 996, 286, 700, 500),
-            self._mk("W8", 1888, 961, 700, 500),
+            self._mk("W0", 1443, -50, 1600, 1000), self._mk("W1", 2193, 483, 700, 500),
+            self._mk("W2", 932, -308, 700, 500), self._mk("W3", 1063, -578, 700, 500),
+            self._mk("W4", 1034, 388, 700, 500), self._mk("W5", 622, 717, 700, 500),
+            self._mk("W6", 1385, 814, 700, 500), self._mk("W7", 1963, -134, 700, 500),
+            self._mk("W8", 1786, -597, 700, 500),
         ]
         layout = eligible
         sizes = []
@@ -736,6 +769,41 @@ class TestSuperGResize(unittest.TestCase):
         bigger = next(r for r in result if r[0] == "BIGGER")
         self.assertEqual((bigger[3], bigger[4]), (950, 750),
                           "a locally-justified but globally-worse resize was not caught by the safety check")
+
+    def test_resize_rejected_when_it_introduces_a_real_dead_gap(self):
+        """Root-cause regression: _final_cost used to compute ONLY
+        composition_cost + weighted movement, completely blind to
+        composition_penalty (dead gaps/slivers/alignment) -- so it could
+        keep a resize that measurably improved mass distribution even when
+        the completed layout left a real, unblocked gap a move-only
+        alternative never had at all. Live-reproduced with this exact
+        6-window fixture (from a seeded randomized sweep, n=6 seed=18):
+        before this fix, 0x4_huge_main was resized 1800x1213 -> 1440x970,
+        which measurably improved composition_cost but left a genuine
+        122px unblocked gap against a neighbor. After folding
+        composition_penalty into _final_cost, the same fixture correctly
+        falls back to move-only (0x4_huge_main keeps its original size)
+        because the move-only alternative has zero dead-gap penalty
+        anywhere, which the resize-enabled alternative does not."""
+        eligible = [
+            self._mk("0x0_portrait", 1830, -131, 323, 1138),
+            self._mk("0x1_landscape_wide", -454, -143, 1614, 520),
+            self._mk("0x2_portrait", 534, -649, 426, 962),
+            self._mk("0x3_ultra_wide", -160, -414, 1982, 309),
+            self._mk("0x4_huge_main", -556, 570, 1800, 1213),
+            self._mk("0x5_ultra_wide", 474, 254, 2147, 389),
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        huge = next(r for r in result if r[0] == "0x4_huge_main")
+        self.assertEqual((huge[3], huge[4]), (1800, 1213),
+                          "a resize that introduces a real dead gap elsewhere was kept over a clean move-only "
+                          "alternative")
+        rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
+        penalty_total = sum(
+            apw.composition_penalty(r, rects[:i] + rects[i + 1:], GAP) for i, r in enumerate(rects)
+        )
+        self.assertLessEqual(penalty_total, 0.0, f"move-only result should have no net dead-gap penalty: "
+                                                   f"{penalty_total}")
 
     def test_position_only_already_good_resizes_nothing(self):
         """6: a composition where move-only already produces a good result
@@ -860,6 +928,51 @@ class TestSuperGResize(unittest.TestCase):
         round1 = [self._mk(a, x, y, w, h) for a, x, y, w, h in r1]
         r2 = arr.auto_arrange(round1, [], (0, 0, 1920, 1080), GAP)
         self.assertEqual(sorted(r1), sorted(r2), "5 identically-sized windows did not converge on a repeated run")
+
+    def test_balanced_adjustment_can_resize_more_than_one_window(self):
+        """Size-optimization case D: resize is a per-INCREMENTAL-STEP
+        decision (see _choose_size_and_position), not a single global
+        "pick the one worst offender" choice -- so when a layout genuinely
+        has more than one real outlier against the dominant population,
+        more than one of them may each independently be resized in the
+        SAME auto_arrange call, not just the single most-oversized one.
+        Verified empirically (not assumed): of 1000 seeded scattered
+        layouts of this shape (two differently-sized big windows, 1200x700
+        and 1400x900, among 12 real 500x400 mediums -- close enough in
+        size to each other to both individually exceed
+        RESIZE_ELIGIBLE_RATIO_FLOOR against the mediums' dominant class,
+        but different enough from EACH OTHER that they don't merge into
+        one combined "big" class and mutually exempt each other -- see
+        _typical_area's own docstring), multi-window resize fired in 4 of
+        1000; this is seed 20 of that sweep, confirmed stable (identical
+        sizes) across five consecutive presses and within
+        MAX_SHRINK_FRACTION of each window's own original size."""
+        eligible = [
+            self._mk("BIG1", 2560, 805, 1200, 700), self._mk("BIG2", 2822, 969, 1400, 900),
+            self._mk("M0", 219, -68, 500, 400), self._mk("M1", 2360, 701, 500, 400),
+            self._mk("M2", 15, 1186, 500, 400), self._mk("M3", 941, 573, 500, 400),
+            self._mk("M4", 293, -545, 500, 400), self._mk("M5", 1285, 233, 500, 400),
+            self._mk("M6", -93, -389, 500, 400), self._mk("M7", 112, 53, 500, 400),
+            self._mk("M8", 1543, 1345, 500, 400), self._mk("M9", 1978, 320, 500, 400),
+            self._mk("M10", 1287, -173, 500, 400), self._mk("M11", 418, 49, 500, 400),
+        ]
+        orig = {w["address"]: tuple(w["size"]) for w in eligible}
+        layout = eligible
+        resized_sizes = []
+        for _ in range(5):
+            result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+            resized = {a: (w, h) for a, x, y, w, h in result if (w, h) != orig[a]}
+            resized_sizes.append(resized)
+            layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
+        self.assertGreaterEqual(len(resized_sizes[0]), 2,
+                                 f"expected at least 2 distinct windows resized, got {resized_sizes[0]}")
+        for addr, (w, h) in resized_sizes[0].items():
+            ow, oh = orig[addr]
+            min_w, min_h = round(ow * (1.0 - apw.MAX_SHRINK_FRACTION)), round(oh * (1.0 - apw.MAX_SHRINK_FRACTION))
+            self.assertGreaterEqual(w, min_w, f"{addr} shrunk past MAX_SHRINK_FRACTION")
+            self.assertGreaterEqual(h, min_h, f"{addr} shrunk past MAX_SHRINK_FRACTION")
+        for s in resized_sizes[1:]:
+            self.assertEqual(s, resized_sizes[0], f"resize sizes kept changing across repeated runs: {resized_sizes}")
 
     def test_moderately_oversized_window_never_resizes_among_many_tiny_dialogs(self):
         """Found by dxrice_placement_benchmark.py's random-layout harness,
@@ -1720,6 +1833,30 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         moved = sum(1 for w2 in eligible if by_addr[w2["address"]] != tuple(w2["at"]))
         self.assertGreater(moved, 0, "a window barely past flush-adjacency to its neighbor was wrongly exempted")
 
+    def test_isolated_singleton_too_far_from_cluster_is_not_exempted(self):
+        """The singleton exemption's lower bound alone (test above) has no
+        ceiling -- live-traced root cause: a window hundreds of pixels from
+        everything else, with nothing between, still passed as
+        "deliberately standalone" provided it merely exceeded its own short
+        side (a trivially low bar once a window has moved any real
+        distance). Minimal reproduction: a 3-window case -- a 338x194
+        dialog left 471px (2.43x its own short side) from its nearest
+        neighbor, with nothing between them -- was judged "coherent" and
+        SUPER+G visibly did nothing for an obviously scattered desktop, the
+        user-visible symptom that led here. This case: C sits 800px (4x
+        its own 200px short side) below a small flush cluster, nothing
+        between -- must trigger a full rebuild, not the recenter-only
+        shortcut."""
+        eligible = [
+            {"address": "A", "at": [100, 100], "size": [400, 300]},
+            {"address": "B", "at": [505, 100], "size": [400, 300]},
+            {"address": "C", "at": [100, 1200], "size": [300, 200]},
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
+        by_addr = {a: (x, y) for a, x, y, w2, h2 in result}
+        moved = sum(1 for w2 in eligible if by_addr[w2["address"]] != tuple(w2["at"]))
+        self.assertGreater(moved, 0, "a singleton far past its own short side from the cluster was wrongly exempted")
+
 
 class TestSuperGEquilibriumChange(unittest.TestCase):
     """Part 9 of this session's own request: resize eligibility must
@@ -1760,17 +1897,25 @@ class TestSuperGEquilibriumChange(unittest.TestCase):
         stopped needing a resize at all -- which says nothing either way
         about hidden state. What actually matters is that the SAME window
         set produces the SAME decision no matter what was arranged before
-        it, so that is what this checks directly."""
+        it, so that is what this checks directly.
+
+        Shares its resize-firing geometry with
+        test_disproportionate_outlier_among_a_real_population_can_resize --
+        see that test's docstring for why this exact fixture (seed 12 of a
+        2000-seed sweep) was re-picked after composition_penalty was folded
+        into _final_cost's whole-composition safety check AND the dead-gap
+        "facing" test was given a materiality threshold
+        (DEAD_GAP_FACING_COVERAGE_THRESHOLD)."""
         resizing_layout = [
-            {"address": "W0", "at": [-50, 565], "size": [1600, 1000]},
-            {"address": "W1", "at": [-342, -78], "size": [700, 500]},
-            {"address": "W2", "at": [-118, 414], "size": [700, 500]},
-            {"address": "W3", "at": [1241, 367], "size": [700, 500]},
-            {"address": "W4", "at": [2068, 177], "size": [700, 500]},
-            {"address": "W5", "at": [259, -408], "size": [700, 500]},
-            {"address": "W6", "at": [1398, -542], "size": [700, 500]},
-            {"address": "W7", "at": [996, 286], "size": [700, 500]},
-            {"address": "W8", "at": [1888, 961], "size": [700, 500]},
+            {"address": "W0", "at": [1443, -50], "size": [1600, 1000]},
+            {"address": "W1", "at": [2193, 483], "size": [700, 500]},
+            {"address": "W2", "at": [932, -308], "size": [700, 500]},
+            {"address": "W3", "at": [1063, -578], "size": [700, 500]},
+            {"address": "W4", "at": [1034, 388], "size": [700, 500]},
+            {"address": "W5", "at": [622, 717], "size": [700, 500]},
+            {"address": "W6", "at": [1385, 814], "size": [700, 500]},
+            {"address": "W7", "at": [1963, -134], "size": [700, 500]},
+            {"address": "W8", "at": [1786, -597], "size": [700, 500]},
         ]
         cold = arr.auto_arrange([dict(w) for w in resizing_layout], [], (0, 0, 1920, 1080), GAP)
         cold_w0 = next(r for r in cold if r[0] == "W0")
