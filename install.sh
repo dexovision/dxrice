@@ -345,8 +345,15 @@ content = legacy_v2.sub("\n", content, count=1)
 # re-appended below, caps the gap at exactly one blank line forever.
 content = content.rstrip("\n") + "\n"
 
-with open(path, "w") as f:
+# Atomic write: a process killed mid-write must never leave a truncated
+# shell rc file behind -- write to a temp file in the same directory, then
+# rename, so the original survives intact if anything goes wrong.
+tmp_path = path + ".dxrice.tmp"
+with open(tmp_path, "w") as f:
     f.write(content)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(tmp_path, path)
 PYEOF
 
         after="$(cat "$rc" 2>/dev/null)"
@@ -403,8 +410,15 @@ content = legacy_v2.sub("\n", content, count=1)
 # trailing blank line from the strip.
 content = content.rstrip("\n") + "\n"
 
-with open(path, "w") as f:
+# Atomic write: a process killed mid-write must never leave a truncated
+# shell rc file behind -- write to a temp file in the same directory, then
+# rename, so the original survives intact if anything goes wrong.
+tmp_path = path + ".dxrice.tmp"
+with open(tmp_path, "w") as f:
     f.write(content)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(tmp_path, path)
 PYEOF
         after="$(cat "$rc" 2>/dev/null)"
         if [ "$before" != "$after" ]; then
@@ -908,6 +922,7 @@ migrate_exec_to_systemd_units() {
     info "Updating your Quickshell/placement/panning autostart to use systemd"
     info "supervision (so a crash recovers on its own instead of staying dead)..."
     python3 - "$f" <<'PYEOF'
+import os
 import re
 import sys
 
@@ -930,8 +945,14 @@ content = re.sub(
     content,
 )
 
-with open(path, "w") as fh:
+# Atomic write -- this rewrites a live, user-customized hyprland.lua in
+# place; a process killed mid-write must never leave it truncated.
+tmp_path = path + ".dxrice.tmp"
+with open(tmp_path, "w") as fh:
     fh.write(content)
+    fh.flush()
+    os.fsync(fh.fileno())
+os.replace(tmp_path, path)
 PYEOF
 }
 
@@ -1046,7 +1067,7 @@ detect_monitor() {
     local target="$CONFIG_HOME/hypr/hyprland.lua"
     command -v hyprctl >/dev/null 2>&1 || { warn "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
     python3 - "$target" <<'PYEOF'
-import json, re, subprocess, sys
+import json, os, re, subprocess, sys
 
 target = sys.argv[1]
 try:
@@ -1069,8 +1090,14 @@ with open(target) as f:
 content = re.sub(r'output\s*=\s*"[^"]*"', f'output = "{name}"', content, count=1)
 content = re.sub(r'mode\s*=\s*"[^"]*"', f'mode = "{mode}"', content, count=1)
 content = re.sub(r'position\s*=\s*"[^"]*"', f'position = "{pos}"', content, count=1)
-with open(target, "w") as f:
+# Atomic write -- same reasoning as migrate_exec_to_systemd_units: this is
+# a live, user-customized file, never safe to truncate mid-write.
+tmp_path = target + ".dxrice.tmp"
+with open(tmp_path, "w") as f:
     f.write(content)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(tmp_path, target)
 print(f"Detected monitor {name} ({mode} at {pos}) and wrote it into hyprland.lua")
 PYEOF
 }
