@@ -863,6 +863,119 @@ migrate_taskbar_bind() {
         "$f"
 }
 
+# Quickshell and the two always-on Python daemons (new-window placement,
+# infinite-desktop panning) are started via a systemd --user unit instead
+# of a bare exec_cmd, specifically so a crash doesn't mean "dead for the
+# rest of the session" -- Restart=on-failure brings each one back on its
+# own, and StartLimitBurst stops a genuinely broken one from restart-
+# looping forever. Mechanism verified live against a real systemd --user
+# instance with a throwaway, uniquely-named test unit (never touching any
+# real dxrice process): a script made to always fail was restarted exactly
+# StartLimitBurst times, then systemd correctly stopped retrying with
+# "start-limit-hit" -- both the recovery and the safety cutoff confirmed
+# working before this was ever wired into a real unit.
+#
+# Units are regenerated on every install/update, never hand-edited, so
+# overwriting them every run is always safe -- this machine's real
+# resolved qs/python3 paths and repo location are baked in fresh each
+# time, picked up the same way a relocated repo already works everywhere
+# else in this installer.
+deploy_systemd_units() {
+    command -v systemctl >/dev/null 2>&1 || return 0
+    local unit_dir="$CONFIG_HOME/systemd/user"
+    mkdir -p "$unit_dir"
+
+    local qs_bin python_bin
+    qs_bin="$(command -v qs || true)"
+    python_bin="$(command -v python3 || true)"
+
+    if [ -n "$qs_bin" ]; then
+        cat > "$unit_dir/dxrice-quickshell.service" <<EOF
+[Unit]
+Description=DXrice Quickshell shell (bars, taskbar, quick settings, theme editor)
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+ExecStart=$qs_bin -p $REPO_DIR/quickshell/shell.qml
+Restart=on-failure
+RestartSec=1
+EOF
+    fi
+
+    if [ -n "$python_bin" ]; then
+        cat > "$unit_dir/dxrice-auto-place-window.service" <<EOF
+[Unit]
+Description=DXrice new-window auto-placement
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+ExecStart=$python_bin $REPO_DIR/scripts/dxrice_auto_place_window.py
+Restart=on-failure
+RestartSec=1
+EOF
+
+        cat > "$unit_dir/dxrice-infinite-desktop.service" <<EOF
+[Unit]
+Description=DXrice infinite-desktop panning/drag daemon
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+ExecStart=$python_bin $REPO_DIR/scripts/dxrice_infinite_desktop_core.py 1.6
+Restart=on-failure
+RestartSec=1
+EOF
+    fi
+
+    systemctl --user daemon-reload 2>/dev/null || true
+}
+
+# Narrower companion to migrate_taskbar_bind, same pattern: an already-
+# deployed hyprland.lua (so check_stale_hyprland_lua above left it alone)
+# can still predate the systemd-supervision change above. Patches just
+# those three specific exec_cmd lines in place -- matched against this
+# installer's own exact previous template text, verified against this
+# session's real deployed file before being written -- leaving every
+# other keybind/customization completely untouched.
+migrate_exec_to_systemd_units() {
+    local f="$CONFIG_HOME/hypr/hyprland.lua"
+    [ -f "$f" ] || return 0
+    grep -q "dxrice-quickshell.service" "$f" 2>/dev/null && return 0  # already migrated
+
+    grep -q 'qs -p " .. repo .. "/quickshell/shell.qml -d -n' "$f" 2>/dev/null || return 0
+
+    info "Updating your Quickshell/placement/panning autostart to use systemd"
+    info "supervision (so a crash recovers on its own instead of staying dead)..."
+    python3 - "$f" <<'PYEOF'
+import re
+import sys
+
+path = sys.argv[1]
+with open(path) as fh:
+    content = fh.read()
+
+content = content.replace(
+    '"qs -p " .. repo .. "/quickshell/shell.qml -d -n; else "',
+    '"systemctl --user restart dxrice-quickshell.service; else "',
+)
+content = re.sub(
+    r'hl\.exec_cmd\("python3 " \.\. repo \.\. "/scripts/dxrice_infinite_desktop_core\.py 1\.6[^"]*"\)',
+    'hl.exec_cmd("systemctl --user restart dxrice-infinite-desktop.service")',
+    content,
+)
+content = re.sub(
+    r'hl\.exec_cmd\("python3 " \.\. repo \.\. "/scripts/dxrice_auto_place_window\.py[^"]*"\)',
+    'hl.exec_cmd("systemctl --user restart dxrice-auto-place-window.service")',
+    content,
+)
+
+with open(path, "w") as fh:
+    fh.write(content)
+PYEOF
+}
+
 # A machine that ran a much older, pre-dxrice version of this exact rice
 # (before the dxrice_ prefix, before Quickshell, back when the taskbar
 # manager was a plain bash script) can have that ENTIRE OLD CHECKOUT still
@@ -1016,6 +1129,10 @@ do_deploy() {
     # tweaks never get overwritten by a repo update, and never show up as a
     # locally-modified tracked file either.
     python3 "$REPO_DIR/scripts/dxrice_apply_theme.py" || true
+
+    echo ""
+    info "Setting up systemd supervision for Quickshell and the placement/panning daemons..."
+    deploy_systemd_units
 }
 
 hyprland_is_running() {
@@ -1123,6 +1240,7 @@ do_install() {
     check_stale_waybar_configs
     check_foreign_copy_once_files
     migrate_taskbar_bind
+    migrate_exec_to_systemd_units
     check_legacy_rice_checkout
     local hypr_existed=0
     [ -f "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
@@ -1407,6 +1525,7 @@ do_update() {
     check_stale_waybar_configs
     check_foreign_copy_once_files
     migrate_taskbar_bind
+    migrate_exec_to_systemd_units
     check_legacy_rice_checkout
     local hypr_existed=0
     [ -s "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1

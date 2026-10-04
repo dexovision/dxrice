@@ -34,8 +34,18 @@ hl.on("hyprland.start", function()
     -- setup only runs as a fallback on a system where Quickshell isn't
     -- installed at all, so a distro without `qs` packaged yet still gets a
     -- working bar instead of nothing.
+    --
+    -- Started via a systemd --user unit (install.sh generates/deploys it
+    -- with the real repo/binary paths baked in), not a direct exec_cmd,
+    -- so Quickshell crashing doesn't mean a dead shell for the rest of the
+    -- session -- Restart=on-failure brings it back on its own. Live
+    -- incident this closes: SUPER+C force-closing a focused settings
+    -- panel used to take the whole shell down with no way back short of a
+    -- full relogin (see dxrice_force_close_window.py's own fix for the
+    -- other half of that bug -- this is the safety net for every OTHER
+    -- way Quickshell could ever crash, not just that one).
     hl.exec_cmd("sh -c 'if command -v qs >/dev/null 2>&1; then "
-        .. "qs -p " .. repo .. "/quickshell/shell.qml -d -n; else "
+        .. "systemctl --user restart dxrice-quickshell.service; else "
         .. "for c in config config-left config-right config-dock; do "
         .. "setsid waybar -c ~/.config/waybar/$c -s ~/.config/waybar/style.css >/dev/null 2>&1 & "
         .. "done; fi'")
@@ -50,13 +60,17 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("wl-paste --type text --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
 
-    hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_infinite_desktop_core.py 1.6 > /tmp/infinite-desktop.log 2>&1")
+    -- Also systemd-supervised now (see the Quickshell comment above for
+    -- why) -- a crash here used to mean silently losing panning for the
+    -- rest of the session with nothing to tell you it happened.
+    hl.exec_cmd("systemctl --user restart dxrice-infinite-desktop.service")
     -- New-window auto-placement (Algorithm A). Event-driven: it tails
     -- Hyprland's .socket2.sock and reacts to openwindow>>. It takes an
     -- flock on its own lock file, so a second copy started by hand (or by
     -- a duplicated autostart line) exits immediately instead of both
-    -- racing to place the same window.
-    hl.exec_cmd("python3 " .. repo .. "/scripts/dxrice_auto_place_window.py > /tmp/auto-place-window.log 2>&1")
+    -- racing to place the same window. Systemd-supervised for the same
+    -- reason as the two units above.
+    hl.exec_cmd("systemctl --user restart dxrice-auto-place-window.service")
 end)
 
 hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")

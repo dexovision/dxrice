@@ -20,10 +20,25 @@ is still the same executable (folding in wrapper/relaunch stages of the same
 app, stopping at the first ancestor that is a different program -- so it
 never reaches past the app into Hyprland or init), then kills that whole
 subtree.
+
+LIVE INCIDENT: a settings panel (Theme/Taskbar/Quick Settings/Calendar) is
+a focusable Quickshell surface, so it can be "the active window" the same
+as any real app -- and every one of those panels belongs to the SAME
+Quickshell process that also renders the bars/dock. Force-closing a panel
+by walking up to that process's root and killing the whole subtree doesn't
+close one panel, it kills the entire shell -- bars, taskbar, everything --
+with no automatic recovery, confirmed live (SUPER+C pressed while editing
+the wallpaper in Theme took the whole shell down). Fixed by checking for
+this specific case BEFORE ever touching a process tree: if the root
+process is Quickshell itself, this asks the shell to close whatever panel
+is actually open (the same thing Escape already does) instead of killing
+anything -- which is also just the correct behavior for "close what I'm
+looking at" here, not merely a guard against the crash.
 """
 
 import os
 import signal
+import subprocess
 import sys
 import time
 
@@ -85,6 +100,18 @@ def _collect_subtree(root):
     return subtree
 
 
+def _quickshell_repo_dir():
+    state_path = os.path.expanduser("~/.local/state/dxrice/repo_path")
+    try:
+        with open(state_path) as f:
+            repo = f.read().strip()
+            if repo:
+                return repo
+    except OSError:
+        pass
+    return os.path.expanduser("~/dxrice")
+
+
 def main():
     window = hyprctl_json(["activewindow"])
     if not window or not window.get("pid"):
@@ -92,6 +119,23 @@ def main():
     pid = window["pid"]
 
     root = _find_root(pid)
+
+    # See the module docstring's LIVE INCIDENT note: the active window can
+    # be one of this shell's OWN panels, and every panel shares the same
+    # process as the bars/dock -- checked here, before any kill, by the
+    # same executable-identity logic the rest of this file already uses.
+    root_exe = _read_exe(root)
+    if root_exe is not None and os.path.basename(root_exe) == "qs":
+        repo = _quickshell_repo_dir()
+        try:
+            subprocess.run(
+                ["qs", "-p", f"{repo}/quickshell/shell.qml", "ipc", "call", "shell", "closeCurrent"],
+                timeout=2, capture_output=True,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return
+
     subtree = _collect_subtree(root)
 
     for p in subtree:
