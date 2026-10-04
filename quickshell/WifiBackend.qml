@@ -10,6 +10,10 @@ Item {
     id: root
     property bool radioOn: false
     property var networks: []
+    // False until the first scan actually completes, so UI bound to
+    // networks.length can tell "no data yet" apart from "scanned, found
+    // none/few" -- see the Expandable auto-collapse fix in QuickSettings.
+    property bool hasScanned: false
     // Refreshed alongside the scan (not per-row) so "Forget" only shows for
     // networks nmcli actually has a saved connection profile for.
     property var savedNames: []
@@ -47,6 +51,7 @@ Item {
                 }
                 const list = Object.values(seen).sort((a, b) => (b.connected - a.connected) || (b.signal - a.signal));
                 root.networks = list.slice(0, 8);
+                root.hasScanned = true;
             }
         }
     }

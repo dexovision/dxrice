@@ -640,7 +640,12 @@ Item {
                         height: visible ? implicitHeight : 0
                         title: "Wi-Fi"
                         trailingText: wifiBackend.networks.length + " found"
-                        expanded: wifiBackend.networks.length <= 3
+                        // Gated on hasScanned so the section doesn't flash
+                        // open-then-shut: before the first scan resolves,
+                        // networks.length is 0, which would otherwise read
+                        // as "short list, expand me" and then immediately
+                        // collapse the instant real results land.
+                        expanded: wifiBackend.hasScanned && wifiBackend.networks.length <= 3
                         Repeater {
                             model: wifiBackend.networks
                             delegate: Row {
@@ -695,7 +700,8 @@ Item {
                         height: visible ? implicitHeight : 0
                         title: "Bluetooth"
                         trailingText: btBackend.devices.length + " paired"
-                        expanded: btBackend.devices.length <= 3
+                        // Same hasScanned gate as the Wi-Fi section above.
+                        expanded: btBackend.hasScanned && btBackend.devices.length <= 3
                         Repeater {
                             model: btBackend.devices
                             delegate: Row {
