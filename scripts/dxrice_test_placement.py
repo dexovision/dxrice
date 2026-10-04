@@ -326,36 +326,74 @@ class TestDeadGapPenalty(unittest.TestCase):
         p_loose = apw.composition_penalty(loose, [neighbour], GAP)
         self.assertLess(p_snug, p_loose)
 
-    def test_large_separation_is_not_penalised_as_dead(self):
-        """Space wide enough to actually hold another window reads as a
-        deliberate separation, not a misalignment -- must not be charged.
-        References DEAD_GAP_USABLE_WIDTH, not MIN_USABLE_WIDTH: those are
-        two different questions (dead-gap threshold vs. resize floor) that
-        used to share one constant by coincidence -- see that constant's
-        own comment for the live bug that caused them to be split."""
+    def test_large_separation_IS_now_penalised_when_genuinely_empty(self):
+        """STRUCTURAL FIX: a large gap used to be exempt purely because of
+        its SIZE (anything above a fixed 'usable window' threshold read as
+        'deliberate separation'). That was proven wrong by a real 7-window
+        layout where three separate facing pairs, all demonstrably part of
+        ONE connected composition, were left with 372-657px holes -- no
+        size-based threshold can both catch those and leave a genuinely
+        separate cluster alone, because size was never the right question.
+        The only thing that should exempt a gap now is something ACTUALLY
+        occupying it (test_large_separation_with_something_in_it_is_not_
+        penalised, right below) -- size alone no longer matters once a gap
+        clears MIN_USABLE_WIDTH/HEIGHT (the fast-path floor, reused here
+        only as 'too small for anything to occupy regardless')."""
         neighbour = rect(0, 0, 400, 400)
-        far = rect(400 + GAP + apw.DEAD_GAP_USABLE_WIDTH + 50, 0, 300, 400)
-        self.assertEqual(apw._dead_gap_penalty(far, [neighbour], GAP), 0.0)
+        far = rect(400 + GAP + apw.MIN_USABLE_WIDTH + 50, 0, 300, 400)
+        self.assertGreater(apw._dead_gap_penalty(far, [neighbour], GAP), 0.0,
+                            "a large but genuinely empty gap must be penalised")
+
+    def test_large_separation_with_something_in_it_is_not_penalised(self):
+        """The one legitimate exemption: a third window actually sitting
+        in the gap between two facing rectangles means that space isn't
+        dead at all, regardless of how wide the raw facing distance is.
+        filler is placed exactly flush (configured GAP) against both
+        neighbour and far, so this isolates the blocking question alone --
+        without that, filler would introduce its OWN small residual gap to
+        far and correctly get penalised for THAT, independent of whether
+        it blocks the larger neighbour-to-far span (a real, separate case,
+        see test_large_separation_IS_now_penalised_when_genuinely_empty's
+        sibling discussion of why each facing pair is judged on its own)."""
+        neighbour = rect(0, 0, 400, 400)
+        filler = rect(400 + GAP, 0, 300, 400)  # wide enough that the OVERALL
+        far = rect(400 + GAP + 300 + GAP, 0, 300, 400)  # neighbour-far span clears MIN_USABLE_WIDTH
+        self.assertEqual(apw._dead_gap_penalty(far, [neighbour, filler], GAP), 0.0,
+                          "a gap genuinely occupied by another window must not be penalised")
 
     def test_dead_gap_penalty_is_capped(self):
         neighbour = rect(0, 0, 400, 400)
-        worst = rect(400 + GAP + apw.DEAD_GAP_USABLE_WIDTH - 1, 0, 300, 400)
+        worst = rect(400 + GAP + apw.MIN_USABLE_WIDTH + 2000, 0, 300, 400)
         p = apw._dead_gap_penalty(worst, [neighbour], GAP)
         self.assertLessEqual(p, apw.DEAD_GAP_CAP * apw.DEAD_GAP_WEIGHT + 0.01)
 
-    def test_live_180px_near_miss_is_now_penalised(self):
+    def test_live_180px_near_miss_is_penalised(self):
         """LIVE REGRESSION: a real 7-window layout (browser/terminal/
         Discord/settings-dialog/utility-dialog/large-app proportions) left
         a reproducible, stable 180px gap below a large window with nothing
-        else nearby -- 180px sits above the OLD 160px threshold (so it
-        read as 'deliberate separation') but is nowhere near big enough to
-        hold the 226px-tall dialog sitting in it. Pins the exact real
-        geometry so this specific near-miss can never silently return."""
+        else nearby. Pins the exact real geometry so this specific
+        near-miss can never silently return."""
         neighbour = rect(538, 602, 1716, 1000)  # the real "largeX" window
         near_miss = rect(1198, 602 + 1000 + 180, 366, 226)  # real "utilX", 180px below
         penalty = apw._dead_gap_penalty(near_miss, [neighbour], GAP)
         self.assertGreater(penalty, 0.0,
                             "a 180px gap with nothing in it must be penalised as dead space")
+
+    def test_live_372px_hole_within_a_connected_composition_is_penalised(self):
+        """LIVE REGRESSION: the MORE SEVERE structural bug this session's
+        audit found -- within one connected composition (all four windows
+        below are demonstrably linked by other exact-5px connections in
+        the real failing case), settingsX and termX directly faced each
+        other with a 372px hole and nothing between them. A fixed size
+        threshold could never catch this without ALSO exempting the
+        180px case or wrongly penalising legitimate separate clusters;
+        only an actual occupancy check can. Pins the real geometry."""
+        termX = rect(-961, -697, 1068, 795)
+        settingsX = rect(-409, -1369, 516, 300)  # real "before" position, 372px above termX
+        penalty = apw._dead_gap_penalty(settingsX, [termX], GAP)
+        self.assertGreater(penalty, 0.0,
+                            "a 372px hole between two facing windows with nothing between them "
+                            "must be penalised regardless of how large it is")
 
 
 class TestExactIntegerGaps(unittest.TestCase):
@@ -2356,6 +2394,192 @@ class TestFamilyAnchorPlacement(unittest.TestCase):
         self.assertTrue(touches_right or touches_left or touches_below or touches_above,
                          f"dialog not placed flush against its family anchor: manager=({mx0},{my0},{mx1},{my1}) "
                          f"dialog=({fx0},{fy0},{fx1},{fy1})")
+
+
+class TestRealisticLayoutCorpus(unittest.TestCase):
+    """13-case deterministic regression corpus of REALISTIC window shapes
+    and arrangements (not purely random rectangles), covering every
+    scenario explicitly requested during the structural dead-gap audit:
+    large-window clusters, dialog-heavy layouts, L/U shapes, stacks,
+    scattered/mixed-aspect layouts, and deliberately adversarial inputs
+    designed to stay technically connected while containing large empty
+    regions. Each case requires, in ONE SUPER+G invocation: zero overlaps,
+    zero unblocked facing-gap deviations from the configured gap (the
+    same blocking-aware check validated live this session -- a facing gap
+    is only acceptable if nothing could occupy it OR something actually
+    does), and zero movement on a second press (one-pass convergence, not
+    a slow multi-press settle)."""
+
+    GAP = 5
+    MON = (0, 0, 1920, 1080)
+
+    @staticmethod
+    def _rects(result):
+        return [(a, x, y, x + w, y + h) for a, x, y, w, h in result]
+
+    def _check(self, result):
+        R = self._rects(result)
+        overlaps = []
+        bad_gaps = []
+        for i in range(len(R)):
+            for j in range(i + 1, len(R)):
+                t1, x0, y0, x1, y1 = R[i]
+                t2, X0, Y0, X1, Y1 = R[j]
+                ox = min(x1, X1) - max(x0, X0)
+                oy = min(y1, Y1) - max(y0, Y0)
+                if ox > 0.6 and oy > 0.6:
+                    overlaps.append((t1, t2))
+                    continue
+                if min(y1, Y1) - max(y0, Y0) > 0.6:
+                    g = X0 - x1 if x1 <= X0 else (x0 - X1 if X1 <= x0 else None)
+                    if g is not None and abs(g - self.GAP) > 0.6:
+                        blocked = any(
+                            k != i and k != j
+                            and R[k][3] > min(x1, X0) + 0.6 and R[k][1] < max(x1, X0) + g - 0.6
+                            and R[k][4] > max(y0, Y0) + 0.6 and R[k][2] < min(y1, Y1) - 0.6
+                            for k in range(len(R)))
+                        if not blocked:
+                            bad_gaps.append((t1, t2, "x", round(g, 1)))
+                if min(x1, X1) - max(x0, X0) > 0.6:
+                    g = Y0 - y1 if y1 <= Y0 else (y0 - Y1 if Y1 <= y0 else None)
+                    if g is not None and abs(g - self.GAP) > 0.6:
+                        blocked = any(
+                            k != i and k != j
+                            and R[k][4] > min(y1, Y0) + 0.6 and R[k][2] < max(y1, Y0) + g - 0.6
+                            and R[k][3] > max(x0, X0) + 0.6 and R[k][1] < min(x1, X1) - 0.6
+                            for k in range(len(R)))
+                        if not blocked:
+                            bad_gaps.append((t1, t2, "y", round(g, 1)))
+        return overlaps, bad_gaps
+
+    def _run_and_assert(self, layout):
+        c1 = [dict(w, at=list(w["at"]), size=list(w["size"])) for w in layout]
+        r1 = arr.auto_arrange(c1, [], self.MON, self.GAP)
+        overlaps, bad_gaps = self._check(r1)
+        self.assertEqual(overlaps, [], f"overlaps: {overlaps}")
+        self.assertEqual(bad_gaps, [], f"unblocked facing gaps not at the configured gap: {bad_gaps}")
+
+        l2 = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in r1]
+        r2 = arr.auto_arrange(l2, [], self.MON, self.GAP)
+        moved = sum(1 for a, x, y, w, h in r2
+                    if any(a == a2 and (abs(x - x2) > 0.6 or abs(y - y2) > 0.6) for a2, x2, y2, w2, h2 in r1))
+        self.assertEqual(moved, 0, "second SUPER+G press moved something -- not a one-pass solve")
+        return r1
+
+    def test_case_01_three_large_windows(self):
+        self._run_and_assert([
+            {"address": "A", "at": [100, 100], "size": [1200, 800]},
+            {"address": "B", "at": [1900, 1500], "size": [1100, 900]},
+            {"address": "C", "at": [-1800, -1200], "size": [1000, 1000]},
+        ])
+
+    def test_case_02_three_large_two_small(self):
+        self._run_and_assert([
+            {"address": "A", "at": [100, 100], "size": [1200, 800]},
+            {"address": "B", "at": [1900, 1500], "size": [1100, 900]},
+            {"address": "C", "at": [-1800, -1200], "size": [1000, 1000]},
+            {"address": "D", "at": [500, -600], "size": [300, 200]},
+            {"address": "E", "at": [-900, 900], "size": [250, 180]},
+        ])
+
+    def test_case_03_two_large_five_small(self):
+        self._run_and_assert([
+            {"address": "A", "at": [100, 100], "size": [1400, 900]},
+            {"address": "B", "at": [-1600, -1400], "size": [1200, 850]},
+            {"address": "C", "at": [800, -900], "size": [300, 200]},
+            {"address": "D", "at": [-400, 1200], "size": [280, 190]},
+            {"address": "E", "at": [1600, 800], "size": [320, 220]},
+            {"address": "F", "at": [-1900, 600], "size": [260, 170]},
+            {"address": "G", "at": [500, 1800], "size": [340, 240]},
+        ])
+
+    def test_case_04_huge_plus_many_dialogs(self):
+        self._run_and_assert([
+            {"address": "HUGE", "at": [0, 0], "size": [1800, 1100]},
+            {"address": "d1", "at": [1000, -900], "size": [250, 150]},
+            {"address": "d2", "at": [-900, 1100], "size": [300, 200]},
+            {"address": "d3", "at": [1700, 900], "size": [280, 180]},
+            {"address": "d4", "at": [-1300, -700], "size": [320, 220]},
+            {"address": "d5", "at": [600, 1700], "size": [260, 170]},
+        ])
+
+    def test_case_05_L_shaped(self):
+        self._run_and_assert([
+            {"address": "A", "at": [0, 0], "size": [900, 600]},
+            {"address": "B", "at": [905, 0], "size": [900, 600]},
+            {"address": "C", "at": [0, 605], "size": [900, 600]},
+        ])
+
+    def test_case_06_U_shaped(self):
+        self._run_and_assert([
+            {"address": "A", "at": [0, 0], "size": [600, 900]},
+            {"address": "B", "at": [605, 0], "size": [600, 300]},
+            {"address": "C", "at": [1210, 0], "size": [600, 900]},
+        ])
+
+    def test_case_07_vertical_stack(self):
+        self._run_and_assert([
+            {"address": "A", "at": [0, 0], "size": [800, 400]},
+            {"address": "B", "at": [0, 405], "size": [800, 400]},
+            {"address": "C", "at": [0, 810], "size": [800, 400]},
+            {"address": "D", "at": [0, 1215], "size": [800, 400]},
+        ])
+
+    def test_case_08_horizontal_stack(self):
+        self._run_and_assert([
+            {"address": "A", "at": [0, 0], "size": [400, 800]},
+            {"address": "B", "at": [405, 0], "size": [400, 800]},
+            {"address": "C", "at": [810, 0], "size": [400, 800]},
+            {"address": "D", "at": [1215, 0], "size": [400, 800]},
+        ])
+
+    def test_case_09_scattered(self):
+        rng = random.Random(777)
+        self._run_and_assert([
+            {"address": f"W{i}", "at": [rng.randint(-1800, 2400), rng.randint(-1500, 2000)],
+             "size": [rng.choice([300, 500, 700, 900]), rng.choice([200, 400, 600])]}
+            for i in range(8)
+        ])
+
+    def test_case_10_mixed_aspect_ratios(self):
+        self._run_and_assert([
+            {"address": "wide", "at": [0, 0], "size": [1800, 300]},
+            {"address": "tall", "at": [2000, 2000], "size": [300, 1400]},
+            {"address": "square", "at": [-1500, -1200], "size": [700, 700]},
+            {"address": "normal", "at": [900, -1800], "size": [900, 600]},
+        ])
+
+    def test_case_11_dialogs_around_one_large(self):
+        self._run_and_assert([
+            {"address": "MAIN", "at": [0, 0], "size": [1600, 1000]},
+            {"address": "d1", "at": [1900, 200], "size": [280, 190]},
+            {"address": "d2", "at": [-500, 1300], "size": [300, 200]},
+            {"address": "d3", "at": [1800, -600], "size": [260, 180]},
+            {"address": "d4", "at": [-700, -500], "size": [320, 210]},
+        ])
+
+    def test_case_12_deliberate_large_holes_in_input(self):
+        """Input already has big gaps between every pair -- SUPER+G must
+        close them, not merely preserve whatever it started with."""
+        self._run_and_assert([
+            {"address": "A", "at": [0, 0], "size": [900, 700]},
+            {"address": "B", "at": [1600, 0], "size": [900, 700]},
+            {"address": "C", "at": [0, 1400], "size": [900, 700]},
+            {"address": "D", "at": [1600, 1400], "size": [900, 700]},
+        ])
+
+    def test_case_13_adversarial_connected_but_holey(self):
+        """A hub window with several satellites, including one placed far
+        enough that only the hub links it to the rest -- exactly the
+        'technically one connected component, could still have a huge
+        unblocked interior gap' shape this audit was built to catch."""
+        self._run_and_assert([
+            {"address": "hub", "at": [0, 0], "size": [1700, 1000]},
+            {"address": "sideA", "at": [-600, 50], "size": [590, 400]},
+            {"address": "sideB", "at": [1705, 50], "size": [590, 400]},
+            {"address": "below", "at": [50, 1005], "size": [700, 500]},
+            {"address": "far_but_linked", "at": [-1250, 50], "size": [640, 400]},
+        ])
 
 
 if __name__ == "__main__":

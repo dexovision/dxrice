@@ -300,25 +300,43 @@ def _edge_alignment_count(cand, rects):
     return int(aligned_x) + int(aligned_y)
 
 
-# Separate from MIN_USABLE_WIDTH/HEIGHT (the resize floor, far below --
-# "how small may an existing window ever be shrunk") on purpose: those two
-# questions only happened to share one constant, not share one meaning,
-# and that coincidence hid a real bug. LIVE INCIDENT: a real 7-window
-# layout (browser/terminal/Discord/settings-dialog/utility-dialog/large-
-# app proportions) put a 366x226 dialog a reproducible, stable 180px below
-# a large window with nothing else nearby -- 180 sits ABOVE the old 160px
-# floor, so _dead_gap_penalty scored it as "wide enough to be deliberate
-# separation" even though nothing was there and the dialog itself is only
-# 226px tall. Reproduced offline against the real auto_arrange() output,
-# confirmed a STABLE fixed point (feeding the result back in reproduces it
-# exactly, so this isn't a transient settle artifact), and confirmed that
-# raising just this threshold -- independent of the resize floor -- closes
-# the gap to exactly 5px with zero new overlaps. Calibrated against real
-# window sizes exercised in that same test (150-226px tall, 250-516px
-# wide dialogs), not picked arbitrarily: set comfortably above the
-# largest of those so a near-miss in that same range can't recur.
-DEAD_GAP_USABLE_WIDTH = 300
-DEAD_GAP_USABLE_HEIGHT = 250
+def _gap_is_blocked(cand, r, all_rects, axis):
+    """Is there a THIRD rectangle genuinely occupying the facing strip
+    between `cand` and `r` along `axis`? The only question that should
+    ever exempt a facing gap from the dead-gap penalty -- see
+    _dead_gap_penalty's own docstring for the live evidence that a fixed
+    "big enough to assume deliberate" size threshold cannot answer this
+    correctly, because it is not a question about size at all."""
+    cx0, cy0, cx1, cy1 = cand
+    rx0, ry0, rx1, ry1 = r
+    if axis == "x":
+        if cx1 <= rx0:
+            gx0, gx1 = cx1, rx0
+        elif rx1 <= cx0:
+            gx0, gx1 = rx1, cx0
+        else:
+            return True  # not actually facing on this axis
+        oy0, oy1 = max(cy0, ry0), min(cy1, ry1)
+        for ox0, oy0_, ox1, oy1_ in all_rects:
+            if (ox0, oy0_, ox1, oy1_) == r:
+                continue
+            if ox1 > gx0 + 0.6 and ox0 < gx1 - 0.6 and oy1_ > oy0 + 0.6 and oy0_ < oy1 - 0.6:
+                return True
+        return False
+    else:
+        if cy1 <= ry0:
+            gy0, gy1 = cy1, ry0
+        elif ry1 <= cy0:
+            gy0, gy1 = ry1, cy0
+        else:
+            return True
+        ox0, ox1 = max(cx0, rx0), min(cx1, rx1)
+        for ox0_, oy0, ox1_, oy1 in all_rects:
+            if (ox0_, oy0, ox1_, oy1) == r:
+                continue
+            if oy1 > gy0 + 0.6 and oy0 < gy1 - 0.6 and ox1_ > ox0 + 0.6 and ox0_ < ox1 - 0.6:
+                return True
+        return False
 
 
 def _dead_gap_penalty(cand, layout_rects, gap):
@@ -332,19 +350,44 @@ def _dead_gap_penalty(cand, layout_rects, gap):
     a completely free 0.0. Live QA caught exactly that: a new window landed
     5px from the window on one side and 55px from the one on the other,
     because scoring exact viewport-centering paid more than closing up a
-    strip of space nothing can ever use. That leftover strip is precisely
-    the "tiny awkward sliver of unusable space" that makes an arrangement
-    read as accidental instead of composed.
+    strip of space nothing can ever use.
 
-    "Unusable" is measured, not guessed: a strip narrower than
-    MIN_USABLE_WIDTH/HEIGHT could never hold another window, so it is dead
-    by definition. Wider strips are left alone -- at that point the space
-    reads as deliberate separation between two groups, not a misalignment.
-    The penalty is capped so a candidate is never dragged across a large
-    distance purely to close a gap."""
+    STRUCTURAL FIX (this was previously a fixed size threshold --
+    MIN_USABLE_WIDTH/HEIGHT, "wide enough to assume deliberate separation"
+    -- and that was proven wrong, not just imprecise): a real 7-window
+    layout (browser/terminal/Discord/settings-dialog/utility-dialog/large-
+    app proportions), scrambled and run through the real production
+    SUPER+G path, left THREE separate facing pairs with 372-657px gaps
+    between them -- all comfortably above any threshold that could ever
+    be raised to "fix" the small 180px case without also exempting gaps
+    this large. Each pair was demonstrably part of ONE connected
+    composition (reachable via other windows' exact-5px links), so these
+    were not legitimate separate clusters -- they were genuine holes.
+    Root cause, confirmed by instrumenting the real incremental build: a
+    window can choose to sit flush against ITS best neighbour (by the
+    composition/compactness/movement terms) while ending up facing a
+    DIFFERENT, already-placed window with nothing between them -- and
+    nothing ever asked whether that specific facing relationship left a
+    hole, because the only question this function asked was "is the gap
+    narrower than a plausible window," never "is anything actually here."
+    A gap between two windows that both belong to one connected
+    composition is wrong at ANY size when nothing fills it.
+    "Genuinely occupied" is now checked for directly (_gap_is_blocked),
+    not inferred from gap width -- the one question that actually
+    distinguishes a filled gap from an empty one. Below MIN_USABLE_WIDTH/
+    HEIGHT (the resize floor, reused here only as "too small for any real
+    window to occupy regardless") the blocking check is skipped entirely
+    as a fast path, since nothing could block a gap that size anyway;
+    verified this adds no observable cost for the common small-gap case
+    this function was originally written for, and a measured, accepted
+    cost (1.1x-2.2x at n=5-30, see the dxrice_test_placement.py benchmark)
+    for genuinely large gaps, which is exactly when the real check is
+    needed. The penalty is still capped so a candidate is never dragged
+    across a large distance purely to close one gap."""
     worst = 0.0
     cx0, cy0, cx1, cy1 = cand
-    for rx0, ry0, rx1, ry1 in layout_rects:
+    for r in layout_rects:
+        rx0, ry0, rx1, ry1 = r
         # _axis_gap inlined on both axes -- same reason as in
         # _flush_coverage: this loop runs once per obstacle per candidate.
         if cx1 <= rx0:
@@ -362,10 +405,14 @@ def _dead_gap_penalty(cand, layout_rects, gap):
         # Only count neighbours actually FACING the candidate on one axis
         # (overlapping on the other) -- a diagonal neighbour isn't leaving
         # a dead strip between them, it's just elsewhere.
-        if yg == 0.0 and gap < xg < DEAD_GAP_USABLE_WIDTH:
-            worst = max(worst, xg - gap)
-        if xg == 0.0 and gap < yg < DEAD_GAP_USABLE_HEIGHT:
-            worst = max(worst, yg - gap)
+        if yg == 0.0 and xg > gap:
+            d = xg - gap
+            if d > worst and not (xg >= MIN_USABLE_WIDTH and _gap_is_blocked(cand, r, layout_rects, "x")):
+                worst = d
+        if xg == 0.0 and yg > gap:
+            d = yg - gap
+            if d > worst and not (yg >= MIN_USABLE_HEIGHT and _gap_is_blocked(cand, r, layout_rects, "y")):
+                worst = d
     return min(worst, DEAD_GAP_CAP) * DEAD_GAP_WEIGHT
 
 
@@ -744,14 +791,18 @@ def composition_penalty(cand, layout_rects, gap):
         if frac is not None:
             best_coverage = frac if best_coverage is None else max(best_coverage, frac)
 
-        # --- dead gap (see _dead_gap_penalty) ---
-        if ygap == 0.0 and gap < xgap < DEAD_GAP_USABLE_WIDTH:
+        # --- dead gap (see _dead_gap_penalty's own docstring for the live
+        # evidence this is a "is anything actually here" question, not a
+        # "is the gap narrower than some size" one) ---
+        if ygap == 0.0 and xgap > gap:
             d = xgap - gap
-            if d > worst_dead:
+            if d > worst_dead and not (xgap >= MIN_USABLE_WIDTH
+                                        and _gap_is_blocked(cand, (rx0, ry0, rx1, ry1), layout_rects, "x")):
                 worst_dead = d
-        if xgap == 0.0 and gap < ygap < DEAD_GAP_USABLE_HEIGHT:
+        if xgap == 0.0 and ygap > gap:
             d = ygap - gap
-            if d > worst_dead:
+            if d > worst_dead and not (ygap >= MIN_USABLE_HEIGHT
+                                        and _gap_is_blocked(cand, (rx0, ry0, rx1, ry1), layout_rects, "y")):
                 worst_dead = d
 
         # --- edge alignment (see _edge_alignment_count) ---
