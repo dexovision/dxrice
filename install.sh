@@ -90,9 +90,9 @@ HYPR_PACKAGES=(hyprland hyprlock hypridle hyprpaper xdg-desktop-portal-hyprland)
 
 # Script basenames from much older, pre-Quickshell versions of this rice
 # (back when it used plain bash scripts and had no dxrice_ prefix at all).
-# Shared by check_stale_hyprland_lua (does a DEPLOYED hyprland.lua still
-# point at these) and check_legacy_rice_checkout (is there an entire old
-# CHECKOUT of the rice still on disk, referenced by leftover shell
+# Shared by reconcile_copy_once_ownership's recognizers (does a DEPLOYED
+# copy-once file still point at these) and check_legacy_rice_checkout (is
+# there an entire old CHECKOUT of the rice still on disk, referenced by leftover shell
 # aliases) -- one list so a name added for one check is recognized by
 # both, rather than two independently-maintained regexes drifting apart.
 LEGACY_SCRIPT_NAMES=(manage-taskbar.sh reorder-taskbar.sh infinite_desktop_core.py
@@ -693,16 +693,10 @@ check_input_group() {
     fi
 }
 
-# hyprland.lua is only ever copied in once, then left as yours to hand-edit
-# (see do_deploy/dxrice_deploy.py) -- which means a machine that got a
-# broken/ancient copy from a much older version of this rice (old script
-# names, no dxrice_ prefix, hardcoded ~/scripts) is stuck with it forever,
-# silently, even after every other bug in this repo gets fixed. Detect that
-# specific case and offer a backed-up replacement -- never touches a
-# hyprland.lua that isn't recognizably an old copy of this rice's own file.
 # Turns LEGACY_SCRIPT_NAMES into a single alternation for grep -E/bash's
-# =~, with literal dots escaped -- shared so check_stale_hyprland_lua and
-# check_legacy_rice_checkout recognize exactly the same set of old names.
+# =~, with literal dots escaped -- shared by reconcile_copy_once_ownership's
+# recognizers and check_legacy_rice_checkout so a name added for one is
+# recognized by both, rather than two independently-maintained regexes.
 _legacy_names_regex() {
     local IFS='|'
     local escaped=()
@@ -713,156 +707,86 @@ _legacy_names_regex() {
     echo "${escaped[*]}"
 }
 
-check_stale_hyprland_lua() {
-    local f="$CONFIG_HOME/hypr/hyprland.lua"
-    [ -f "$f" ] || return 0
-
-    if grep -q "dxrice_repo" "$f" 2>/dev/null; then
-        return 0
-    fi
-    # (dxrice_/dxrice-)? because even older copies of this rice, from before
-    # scripts were renamed with that prefix, still used these same base names.
-    if ! grep -qE "(dxrice[-_])?($(_legacy_names_regex))" "$f" 2>/dev/null; then
-        return 0
-    fi
-
-    warn "Your ~/.config/hypr/hyprland.lua is from a much older version of this rice."
-    info "It still points at script names/locations that don't exist anymore, so"
-    info "keybinds and the infinite desktop cannot work with it as it is now."
-    if ask_yes_no "Back it up and replace it with the current version?" Y; then
-        mkdir -p "$STATE_DIR/backups"
-        local backup="$STATE_DIR/backups/hyprland.lua.$(date +%s).bak"
-        cp "$f" "$backup"
-        rm -f "$f"
-        ok "Backed up to $backup and removed the live copy -- deploying the current version next."
-    else
-        warn "Leaving it as-is -- binds and the infinite desktop will keep not working until"
-        info "you either fix it by hand or re-run install and say yes to replacing it."
-    fi
-}
-
-# A deployed waybar/config* file is copy-once (see dxrice_deploy.py) and is
-# only ever upgraded in place for one specific, already-known structural
-# change (adding the Quick Settings module group -- see that script's own
-# _migrate_waybar_quicksettings). A config from a genuinely ancient,
-# pre-dxrice rice -- a single waybar bar instead of this rice's four, no
-# Quick Settings concept at all -- doesn't match that narrow migration's
-# precondition and is simply left exactly as it was, forever. That's why a
-# machine coming from a much older setup can run this installer clean,
-# with hyprland.lua correctly replaced by the check above, and still
-# visually look like the old rice afterward: the bars themselves never got
-# the memo. Live-reported: exactly this, right after check_stale_hyprland_
-# lua + check_legacy_rice_checkout both ran successfully.
+# Ownership reconciliation for every copy-once file (hyprland.lua + the
+# four waybar configs). Used to be three independent checks here --
+# check_stale_hyprland_lua, check_stale_waybar_configs (marker-based,
+# correctly recognized a current-shaped DXrice file and left it alone),
+# and check_foreign_copy_once_files (snapshot-absence-based: "no snapshot
+# => DXrice never put this here => offer to replace it"). The third ran
+# independently of what the first two had just established, so a file
+# they'd positively recognized as a genuine, current-shaped DXrice
+# deployment -- just one that predates the copy_once_snapshots mechanism
+# added after it was deployed -- still got treated as foreign purely for
+# lacking a snapshot. Live incident this caused: a real ~/.config/waybar/
+# config-dock, with real custom taskbar shortcuts (Brave/Discord/Sober/
+# Steam/Prism Launcher/VirtualBox/VS Code), backed up and overwritten with
+# the bare template on a completely ordinary `install.sh install` run.
 #
-# Detected the same way as check_stale_hyprland_lua: by a marker, not a
-# byte-diff. Every CURRENT template names itself ("waybar-top"/"-left"/
-# "-right"/"-dock", one per file -- see dxrice_deploy.py's own four
-# COPY_ONCE_FILES), and that field survives every legitimate edit this
-# rice itself makes to the file: TaskbarManager.qml's own add-shortcut
-# flow round-trips the WHOLE parsed JSON object (confirmed by reading its
-# source), not just modules-left, so a live, user-customized config-dock
-# still carries "waybar-dock" after any number of added shortcuts. A
-# deployed file missing its own name, or that still references one of
-# LEGACY_SCRIPT_NAMES directly in an on-click/exec string, is provably not
-# a current dxrice config -- never a user's own legitimate customization.
-check_stale_waybar_configs() {
-    local names_re
-    names_re="$(_legacy_names_regex)"
-    local pairs=("config:waybar-top" "config-left:waybar-left" "config-right:waybar-right" "config-dock:waybar-dock")
-    local pair rel expected f
-    for pair in "${pairs[@]}"; do
-        rel="${pair%%:*}"
-        expected="${pair##*:}"
-        f="$CONFIG_HOME/waybar/$rel"
-        [ -f "$f" ] || continue
+# All classification now goes through one shared model (see
+# scripts/dxrice_copy_once_ownership.py for the full state machine and its
+# own test suite) with one hard invariant: if ownership cannot be proven,
+# the file is preserved -- uncertainty never results in an overwrite. Only
+# a file positively identified as DXrice's own (current-shaped but missing
+# its snapshot, or an old pre-Quickshell shape) is ever eligible for any
+# action, and even then: a current-shaped one is never touched at all
+# (just silently given the snapshot it was always missing), and an
+# old-shaped one is only ever replaced after this same explicit,
+# declined-by-default-does-nothing confirmation the old checks already
+# used.
+reconcile_copy_once_ownership() {
+    local ownership_py="$REPO_DIR/scripts/dxrice_copy_once_ownership.py"
+    [ -f "$ownership_py" ] || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
 
-        if grep -q "\"name\"[[:space:]]*:[[:space:]]*\"$expected\"" "$f" 2>/dev/null; then
-            continue  # already current-shaped, whatever else you've customized
-        fi
-
-        local reason="doesn't look like this rice's current four-bar layout"
-        if grep -qE "$names_re" "$f" 2>/dev/null; then
-            reason="still references this rice's own old, pre-Quickshell script names"
-        fi
-
-        warn "~/.config/waybar/$rel $reason."
-        info "This is from a much older version of this rice (or a different setup"
-        info "entirely) -- it predates the current look, so it's never going to pick"
-        info "that up just by itself."
-        if ask_yes_no "Back it up and let the current version deploy instead?" Y; then
-            mkdir -p "$STATE_DIR/backups"
-            local backup="$STATE_DIR/backups/waybar-$rel.$(date +%s).bak"
-            cp "$f" "$backup"
-            rm -f "$f"
-            ok "Backed up to $backup and removed the live copy -- deploying the current version next."
-        else
-            warn "Leaving ~/.config/waybar/$rel as-is -- it'll keep looking like the old rice"
-            info "until you either edit it by hand or re-run install and say yes here."
-        fi
-    done
+    local rel state detail
+    while IFS=$'\t' read -r rel state detail; do
+        [ -n "$rel" ] || continue
+        case "$state" in
+            LEGACY_DXRICE)
+                if [ "$detail" = "current-shaped" ]; then
+                    # Positively DXrice's own, already in the shape the
+                    # repo ships today -- nothing to replace, just backfill
+                    # the snapshot it never got. Never reads or rewrites
+                    # the live file.
+                    python3 "$ownership_py" claim-snapshot "$rel" "$CONFIG_HOME" "$STATE_DIR" "$REPO_DIR" \
+                        && ok "~/.config/$rel recognized as your existing DXrice deployment -- left exactly as it is."
+                    continue
+                fi
+                # old-shaped: a genuine pre-Quickshell DXrice file. Same
+                # upgrade offer the old per-file checks used.
+                warn "~/.config/$rel is from a much older version of this rice."
+                info "It predates the current layout, so it won't pick that up on its own."
+                if ask_yes_no "Back it up and let the current version deploy instead?" Y; then
+                    mkdir -p "$STATE_DIR/backups"
+                    local backup="$STATE_DIR/backups/${rel//\//_}.$(date +%s).bak"
+                    cp "$CONFIG_HOME/$rel" "$backup"
+                    rm -f "$CONFIG_HOME/$rel"
+                    ok "Backed up to $backup and removed the live copy -- deploying the current version next."
+                else
+                    warn "Leaving ~/.config/$rel as-is -- it'll keep looking like the old rice until"
+                    info "you either edit it by hand or re-run install and say yes here."
+                fi
+                ;;
+            FOREIGN)
+                info "~/.config/$rel exists but looks like it belongs to a different setup --"
+                info "left completely alone; DXrice's own version won't deploy over it."
+                ;;
+            UNKNOWN)
+                info "~/.config/$rel already exists and DXrice can't positively tell whose it is --"
+                info "left completely alone (never guessed at) until you move it yourself."
+                ;;
+            DXRICE_OWNED_UNCHANGED|DXRICE_OWNED_MODIFIED)
+                : # Already tracked and already safe -- dxrice_deploy.py's
+                  # own hash-guard (or, for these copy-once files, its
+                  # unconditional "leave alone if it exists" rule) handles
+                  # this; nothing for install.sh itself to do.
+                ;;
+        esac
+    done < <(python3 "$ownership_py" classify "$CONFIG_HOME" "$STATE_DIR")
 }
 
-# Project history (this exact bug class has happened before -- see
-# 3413cb4's own commit message, "the earlier 'friend stuck on an old
-# waybar/config forever' bug"): the two checks above catch a copy-once
-# file by RECOGNIZING it as an old DXrice copy -- a specific, named
-# marker. That leaves a real gap they were never meant to cover: ANY
-# pre-existing file at one of these five paths, for ANY reason (a
-# completely unrelated hand-written Hyprland/waybar setup from before
-# DXrice was ever installed, a rice this isn't even a fork of, anything),
-# silently and permanently blocks DXrice's own version from ever
-# deploying -- COPY_ONCE_FILES in dxrice_deploy.py skips an existing file
-# unconditionally, full stop. The result looks identical from the
-# outside: install.sh runs clean, reports nothing wrong, and the actual
-# keybinds/bars/infinite-desktop experience this installer exists to set
-# up never shows up, with no error anywhere to explain why.
-#
-# General fix, independent of recognizing any specific marker: DXrice
-# itself records a pristine snapshot of a copy-once file the ONE time it
-# genuinely installs it fresh (see deploy_copy_once's own comment on
-# copy_once_snapshots/ -- written only on that exact branch, never on an
-# "adopt"/migrate path). So the snapshot's mere EXISTENCE is a direct,
-# first-party record of "DXrice itself put a copy of this file here at
-# some point on this machine" -- independent of whatever the user has
-# since done to the live copy (hand-edited it, or even reverted it to
-# look like something else entirely). Its ABSENCE, for a file that
-# nonetheless already exists live, means DXrice has never once deployed
-# its own version here: definitive, not a heuristic, and it needs no
-# per-file content inspection at all. This intentionally runs AFTER the
-# two checks above: anything they already recognized and replaced is
-# gone by the time this looks, so it only ever asks about files that are
-# still a genuine mystery to both of them.
-check_foreign_copy_once_files() {
-    local snapshot_dir="$STATE_DIR/copy_once_snapshots"
-    local pairs=("hypr/hyprland.lua" "waybar/config" "waybar/config-left" "waybar/config-right" "waybar/config-dock")
-    local rel f snap_name snap
-    for rel in "${pairs[@]}"; do
-        f="$CONFIG_HOME/$rel"
-        [ -e "$f" ] || continue
-        snap_name="${rel//\//_}"
-        snap="$snapshot_dir/$snap_name"
-        [ -e "$snap" ] && continue  # DXrice itself put this here before -- yours, leave it alone
-
-        warn "~/.config/$rel already exists, but DXrice has never deployed its own"
-        info "version here on this machine -- it might be left over from a different"
-        info "setup entirely, or just something you already had. Either way, DXrice's"
-        info "own version of this file won't take effect until it's out of the way."
-        if ask_yes_no "Back it up and let DXrice's own version deploy instead?" Y; then
-            mkdir -p "$STATE_DIR/backups"
-            local backup="$STATE_DIR/backups/${rel//\//_}.$(date +%s).bak"
-            cp "$f" "$backup"
-            rm -f "$f"
-            ok "Backed up to $backup and removed the live copy -- deploying DXrice's own version next."
-        else
-            warn "Leaving ~/.config/$rel as-is -- DXrice's own version of it will keep not"
-            info "taking effect until you either replace it by hand or re-run install and"
-            info "say yes here."
-        fi
-    done
-}
-
-# Narrower companion to check_stale_hyprland_lua: a hyprland.lua already on
-# the current repo-path scheme (so the check above leaves it alone) can
+# Narrower companion to reconcile_copy_once_ownership: a hyprland.lua
+# already recognized as current-shaped (so that check leaves it alone) can
 # still predate a later change to one specific bind -- e.g. the taskbar
 # manager moving from a kitty-terminal script to a GUI. Patches just that
 # one line in place, leaving every other keybind/customization untouched.
@@ -947,7 +871,7 @@ EOF
 }
 
 # Narrower companion to migrate_taskbar_bind, same pattern: an already-
-# deployed hyprland.lua (so check_stale_hyprland_lua above left it alone)
+# deployed hyprland.lua (so reconcile_copy_once_ownership left it alone)
 # can still predate the systemd-supervision change above. Patches just
 # those three specific exec_cmd lines in place -- matched against this
 # installer's own exact previous template text, verified against this
@@ -1003,7 +927,7 @@ PYEOF
 # carrying its own `alias managetaskbar=...`/`alias reordertaskbar=...`
 # pointing straight at it.
 #
-# Detected the same way check_stale_hyprland_lua detects an old
+# Detected the same way reconcile_copy_once_ownership detects an old
 # hyprland.lua: by name, not by guessing at a path. Scans ~/.bashrc and
 # ~/.zshrc for a plain `alias ...=` line that mentions one of
 # LEGACY_SCRIPT_NAMES -- the current rice's own managed block never
@@ -1250,9 +1174,7 @@ do_install() {
     check_input_group
 
     step "Step 4/4 -- Deploying your rice"
-    check_stale_hyprland_lua
-    check_stale_waybar_configs
-    check_foreign_copy_once_files
+    reconcile_copy_once_ownership
     migrate_taskbar_bind
     migrate_exec_to_systemd_units
     check_legacy_rice_checkout
@@ -1552,9 +1474,7 @@ do_update() {
     fi
 
     step "Redeploying"
-    check_stale_hyprland_lua
-    check_stale_waybar_configs
-    check_foreign_copy_once_files
+    reconcile_copy_once_ownership
     migrate_taskbar_bind
     migrate_exec_to_systemd_units
     check_legacy_rice_checkout
