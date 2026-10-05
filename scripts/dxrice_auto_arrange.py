@@ -216,7 +216,7 @@ NOTCH_REFINE_MAX_ROUNDS = 3
 NOTCH_REFINE_MAX_TOTAL_SHIFT = 300.0
 
 
-def _refine_notch_alignment(placed, fixed_rects, gap, max_rounds=NOTCH_REFINE_MAX_ROUNDS):
+def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds=NOTCH_REFINE_MAX_ROUNDS):
     """Post-hoc structural repair for a root cause live-traced directly,
     not assumed: the incremental build places one window at a time with
     only the ALREADY-PLACED windows visible. A window's locally-best
@@ -234,23 +234,36 @@ def _refine_notch_alignment(placed, fixed_rects, gap, max_rounds=NOTCH_REFINE_MA
 
     Runs once the full set is visible (after the incremental loop, before
     the final recenter): for every pair of windows in a genuine flush
-    relationship with a silhouette notch, tries shifting ONE of them
-    flush with the other along the single axis that would close it. A
-    trial shift is kept ONLY when it is a strict, fully re-verified
-    improvement, checked the SAME lexicographic way the per-step notch
-    tiebreak already does (see _find_best_position's own comment on why):
-    composition_penalty (dead-gap/sliver/align) across the WHOLE set must
-    not get WORSE -- non-negotiable, never traded against a better
-    silhouette -- and only then must _notch_penalty across the whole set
-    get STRICTLY better. A first version compared one blended sum instead
-    and was caught live: a shift that improved notch enough could "pay
-    for" a newly-introduced 55px unblocked dead gap elsewhere, which is
-    not a repair, it is trading one visible defect for a worse one. Also
-    requires no new overlap with anything, including fixed obstacles.
-    Uses the exact same scoring functions every other decision in this
-    file already uses, just with the full-composition visibility a
-    mid-build candidate structurally cannot have -- a repair of the
-    construction, not a new objective.
+    relationship with a silhouette notch, tries EITHER moving one of them
+    flush with the other along the axis that would close it, OR shrinking
+    whichever one sticks out so its edge pulls back to meet the other
+    instead -- a live user report confirmed some notches are a genuine
+    width/height mismatch between two windows that no amount of sliding
+    can fix (two windows of different widths stacked flush can always be
+    LEFT-aligned or RIGHT-aligned, never both), so a repositioning-only
+    version of this pass could not help them at all. The shrink option is
+    bounded the exact same way the file's own per-step resize mechanism
+    already is (MAX_SHRINK_FRACTION of the window's TRUE original size,
+    never MIN_USABLE_WIDTH/HEIGHT) -- "5-10% shrink to eliminate a skinny
+    side channel," not a new resize policy, the same trade-off already
+    made elsewhere just driven by a silhouette mismatch instead of a
+    population-outlier comparison.
+
+    A trial candidate (move OR shrink) is kept ONLY when it is a strict,
+    fully re-verified improvement, checked the SAME lexicographic way the
+    per-step notch tiebreak already does (see _find_best_position's own
+    comment on why): composition_penalty (dead-gap/sliver/align) across
+    the WHOLE set must not get WORSE -- non-negotiable, never traded
+    against a better silhouette -- and only then must _notch_penalty
+    across the whole set get STRICTLY better. A first version compared
+    one blended sum instead and was caught live: a shift that improved
+    notch enough could "pay for" a newly-introduced 55px unblocked dead
+    gap elsewhere, which is not a repair, it is trading one visible
+    defect for a worse one. Also requires no new overlap with anything,
+    including fixed obstacles. Uses the exact same scoring functions
+    every other decision in this file already uses, just with the full-
+    composition visibility a mid-build candidate structurally cannot
+    have -- a repair of the construction, not a new objective.
 
     Mutates `placed` in place and returns nothing, matching this file's
     existing convention for the incremental build's own `placed` dict."""
@@ -295,6 +308,12 @@ def _refine_notch_alignment(placed, fixed_rects, gap, max_rounds=NOTCH_REFINE_MA
     # exists to close (the reported range was 100-300px), so the cap
     # tracks that, not an arbitrarily larger "whatever the math wants."
     origin = {a: placed[a][:2] for a in addrs}
+    # Same cumulative-cap principle as position above, but for size: always
+    # measured against the TRUE original dimensions (not the current,
+    # possibly-already-shrunk ones), so repeated rounds can never compound
+    # past MAX_SHRINK_FRACTION in total -- the exact guarantee the per-step
+    # resize mechanism elsewhere in this file already relies on.
+    original_size = {a: placed[a][2:4] for a in addrs}
 
     # Final whole-pass safety net, same pattern as the resize-vs-moveonly
     # check elsewhere in this file: every individual step above is already
@@ -315,6 +334,21 @@ def _refine_notch_alignment(placed, fixed_rects, gap, max_rounds=NOTCH_REFINE_MA
         improved = False
         for addr in addrs:
             x, y, w, h = placed[addr]
+            # Shrinking to close a notch must be gated by the SAME
+            # eligibility test the per-step resize mechanism already uses
+            # -- is this window genuinely oversized relative to the
+            # population at all -- not just "does some edge happen not to
+            # line up." Live-caught without this: a window ~5x the local
+            # median, surrounded by tiny dialogs, got shrunk purely
+            # because one dialog's edge was misaligned with it, and a
+            # perfectly ordinary 2-window composition with plenty of open
+            # canvas got a modest but entirely unnecessary shrink just to
+            # tidy up an edge nobody needed tidied. A notch is reason
+            # enough to consider REPOSITIONING (always available, no
+            # eligibility gate -- moving costs nothing structurally); it
+            # is reason enough to consider SHRINKING only for a window
+            # already reasonable to shrink at all.
+            can_shrink = _mass_ratio(w, h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR
             for other_addr in addrs:
                 if other_addr == addr:
                     continue
@@ -322,38 +356,70 @@ def _refine_notch_alignment(placed, fixed_rects, gap, max_rounds=NOTCH_REFINE_MA
                 orx0, ory0, orx1, ory1 = rect_for(*placed[other_addr])
                 xg = _axis_gap(rx0, rx1, orx0, orx1)
                 yg = _axis_gap(ry0, ry1, ory0, ory1)
-                shifts = []
+                # Each candidate is the full (x, y, w, h) this window would
+                # take -- position-only shifts (align an edge by moving)
+                # and shrink candidates (align an edge by pulling it in
+                # instead) are scored through the exact same trial-and-
+                # verify path below, never a separately-trusted mechanism.
+                candidates = []
+                orig_w, orig_h = original_size[addr]
+                min_w = max(MIN_USABLE_WIDTH, round(orig_w * (1.0 - MAX_SHRINK_FRACTION)))
+                min_h = max(MIN_USABLE_HEIGHT, round(orig_h * (1.0 - MAX_SHRINK_FRACTION)))
                 if xg == 0.0 and abs(yg - gap) < FLUSH_TOL:
                     span = min(rx1 - rx0, orx1 - orx0)
                     frac = (min(rx1, orx1) - max(rx0, orx0)) / span if span > 0 else 0.0
                     if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
-                        shifts.append((orx0 - rx0, 0))  # align left edges
-                        shifts.append((orx1 - rx1, 0))  # align right edges
+                        candidates.append((orx0 - rx0, 0, w, h))  # move: align left edges
+                        candidates.append((orx1 - rx1, 0, w, h))  # move: align right edges
+                        # Shrink: pull in whichever side sticks out past
+                        # `other_addr`, instead of moving to meet it --
+                        # "5-10% shrink to eliminate a skinny side
+                        # channel," the exact trade-off this file's own
+                        # resize mechanism already makes elsewhere, just
+                        # driven by a silhouette mismatch instead of a
+                        # population-outlier comparison. Gated on
+                        # can_shrink -- see its own comment above.
+                        if can_shrink and rx0 < orx0:  # sticks out further left
+                            new_w = rx1 - orx0
+                            if new_w >= min_w:
+                                candidates.append((orx0 - x, 0, new_w, h))
+                        if can_shrink and rx1 > orx1:  # sticks out further right
+                            new_w = orx1 - rx0
+                            if new_w >= min_w:
+                                candidates.append((0, 0, new_w, h))
                 if yg == 0.0 and abs(xg - gap) < FLUSH_TOL:
                     span = min(ry1 - ry0, ory1 - ory0)
                     frac = (min(ry1, ory1) - max(ry0, ory0)) / span if span > 0 else 0.0
                     if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
-                        shifts.append((0, ory0 - ry0))  # align top edges
-                        shifts.append((0, ory1 - ry1))  # align bottom edges
-                for dx, dy in shifts:
-                    if dx == 0 and dy == 0:
+                        candidates.append((0, ory0 - ry0, w, h))  # move: align top edges
+                        candidates.append((0, ory1 - ry1, w, h))  # move: align bottom edges
+                        if can_shrink and ry0 < ory0:  # sticks out further up
+                            new_h = ry1 - ory0
+                            if new_h >= min_h:
+                                candidates.append((0, ory0 - y, w, new_h))
+                        if can_shrink and ry1 > ory1:  # sticks out further down
+                            new_h = ory1 - ry0
+                            if new_h >= min_h:
+                                candidates.append((0, 0, w, new_h))
+                for dx, dy, nw, nh in candidates:
+                    if dx == 0 and dy == 0 and nw == w and nh == h:
                         continue
                     ox, oy = origin[addr]
                     total_shift = math.hypot((x + dx) - ox, (y + dy) - oy)
                     if total_shift > NOTCH_REFINE_MAX_TOTAL_SHIFT:
                         continue
-                    trial_rect = rect_for(x + dx, y + dy, w, h)
+                    trial_rect = rect_for(x + dx, y + dy, nw, nh)
                     if collides(addr, trial_rect):
                         continue
                     correctness_before = correctness_cost()
                     notch_before = notch_cost()
                     saved = placed[addr]
-                    placed[addr] = (x + dx, y + dy, w, h)
+                    placed[addr] = (x + dx, y + dy, nw, nh)
                     correctness_after = correctness_cost()
                     notch_after = notch_cost()
                     if correctness_after <= correctness_before + 1e-6 and notch_after < notch_before - 1e-6:
                         improved = True
-                        x, y = x + dx, y + dy
+                        x, y, w, h = x + dx, y + dy, nw, nh
                     else:
                         placed[addr] = saved
         if not improved:
@@ -1416,7 +1482,7 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         # changes relative positions, so doing this before or after makes
         # no difference to the geometry -- before is simply closer to
         # where the rest of this function's structure already is).
-        _refine_notch_alignment(placed, fixed_rects, gap)
+        _refine_notch_alignment(placed, fixed_rects, gap, reference_area)
 
         # Rigid recenter: one (dx, dy) applied to every eligible window's
         # POSITION (never its size -- resize decisions are already final by
