@@ -109,6 +109,22 @@ def toggle_floating(address=None):
     return dispatch(toggle_floating_lua(address))
 
 
+def close_window_lua(address):
+    # The compositor's own per-TOPLEVEL close dispatch (hl.dsp.window.close,
+    # Hyprland's native closewindow-equivalent) -- sends the xdg_toplevel
+    # close request to exactly the targeted surface, same as clicking that
+    # window's own close button. Critically NOT pid/process-based: a
+    # multi-window single-process app (two Brave windows, one browser
+    # process) only loses the targeted window, because Wayland delivers the
+    # close event to one specific toplevel object, never to "the process."
+    # See dxrice_force_close_window.py for why this exists as the PRIMARY
+    # close mechanism there, with process termination only as a last resort.
+    return f'hl.dsp.window.close({{ window = "address:{address}" }})'
+
+def close_window(address, timeout=2):
+    return dispatch(close_window_lua(address), timeout=timeout)
+
+
 def focus_window_lua(address):
     return f'hl.dsp.focus({{ window = "address:{address}" }})'
 
