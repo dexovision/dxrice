@@ -627,15 +627,28 @@ Item {
                         color: Theme.surfaceHighlight
                         visible: brightnessBackend.hasBacklight
                     }
-                    Text {
-                        text: "Display"
-                        color: Theme.text
-                        opacity: Theme.opacityMuted
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                        font.letterSpacing: 0.5
-                        visible: brightnessBackend.hasBacklight
-                        height: visible ? implicitHeight : 0
+                    Item {
+                        // The collapse-to-zero-when-hidden height lives on
+                        // this wrapper, not on the Text directly -- putting
+                        // `height: visible ? implicitHeight : 0` directly
+                        // on a Text caused a genuine binding loop under
+                        // rapid show/hide stress (caught live by toggling
+                        // this panel open/closed 6x in quick succession,
+                        // not by reading the QML), something this exact
+                        // same pattern on a plain Item/Row elsewhere in
+                        // this file never triggered.
+                        width: parent.width
+                        height: label.visible ? label.implicitHeight : 0
+                        Text {
+                            id: label
+                            text: "Display"
+                            color: Theme.text
+                            opacity: Theme.opacityMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.letterSpacing: 0.5
+                            visible: brightnessBackend.hasBacklight
+                        }
                     }
                     Row {
                         width: parent.width
