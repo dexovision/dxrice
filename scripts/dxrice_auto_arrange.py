@@ -215,6 +215,20 @@ NOTCH_REFINE_MAX_ROUNDS = 3
 # the live-caught cascading-drift bug this closes.
 NOTCH_REFINE_MAX_TOTAL_SHIFT = 300.0
 
+# Minimum notch depth (pixels, along the axis a shrink would change)
+# before the "partner is substantial" shrink path even considers firing --
+# see that path's own comment for the live-caught case this closes: two
+# entirely ordinary, similarly-sized windows with plenty of open canvas
+# got a pointless shrink to close a 63px edge mismatch, which is a
+# "tidying a detail nobody needed tidied" shrink, not a "close a visible
+# channel" one. Set to the LOW end of this session's own reported range
+# for what reads as a real, visible channel (100-300px) -- a floor, not a
+# target; deeper mismatches are all still eligible. Does NOT apply to the
+# self_is_outlier path, where "this window is a genuine population
+# outlier" was already the established bar for "worth resizing" before
+# this shrink extension existed.
+NOTCH_REFINE_SHRINK_MIN_DEPTH = 100.0
+
 
 def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds=NOTCH_REFINE_MAX_ROUNDS):
     """Post-hoc structural repair for a root cause live-traced directly,
@@ -334,26 +348,63 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds
         improved = False
         for addr in addrs:
             x, y, w, h = placed[addr]
-            # Shrinking to close a notch must be gated by the SAME
-            # eligibility test the per-step resize mechanism already uses
-            # -- is this window genuinely oversized relative to the
-            # population at all -- not just "does some edge happen not to
-            # line up." Live-caught without this: a window ~5x the local
-            # median, surrounded by tiny dialogs, got shrunk purely
-            # because one dialog's edge was misaligned with it, and a
-            # perfectly ordinary 2-window composition with plenty of open
-            # canvas got a modest but entirely unnecessary shrink just to
-            # tidy up an edge nobody needed tidied. A notch is reason
-            # enough to consider REPOSITIONING (always available, no
-            # eligibility gate -- moving costs nothing structurally); it
-            # is reason enough to consider SHRINKING only for a window
-            # already reasonable to shrink at all.
-            can_shrink = _mass_ratio(w, h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR
+            # Shrinking to close a notch must be gated -- is there a
+            # genuine, substantial reason to shrink THIS window -- not
+            # just "does some edge happen not to line up." Live-caught
+            # without any gate at all: a window ~5x the local median,
+            # surrounded by tiny dialogs, got shrunk purely because one
+            # dialog's edge was misaligned with it, and a perfectly
+            # ordinary 2-window composition with plenty of open canvas
+            # got a modest but entirely unnecessary shrink just to tidy up
+            # an edge nobody needed tidied.
+            #
+            # Two independent, sufficient reasons, matching the two real
+            # shapes this closes:
+            #   - self_is_outlier: THIS window is genuinely oversized
+            #     relative to the population (the same test the per-step
+            #     resize mechanism already uses) -- shrinking the odd one
+            #     out to match everyone else.
+            #   - partner_is_substantial (computed per pair, below): the
+            #     window it would align WITH is not a trivial dialog --
+            #     a live user screenshot showed a dominant panel next to
+            #     smaller but still substantial windows (two terminals),
+            #     which this window's OWN population-wide ratio doesn't
+            #     flag as an outlier (it may legitimately BE the dominant
+            #     size class), but the alignment partner is clearly not
+            #     something to be excluded on "it's just a tiny dialog"
+            #     grounds either.
+            # A notch is reason enough to consider REPOSITIONING always
+            # (moving costs nothing structurally); SHRINKING needs one of
+            # these two reasons first.
+            self_is_outlier = _mass_ratio(w, h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR
             for other_addr in addrs:
                 if other_addr == addr:
                     continue
                 rx0, ry0, rx1, ry1 = rect_for(x, y, w, h)
                 orx0, ory0, orx1, ory1 = rect_for(*placed[other_addr])
+                # partner_is_substantial is judged along the SPECIFIC axis
+                # a shrink would actually change (width for a vstack pair,
+                # height for an hstack pair), as a direct ratio against
+                # THIS window's own size on that axis -- not a population
+                # comparison. A population-based version was tried first
+                # and live-caught failing in both directions: measured
+                # against the GLOBAL reference_area, a dominant panel's
+                # own enormous size skews that reference so much that even
+                # a genuinely substantial neighbor (a real terminal
+                # window) reads as "small by comparison"; measured against
+                # the population EXCLUDING this window instead, a main
+                # window surrounded ONLY by many tiny dialogs makes THOSE
+                # dialogs each other's own "typical" peer once the main
+                # window is excluded, which wrongly judges any one of them
+                # "substantial" relative to itself. A direct per-axis
+                # ratio against THIS window sidesteps both: reusing
+                # RESIZE_ELIGIBLE_RATIO_FLOOR's own linear ratio (already
+                # the established "how much bigger is too much bigger"
+                # bar), the partner must be no more than that ratio
+                # SMALLER on the relevant axis -- i.e. this window is not
+                # more than 1.5x the partner's width/height, matching the
+                # exact same bar the outlier test already applies in the
+                # other direction.
                 xg = _axis_gap(rx0, rx1, orx0, orx1)
                 yg = _axis_gap(ry0, ry1, ory0, ory1)
                 # Each candidate is the full (x, y, w, h) this window would
@@ -378,7 +429,23 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds
                         # resize mechanism already makes elsewhere, just
                         # driven by a silhouette mismatch instead of a
                         # population-outlier comparison. Gated on
-                        # can_shrink -- see its own comment above.
+                        # can_shrink -- see its own comment above; here the
+                        # relevant axis is WIDTH. The partner-substantial
+                        # path additionally requires a MATERIAL notch depth
+                        # (NOTCH_REFINE_SHRINK_MIN_DEPTH) -- live-caught
+                        # without it: two entirely ordinary, similar-sized
+                        # windows with plenty of open canvas got a modest
+                        # but pointless shrink purely to close a 63px
+                        # edge mismatch neither window's own size justified
+                        # worrying about. self_is_outlier is NOT subject to
+                        # this floor -- a genuine population outlier was
+                        # already the established bar for "worth resizing"
+                        # before this shrink extension existed at all.
+                        other_w = orx1 - orx0
+                        depth_w = max(rx0 - orx0, rx1 - orx1, orx0 - rx0, orx1 - rx1)
+                        partner_substantial = (other_w > 0 and w / other_w <= RESIZE_ELIGIBLE_RATIO_FLOOR
+                                                and depth_w >= NOTCH_REFINE_SHRINK_MIN_DEPTH)
+                        can_shrink = self_is_outlier or partner_substantial
                         if can_shrink and rx0 < orx0:  # sticks out further left
                             new_w = rx1 - orx0
                             if new_w >= min_w:
@@ -393,6 +460,14 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds
                     if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
                         candidates.append((0, ory0 - ry0, w, h))  # move: align top edges
                         candidates.append((0, ory1 - ry1, w, h))  # move: align bottom edges
+                        # Relevant axis here is HEIGHT -- see the width
+                        # branch above for why partner-substantial also
+                        # requires a material depth.
+                        other_h = ory1 - ory0
+                        depth_h = max(ry0 - ory0, ry1 - ory1, ory0 - ry0, ory1 - ry1)
+                        partner_substantial = (other_h > 0 and h / other_h <= RESIZE_ELIGIBLE_RATIO_FLOOR
+                                                and depth_h >= NOTCH_REFINE_SHRINK_MIN_DEPTH)
+                        can_shrink = self_is_outlier or partner_substantial
                         if can_shrink and ry0 < ory0:  # sticks out further up
                             new_h = ry1 - ory0
                             if new_h >= min_h:

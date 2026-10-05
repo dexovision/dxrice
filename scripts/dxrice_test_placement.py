@@ -2977,39 +2977,76 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
                              for i, r in enumerate(rects))
         self.assertLessEqual(penalty_total, 0.0, f"shrink introduced a dead gap: {penalty_total}")
 
-    def test_shrink_never_fires_to_align_with_a_tiny_dialog(self):
+    def test_shrink_never_fires_for_a_trivial_edge_mismatch(self):
         """LIVE REGRESSION: an early version of the shrink extension had
         no eligibility gate at all -- any window with a misaligned edge
-        was a candidate, including a dominant main window whose only
-        "problem" was a nearby tiny dialog not sharing its width. That
-        shrank a window ~5x the local population's own size purely to
-        tidy up an edge nobody needed tidied, and a perfectly ordinary
-        2-window composition with plenty of open canvas got an
-        unnecessary shrink just to align. Gated the same way the main
-        resize mechanism already is: a window must be genuinely oversized
-        relative to the population (RESIZE_ELIGIBLE_RATIO_FLOOR) before
-        shrinking-to-align is even considered -- repositioning remains
-        unrestricted, since moving costs nothing structurally."""
+        was a candidate. Two entirely ordinary, similarly-sized windows
+        with plenty of open canvas got a modest but pointless shrink
+        purely to close a 63px edge mismatch neither window's own size
+        justified worrying about -- a "tidy a detail nobody needed
+        tidied" shrink, not a "close a visible channel" one. Gated on
+        NOTCH_REFINE_SHRINK_MIN_DEPTH for the partner-substantial path:
+        a real, visible-channel-sized mismatch is still eligible (see
+        test_shrink_closes_a_notch_for_a_substantial_partner below),
+        a cosmetic one is not. self_is_outlier (a genuine population
+        outlier, the main resize mechanism's own established bar) is
+        unaffected by this floor and remains covered by the pre-existing
+        test_moderately/extreme_oversized_window_never_resizes_among_
+        many_tiny_dialogs tests."""
         eligible = [
-            {"address": "small_term", "at": [0, 0], "size": [420, 220]},
-            {"address": "wide_term", "at": [425, 0], "size": [1100, 220]},
-            {"address": "panel", "at": [0, 225], "size": [1900, 950]},
+            {"address": "0xA", "at": [0, 0], "size": [437, 291]},
+            {"address": "0xB", "at": [900, 500], "size": [500, 400]},
         ]
+        result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
+        by_orig = {"0xA": (437, 291), "0xB": (500, 400)}
+        for a, x, y, w, h in result:
+            self.assertEqual((w, h), by_orig[a], f"{a} was resized with no need to")
+
+    def test_shrink_closes_a_notch_for_a_substantial_partner(self):
+        """The other half of the same fix: a window does not need to be a
+        full population OUTLIER for shrinking-to-align to be justified --
+        a live user screenshot showed a dominant panel next to smaller
+        but still substantial windows (two terminals), which the panel's
+        own population-wide ratio correctly does NOT flag as an outlier
+        (it legitimately IS the dominant size class, same as the tiny-
+        dialog tests' main window), yet the gap was real and visible
+        (250px) and the alignment partner (1450px wide) is clearly not a
+        trivial dialog. Scattered starting positions, not already-aligned
+        ones -- an already-coherent input never even reaches the rebuild
+        this pass runs inside of, which would make this test pass for the
+        wrong reason."""
+        eligible = [
+            {"address": "small_term", "at": [-2000, 500], "size": [420, 220]},
+            {"address": "wide_term", "at": [1500, -1500], "size": [1450, 220]},
+            {"address": "panel", "at": [2200, 1200], "size": [1700, 950]},
+        ]
+        self.assertFalse(arr._shape_is_coherent(eligible, [], self.GAP),
+                          "fixture must NOT be pre-coherent, or the rebuild this test exercises never runs")
+        result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
+        panel = next(r for r in result if r[0] == "panel")
+        self.assertEqual((panel[3], panel[4]), (1450, 950),
+                          f"expected panel shrunk to match wide_term's width, got {panel[3]}x{panel[4]}")
+        min_w = round(1700 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        self.assertGreaterEqual(panel[3], min_w, "shrunk more than MAX_SHRINK_FRACTION allows")
+
+    def test_shrink_never_fires_to_align_with_a_tiny_dialog(self):
+        """A dominant main window's only "problem" being a nearby TINY
+        dialog not sharing its width must never shrink it -- the
+        population-scale mismatch here is large enough that it would
+        already be caught by MAX_SHRINK_FRACTION alone in most cases, but
+        this pins the eligibility gate directly, at a scale realistic
+        enough (a 420px dialog, not a token 50px one) that the gate is
+        the thing actually doing the work, not just the shrink bound."""
+        eligible = [
+            {"address": "dialog", "at": [-2000, 500], "size": [420, 220]},
+            {"address": "panel", "at": [2200, 1200], "size": [1900, 950]},
+        ]
+        self.assertFalse(arr._shape_is_coherent(eligible, [], self.GAP),
+                          "fixture must NOT be pre-coherent, or the rebuild this test exercises never runs")
         result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
         panel = next(r for r in result if r[0] == "panel")
         self.assertEqual((panel[3], panel[4]), (1900, 950),
                           "panel was shrunk even though it is its own legitimate, dominant size class")
-
-        # And the simpler, already-covered case: two modest windows with
-        # plenty of open canvas must never be resized just to tidy an edge.
-        eligible2 = [
-            {"address": "0xA", "at": [0, 0], "size": [437, 291]},
-            {"address": "0xB", "at": [900, 500], "size": [500, 400]},
-        ]
-        result2 = arr.auto_arrange(eligible2, [], self.MON, self.GAP)
-        by_orig = {"0xA": (437, 291), "0xB": (500, 400)}
-        for a, x, y, w, h in result2:
-            self.assertEqual((w, h), by_orig[a], f"{a} was resized with no need to")
 
 
 if __name__ == "__main__":
