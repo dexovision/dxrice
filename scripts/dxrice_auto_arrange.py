@@ -1543,13 +1543,14 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
     # look like" comparison candidate a few lines below (outer_allow_resize
     # is still True there -- the caller never asked for positions-only,
     # this function is just building a baseline to compare against). Only
-    # the first case is the contract Finding #1 was about; refine's own
-    # shrink staying available for the second case is what let this file's
-    # existing 6-window live-user-report regression test close a real,
-    # reported notch at all -- gating refine on _build's inner flag instead
-    # of this one was tried first and broke that exact case, live-caught
-    # by noticing the reported-gap fixture regressed even though every
-    # existing automated check still passed.
+    # the first case is auto_arrange's own documented "positions only, no
+    # size changes at all" contract; refine's own shrink staying available
+    # for the second case is what let this file's existing 6-window live-
+    # user-report regression test close a real, reported notch at all --
+    # gating refine on _build's inner flag instead of this one was tried
+    # first and broke that exact case, live-caught by noticing the
+    # reported-gap fixture regressed even though every existing automated
+    # check still passed.
     outer_allow_resize = allow_resize
 
     def _build(allow_resize):
