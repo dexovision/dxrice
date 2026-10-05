@@ -219,11 +219,8 @@ Item {
         // collapsed self doesn't. Always the same corner (top-right of the
         // SURFACE, not of the header) regardless of which edge the island
         // grows from, so every panel in the shell closes the same way.
-        Rectangle {
+        CloseButton {
             id: closeButton
-            width: 22
-            height: 22
-            radius: Theme.roundingFull
             x: surface.width - width - 8
             // Always the top-right corner of the SURFACE regardless of
             // pinY -- this used to be written as a `pinY === "bottom" ? 8 :
@@ -236,24 +233,9 @@ Item {
             // closeButtonReserve for the one place that actually collided
             // with it.
             y: 8
-            color: closeArea.containsMouse ? Theme.layer2Hover : Theme.layer1
             opacity: root.sub(root.morph, 0.35, 0.7)
             visible: opacity > 0.01
-            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
-
-            Text {
-                anchors.centerIn: parent
-                text: "✕"
-                font.pixelSize: 10
-                color: Theme.text
-            }
-            MouseArea {
-                id: closeArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.closeRequested()
-            }
+            onClicked: root.closeRequested()
         }
 
         // ---- the panel's own content, laid out in whatever space remains

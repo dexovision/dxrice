@@ -246,7 +246,12 @@ Item {
                 height: 3
                 radius: 1.5
                 x: tabBar.activeIndex * tabBar.tabWidth + (tabBar.tabWidth - width) / 2
-                y: tabBar.height - height
+                // A few px clear of tabBar's own bottom edge -- flush
+                // against it put this accent bar's bottom edge touching the
+                // nav-strip seam immediately below (see that Rectangle's own
+                // comment), reading as one confused double line under the
+                // active tab instead of two separate, legible marks.
+                y: tabBar.height - height - 4
                 color: Theme.accent
                 Behavior on x {
                     NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
@@ -608,6 +613,30 @@ Item {
                         }
                     }
 
+                    // Brightness isn't audio -- it rode along at the bottom
+                    // of this card with no label of its own, so it read as
+                    // one more audio control instead of a second, distinct
+                    // group. A hairline + a small caption (the exact style
+                    // Card's own title already uses) gives it the same
+                    // "this is a named group" treatment Output/Input get
+                    // from Expandable, without needing a whole second Card
+                    // just for one row.
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Theme.surfaceHighlight
+                        visible: brightnessBackend.hasBacklight
+                    }
+                    Text {
+                        text: "Display"
+                        color: Theme.text
+                        opacity: Theme.opacityMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        font.letterSpacing: 0.5
+                        visible: brightnessBackend.hasBacklight
+                        height: visible ? implicitHeight : 0
+                    }
                     Row {
                         width: parent.width
                         spacing: Theme.padSm
@@ -831,9 +860,10 @@ Item {
                         visible: mediaBackend.artUrl.length === 0
                         text: "\uf001"
                         font.family: Theme.fontFamily
-                        // Hero glyph, deliberately outside the type scale (a single
-                        // large placeholder icon, not body text).
-                        font.pixelSize: 40
+                        // Large placeholder icon, not body text -- the
+                        // Display tier is the right token for a glyph this
+                        // size even though it's an icon, not a number.
+                        font.pixelSize: Theme.fontSizeDisplay
                         color: Theme.text
                         opacity: 0.4
                     }
