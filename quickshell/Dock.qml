@@ -50,23 +50,28 @@ PanelWindow {
     WlrLayershell.namespace: "dxrice-bar-dock"
     aboveWindows: true
     focusable: PanelManager.isOpen("taskbar")
-    Shortcut { sequence: "Escape"; enabled: root.focusable; onActivated: PanelManager.close("taskbar") }
+    // Disabled while the Add-Shortcut branch is open: AddShortcutBranch.qml
+    // owns its own Escape handler (closing just the branch, not the whole
+    // taskbar), and two enabled Shortcut items racing for the same key
+    // sequence is exactly the kind of ambiguity worth avoiding outright
+    // rather than hoping Qt resolves it the way this file wants.
+    Shortcut { sequence: "Escape"; enabled: root.focusable && !root.taskbarModalOpen; onActivated: PanelManager.close("taskbar") }
 
-    // Whether TaskbarManager's own Add-Shortcut dialog is open -- a real,
-    // separate top-level window (FloatingWindow), not part of this surface.
-    // The catch-all region below must suspend itself while it's open: that
-    // dialog isn't excluded from "everywhere outside dockIsland", so a
-    // click meant for its search box or text fields was being caught by
-    // THIS window's own full-screen dismiss region instead of ever
-    // reaching the dialog, closing the whole taskbar panel (and the dialog
-    // with it) the moment the user tried to type into it.
-    readonly property bool taskbarModalOpen: dockIsland.panelItem && dockIsland.panelItem.addDialogOpen
+    // Whether TaskbarManager's own Add-Shortcut branch is open. Unlike the
+    // FloatingWindow this used to be, the branch now lives inside THIS
+    // window (see addBranch below) -- but the click-outside-to-dismiss
+    // region below still has to suspend itself while it's open, for the
+    // same reason as before: a click meant for the branch's search box or
+    // text fields must never be caught by this window's own full-screen
+    // dismiss region first.
+    readonly property bool taskbarModalOpen: dockIsland.panelItem && dockIsland.panelItem.addPanelOpen
 
     // Same click-outside-to-dismiss pattern as TopBar.qml: the input region
     // only ever extends past dockIsland while Taskbar is actually open, and
     // collapses back to nothing the instant it closes.
     mask: Region {
         Region { item: dockIsland }
+        Region { item: addBranch }
         Region {
             x: 0; y: 0
             width: (PanelManager.isOpen("taskbar") && !root.taskbarModalOpen) ? root.width : 0
@@ -221,5 +226,22 @@ PanelWindow {
     Component {
         id: taskbarComponent
         TaskbarManager { onCloseRequested: PanelManager.close("taskbar") }
+    }
+
+    // The Add-Shortcut branch -- a sibling of dockIsland in THIS window,
+    // not a child of it. dockIsland's own surface clips to its growing
+    // bounds (ShellIsland.qml), so anything meant to visually extend past
+    // the taskbar panel's own rectangle has to live outside that clip;
+    // this window already spans the full screen height for exactly this
+    // kind of thing (see this file's own `implicitHeight` comment), so no
+    // second window is needed at all -- see AddShortcutBranch.qml's own
+    // header comment for the full account of what this replaces.
+    AddShortcutBranch {
+        id: addBranch
+        manager: dockIsland.panelItem
+        anchorIsland: dockIsland
+        screenWidth: root.width
+        screenHeight: root.height
+        edgeMargin: root.edgeMargin
     }
 }

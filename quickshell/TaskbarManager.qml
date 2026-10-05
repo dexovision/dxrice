@@ -25,9 +25,35 @@ Item {
     signal closeRequested()
 
     // Read by Dock.qml (via ShellIsland's panelItem alias) so its own
-    // click-outside-to-dismiss region can suspend itself while this dialog
-    // is open -- see the fix note on addDialog below for why that's needed.
-    readonly property bool addDialogOpen: addDialog.visible
+    // click-outside-to-dismiss region can suspend itself while the
+    // Add-Shortcut branch is open, and so Dock.qml knows to render that
+    // branch at all -- see AddShortcutBranch.qml for the actual UI this
+    // now drives (no longer a separate FloatingWindow; see that file's
+    // own comment for why).
+    property bool addPanelOpen: false
+
+    // State for AddShortcutBranch.qml, which binds to this Item (passed
+    // as its own `manager` property from Dock.qml) rather than owning
+    // this data itself -- TaskbarManager is still the one thing that
+    // knows how to list installed apps and actually add a shortcut; the
+    // branch is presentation + positioning only. (repoDir is already
+    // declared further down this file, reused here as-is.)
+    property var allApps: []
+    property string query: ""
+    readonly property var filteredApps: root.query.length === 0
+        ? root.allApps
+        : root.allApps.filter((a) => a.name.toLowerCase().includes(root.query.toLowerCase()))
+
+    Process {
+        id: appsProc
+        command: ["python3", root.repoDir + "/scripts/dxrice_list_desktop_apps.py"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { root.allApps = JSON.parse(this.text); } catch (e) { root.allApps = []; }
+            }
+        }
+    }
+    onAddPanelOpenChanged: if (addPanelOpen) appsProc.running = true
 
     // Drives the island's expanded height, so the surface fits the list rather
     // than every taskbar being padded out to a fixed 780px with dead space
@@ -392,7 +418,7 @@ Item {
                 anchors.top: parent.top
                 anchors.topMargin: Theme.padSm
                 x: header.width - width - Theme.padLg - header.closeButtonReserve
-                GlassButton { text: "Add"; variant: "primary"; onClicked: addDialog.visible = true }
+                GlassButton { text: "Add"; variant: "primary"; onClicked: root.addPanelOpen = !root.addPanelOpen }
             }
         }
 
@@ -769,166 +795,4 @@ Item {
         }
     }
 
-    // A real, separate top-level window (not a rectangle drawn inside this
-    // panel's own surface) -- Dock.qml's own click-outside-to-dismiss mask
-    // has no way to know this window exists, so a click meant for THIS
-    // window's search field or text inputs was landing on Dock's full-
-    // screen dismiss catcher instead and closing the whole taskbar panel,
-    // tearing this dialog down with it (it's a child of `root`, which
-    // ShellIsland destroys once the panel collapses). Fixed at the source
-    // via `addDialogOpen` above, which Dock.qml reads to suspend its own
-    // dismiss region while this is open -- not by trying to teach this
-    // dialog anything about Dock's geometry.
-    FloatingWindow {
-        id: addDialog
-        visible: false
-        title: "Add Shortcut"
-        color: "transparent"
-        implicitWidth: 380
-        implicitHeight: 520
-
-        property var allApps: []
-        property string query: ""
-        readonly property var filteredApps: addDialog.query.length === 0
-            ? addDialog.allApps
-            : addDialog.allApps.filter((a) => a.name.toLowerCase().includes(addDialog.query.toLowerCase()))
-
-        Process {
-            id: appsProc
-            command: ["python3", root.repoDir + "/scripts/dxrice_list_desktop_apps.py"]
-            stdout: StdioCollector {
-                onStreamFinished: {
-                    try { addDialog.allApps = JSON.parse(this.text); } catch (e) { addDialog.allApps = []; }
-                }
-            }
-        }
-        onVisibleChanged: if (visible) appsProc.running = true
-
-        ModalSurface {
-            id: addDialogSurface
-            anchors.fill: parent
-
-            Column {
-                anchors.fill: parent
-                anchors.margins: Theme.padLg
-                spacing: Theme.padMd
-
-                Item {
-                    width: parent.width
-                    height: Math.max(titleText.implicitHeight, closeBtn.height)
-                    Text {
-                        id: titleText
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "Add Shortcut"
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        font.weight: Font.DemiBold
-                    }
-                    CloseButton {
-                        id: closeBtn
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        onClicked: addDialog.visible = false
-                    }
-                }
-
-                Rectangle {
-                    width: parent.width; height: ShellSurface.rowHeight; radius: Theme.entryRadius
-                    color: Theme.inputFill
-                    border.width: Theme.borderWidth; border.color: Theme.borderIdle
-                    TextInput {
-                        id: searchInput
-                        anchors.fill: parent; anchors.margins: 8
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        verticalAlignment: TextInput.AlignVCenter
-                        onTextChanged: addDialog.query = text
-                    }
-                    Text { text: "Search installed apps..."; color: Theme.text; opacity: searchInput.text.length ? 0 : 0.5; anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter }
-                }
-
-                Flickable {
-                    width: parent.width
-                    height: 220
-                    contentHeight: appList.implicitHeight
-                    clip: true
-                    Column {
-                        id: appList
-                        width: parent.width
-                        Repeater {
-                            model: addDialog.filteredApps
-                            delegate: Rectangle {
-                                width: appList.width
-                                height: 36
-                                radius: Theme.entryRadius
-                                color: appArea.containsMouse ? Theme.active : "transparent"
-                                Behavior on color { ColorAnimation { duration: Theme.animMs } }
-                                Column {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 8
-                                    width: parent.width - 16
-                                    Text { text: modelData.name; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; elide: Text.ElideRight; width: parent.width }
-                                    Text { text: modelData.cmd; color: Theme.text; opacity: 0.6; font.pixelSize: Theme.fontSizeSmall; elide: Text.ElideRight; width: parent.width }
-                                }
-                                MouseArea {
-                                    id: appArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        root.addShortcut(modelData.name, modelData.cmd);
-                                        addDialog.visible = false;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Text { text: "Or add a custom shortcut"; color: Theme.text; opacity: 0.7; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily }
-
-                Rectangle {
-                    width: parent.width; height: ShellSurface.rowHeight; radius: Theme.entryRadius
-                    color: Theme.inputFill
-                    border.width: Theme.borderWidth; border.color: Theme.borderIdle
-                    TextInput {
-                        id: nameInput
-                        anchors.fill: parent; anchors.margins: 8
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        verticalAlignment: TextInput.AlignVCenter
-                    }
-                    Text { text: "Display name"; color: Theme.text; opacity: nameInput.text.length ? 0 : 0.5; anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter }
-                }
-                Rectangle {
-                    width: parent.width; height: ShellSurface.rowHeight; radius: Theme.entryRadius
-                    color: Theme.inputFill
-                    border.width: Theme.borderWidth; border.color: Theme.borderIdle
-                    TextInput {
-                        id: cmdInput
-                        anchors.fill: parent; anchors.margins: 8
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        verticalAlignment: TextInput.AlignVCenter
-                    }
-                    Text { text: "Command to run"; color: Theme.text; opacity: cmdInput.text.length ? 0 : 0.5; anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter }
-                }
-
-                GlassButton {
-                    text: "Add"
-                    variant: "primary"
-                    onClicked: {
-                        if (nameInput.text.length && cmdInput.text.length) {
-                            root.addShortcut(nameInput.text, cmdInput.text);
-                            nameInput.text = ""; cmdInput.text = "";
-                            addDialog.visible = false;
-                        }
-                    }
-                }
-            }
-        }
-
-        Shortcut { sequence: "Escape"; onActivated: addDialog.visible = false }
-    }
 }
