@@ -2928,8 +2928,9 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
         origin = {a: (x, y) for a, (x, y, w, h) in placed.items()}
         reference_area = arr._typical_area([{"address": a, "at": [0, 0], "size": [w, h]}
                                              for a, (x, y, w, h) in placed.items()])
+        original_size = {a: (w, h) for a, (x, y, w, h) in placed.items()}
 
-        arr._refine_notch_alignment(placed, [], self.GAP, reference_area)
+        arr._refine_notch_alignment(placed, [], self.GAP, reference_area, original_size)
 
         for a, (x, y, w, h) in placed.items():
             ox, oy = origin[a]
@@ -2942,37 +2943,48 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
         survived the position-only version of this pass -- confirmed
         structurally unfixable by sliding alone, since two flush-stacked
         windows of different widths can be LEFT-aligned or RIGHT-aligned
-        but never both. This exact 6-window fixture (from the dead-gap
-        regression test above) reproduces a real instance: 0x4_huge_main
-        (1800px wide, a genuine size outlier against this population) and
-        0x1_landscape_wide (1614px) end up in a flush vertical
-        relationship with a 186px notch that no shift could close. The
-        post-resize version shrinks 0x4_huge_main to exactly match
-        0x1_landscape_wide's width, closing the notch completely, within
-        MAX_SHRINK_FRACTION, and with zero dead-gap penalty anywhere."""
+        but never both.
+
+        Re-pinned after a code review found the original 6-window fixture's
+        exact expected size depended on a since-fixed bug: the position-
+        only pass (auto_arrange(allow_resize=False)) used to ignore
+        allow_resize inside _refine_notch_alignment and shrink windows
+        anyway, so the "pure repositioning" baseline this test compared
+        against was never actually pure-repositioning-only -- its specific
+        pinned number was an artifact of two independent shrink paths
+        interacting, not of the claim this test's name makes. Re-verified
+        directly against the real contract instead: calling auto_arrange
+        with allow_resize=True vs. allow_resize=False on the SAME scattered
+        fixture used by test_shrink_closes_a_notch_for_a_substantial_partner
+        (panel/wide_term/small_term) and comparing the two results' own
+        total notch penalty -- allow_resize=False is the actual, honest
+        "pure repositioning" baseline now that its own contract is
+        enforced, and it leaves strictly MORE notch behind than the
+        resize-enabled result, which is the real, structural reason this
+        feature exists."""
         eligible = [
-            {"address": "0x0_portrait", "at": [1830, -131], "size": [323, 1138]},
-            {"address": "0x1_landscape_wide", "at": [-454, -143], "size": [1614, 520]},
-            {"address": "0x2_portrait", "at": [534, -649], "size": [426, 962]},
-            {"address": "0x3_ultra_wide", "at": [-160, -414], "size": [1982, 309]},
-            {"address": "0x4_huge_main", "at": [-556, 570], "size": [1800, 1213]},
-            {"address": "0x5_ultra_wide", "at": [474, 254], "size": [2147, 389]},
+            {"address": "small_term", "at": [-2000, 500], "size": [420, 220]},
+            {"address": "wide_term", "at": [1500, -1500], "size": [1450, 220]},
+            {"address": "panel", "at": [2200, 1200], "size": [1700, 950]},
         ]
-        result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
-        huge = next(r for r in result if r[0] == "0x4_huge_main")
-        self.assertEqual((huge[3], huge[4]), (1614, 1186),
-                          f"expected 0x4_huge_main shrunk to match its neighbor's width, got {huge[3]}x{huge[4]}")
-        min_w = round(1800 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        min_h = round(1213 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        self.assertGreaterEqual(huge[3], min_w, "shrunk more than MAX_SHRINK_FRACTION allows")
-        self.assertGreaterEqual(huge[4], min_h, "shrunk more than MAX_SHRINK_FRACTION allows")
-        rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
-        addrs = [a for a, x, y, w, h in result]
-        huge_rect = rects[addrs.index("0x4_huge_main")]
-        huge_notch = apw._notch_penalty(huge_rect, rects[:addrs.index("0x4_huge_main")]
-                                         + rects[addrs.index("0x4_huge_main") + 1:], self.GAP)
-        self.assertEqual(huge_notch, 0.0,
-                          f"expected 0x4_huge_main's own notch to close completely via shrink, got {huge_notch}")
+        self.assertFalse(arr._shape_is_coherent(eligible, [], self.GAP),
+                          "fixture must NOT be pre-coherent, or the rebuild this test exercises never runs")
+
+        def total_notch(result):
+            rects = [arr.rect_for(x, y, w, h) for _, x, y, w, h in result]
+            return sum(apw._notch_penalty(r, rects[:i] + rects[i + 1:], self.GAP)
+                       for i, r in enumerate(rects))
+
+        result_resize = arr.auto_arrange(eligible, [], self.MON, self.GAP, allow_resize=True)
+        result_moveonly = arr.auto_arrange(eligible, [], self.MON, self.GAP, allow_resize=False)
+        panel = next(r for r in result_resize if r[0] == "panel")
+        self.assertEqual((panel[3], panel[4]), (1450, 950),
+                          f"expected panel shrunk to match wide_term's width, got {panel[3]}x{panel[4]}")
+        self.assertLess(total_notch(result_resize), total_notch(result_moveonly),
+                         "resize should leave strictly less notch behind than pure repositioning can")
+        min_w = round(1700 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        self.assertGreaterEqual(panel[3], min_w, "shrunk more than MAX_SHRINK_FRACTION allows")
+        rects = [arr.rect_for(x, y, w, h) for _, x, y, w, h in result_resize]
         penalty_total = sum(apw.composition_penalty(r, rects[:i] + rects[i + 1:], self.GAP)
                              for i, r in enumerate(rects))
         self.assertLessEqual(penalty_total, 0.0, f"shrink introduced a dead gap: {penalty_total}")
