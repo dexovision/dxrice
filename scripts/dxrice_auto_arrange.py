@@ -230,7 +230,8 @@ NOTCH_REFINE_MAX_TOTAL_SHIFT = 300.0
 NOTCH_REFINE_SHRINK_MIN_DEPTH = 100.0
 
 
-def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds=NOTCH_REFINE_MAX_ROUNDS):
+def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_size,
+                             allow_resize=True, max_rounds=NOTCH_REFINE_MAX_ROUNDS):
     """Post-hoc structural repair for a root cause live-traced directly,
     not assumed: the incremental build places one window at a time with
     only the ALREADY-PLACED windows visible. A window's locally-best
@@ -279,6 +280,23 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds
     composition visibility a mid-build candidate structurally cannot
     have -- a repair of the construction, not a new objective.
 
+    original_size must be the window's TRUE pre-auto_arrange size (keyed by
+    address) -- NOT read from `placed`, which by the time this function runs
+    may already reflect a shrink the main incremental build applied to that
+    same window. Live-caught bug: capturing it from `placed` at this
+    function's own entry let the two independent shrink paths (the main
+    build's own per-step resize, then this function's own shrink extension)
+    compound past MAX_SHRINK_FRACTION in a single auto_arrange call, because
+    each path's "has this already been shrunk once" check only ever saw its
+    own, already-reduced idea of "original."
+
+    allow_resize=False (propagated from auto_arrange's own parameter of the
+    same name) disables every shrink candidate this function can generate,
+    leaving only repositioning -- otherwise this function would silently
+    break auto_arrange(allow_resize=False)'s own documented "positions only,
+    no size changes" contract that main()'s second, post-settle pass relies
+    on.
+
     Mutates `placed` in place and returns nothing, matching this file's
     existing convention for the incremental build's own `placed` dict."""
     addrs = list(placed.keys())
@@ -322,12 +340,9 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds
     # exists to close (the reported range was 100-300px), so the cap
     # tracks that, not an arbitrarily larger "whatever the math wants."
     origin = {a: placed[a][:2] for a in addrs}
-    # Same cumulative-cap principle as position above, but for size: always
-    # measured against the TRUE original dimensions (not the current,
-    # possibly-already-shrunk ones), so repeated rounds can never compound
-    # past MAX_SHRINK_FRACTION in total -- the exact guarantee the per-step
-    # resize mechanism elsewhere in this file already relies on.
-    original_size = {a: placed[a][2:4] for a in addrs}
+    # original_size is a PARAMETER now (the caller's true pre-build sizes),
+    # not derived here -- see this function's own docstring for the
+    # compounding-shrink bug that fixed.
 
     # Final whole-pass safety net, same pattern as the resize-vs-moveonly
     # check elsewhere in this file: every individual step above is already
@@ -376,11 +391,18 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds
             # A notch is reason enough to consider REPOSITIONING always
             # (moving costs nothing structurally); SHRINKING needs one of
             # these two reasons first.
-            self_is_outlier = _mass_ratio(w, h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR
             for other_addr in addrs:
                 if other_addr == addr:
                     continue
                 rx0, ry0, rx1, ry1 = rect_for(x, y, w, h)
+                # Recomputed fresh on every other_addr iteration (not once
+                # before this loop, against whatever w,h the addr started
+                # the round with) -- live-caught bug: a one-time computation
+                # went stale the moment an earlier other_addr in the SAME
+                # round accepted a shrink against this addr, letting a
+                # window that no longer qualifies as an outlier after that
+                # shrink still take a SECOND shrink later in the same round.
+                self_is_outlier = _mass_ratio(w, h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR
                 orx0, ory0, orx1, ory1 = rect_for(*placed[other_addr])
                 # partner_is_substantial is judged along the SPECIFIC axis
                 # a shrink would actually change (width for a vstack pair,
@@ -422,60 +444,73 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds
                     if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
                         candidates.append((orx0 - rx0, 0, w, h))  # move: align left edges
                         candidates.append((orx1 - rx1, 0, w, h))  # move: align right edges
-                        # Shrink: pull in whichever side sticks out past
-                        # `other_addr`, instead of moving to meet it --
-                        # "5-10% shrink to eliminate a skinny side
-                        # channel," the exact trade-off this file's own
-                        # resize mechanism already makes elsewhere, just
-                        # driven by a silhouette mismatch instead of a
-                        # population-outlier comparison. Gated on
-                        # can_shrink -- see its own comment above; here the
-                        # relevant axis is WIDTH. The partner-substantial
-                        # path additionally requires a MATERIAL notch depth
-                        # (NOTCH_REFINE_SHRINK_MIN_DEPTH) -- live-caught
-                        # without it: two entirely ordinary, similar-sized
-                        # windows with plenty of open canvas got a modest
-                        # but pointless shrink purely to close a 63px
-                        # edge mismatch neither window's own size justified
-                        # worrying about. self_is_outlier is NOT subject to
-                        # this floor -- a genuine population outlier was
-                        # already the established bar for "worth resizing"
-                        # before this shrink extension existed at all.
-                        other_w = orx1 - orx0
-                        depth_w = max(rx0 - orx0, rx1 - orx1, orx0 - rx0, orx1 - rx1)
-                        partner_substantial = (other_w > 0 and w / other_w <= RESIZE_ELIGIBLE_RATIO_FLOOR
-                                                and depth_w >= NOTCH_REFINE_SHRINK_MIN_DEPTH)
-                        can_shrink = self_is_outlier or partner_substantial
-                        if can_shrink and rx0 < orx0:  # sticks out further left
-                            new_w = rx1 - orx0
-                            if new_w >= min_w:
-                                candidates.append((orx0 - x, 0, new_w, h))
-                        if can_shrink and rx1 > orx1:  # sticks out further right
-                            new_w = orx1 - rx0
-                            if new_w >= min_w:
-                                candidates.append((0, 0, new_w, h))
+                        # Shrink candidates are generated only when the
+                        # caller actually allows a resize -- auto_arrange's
+                        # own allow_resize=False contract means "positions
+                        # only, no size changes at all" (see main()'s own
+                        # position-only settle pass), and this function must
+                        # honor that the same way the main incremental build
+                        # already does for its own per-step resize mechanism.
+                        if allow_resize:
+                            # Shrink: pull in whichever side sticks out past
+                            # `other_addr`, instead of moving to meet it --
+                            # "5-10% shrink to eliminate a skinny side
+                            # channel," the exact trade-off this file's own
+                            # resize mechanism already makes elsewhere, just
+                            # driven by a silhouette mismatch instead of a
+                            # population-outlier comparison. Gated on
+                            # can_shrink -- see its own comment above; here
+                            # the relevant axis is WIDTH. The partner-
+                            # substantial path additionally requires a
+                            # MATERIAL notch depth
+                            # (NOTCH_REFINE_SHRINK_MIN_DEPTH) -- live-caught
+                            # without it: two entirely ordinary, similar-
+                            # sized windows with plenty of open canvas got a
+                            # modest but pointless shrink purely to close a
+                            # 63px edge mismatch neither window's own size
+                            # justified worrying about. self_is_outlier is
+                            # NOT subject to this floor -- a genuine
+                            # population outlier was already the established
+                            # bar for "worth resizing" before this shrink
+                            # extension existed at all.
+                            other_w = orx1 - orx0
+                            depth_w = max(rx0 - orx0, rx1 - orx1, orx0 - rx0, orx1 - rx1)
+                            partner_substantial = (other_w > 0 and w / other_w <= RESIZE_ELIGIBLE_RATIO_FLOOR
+                                                    and depth_w >= NOTCH_REFINE_SHRINK_MIN_DEPTH)
+                            can_shrink = self_is_outlier or partner_substantial
+                            if can_shrink and rx0 < orx0:  # sticks out further left
+                                new_w = rx1 - orx0
+                                if new_w >= min_w:
+                                    candidates.append((orx0 - x, 0, new_w, h))
+                            if can_shrink and rx1 > orx1:  # sticks out further right
+                                new_w = orx1 - rx0
+                                if new_w >= min_w:
+                                    candidates.append((0, 0, new_w, h))
                 if yg == 0.0 and abs(xg - gap) < FLUSH_TOL:
                     span = min(ry1 - ry0, ory1 - ory0)
                     frac = (min(ry1, ory1) - max(ry0, ory0)) / span if span > 0 else 0.0
                     if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
                         candidates.append((0, ory0 - ry0, w, h))  # move: align top edges
                         candidates.append((0, ory1 - ry1, w, h))  # move: align bottom edges
-                        # Relevant axis here is HEIGHT -- see the width
-                        # branch above for why partner-substantial also
-                        # requires a material depth.
-                        other_h = ory1 - ory0
-                        depth_h = max(ry0 - ory0, ry1 - ory1, ory0 - ry0, ory1 - ry1)
-                        partner_substantial = (other_h > 0 and h / other_h <= RESIZE_ELIGIBLE_RATIO_FLOOR
-                                                and depth_h >= NOTCH_REFINE_SHRINK_MIN_DEPTH)
-                        can_shrink = self_is_outlier or partner_substantial
-                        if can_shrink and ry0 < ory0:  # sticks out further up
-                            new_h = ry1 - ory0
-                            if new_h >= min_h:
-                                candidates.append((0, ory0 - y, w, new_h))
-                        if can_shrink and ry1 > ory1:  # sticks out further down
-                            new_h = ory1 - ry0
-                            if new_h >= min_h:
-                                candidates.append((0, 0, w, new_h))
+                        # Gated on allow_resize for the same reason as the
+                        # width branch above.
+                        if allow_resize:
+                            # Relevant axis here is HEIGHT -- see the width
+                            # branch above for why partner-substantial also
+                            # requires a material depth.
+                            other_h = ory1 - ory0
+                            depth_h = max(ry0 - ory0, ry1 - ory1, ory0 - ry0, ory1 - ry1)
+                            partner_substantial = (other_h > 0 and h / other_h <= RESIZE_ELIGIBLE_RATIO_FLOOR
+                                                    and depth_h >= NOTCH_REFINE_SHRINK_MIN_DEPTH)
+                            can_shrink = self_is_outlier or partner_substantial
+                            if can_shrink and ry0 < ory0:  # sticks out further up
+                                new_h = ry1 - ory0
+                                if new_h >= min_h:
+                                    candidates.append((0, ory0 - y, w, new_h))
+                            if can_shrink and ry1 > ory1:  # sticks out further down
+                                new_h = ory1 - ry0
+                                if new_h >= min_h:
+                                    candidates.append((0, 0, w, new_h))
                 for dx, dy, nw, nh in candidates:
                     if dx == 0 and dy == 0 and nw == w and nh == h:
                         continue
@@ -495,6 +530,19 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, max_rounds
                     if correctness_after <= correctness_before + 1e-6 and notch_after < notch_before - 1e-6:
                         improved = True
                         x, y, w, h = x + dx, y + dy, nw, nh
+                        # Stop consuming this other_addr's candidate list --
+                        # live-caught bug: the remaining candidates here were
+                        # computed as deltas against the PRE-acceptance
+                        # x,y,w,h, so evaluating them against the just-
+                        # updated values above produced geometrically wrong
+                        # trials (a "shrink" candidate computed before an
+                        # earlier shrink was accepted could end up GROWING
+                        # the window past its own original bound once
+                        # applied on top of the new state). The next
+                        # other_addr's candidates are unaffected -- they're
+                        # built fresh from the updated x,y,w,h at the top of
+                        # that iteration.
+                        break
                     else:
                         placed[addr] = saved
         if not improved:
@@ -1476,6 +1524,13 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
 
     reference_area = _typical_area(eligible)
     fixed_rects = [rect_for(*_xywh(w)) for w in fixed]
+    # Captured ONCE here, from `eligible` itself -- the TRUE pre-build size
+    # of every window -- and threaded into _refine_notch_alignment below
+    # rather than let it derive its own idea of "original" from `placed`
+    # (which by the time that function runs may already reflect a shrink
+    # the incremental build below just applied). See that function's own
+    # docstring for the compounding-shrink bug this closes.
+    true_original_size = {w["address"]: (w["size"][0], w["size"][1]) for w in eligible}
 
     def _build(allow_resize):
         """Runs the full incremental build once, either allowing resize
@@ -1557,7 +1612,8 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         # changes relative positions, so doing this before or after makes
         # no difference to the geometry -- before is simply closer to
         # where the rest of this function's structure already is).
-        _refine_notch_alignment(placed, fixed_rects, gap, reference_area)
+        _refine_notch_alignment(placed, fixed_rects, gap, reference_area,
+                                 true_original_size, allow_resize=allow_resize)
 
         # Rigid recenter: one (dx, dy) applied to every eligible window's
         # POSITION (never its size -- resize decisions are already final by
