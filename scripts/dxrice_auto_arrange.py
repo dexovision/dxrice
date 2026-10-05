@@ -1636,8 +1636,8 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         # _shape_is_coherent is checked before AND after: refine's own
         # internal safety net (correctness_cost/notch_cost) only guards
         # dead-gap and notch, which says nothing about the SEPARATE
-        # criteria (per-cluster aspect ratio, singleton distance ratios)
-        # a FUTURE press's own _shape_is_coherent precheck uses to decide
+        # criteria (per-cluster aspect ratio, singleton distance ratios) a
+        # FUTURE press's own _shape_is_coherent precheck uses to decide
         # whether anything needs rebuilding at all. Live-caught by a
         # repeated-press sweep: refine could take an already-coherent
         # layout and, chasing a real but minor notch improvement, shrink
@@ -1645,17 +1645,33 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         # ratio (or a singleton's relative distance) across one of those
         # separate thresholds -- invisible to refine's own checks, but it
         # meant the NEXT press's precheck saw "not coherent," forced a
-        # full rebuild that had no reason to run, and that rebuild's own
-        # fresh reference_area/ordering could open a SECOND, compounding
-        # shrink on top of the first. Reverting refine here when it turns
-        # an already-coherent layout incoherent costs nothing -- the main
-        # incremental build's own result is kept instead -- and avoids
-        # kicking off an unnecessary, destabilizing rebuild one press
-        # later for a notch gain _shape_is_coherent doesn't even measure.
+        # full rebuild that a genuinely settled layout had no reason to
+        # need, and that rebuild's fresh reference_area/ordering could
+        # open a SECOND, compounding shrink on top of the first -- the
+        # exact "next press must not get another opinion about that size"
+        # guarantee the shortcut above this one exists to provide, broken
+        # one layer down. Reverting refine here when it turns an already-
+        # coherent layout incoherent costs nothing (the main incremental
+        # build's own result is kept instead) and avoids kicking off an
+        # unnecessary, destabilizing rebuild one press later for a notch
+        # gain _shape_is_coherent doesn't even measure.
         def _coherent(p):
             as_eligible = [{"address": a, "at": [x, y], "size": [w, h]} for a, (x, y, w, h) in p.items()]
             return _shape_is_coherent(as_eligible, fixed_rects, gap)
 
+        # Only fires when the layout was ALREADY coherent before refine
+        # touched it: a two-variant empirical comparison (full 540-layout
+        # repeated-press sweep) found that ALSO intervening when the
+        # pre-refine state was already incoherent -- retrying refine
+        # position-only instead of leaving its result alone -- made cross-
+        # press erosion WORSE (17-18/540) than doing nothing in that case
+        # (9/540, this version). The plausible-sounding "retry without
+        # resize, keep the repositioning" idea does not survive contact
+        # with the actual sweep, so it is deliberately NOT done here --
+        # measured, not assumed. When the input was already incoherent,
+        # this pass's full rebuild was always going to run regardless of
+        # what refine does, and there is no "already good" result to fall
+        # back to, so refine's own result (whatever it is) is left as-is.
         pre_refine_coherent = _coherent(placed)
         pre_refine_snapshot = dict(placed)
         _refine_notch_alignment(placed, fixed_rects, gap, reference_area,
