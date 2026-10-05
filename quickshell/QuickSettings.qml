@@ -677,47 +677,68 @@ Item {
                         expanded: wifiBackend.hasScanned && wifiBackend.networks.length <= 3
                         Repeater {
                             model: wifiBackend.networks
-                            delegate: Row {
+                            // A single Row cramming SSID + signal% + a
+                            // checkmark + a forget button + a "Connect"
+                            // button all onto one line was designed against
+                            // a much wider column than this card actually
+                            // gets (rightCol is 27% of the panel's width,
+                            // ~160px of content after padding) -- live-
+                            // caught by actually expanding this list: the
+                            // SSID text's width worked out to single
+                            // digits or negative, rendering real network
+                            // names (anything longer than ~2 characters)
+                            // entirely invisible. Two lines gives the name
+                            // the card's FULL width to elide against,
+                            // which this column was always going to need.
+                            delegate: Column {
                                 width: parent.width
-                                height: 26
-                                Text {
-                                    text: modelData.ssid
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmaller
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width - (modelData.connected ? 130 : 150)
-                                    elide: Text.ElideRight
+                                spacing: 2
+                                Row {
+                                    width: parent.width
+                                    spacing: Theme.padXs
+                                    Text {
+                                        text: modelData.ssid
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmaller
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - (modelData.connected ? 20 : 0)
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        visible: modelData.connected
+                                        text: "\u2713"
+                                        color: Theme.accent
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 16
+                                    }
                                 }
-                                Text {
-                                    text: modelData.signal + "%"
-                                    color: Theme.text
-                                    opacity: Theme.opacityMuted
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    width: 34
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                Text {
-                                    visible: modelData.connected
-                                    text: "\u2713"
-                                    color: Theme.accent
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 16
-                                }
-                                IconButton {
-                                    visible: modelData.known
-                                    glyph: ""
-                                    size: 24
-                                    destructive: true
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    onClicked: wifiBackend.forget(modelData.ssid)
-                                }
-                                GlassButton {
-                                    visible: !modelData.connected
-                                    text: "Connect"
-                                    variant: "secondary"
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    onClicked: wifiBackend.connectTo(modelData.ssid, modelData.security)
+                                Row {
+                                    width: parent.width
+                                    height: 24
+                                    Text {
+                                        text: modelData.signal + "%"
+                                        color: Theme.text
+                                        opacity: Theme.opacityMuted
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - 24 - (modelData.connected ? 0 : 76)
+                                    }
+                                    IconButton {
+                                        visible: modelData.known
+                                        glyph: ""
+                                        size: 24
+                                        destructive: true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: wifiBackend.forget(modelData.ssid)
+                                    }
+                                    GlassButton {
+                                        visible: !modelData.connected
+                                        text: "Connect"
+                                        variant: "secondary"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: wifiBackend.connectTo(modelData.ssid, modelData.security)
+                                    }
                                 }
                             }
                         }
@@ -733,39 +754,52 @@ Item {
                         expanded: btBackend.hasScanned && btBackend.devices.length <= 3
                         Repeater {
                             model: btBackend.devices
-                            delegate: Row {
+                            // Same fix as the Wi-Fi list just above:
+                            // one line had no real chance of fitting name
+                            // + battery% + forget + connect/disconnect in
+                            // this card's actual ~160px width.
+                            delegate: Column {
                                 width: parent.width
-                                height: 26
+                                spacing: 2
                                 Text {
                                     text: modelData.name
                                     color: Theme.text
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmaller
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width - (modelData.battery >= 0 ? 190 : 160)
+                                    width: parent.width
                                     elide: Text.ElideRight
                                 }
-                                Text {
-                                    visible: modelData.battery >= 0
-                                    text: modelData.battery + "%"
-                                    color: Theme.text
-                                    opacity: Theme.opacityMuted
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    width: 34
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                IconButton {
-                                    glyph: ""
-                                    size: 24
-                                    destructive: true
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    onClicked: btBackend.forget(modelData.mac)
-                                }
-                                GlassButton {
-                                    text: modelData.connected ? "Disconnect" : "Connect"
-                                    variant: "secondary"
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    onClicked: btBackend.toggleConnect(modelData.mac, modelData.connected)
+                                Row {
+                                    width: parent.width
+                                    height: 24
+                                    Text {
+                                        visible: modelData.battery >= 0
+                                        text: modelData.battery + "%"
+                                        color: Theme.text
+                                        opacity: Theme.opacityMuted
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - 24 - connectBtn.width
+                                    }
+                                    Item {
+                                        visible: !(modelData.battery >= 0)
+                                        width: parent.width - 24 - connectBtn.width
+                                        height: 1
+                                    }
+                                    IconButton {
+                                        glyph: ""
+                                        size: 24
+                                        destructive: true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: btBackend.forget(modelData.mac)
+                                    }
+                                    GlassButton {
+                                        id: connectBtn
+                                        text: modelData.connected ? "Disconnect" : "Connect"
+                                        variant: "secondary"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: btBackend.toggleConnect(modelData.mac, modelData.connected)
+                                    }
                                 }
                             }
                         }
