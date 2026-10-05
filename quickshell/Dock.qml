@@ -50,12 +50,24 @@ PanelWindow {
     WlrLayershell.namespace: "dxrice-bar-dock"
     aboveWindows: true
     focusable: PanelManager.isOpen("taskbar")
-    // Disabled while the Add-Shortcut branch is open: AddShortcutBranch.qml
-    // owns its own Escape handler (closing just the branch, not the whole
-    // taskbar), and two enabled Shortcut items racing for the same key
-    // sequence is exactly the kind of ambiguity worth avoiding outright
-    // rather than hoping Qt resolves it the way this file wants.
-    Shortcut { sequence: "Escape"; enabled: root.focusable && !root.taskbarModalOpen; onActivated: PanelManager.close("taskbar") }
+    // The ONE Escape handler for everything this window hosts. Qt delivers
+    // a key sequence claimed by two enabled Shortcuts in the same window
+    // as `activatedAmbiguously` to one of them and never as `activated`
+    // (verified directly: two enabled Escape Shortcuts -> only the
+    // ambiguous signal ever fires), so the three handlers this window used
+    // to carry (this one, TaskbarManager's always-enabled one, and the
+    // Add-Shortcut branch's) meant Escape closed nothing at all whenever
+    // two of them were enabled at once -- i.e. any time Taskbar was open.
+    // Escape peels one layer: the branch if it is open, else the panel.
+    Shortcut {
+        objectName: "dockEscape"
+        sequence: "Escape"
+        enabled: root.focusable
+        onActivated: {
+            if (root.taskbarModalOpen) dockIsland.panelItem.addPanelOpen = false;
+            else PanelManager.close("taskbar");
+        }
+    }
 
     // Whether TaskbarManager's own Add-Shortcut branch is open. Unlike the
     // FloatingWindow this used to be, the branch now lives inside THIS
@@ -64,14 +76,34 @@ PanelWindow {
     // same reason as before: a click meant for the branch's search box or
     // text fields must never be caught by this window's own full-screen
     // dismiss region first.
-    readonly property bool taskbarModalOpen: dockIsland.panelItem && dockIsland.panelItem.addPanelOpen
+    readonly property bool taskbarModalOpen: addBranch.open
 
     // Same click-outside-to-dismiss pattern as TopBar.qml: the input region
     // only ever extends past dockIsland while Taskbar is actually open, and
     // collapses back to nothing the instant it closes.
     mask: Region {
         Region { item: dockIsland }
-        Region { item: addBranch }
+        // Explicit geometry gated on the branch actually being open -- NOT
+        // `Region { item: addBranch }`. An item region is that item's
+        // mapped rectangle regardless of visible/opacity (see Quickshell's
+        // PendingRegion::build), and the branch Item keeps its full size
+        // while closed, so the item form left a permanent, invisible
+        // ~270x390 input-blocking rectangle beside the dock -- clicks on
+        // any application underneath it (lower half of the screen, to the
+        // right of the dock) were swallowed even with every panel closed.
+        // It was also stale while OPEN: an item region is only rebuilt on
+        // x/y/width/height changes, never on a scale animation, so the
+        // mask stayed frozen at the branch's half-animated size and its
+        // own close button sat outside its own input region. These
+        // explicit bounds track the branch's layout rect (the shape it
+        // settles into) and collapse to nothing the instant it starts to
+        // close, so input can never outlive what is on screen.
+        Region {
+            x: addBranch.x
+            y: addBranch.y
+            width: addBranch.inputActive ? addBranch.width : 0
+            height: addBranch.inputActive ? addBranch.height : 0
+        }
         Region {
             x: 0; y: 0
             width: (PanelManager.isOpen("taskbar") && !root.taskbarModalOpen) ? root.width : 0

@@ -55,6 +55,15 @@ Item {
     }
     onAddPanelOpenChanged: if (addPanelOpen) appsProc.running = true
 
+    // The branch belongs to an OPEN taskbar. This Item outlives a close by
+    // ShellIsland's keep-alive window, so without resetting here a quick
+    // close-then-reopen brought the branch back up on its own, and a
+    // closed taskbar kept a branch flagged open that nothing could see.
+    Connections {
+        target: PanelManager
+        function onCurrentChanged() { if (!PanelManager.isOpen("taskbar")) root.addPanelOpen = false; }
+    }
+
     // Drives the island's expanded height, so the surface fits the list rather
     // than every taskbar being padded out to a fixed 780px with dead space
     // under it (which is what the old fixed-size window did).
@@ -100,7 +109,9 @@ Item {
     property var cfg: ({})
     property bool loaded: false
 
-    Shortcut { sequence: "Escape"; onActivated: root.closeRequested() }
+    // No Escape Shortcut here: Dock.qml owns the single Escape handler for
+    // its whole window (see its comment for why a second one in the same
+    // window disables both).
 
     // blockLoading is required here, not optional: without it text() can
     // return "" if this runs before the async read finishes, which a

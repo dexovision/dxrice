@@ -1,0 +1,7 @@
+module Quickshell
+singleton Quickshell 1.0 Quickshell.qml
+ShellRoot 1.0 ShellRoot.qml
+PanelWindow 1.0 PanelWindow.qml
+FloatingWindow 1.0 FloatingWindow.qml
+LazyLoader 1.0 LazyLoader.qml
+Region 1.0 Region.qml

@@ -1,0 +1,5 @@
+module Quickshell.Wayland
+ExclusionMode 1.0 ExclusionMode.qml
+WlrLayer 1.0 WlrLayer.qml
+WlSessionLock 1.0 WlSessionLock.qml
+WlSessionLockSurface 1.0 WlSessionLockSurface.qml
