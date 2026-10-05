@@ -1531,6 +1531,26 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
     # the incremental build below just applied). See that function's own
     # docstring for the compounding-shrink bug this closes.
     true_original_size = {w["address"]: (w["size"][0], w["size"][1]) for w in eligible}
+    # This function's OWN allow_resize parameter -- captured under a
+    # different name because _build below declares its own parameter of
+    # the same name, which shadows this one inside _build's body. The two
+    # are NOT interchangeable: _build is called with allow_resize=False
+    # TWICE for two different reasons -- once when THIS function's own
+    # caller asked for positions-only (outer_allow_resize is False too,
+    # and refine must honor that, full stop, to keep the documented "no
+    # size changes at all" contract main()'s second pass relies on), and
+    # once purely as an internal "what would a true move-only alternative
+    # look like" comparison candidate a few lines below (outer_allow_resize
+    # is still True there -- the caller never asked for positions-only,
+    # this function is just building a baseline to compare against). Only
+    # the first case is the contract Finding #1 was about; refine's own
+    # shrink staying available for the second case is what let this file's
+    # existing 6-window live-user-report regression test close a real,
+    # reported notch at all -- gating refine on _build's inner flag instead
+    # of this one was tried first and broke that exact case, live-caught
+    # by noticing the reported-gap fixture regressed even though every
+    # existing automated check still passed.
+    outer_allow_resize = allow_resize
 
     def _build(allow_resize):
         """Runs the full incremental build once, either allowing resize
@@ -1613,7 +1633,7 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         # no difference to the geometry -- before is simply closer to
         # where the rest of this function's structure already is).
         _refine_notch_alignment(placed, fixed_rects, gap, reference_area,
-                                 true_original_size, allow_resize=allow_resize)
+                                 true_original_size, allow_resize=outer_allow_resize)
 
         # Rigid recenter: one (dx, dy) applied to every eligible window's
         # POSITION (never its size -- resize decisions are already final by

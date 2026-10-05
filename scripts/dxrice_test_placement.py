@@ -836,39 +836,42 @@ class TestSuperGResize(unittest.TestCase):
         composition_penalty into _final_cost, the same fixture correctly
         falls back to move-only (0x4_huge_main keeps its original size)
         because the move-only alternative has zero dead-gap penalty
-        anywhere, which the resize-enabled alternative does not."""
-        eligible = [
-            self._mk("0x0_portrait", 1830, -131, 323, 1138),
-            self._mk("0x1_landscape_wide", -454, -143, 1614, 520),
-            self._mk("0x2_portrait", 534, -649, 426, 962),
-            self._mk("0x3_ultra_wide", -160, -414, 1982, 309),
-            self._mk("0x4_huge_main", -556, 570, 1800, 1213),
-            self._mk("0x5_ultra_wide", 474, 254, 2147, 389),
-        ]
-        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        anywhere, which the resize-enabled alternative does not.
+
+        _refine_notch_alignment is stubbed out for this test: it now runs
+        a further, independently-tested pass on top of whichever build
+        wins here (see TestNotchAlignmentRefinement), and on this exact
+        fixture it legitimately shrinks 0x4_huge_main further still (to
+        1614px, matching 0x1_landscape_wide's width). That is real,
+        separately-verified behavior, not this test's concern -- mixing
+        it in here previously forced this test to assert a weaker "not
+        equal to one specific known-bad value" instead of the one value
+        that actually encodes what THIS test exists to check: does
+        _final_cost's own dead-gap term correctly reject the bad resize
+        and fall back to true move-only, on its own, with nothing else
+        layered on top."""
+        orig_refine = arr._refine_notch_alignment
+        arr._refine_notch_alignment = lambda *a, **k: None
+        try:
+            eligible = [
+                self._mk("0x0_portrait", 1830, -131, 323, 1138),
+                self._mk("0x1_landscape_wide", -454, -143, 1614, 520),
+                self._mk("0x2_portrait", 534, -649, 426, 962),
+                self._mk("0x3_ultra_wide", -160, -414, 1982, 309),
+                self._mk("0x4_huge_main", -556, 570, 1800, 1213),
+                self._mk("0x5_ultra_wide", 474, 254, 2147, 389),
+            ]
+            result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        finally:
+            arr._refine_notch_alignment = orig_refine
         huge = next(r for r in result if r[0] == "0x4_huge_main")
-        # Re-pick, same root cause as several other fixtures this session:
-        # _refine_notch_alignment (added after this test was written) now
-        # runs a further, independently-verified-safe pass on TOP of the
-        # move-only result this test originally pinned -- 0x4_huge_main's
-        # 1800px width happened to be legitimately shrinkable (it passes
-        # the same oversized-relative-to-population gate the per-step
-        # resize mechanism uses) to exactly 1614px, matching
-        # 0x1_landscape_wide's own width and closing a real silhouette
-        # notch between them. This is a GENUINE further improvement, not
-        # a loosening: confirmed via the exact assertion below (the one
-        # that actually encodes this test's real intent), which still
-        # passes -- zero net dead-gap penalty anywhere, i.e. still not the
-        # BAD resize (1440x970, a real 122px gap) this test exists to
-        # catch. The exact pre-refinement size is no longer the right
-        # thing to assert; "no dead gap" always was.
+        self.assertEqual((huge[3], huge[4]), (1800, 1213),
+                          f"expected fallback to move-only (original size kept), got {huge[3]}x{huge[4]}")
         rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
         penalty_total = sum(
             apw.composition_penalty(r, rects[:i] + rects[i + 1:], GAP) for i, r in enumerate(rects)
         )
         self.assertLessEqual(penalty_total, 0.0, f"result should have no net dead-gap penalty: {penalty_total}")
-        self.assertNotEqual((huge[3], huge[4]), (1440, 970),
-                             "the specific BAD resize this test exists to catch was kept")
 
     def test_position_only_already_good_resizes_nothing(self):
         """6: a composition where move-only already produces a good result
@@ -2398,9 +2401,26 @@ class TestResizeSettleGapCorrection(unittest.TestCase):
                 {"address": "W8", "at": [1888, 961], "size": [700, 500]}]
 
     def test_positions_only_pass_never_changes_a_size(self):
+        # The third layout here is deliberately the live-user-report
+        # fixture from TestNotchAlignmentRefinement -- a uniform-size
+        # layout (the other two) never exercises _refine_notch_alignment's
+        # own shrink path at all (nothing is a size outlier or has a
+        # substantial misaligned partner), so it could never have caught
+        # the regression where that function ignored allow_resize entirely
+        # and shrank windows anyway during this exact "positions only"
+        # pass. This one genuinely shrinks under allow_resize=True (see
+        # TestNotchAlignmentRefinement.test_shrink_closes_a_notch_pure_
+        # repositioning_cannot), so it is the one actually capable of
+        # catching that bug here.
         for layout in (self._seeded(),
                        [{"address": f"M{i}", "at": [(i % 4) * 510, (i // 4) * 410],
-                         "size": [500, 400]} for i in range(9)]):
+                         "size": [500, 400]} for i in range(9)],
+                       [{"address": "0x0_portrait", "at": [1830, -131], "size": [323, 1138]},
+                        {"address": "0x1_landscape_wide", "at": [-454, -143], "size": [1614, 520]},
+                        {"address": "0x2_portrait", "at": [534, -649], "size": [426, 962]},
+                        {"address": "0x3_ultra_wide", "at": [-160, -414], "size": [1982, 309]},
+                        {"address": "0x4_huge_main", "at": [-556, 570], "size": [1800, 1213]},
+                        {"address": "0x5_ultra_wide", "at": [474, 254], "size": [2147, 389]}]):
             with self.subTest(n=len(layout)):
                 result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP, allow_resize=False)
                 by_addr = {a: (w, h) for a, _x, _y, w, h in result}
