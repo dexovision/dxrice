@@ -706,7 +706,7 @@ Item {
                                 }
                                 IconButton {
                                     visible: modelData.known
-                                    glyph: "_forget"
+                                    glyph: ""
                                     size: 24
                                     destructive: true
                                     anchors.verticalCenter: parent.verticalCenter
