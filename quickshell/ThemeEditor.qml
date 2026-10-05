@@ -554,7 +554,10 @@ PanelWindow {
                         enabled: !root.applying
                         onClicked: root.apply()
                     }
-                    IconButton { glyph: "✕"; onClicked: PanelManager.close("theme") }
+                    CloseButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: PanelManager.close("theme")
+                    }
                 }
             }
 

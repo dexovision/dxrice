@@ -14,22 +14,9 @@ FloatingWindow {
 
     Shortcut { sequence: "Escape"; onActivated: root.visible = false }
 
-    RectangularShadow {
-        anchors.fill: pwSurface
-        radius: pwSurface.radius
-        color: Theme.shadowColor
-        blur: Theme.elevationBlur(3)
-        spread: Theme.elevationSpread(3)
-        offset.y: Theme.elevationOffsetY(3)
-    }
-
-    Rectangle {
+    ModalSurface {
         id: pwSurface
         anchors.fill: parent
-        radius: Theme.roundingXl
-        color: Theme.bg
-        border.width: 1
-        border.color: Theme.border
 
         Column {
             anchors.fill: parent

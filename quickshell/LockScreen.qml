@@ -83,10 +83,10 @@ WlSessionLock {
                     anchors.horizontalCenter: parent.horizontalCenter
                     color: Theme.textActive
                     font.family: Theme.fontFamily
-                    // The one deliberately huge display size in this whole
-                    // shell -- a lock screen clock is meant to dominate,
-                    // same as every reference rice's own lock screen.
-                    font.pixelSize: 72
+                    // A lock screen clock is meant to dominate, same as
+                    // every reference rice's own lock screen -- the same
+                    // tier QuickSettings' own dashboard clock uses.
+                    font.pixelSize: Theme.fontSizeHero
                     font.weight: Font.Light
                 }
                 Text {
@@ -228,22 +228,9 @@ WlSessionLock {
                     NumberAnimation { target: shakeAnim; property: "offset"; from: -6; to: 0; duration: 50 }
                 }
 
-                RectangularShadow {
-                    anchors.fill: cardSurface
-                    radius: cardSurface.radius
-                    color: Theme.shadowColor
-                    blur: Theme.elevationBlur(3)
-                    spread: Theme.elevationSpread(3)
-                    offset.y: Theme.elevationOffsetY(3)
-                }
-
-                Rectangle {
+                ModalSurface {
                     id: cardSurface
                     anchors.fill: parent
-                    radius: Theme.roundingXl
-                    color: Theme.bg
-                    border.width: 1
-                    border.color: Theme.border
 
                     Column {
                         id: cardColumn

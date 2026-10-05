@@ -120,20 +120,10 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         Behavior on scale { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel } }
 
-        RectangularShadow {
-            anchors.fill: card
-            radius: card.radius
-            color: Theme.shadowColor
-            blur: Theme.elevationBlur(2)
-            spread: Theme.elevationSpread(2)
-            offset.y: Theme.elevationOffsetY(2)
-        }
-
-        Rectangle {
+        ModalSurface {
             id: card
             anchors.fill: parent
-            radius: Theme.roundingXl
-            color: Theme.bg
+            elevation: 2
 
             Column {
                 anchors.centerIn: parent
