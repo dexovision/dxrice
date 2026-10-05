@@ -26,13 +26,21 @@ import QtQuick
 // instead of owning any of that state itself.
 Item {
     id: root
+    objectName: "addShortcutBranch"
     required property Item manager
     required property Item anchorIsland
     required property real screenWidth
     required property real screenHeight
     required property real edgeMargin
 
-    readonly property bool open: !!(manager && manager.addPanelOpen)
+    // Gated on the taskbar itself being open too, so closing the taskbar
+    // (click-outside, IPC, SUPER+C's closeCurrent) closes this branch in
+    // the same frame rather than leaving it up through the collapse.
+    readonly property bool open: !!(manager && manager.addPanelOpen) && PanelManager.isOpen("taskbar")
+    // Whether this branch may receive pointer input at all -- read by
+    // Dock.qml's input mask. False the moment a close begins, so a fading
+    // branch never intercepts clicks meant for what is underneath it.
+    readonly property bool inputActive: root.open
     readonly property real branchWidth: 320
     readonly property real branchHeight: Math.min(460, root.screenHeight - root.edgeMargin * 2)
     readonly property real gap: Theme.padLg
@@ -94,6 +102,7 @@ Item {
                 }
                 CloseButton {
                     id: closeBtn
+                    objectName: "addShortcutBranchClose"
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     onClicked: root.manager.addPanelOpen = false
@@ -196,6 +205,4 @@ Item {
             }
         }
     }
-
-    Shortcut { sequence: "Escape"; enabled: root.open; onActivated: root.manager.addPanelOpen = false }
 }
