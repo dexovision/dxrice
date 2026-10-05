@@ -24,6 +24,7 @@ Rectangle {
     Behavior on color { ColorAnimation { duration: Theme.durationFast } }
 
     Text {
+        font.family: Theme.fontFamily
         anchors.centerIn: parent
         text: "✕"
         font.pixelSize: 10

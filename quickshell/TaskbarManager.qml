@@ -663,6 +663,7 @@ Item {
                                         height: 20
                                         visible: !shortcutRow.pinned
                                         Text {
+                                            font.family: Theme.fontFamily
                                             anchors.centerIn: parent
                                             text: "⣿"
                                             color: Theme.text
@@ -688,6 +689,7 @@ Item {
                                         }
                                     }
                                     Text {
+                                        font.family: Theme.fontFamily
                                         anchors.left: parent.left
                                         anchors.leftMargin: Theme.padSm + 6
                                         anchors.verticalCenter: parent.verticalCenter
@@ -777,6 +779,7 @@ Item {
                                         }
                                     }
                                     Text {
+                                        font.family: Theme.fontFamily
                                         visible: (shortcutRow.meta.dxrice_icon_mode || "auto") === "image"
                                         text: shortcutRow.meta.dxrice_icon_path ? shortcutRow.meta.dxrice_icon_path : "No image chosen"
                                         color: Theme.text

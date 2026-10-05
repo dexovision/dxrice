@@ -314,6 +314,10 @@ QtObject {
     // there was no token above `fontSizeExtraLarge`(28) at all, so every
     // "big number" spot picked its own bare size (40 twice, independently).
     readonly property int fontSizeMuted: 12
+    // A pane's own headline (a track title) -- between a card title and
+    // a hero readout. 28 (ExtraLarge) in this monospace face fits ~13
+    // characters in a third of a panel, which broke real titles mid-word.
+    readonly property int fontSizeHeadline: 22
     readonly property int fontSizeDisplay: 40
     // The single biggest text in the shell (the lock screen's clock) is a
     // materially different, bigger register than a card's hero stat -- kept

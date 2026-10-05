@@ -47,10 +47,12 @@ Item {
     // change cardPad itself -- Quick Settings and Taskbar's cards, which
     // already have real breathing room, are untouched.
     property real padding: ShellSurface.cardPad
+    // Height the title strip takes above the content column (0 untitled),
+    // for callers that size a fixed viewport inside an explicitly-sized card.
+    readonly property real titleHeight: root.title.length > 0 ? titleLabel.implicitHeight + Theme.padXs : 0
 
     implicitWidth: column.implicitWidth + root.padding * 2
-    implicitHeight: (root.title.length > 0 ? titleLabel.implicitHeight + Theme.padXs : 0)
-        + column.implicitHeight + root.padding * 2
+    implicitHeight: root.titleHeight + column.implicitHeight + root.padding * 2
 
     RectangularShadow {
         anchors.fill: surface

@@ -80,7 +80,10 @@ Column {
         id: clip
         width: parent.width
         clip: true
-        height: root.expanded ? body.implicitHeight : 0
+        // + body.y: the body starts padXs down, so clipping at just its
+        // implicitHeight cut the last 4px off every expanded list (the
+        // bottom of the last row's buttons, visibly).
+        height: root.expanded ? body.y + body.implicitHeight : 0
         Behavior on height {
             NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel }
         }

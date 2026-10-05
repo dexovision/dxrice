@@ -80,6 +80,10 @@ Item {
     readonly property real maxAvailableHeight: ShellSurface.screenHeight - ShellSurface.gap * 2 - ShellSurface.unit
     readonly property real viewportHeight: Math.max(120, Math.min(preferredPaneHeight, maxAvailableHeight - headerStackHeight))
     readonly property real contentHeight: headerStackHeight + viewportHeight
+    // What a pane can fill without scrolling: the viewport minus the pane
+    // loader's own top/bottom inset. A per-screen constant, like the rest of
+    // this contract -- safe for panes to size themselves from.
+    readonly property real paneAvailableHeight: viewportHeight - Theme.padLg * 2
 
 
     property string currentTab: "overview"
@@ -325,7 +329,7 @@ Item {
 
             Flickable {
                 id: paneFlickable
-                readonly property real paneHeight: (paneLoader.item ? paneLoader.item.implicitHeight : 0) + Theme.padMd * 2
+                readonly property real paneHeight: (paneLoader.item ? paneLoader.item.implicitHeight : 0) + Theme.padLg * 2
                 anchors.fill: parent
                 contentHeight: paneHeight
                 clip: true
@@ -334,18 +338,12 @@ Item {
                 Loader {
                     id: paneLoader
                     x: Theme.padXl
-                    // Centered, not pinned to the top: viewportHeight is a
-                    // fixed constant sized for Overview's content (see the
-                    // layout contract above) so it stays independent of any
-                    // per-tick-changing implicitHeight -- but that means a
-                    // shorter tab (Media, once its content-cap width bug was
-                    // fixed, is ~200px against a 420px viewport) left a
-                    // literal empty rectangle pinned below it. paneLoader's
-                    // own height already tracks its *loaded* item's
-                    // implicitHeight (a one-time value per tab switch, not a
-                    // ticking one), so centering against that is a paint-time
-                    // position, never a source of the restart-loop bug.
-                    y: Math.max(Theme.padMd, (paneFlickable.height - height) / 2)
+                    // Top-aligned. This used to centre each pane vertically
+                    // in the fixed viewport, which split any leftover space
+                    // into two dead bands (one between the tabs and the
+                    // content, one under it); panes now fill the viewport
+                    // deliberately instead, via root.paneAvailableHeight.
+                    y: Theme.padLg
                     width: parent.width - Theme.padXl * 2
                     sourceComponent: {
                         switch (root.currentTab) {
@@ -368,103 +366,36 @@ Item {
     }
 
     // ==================== DASHBOARD ====================
-    // A real 3-region dashboard home -- LEFT (connectivity + device
-    // identity), CENTER (a dominant hero clock + Audio, the one control
-    // surface people reach for most), RIGHT (networks + world clock) --
-    // instead of a flat two-column settings list. Every card here is the
-    // same real functionality/data that existed before, just given an
-    // actual dashboard composition with a genuine focal point instead of
-    // two evenly-weighted columns and no hierarchy.
+    // Three registers, read top to bottom:
+    //   PRIMARY   the time, large, alone on the left of a hero band, with
+    //             the date under it;
+    //   SECONDARY the things you actually touch -- the four toggles and
+    //             Audio on the left, Networks on the right -- as two equal
+    //             columns sharing one baseline and one bottom edge;
+    //   TERTIARY  world clocks (quiet, right side of the hero band) and the
+    //             device line at the very bottom: plain text, no surfaces.
+    //
+    // The previous layout split the pane into 27% / 46% / 27% columns, so
+    // the clock owned the middle while Networks -- the one list that needs
+    // horizontal room for a name, a detail and an action -- got ~160px and
+    // had to break every row over two lines with its Connect chips clipped.
+    // The clock keeps its size; it simply no longer costs a column.
     Component {
         id: overviewPane
-        Row {
+        Column {
+            id: dash
             width: parent ? parent.width : implicitWidth
-            spacing: Theme.pad2xl
+            spacing: Theme.padXl
 
-            Column {
-                id: leftCol
-                width: parent.width * 0.27
-                spacing: ShellSurface.cardGap
-
-                Card {
-                    width: parent.width
-                    title: "Connectivity"
-                    // 2x2 rather than a 4-wide row: at this card's real
-                    // width (now the narrow left column, ~27% of the
-                    // dashboard) a row of four 74px tiles was the exact
-                    // cause of "Do Not Disturb" truncating -- not
-                    // neighboring cards, the row itself had no room. Two
-                    // columns gives each tile its full natural width
-                    // regardless of card width, fixed at the composition
-                    // level rather than by shrinking text or widening the
-                    // whole dashboard.
-                    Grid {
-                        columns: 2
-                        spacing: Theme.padSm
-                        ToggleChip {
-                            glyph: ""; label: "Wi-Fi"
-                            active: root.wifiEnabled
-                            onToggled: (next) => root.setWifi(next)
-                        }
-                        ToggleChip {
-                            glyph: ""; label: "Bluetooth"
-                            active: root.bluetoothEnabled
-                            onToggled: (next) => root.setBluetooth(next)
-                        }
-                        ToggleChip {
-                            glyph: ""; label: "Do Not Disturb"
-                            active: root.dndActive
-                            onToggled: (next) => root.setDnd(next)
-                        }
-                        ToggleChip {
-                            glyph: "\u23fb"; label: "Keep Awake"
-                            active: root.idleInhibited
-                            onToggled: (next) => root.setIdleInhibit(next)
-                        }
-                    }
-                }
-
-                Column {
-                    width: parent.width
-                    spacing: Theme.padXs
-                    Text {
-                        text: "This device"
-                        color: Theme.text
-                        opacity: Theme.opacityMuted
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                    }
-                    Text {
-                        width: parent.width
-                        text: systemInfo.osName + " \u00b7 " + systemInfo.kernel
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmaller
-                        elide: Text.ElideRight
-                    }
-                    Text {
-                        width: parent.width
-                        text: systemInfo.hostname + " \u00b7 " + systemInfo.user + " \u00b7 up " + systemInfo.uptime
-                        color: Theme.text
-                        opacity: Theme.opacitySecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmaller
-                        elide: Text.ElideRight
-                    }
-                }
-            }
-
-            // CENTER: the dominant region -- a real focal point (the shell
-            // never had one), then the control people actually touch most.
-            Column {
-                id: centerCol
-                width: parent.width - leftCol.width - rightCol.width - parent.spacing * 2
-                spacing: Theme.padLg
+            // ---- hero band ----
+            Item {
+                id: hero
+                width: parent.width
+                height: heroClock.implicitHeight
 
                 Column {
                     id: heroClock
-                    width: parent.width
-                    spacing: Theme.padXs
+                    spacing: 0
                     property string timeText: Qt.formatDateTime(new Date(), "HH:mm")
                     property string dateText: Qt.formatDateTime(new Date(), "dddd, MMMM d")
                     Timer {
@@ -480,435 +411,434 @@ Item {
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeHero
                         font.weight: Font.Light
+                        // The glyph box carries ~15% empty leading above
+                        // the digits at this size; pulling the date up by
+                        // part of it keeps the two reading as one block.
+                        bottomPadding: -Math.round(Theme.fontSizeHero * 0.12)
                     }
                     Text {
+                        leftPadding: 3
                         text: heroClock.dateText
                         color: Theme.text
                         opacity: Theme.opacitySecondary
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeNormal
+                        font.pixelSize: Theme.fontSizeLarger
                     }
                 }
 
+                // Tertiary: other time zones, aligned to the date line so
+                // they sit inside the hero band instead of competing with
+                // the time itself.
+                Grid {
+                    id: worldGrid
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 2
+                    columns: 2
+                    columnSpacing: Theme.pad2xl
+                    rowSpacing: Theme.padSm
+                    visible: worldClock.cities.length > 0
+                    Repeater {
+                        model: worldClock.cities
+                        delegate: Row {
+                            required property var modelData
+                            spacing: Theme.padSm
+                            Text {
+                                width: 72
+                                text: modelData.label
+                                color: Theme.text
+                                opacity: Theme.opacityMuted
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmaller
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: modelData.time
+                                color: Theme.textActive
+                                opacity: Theme.opacityFaint
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmaller
+                                font.weight: Font.Medium
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- the controls ----
+            Row {
+                id: lower
+                width: parent.width
+                spacing: Theme.padLg
+                // Fills whatever the fixed pane viewport leaves (a constant
+                // per screen -- see the layout contract at the top of this
+                // file -- never a ticking value), so the Networks card's
+                // bottom edge lines up with the Audio card's instead of each
+                // column ending wherever its own content happens to.
+                // From the cards' IMPLICIT (content) heights, never their
+                // laid-out ones: the Audio card stretches to this row's
+                // height, so reading its `height` here would be a cycle.
+                height: Math.max(toggleRow.height + ShellSurface.cardGap + audioCard.implicitHeight,
+                                 root.paneAvailableHeight - hero.height - footer.height - dash.spacing * 2)
+                readonly property real colWidth: (width - spacing) / 2
+
+                Column {
+                    id: controlsCol
+                    width: lower.colWidth
+                    spacing: ShellSurface.cardGap
+
+                    // The toggles sit directly on the panel: each tile is
+                    // already its own Level-2 control, and wrapping four of
+                    // them in a bordered "Connectivity" card was a card
+                    // holding cards.
+                    Row {
+                        id: toggleRow
+                        width: parent.width
+                        spacing: Theme.padSm
+                        readonly property real tileWidth: (width - spacing * 3) / 4
+                        ToggleChip {
+                            width: toggleRow.tileWidth
+                            glyph: "\uf1eb"; label: "Wi-Fi"
+                            active: root.wifiEnabled
+                            onToggled: (next) => root.setWifi(next)
+                        }
+                        ToggleChip {
+                            width: toggleRow.tileWidth
+                            glyph: "\uf294"; label: "Bluetooth"
+                            active: root.bluetoothEnabled
+                            onToggled: (next) => root.setBluetooth(next)
+                        }
+                        ToggleChip {
+                            width: toggleRow.tileWidth
+                            glyph: "\uf1f6"; label: "Do Not Disturb"
+                            active: root.dndActive
+                            onToggled: (next) => root.setDnd(next)
+                        }
+                        ToggleChip {
+                            width: toggleRow.tileWidth
+                            glyph: "⏻"; label: "Keep Awake"
+                            active: root.idleInhibited
+                            onToggled: (next) => root.setIdleInhibit(next)
+                        }
+                    }
+
+                    Card {
+                        id: audioCard
+                        width: parent.width
+                        // Fills the rest of the column so its bottom edge
+                        // lines up with the Networks card's across the gutter.
+                        height: Math.max(implicitHeight, lower.height - toggleRow.height - parent.spacing)
+                        title: "Audio"
+                        Row {
+                            width: parent.width
+                            spacing: Theme.padSm
+                            IconButton {
+                                glyph: (root.sink && root.sink.audio && root.sink.audio.muted) ? "\u{f075f}" : "\uf028"
+                                size: Theme.iconSm
+                                anchors.verticalCenter: parent.verticalCenter
+                                onClicked: if (root.sink && root.sink.audio) root.sink.audio.muted = !root.sink.audio.muted
+                            }
+                            SliderRow {
+                                width: parent.width - Theme.iconSm - Theme.padSm
+                                from: 0; to: 100
+                                value: (root.sink && root.sink.audio) ? Math.round(root.sink.audio.volume * 100) : 0
+                                onChanged: (v) => { if (root.sink && root.sink.audio) root.sink.audio.volume = v / 100; }
+                            }
+                        }
+                        Expandable {
+                            width: parent.width
+                            title: "Output"
+                            trailingText: root.sink ? audioDeviceBackend.label(root.sink) : ""
+                            visible: audioDeviceBackend.outputs.length > 1
+                            height: visible ? implicitHeight : 0
+                            Repeater {
+                                model: audioDeviceBackend.outputs
+                                delegate: DeviceChoice {
+                                    label: audioDeviceBackend.label(modelData)
+                                    selected: root.sink && root.sink.name === modelData.name
+                                    onPicked: audioDeviceBackend.setOutput(modelData)
+                                }
+                            }
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: Theme.padSm
+                            IconButton {
+                                glyph: (root.source && root.source.audio && root.source.audio.muted) ? "\uf131" : "\uf130"
+                                size: Theme.iconSm
+                                anchors.verticalCenter: parent.verticalCenter
+                                onClicked: if (root.source && root.source.audio) root.source.audio.muted = !root.source.audio.muted
+                            }
+                            SliderRow {
+                                width: parent.width - Theme.iconSm - Theme.padSm
+                                from: 0; to: 100
+                                value: (root.source && root.source.audio) ? Math.round(root.source.audio.volume * 100) : 0
+                                onChanged: (v) => { if (root.source && root.source.audio) root.source.audio.volume = v / 100; }
+                            }
+                        }
+                        Expandable {
+                            width: parent.width
+                            title: "Input"
+                            trailingText: root.source ? audioDeviceBackend.label(root.source) : ""
+                            visible: audioDeviceBackend.inputs.length > 1
+                            height: visible ? implicitHeight : 0
+                            Repeater {
+                                model: audioDeviceBackend.inputs
+                                delegate: DeviceChoice {
+                                    label: audioDeviceBackend.label(modelData)
+                                    selected: root.source && root.source.name === modelData.name
+                                    onPicked: audioDeviceBackend.setInput(modelData)
+                                }
+                            }
+                        }
+
+                        // Brightness rides in the same card as one more
+                        // level you set, behind the same icon-then-slider
+                        // grammar as the two audio rows (no separate
+                        // caption + hairline: on a laptop it is simply a
+                        // third row).
+                        Row {
+                            width: parent.width
+                            spacing: Theme.padSm
+                            visible: brightnessBackend.hasBacklight
+                            height: visible ? implicitHeight : 0
+                            Text {
+                                width: Theme.iconSm
+                                anchors.verticalCenter: parent.verticalCenter
+                                horizontalAlignment: Text.AlignHCenter
+                                text: ""
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeNormal
+                            }
+                            SliderRow {
+                                width: parent.width - Theme.iconSm - Theme.padSm
+                                from: 1; to: 100
+                                value: brightnessBackend.percent
+                                onChanged: (v) => brightnessBackend.set(v)
+                            }
+                        }
+                    }
+                }
+
+                // ---- Networks: one card, two sections, one scroll ----
                 Card {
-                    width: parent.width
-                    title: "Audio"
-                    Row {
-                        width: parent.width
-                        spacing: Theme.padSm
-                        IconButton {
-                            glyph: (root.sink && root.sink.audio && root.sink.audio.muted) ? "" : ""
-                            size: Theme.iconSm
-                            anchors.verticalCenter: parent.verticalCenter
-                            onClicked: if (root.sink && root.sink.audio) root.sink.audio.muted = !root.sink.audio.muted
-                        }
-                        SliderRow {
-                            width: parent.width - 26 - Theme.padSm
-                            from: 0; to: 100
-                            value: (root.sink && root.sink.audio) ? Math.round(root.sink.audio.volume * 100) : 0
-                            onChanged: (v) => { if (root.sink && root.sink.audio) root.sink.audio.volume = v / 100; }
-                        }
-                    }
-                    Expandable {
-                        width: parent.width
-                        title: "Output"
-                        trailingText: root.sink ? audioDeviceBackend.label(root.sink) : ""
-                        visible: audioDeviceBackend.outputs.length > 1
-                        height: visible ? implicitHeight : 0
-                        Repeater {
-                            model: audioDeviceBackend.outputs
-                            delegate: Rectangle {
-                                width: parent.width
-                                height: 30
-                                radius: Theme.roundingXs
-                                color: outArea.containsMouse ? Theme.layer2Hover : "transparent"
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: Theme.padSm
-                                    anchors.right: check.left
-                                    text: audioDeviceBackend.label(modelData)
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmaller
-                                    elide: Text.ElideRight
-                                }
-                                Text {
-                                    id: check
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: Theme.padSm
-                                    visible: root.sink && root.sink.name === modelData.name
-                                    text: "\u2713"
-                                    color: Theme.accent
-                                }
-                                MouseArea {
-                                    id: outArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: audioDeviceBackend.setOutput(modelData)
-                                }
-                            }
-                        }
-                    }
+                    id: networksCard
+                    width: lower.colWidth
+                    height: lower.height
+                    // No card title: the Wi-Fi | Bluetooth switch is the
+                    // heading, so a "Networks" label above it would only eat
+                    // a row of an already-short card.
 
-                    Row {
-                        width: parent.width
-                        spacing: Theme.padSm
-                        IconButton {
-                            glyph: (root.source && root.source.audio && root.source.audio.muted) ? "" : ""
-                            size: Theme.iconSm
-                            anchors.verticalCenter: parent.verticalCenter
-                            onClicked: if (root.source && root.source.audio) root.source.audio.muted = !root.source.audio.muted
-                        }
-                        SliderRow {
-                            width: parent.width - 26 - Theme.padSm
-                            from: 0; to: 100
-                            value: (root.source && root.source.audio) ? Math.round(root.source.audio.volume * 100) : 0
-                            onChanged: (v) => { if (root.source && root.source.audio) root.source.audio.volume = v / 100; }
-                        }
-                    }
-                    Expandable {
-                        width: parent.width
-                        title: "Input"
-                        trailingText: root.source ? audioDeviceBackend.label(root.source) : ""
-                        visible: audioDeviceBackend.inputs.length > 1
-                        height: visible ? implicitHeight : 0
-                        Repeater {
-                            model: audioDeviceBackend.inputs
-                            delegate: Rectangle {
-                                width: parent.width
-                                height: 30
-                                radius: Theme.roundingXs
-                                color: inArea.containsMouse ? Theme.layer2Hover : "transparent"
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: Theme.padSm
-                                    anchors.right: inCheck.left
-                                    text: audioDeviceBackend.label(modelData)
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmaller
-                                    elide: Text.ElideRight
-                                }
-                                Text {
-                                    id: inCheck
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: Theme.padSm
-                                    visible: root.source && root.source.name === modelData.name
-                                    text: "\u2713"
-                                    color: Theme.accent
-                                }
-                                MouseArea {
-                                    id: inArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: audioDeviceBackend.setInput(modelData)
-                                }
-                            }
-                        }
-                    }
-
-                    // Brightness isn't audio -- it rode along at the bottom
-                    // of this card with no label of its own, so it read as
-                    // one more audio control instead of a second, distinct
-                    // group. A hairline + a small caption (the exact style
-                    // Card's own title already uses) gives it the same
-                    // "this is a named group" treatment Output/Input get
-                    // from Expandable, without needing a whole second Card
-                    // just for one row.
-                    Rectangle {
-                        width: parent.width
-                        height: 1
-                        color: Theme.surfaceHighlight
-                        visible: brightnessBackend.hasBacklight
-                    }
+                    // Wi-Fi | Bluetooth: one list at a time, each given the
+                    // whole card. Stacked, the second list always started
+                    // below the fold of a ~200px card.
                     Item {
-                        // The collapse-to-zero-when-hidden height lives on
-                        // this wrapper, not on the Text directly -- putting
-                        // `height: visible ? implicitHeight : 0` directly
-                        // on a Text caused a genuine binding loop under
-                        // rapid show/hide stress (caught live by toggling
-                        // this panel open/closed 6x in quick succession,
-                        // not by reading the QML), something this exact
-                        // same pattern on a plain Item/Row elsewhere in
-                        // this file never triggered.
+                        id: netHeader
                         width: parent.width
-                        height: label.visible ? label.implicitHeight : 0
+                        height: 26
+                        property string tab: "wifi"
+                        Row {
+                            id: segRow
+                            spacing: Theme.padXs
+                            anchors.verticalCenter: parent.verticalCenter
+                            Repeater {
+                                model: [{ id: "wifi", label: "Wi-Fi" }, { id: "bt", label: "Bluetooth" }]
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    readonly property bool active: netHeader.tab === modelData.id
+                                    width: segLabel.implicitWidth + Theme.padMd * 2
+                                    height: 24
+                                    radius: height / 2
+                                    color: active ? Theme.layer2Active : (segArea.containsMouse ? Theme.layer2Hover : "transparent")
+                                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                                    Text {
+                                        id: segLabel
+                                        anchors.centerIn: parent
+                                        text: parent.modelData.label
+                                        color: parent.active ? Theme.textActive : Theme.text
+                                        opacity: parent.active ? 1 : Theme.opacitySecondary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmaller
+                                        font.weight: parent.active ? Font.Medium : Font.Normal
+                                    }
+                                    MouseArea {
+                                        id: segArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { netHeader.tab = parent.modelData.id; netFlick.contentY = 0; }
+                                    }
+                                }
+                            }
+                        }
                         Text {
-                            id: label
-                            text: "Display"
+                            anchors.right: parent.right
+                            anchors.rightMargin: Theme.padXs
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: netHeader.tab === "wifi"
+                                ? (root.wifiEnabled && wifiBackend.hasScanned && wifiBackend.networks.length > 0
+                                    ? wifiBackend.networks.length + (wifiBackend.networks.length === 1 ? " network" : " networks") : "")
+                                : (root.bluetoothEnabled && btBackend.hasScanned && btBackend.devices.length > 0
+                                    ? btBackend.devices.length + " paired" : "")
                             color: Theme.text
                             opacity: Theme.opacityMuted
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
-                            font.letterSpacing: 0.5
-                            visible: brightnessBackend.hasBacklight
                         }
                     }
-                    Row {
+
+                    Item {
                         width: parent.width
-                        spacing: Theme.padSm
-                        visible: brightnessBackend.hasBacklight
-                        height: visible ? implicitHeight : 0
-                        Text { text: "\u2600"; color: Theme.text; opacity: Theme.opacityFaint; anchors.verticalCenter: parent.verticalCenter; width: 26; horizontalAlignment: Text.AlignHCenter }
-                        SliderRow {
-                            width: parent.width - 26 - Theme.padSm
-                            from: 1; to: 100
-                            value: brightnessBackend.percent
-                            onChanged: (v) => brightnessBackend.set(v)
+                        // The card's own fixed height minus its padding and
+                        // header -- a real viewport, so a long list scrolls
+                        // inside the card rather than stretching the panel.
+                        height: networksCard.height - networksCard.padding * 2 - netHeader.height - networksCard.spacing
+                    Flickable {
+                        id: netFlick
+                        anchors.fill: parent
+                        contentHeight: netColumn.implicitHeight
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+
+                        Column {
+                            id: netColumn
+                            width: netFlick.width
+                            spacing: 2
+
+                            Repeater {
+                                model: root.wifiEnabled && netHeader.tab === "wifi" ? wifiBackend.networks : []
+                                delegate: DeviceRow {
+                                    required property var modelData
+                                    glyph: root.wifiGlyph(modelData.signal)
+                                    title: modelData.ssid
+                                    detail: (modelData.connected ? "Connected \u00b7 " : "") + modelData.signal + "%"
+                                        + (root.isOpenNetwork(modelData.security) ? " \u00b7 Open" : " \u00b7 Secured")
+                                    connected: modelData.connected
+                                    actionText: modelData.connected ? "" : "Connect"
+                                    canForget: modelData.known
+                                    onActionClicked: wifiBackend.connectTo(modelData.ssid, modelData.security)
+                                    onForgetClicked: wifiBackend.forget(modelData.ssid)
+                                }
+                            }
+                            EmptyLine {
+                                visible: netHeader.tab === "wifi" && (!root.wifiEnabled || !wifiBackend.hasScanned || wifiBackend.networks.length === 0)
+                                text: !root.wifiEnabled ? "Wi-Fi is off"
+                                    : (!wifiBackend.hasScanned ? "Scanning\u2026" : "No networks found")
+                            }
+
+                            Repeater {
+                                model: root.bluetoothEnabled && netHeader.tab === "bt" ? btBackend.devices : []
+                                delegate: DeviceRow {
+                                    required property var modelData
+                                    glyph: modelData.connected ? "\u{f00b1}" : "\u{f00af}"
+                                    title: modelData.name
+                                    detail: (modelData.connected ? "Connected" : "Paired")
+                                        + (modelData.battery >= 0 ? " \u00b7 " + modelData.battery + "% battery" : "")
+                                    connected: modelData.connected
+                                    actionText: modelData.connected ? "Disconnect" : "Connect"
+                                    canForget: true
+                                    onActionClicked: btBackend.toggleConnect(modelData.mac, modelData.connected)
+                                    onForgetClicked: btBackend.forget(modelData.mac)
+                                }
+                            }
+                            EmptyLine {
+                                visible: netHeader.tab === "bt" && (!root.bluetoothEnabled || !btBackend.hasScanned || btBackend.devices.length === 0)
+                                text: !root.bluetoothEnabled ? "Bluetooth is off"
+                                    : (!btBackend.hasScanned ? "Looking for devices\u2026" : "No paired devices")
+                            }
                         }
+                    }
+                    ScrollHint {
+                        flickable: netFlick
+                        height: parent.height
+                        anchors.right: parent.right
+                        anchors.rightMargin: -networksCard.padding + 4
+                    }
                     }
                 }
             }
 
-            Column {
-                id: rightCol
-                width: parent.width * 0.27
-                spacing: ShellSurface.cardGap
-
-                Card {
-                    width: parent.width
-                    title: "Networks"
-                    visible: (root.wifiEnabled && wifiBackend.networks.length > 0) || (root.bluetoothEnabled && btBackend.devices.length > 0)
-                    height: visible ? implicitHeight : 0
-                    Expandable {
-                        width: parent.width
-                        visible: root.wifiEnabled && wifiBackend.networks.length > 0
-                        height: visible ? implicitHeight : 0
-                        title: "Wi-Fi"
-                        trailingText: wifiBackend.networks.length + " found"
-                        // Gated on hasScanned so the section doesn't flash
-                        // open-then-shut: before the first scan resolves,
-                        // networks.length is 0, which would otherwise read
-                        // as "short list, expand me" and then immediately
-                        // collapse the instant real results land.
-                        expanded: wifiBackend.hasScanned && wifiBackend.networks.length <= 3
-                        Repeater {
-                            model: wifiBackend.networks
-                            // A single Row cramming SSID + signal% + a
-                            // checkmark + a forget button + a "Connect"
-                            // button all onto one line was designed against
-                            // a much wider column than this card actually
-                            // gets (rightCol is 27% of the panel's width,
-                            // ~160px of content after padding) -- live-
-                            // caught by actually expanding this list: the
-                            // SSID text's width worked out to single
-                            // digits or negative, rendering real network
-                            // names (anything longer than ~2 characters)
-                            // entirely invisible. Two lines gives the name
-                            // the card's FULL width to elide against,
-                            // which this column was always going to need.
-                            // One coherent row object, not a name
-                            // with controls bolted beside it: a thin
-                            // accent bar marks the connected network (the
-                            // same left-edge-accent language the active
-                            // tab's own indicator uses elsewhere in this
-                            // file, not a one-off), the name is the one
-                            // thing sized to actually read, and the
-                            // action is a CompactChip rather than a full
-                            // GlassButton -- a GlassButton "Connect" came
-                            // out wider than most network names
-                            // themselves in this card's real width, the
-                            // opposite of "a compact action."
-                            delegate: Item {
-                                width: parent.width
-                                height: nameRow.implicitHeight + detailRow.implicitHeight + 3
-                                Rectangle {
-                                    visible: modelData.connected
-                                    anchors.top: parent.top
-                                    anchors.bottom: parent.bottom
-                                    width: 2
-                                    radius: 1
-                                    color: Theme.accent
-                                }
-                                Column {
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: modelData.connected ? 8 : 0
-                                    anchors.right: parent.right
-                                    spacing: 3
-                                    Row {
-                                        id: nameRow
-                                        width: parent.width
-                                        spacing: Theme.padXs
-                                        Text {
-                                            text: modelData.ssid
-                                            color: modelData.connected ? Theme.textActive : Theme.text
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeSmaller
-                                            font.weight: modelData.connected ? Font.DemiBold : Font.Normal
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: parent.width - (modelData.connected ? 20 : 0)
-                                            elide: Text.ElideRight
-                                        }
-                                        Text {
-                                            visible: modelData.connected
-                                            text: "\u2713"
-                                            color: Theme.accent
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 16
-                                        }
-                                    }
-                                    Row {
-                                        id: detailRow
-                                        width: parent.width
-                                        height: Math.max(24, signalText.implicitHeight)
-                                        Text {
-                                            id: signalText
-                                            text: modelData.signal + "%"
-                                            color: Theme.text
-                                            opacity: Theme.opacityMuted
-                                            font.pixelSize: Theme.fontSizeSmall
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: parent.width - 24 - (modelData.connected ? 0 : connectChip.width + Theme.padXs)
-                                        }
-                                        IconButton {
-                                            visible: modelData.known
-                                            glyph: ""
-                                            size: 24
-                                            destructive: true
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            onClicked: wifiBackend.forget(modelData.ssid)
-                                        }
-                                        CompactChip {
-                                            id: connectChip
-                                            visible: !modelData.connected
-                                            text: "Connect"
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            onClicked: wifiBackend.connectTo(modelData.ssid, modelData.security)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Expandable {
-                        width: parent.width
-                        visible: root.bluetoothEnabled && btBackend.devices.length > 0
-                        height: visible ? implicitHeight : 0
-                        title: "Bluetooth"
-                        trailingText: btBackend.devices.length + " paired"
-                        // Same hasScanned gate as the Wi-Fi section above.
-                        expanded: btBackend.hasScanned && btBackend.devices.length <= 3
-                        Repeater {
-                            model: btBackend.devices
-                            // Same fix as the Wi-Fi list just above:
-                            // one line had no real chance of fitting name
-                            // + battery% + forget + connect/disconnect in
-                            // this card's actual ~160px width.
-                            delegate: Item {
-                                width: parent.width
-                                height: btNameRow.implicitHeight + btDetailRow.implicitHeight + 3
-                                Rectangle {
-                                    visible: modelData.connected
-                                    anchors.top: parent.top
-                                    anchors.bottom: parent.bottom
-                                    width: 2
-                                    radius: 1
-                                    color: Theme.accent
-                                }
-                                Column {
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: modelData.connected ? 8 : 0
-                                    anchors.right: parent.right
-                                    spacing: 3
-                                    Row {
-                                        id: btNameRow
-                                        width: parent.width
-                                        spacing: Theme.padXs
-                                        Text {
-                                            text: modelData.name
-                                            color: modelData.connected ? Theme.textActive : Theme.text
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeSmaller
-                                            font.weight: modelData.connected ? Font.DemiBold : Font.Normal
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: parent.width - (modelData.connected ? 20 : 0)
-                                            elide: Text.ElideRight
-                                        }
-                                        Text {
-                                            visible: modelData.connected
-                                            text: "\u2713"
-                                            color: Theme.accent
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 16
-                                        }
-                                    }
-                                    Row {
-                                        id: btDetailRow
-                                        width: parent.width
-                                        height: Math.max(24, btSignalText.implicitHeight)
-                                        Text {
-                                            id: btSignalText
-                                            visible: modelData.battery >= 0
-                                            text: modelData.battery + "%"
-                                            color: Theme.text
-                                            opacity: Theme.opacityMuted
-                                            font.pixelSize: Theme.fontSizeSmall
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: parent.width - 24 - connectBtn.width - Theme.padXs
-                                        }
-                                        Item {
-                                            visible: !(modelData.battery >= 0)
-                                            width: parent.width - 24 - connectBtn.width - Theme.padXs
-                                            height: 1
-                                        }
-                                        IconButton {
-                                            glyph: ""
-                                            size: 24
-                                            destructive: true
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            onClicked: btBackend.forget(modelData.mac)
-                                        }
-                                        CompactChip {
-                                            id: connectBtn
-                                            text: modelData.connected ? "Disconnect" : "Connect"
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            onClicked: btBackend.toggleConnect(modelData.mac, modelData.connected)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Plain tertiary info, not a Card -- a list of read-only
-                // times to glance at needs no border/fill of its own any
-                // more than "This device" (leftCol's own equivalent) does.
-                // Matches that block's exact caption convention
-                // (opacityMuted, fontSizeSmall) so the two tertiary blocks
-                // on this Dashboard read as the same register, and gives
-                // the Networks card above it room to be the one real,
-                // bordered surface in this column.
-                Column {
-                    width: parent.width
-                    spacing: Theme.padXs
-                    visible: worldClock.cities.length > 0
-                    height: visible ? implicitHeight : 0
-                    Text {
-                        text: "World Clock"
-                        color: Theme.text
-                        opacity: Theme.opacityMuted
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                    }
-                    Repeater {
-                        model: worldClock.cities
-                        delegate: Row {
-                            width: parent.width
-                            Text { text: modelData.label; color: Theme.text; opacity: Theme.opacityFaint; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: parent.width - 50 }
-                            Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: 50; horizontalAlignment: Text.AlignRight }
-                        }
-                    }
-                }
+            // ---- tertiary: this machine ----
+            Text {
+                id: footer
+                width: parent.width
+                text: [systemInfo.osName, systemInfo.kernel, systemInfo.hostname, systemInfo.uptime ? "up " + systemInfo.uptime : ""]
+                    .filter((s) => s && s.length > 0).join("  ·  ")
+                color: Theme.text
+                opacity: Theme.opacityMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                elide: Text.ElideRight
             }
         }
+    }
+
+    function wifiGlyph(signal) {
+        if (signal >= 80) return "\u{f0928}";
+        if (signal >= 60) return "\u{f0925}";
+        if (signal >= 40) return "\u{f0922}";
+        if (signal >= 20) return "\u{f091f}";
+        return "\u{f092f}";
+    }
+    function isOpenNetwork(security) { return !security || security === "--" || security === ""; }
+
+    // A pickable audio device in the Output/Input lists.
+    component DeviceChoice: Rectangle {
+        id: choice
+        property string label: ""
+        property bool selected: false
+        signal picked()
+        width: parent ? parent.width : 0
+        height: 30
+        radius: Theme.roundingXs
+        color: choiceArea.containsMouse ? Theme.layer2Hover : "transparent"
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.padSm
+            anchors.right: choiceCheck.left
+            anchors.rightMargin: Theme.padSm
+            text: choice.label
+            color: choice.selected ? Theme.textActive : Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmaller
+            elide: Text.ElideRight
+        }
+        Text {
+            id: choiceCheck
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: Theme.padSm
+            visible: choice.selected
+            text: ""
+            color: Theme.accent
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+        }
+        MouseArea {
+            id: choiceArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: choice.picked()
+        }
+    }
+
+    // The honest "nothing here" line for a list section -- off, loading or
+    // empty -- at the same left inset as a row's name, so an empty section
+    // still lines up with the populated one above or below it.
+    component EmptyLine: Text {
+        width: parent ? parent.width : 0
+        height: 36
+        leftPadding: Theme.padSm + 20 + Theme.padSm
+        verticalAlignment: Text.AlignVCenter
+        color: Theme.text
+        opacity: Theme.opacityMuted
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeSmaller
+        elide: Text.ElideRight
     }
 
 
@@ -925,12 +855,16 @@ Item {
     // and a real per-player volume control (see MediaBackend.qml).
     Component {
         id: mediaPane
+        // Owns the whole pane viewport and centres whichever content it has,
+        // so neither a short player layout nor the empty state leaves a dead
+        // band under it now that panes are top-aligned.
         Item {
             width: parent ? parent.width : implicitWidth
-            implicitHeight: loader.implicitHeight
+            implicitHeight: Math.max(loader.implicitHeight, root.paneAvailableHeight)
             Loader {
                 id: loader
                 width: parent ? parent.width : implicitWidth
+                anchors.verticalCenter: parent.verticalCenter
                 sourceComponent: mediaBackend.available ? mediaPlayerContent : mediaEmptyContent
             }
         }
@@ -947,8 +881,10 @@ Item {
             // and a small art tile plus small type in the middle of a wide
             // row was still reading as "content compressed into the
             // middle" even with real regions either side of it.
-            readonly property real artSize: 210
-            readonly property real sideWidth: 168
+            // Art and the info column give width back to the centre column,
+            // which carries the title -- this pane's primary element.
+            readonly property real artSize: 184
+            readonly property real sideWidth: 144
 
             Item {
                 width: mediaRow.artSize
@@ -1016,13 +952,18 @@ Item {
                         // most of them down to a few words (the same
                         // truncation-vs-neighboring-space lesson as
                         // ToggleChip's "Do Not Disturb" fix earlier).
-                        wrapMode: Text.WordWrap
+                        // Wrap (not WordWrap): breaks between words when it
+                        // can, inside a word only when one word alone is
+                        // wider than the line -- never an orphaned "An" over
+                        // "Extraordina...".
+                        wrapMode: Text.Wrap
                         maximumLineCount: 2
                         elide: Text.ElideRight
-                        font.pixelSize: Theme.fontSizeExtraLarge
+                        font.pixelSize: Theme.fontSizeHeadline
                         font.weight: Font.DemiBold
                     }
                     Text {
+                        font.family: Theme.fontFamily
                         width: parent.width
                         visible: mediaBackend.artist.length > 0
                         text: mediaBackend.artist
@@ -1040,6 +981,7 @@ Item {
                     height: visible ? implicitHeight : 0
                     SliderRow {
                         width: parent.width
+                        showValue: false
                         from: 0
                         to: Math.max(1, mediaBackend.length)
                         value: root.mediaPosition
@@ -1048,6 +990,7 @@ Item {
                     Row {
                         width: parent.width
                         Text {
+                            font.family: Theme.fontFamily
                             text: mediaBackend.formatTime(root.mediaPosition)
                             color: Theme.text
                             opacity: 0.6
@@ -1055,6 +998,7 @@ Item {
                             width: parent.width / 2
                         }
                         Text {
+                            font.family: Theme.fontFamily
                             text: mediaBackend.formatTime(mediaBackend.length)
                             color: Theme.text
                             opacity: 0.6
@@ -1165,324 +1109,407 @@ Item {
         }
     }
 
-    // A real, framed empty-state card instead of an icon and a caption
-    // floating alone against bare panel -- the same cardTone/border/radius
-    // language as everything else in this shell, so "nothing is playing"
-    // still reads as a deliberate part of the composition, not an
-    // afterthought that happens to render when there's no data. No
-    // fabricated player data appears here -- this is honestly empty, just
-    // no longer *look* orphaned.
+    // The honest empty state: an icon and two lines centred in the pane,
+    // straight on the panel. It used to sit in a bordered card the size of
+    // the pane -- a frame around nothing, the clearest case of a border that
+    // communicated no boundary worth drawing.
     Component {
         id: mediaEmptyContent
-        Item {
+        Column {
             width: parent ? parent.width : implicitWidth
-            implicitHeight: 260
+            spacing: Theme.padSm
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "\uf001"
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeDisplay
+                color: Theme.text
+                opacity: 0.35
+                bottomPadding: Theme.padSm
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Nothing playing"
+                color: Theme.textActive
+                opacity: Theme.opacityFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeLarger
+                font.weight: Font.Medium
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Media from any MPRIS player will appear here"
+                color: Theme.text
+                opacity: Theme.opacityMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmaller
+            }
+        }
+    }
 
-            Rectangle {
-                anchors.fill: parent
-                radius: ShellSurface.cardRadius
-                color: Theme.cardTone
-                border.width: Theme.borderWidth
-                border.color: Theme.borderFaint
+    // ==================== PERFORMANCE ====================
+    // One monitoring surface, then two small utility groups -- sized to fit
+    // the pane's viewport without scrolling.
+    //
+    //   System   CPU / GPU / Memory as three hero readouts (the numbers are
+    //            the point, so they get the big type), with Storage and
+    //            Network as one quieter secondary line underneath -- they
+    //            change slowly and are glanced at, not watched.
+    //   Clipboard | Actions   side by side: the recent entries are shown
+    //            directly (the old card repeated "3 items" twice, once as a
+    //            row and once as a collapsed Expandable, and showed nothing),
+    //            and the screenshot/session actions beside it.
+    //
+    // Cells are separated by space, not by vertical rules: the old dividers
+    // ran into the ends of the level bars, which read as one broken line.
+    // GPU shows a genuine "Unavailable" (never a made-up value) when this
+    // machine exposes no utilisation source -- see PerformanceService.
+    Component {
+        id: performancePane
+        Column {
+            id: perf
+            width: parent ? parent.width : implicitWidth
+            spacing: ShellSurface.cardGap
 
-                Column {
-                    anchors.centerIn: parent
-                    spacing: Theme.padSm
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: "\uf001"
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeHero
-                        color: Theme.text
-                        opacity: Theme.opacityMuted
+            Card {
+                id: systemCard
+                width: parent.width
+                title: "System"
+                spacing: Theme.padLg
+
+                Row {
+                    width: parent.width
+                    spacing: Theme.pad2xl
+                    readonly property real cellWidth: (width - spacing * 2) / 3
+                    Metric {
+                        width: parent.cellWidth
+                        label: "CPU"
+                        value: Math.round(PerformanceService.cpuPercent) + "%"
+                        fraction: PerformanceService.cpuPercent / 100
+                    }
+                    Metric {
+                        width: parent.cellWidth
+                        label: "GPU"
+                        available: PerformanceService.gpuAvailable
+                        value: Math.round(PerformanceService.gpuPercent) + "%"
+                        fraction: PerformanceService.gpuPercent / 100
+                    }
+                    Metric {
+                        width: parent.cellWidth
+                        label: "Memory"
+                        value: Math.round(PerformanceService.memPercent) + "%"
+                        fraction: PerformanceService.memPercent / 100
+                    }
+                }
+
+                Rectangle { width: parent.width; height: 1; color: Theme.withAlpha(Theme.borderTint, 0.08) }
+
+                Row {
+                    width: parent.width
+                    spacing: Theme.pad2xl
+                    readonly property real cellWidth: (width - spacing) / 2
+                    SecondaryMetric {
+                        width: parent.cellWidth
+                        label: "Storage"
+                        value: Math.round(PerformanceService.diskPercent) + "%"
+                        detail: PerformanceService.diskUsedLabel
+                        fraction: PerformanceService.diskPercent / 100
+                    }
+                    SecondaryMetric {
+                        width: parent.cellWidth
+                        label: "Network"
+                        value: PerformanceService.networkRateKBs >= 1024
+                            ? (PerformanceService.networkRateKBs / 1024).toFixed(1) + " MB/s"
+                            : Math.round(PerformanceService.networkRateKBs) + " KB/s"
+                        detail: "rx + tx"
+                        fraction: -1
+                    }
+                }
+            }
+
+            Row {
+                id: utilRow
+                width: parent.width
+                spacing: ShellSurface.cardGap
+                // Actions' content sets the floor; Clipboard is a viewport
+                // that fits whatever it is given (reading its implicit
+                // height here would be a cycle -- it sizes itself from this).
+                height: Math.max(actionsCard.implicitHeight,
+                                 root.paneAvailableHeight - systemCard.implicitHeight - perf.spacing)
+
+                Card {
+                    id: clipCard
+                    width: (parent.width - parent.spacing) * 0.58
+                    height: parent.height
+                    title: "Clipboard"
+                    Item {
+                        width: parent.width
+                        height: clipCard.height - clipCard.padding * 2 - clipCard.titleHeight
+                        Flickable {
+                            id: clipFlick
+                            anchors.fill: parent
+                            contentHeight: clipList.implicitHeight
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            Column {
+                                id: clipList
+                                width: clipFlick.width
+                                Repeater {
+                                    model: clipboardBackend.entries
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: clipList.width
+                                        height: 30
+                                        radius: Theme.roundingXs
+                                        color: clipArea.containsMouse ? Theme.layer2Hover : "transparent"
+                                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            x: Theme.padSm
+                                            width: parent.width - Theme.padSm * 2
+                                            text: parent.modelData.preview.replace(/\s+/g, " ")
+                                            color: Theme.text
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmaller
+                                            elide: Text.ElideRight
+                                        }
+                                        MouseArea {
+                                            id: clipArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: clipboardBackend.copyEntry(parent.modelData.raw)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ScrollHint {
+                            flickable: clipFlick
+                            height: parent.height
+                            anchors.right: parent.right
+                            anchors.rightMargin: -clipCard.padding + 4
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            visible: clipboardBackend.entries.length === 0
+                            text: "Clipboard history is empty"
+                            color: Theme.text
+                            opacity: Theme.opacityMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmaller
+                        }
+                    }
+                }
+                // Refresh lives on the card's title line, not as a row of
+                // its own.
+                IconButton {
+                    parent: clipCard
+                    x: clipCard.width - width - Theme.padSm
+                    y: Theme.padXs + 2
+                    glyph: "\uf021"
+                    size: 24
+                    onClicked: clipboardBackend.refresh()
+                }
+
+                Card {
+                    id: actionsCard
+                    width: (parent.width - parent.spacing) * 0.42
+                    height: parent.height
+                    title: "Actions"
+                    Row {
+                        width: parent.width
+                        spacing: Theme.padSm
+                        GlassButton {
+                            text: "Region"
+                            width: (parent.width - parent.spacing) / 2
+                            onClicked: root.takeScreenshot(true)
+                        }
+                        GlassButton {
+                            text: "Screen"
+                            width: (parent.width - parent.spacing) / 2
+                            onClicked: root.takeScreenshot(false)
+                        }
                     }
                     Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: "Nothing playing"
-                        color: Theme.text
-                        opacity: Theme.opacitySecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeNormal
-                    }
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: "Media from any MPRIS player will appear here"
+                        text: "Saved to Pictures/Screenshots"
+                        width: parent.width
                         color: Theme.text
                         opacity: Theme.opacityMuted
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall
+                        elide: Text.ElideRight
+                    }
+                    Row {
+                        id: powerRow
+                        width: parent.width
+                        readonly property real slot: width / 4
+                        Item {
+                            width: powerRow.slot; height: Theme.iconMd
+                            IconButton { anchors.centerIn: parent; glyph: "\uf023"; size: Theme.iconMd; onClicked: Quickshell.execDetached(["hyprlock"]) }
+                        }
+                        Item {
+                            width: powerRow.slot; height: Theme.iconMd
+                            // NOT `hyprctl dispatch exit`: this system launches
+                            // Hyprland through `start-hyprland`, Hyprland's own
+                            // official watchdog binary, which automatically
+                            // restarts Hyprland on anything it reads as a "not
+                            // clean" exit -- confirmed via the watchdog's own
+                            // embedded strings ("Hyprland exit not-cleanly,
+                            // restarting"). `dispatch exit` is the textbook-correct
+                            // way to close a plain Hyprland session, but on this
+                            // launcher it doesn't complete the watchdog's clean-exit
+                            // handshake, so the compositor just silently respawns --
+                            // reboot/shutdown "worked" only because they tear down
+                            // the whole system, watchdog included, not because the
+                            // compositor-level exit path was ever fine.
+                            // `loginctl terminate-session $XDG_SESSION_ID` ends
+                            // JUST this graphical session at the systemd-logind
+                            // layer, the same mechanism a real desktop's own "Log
+                            // out" uses, bypassing the compositor (and its
+                            // watchdog) entirely -- WITHOUT `terminate-user`'s
+                            // blast radius. `terminate-user` kills every session
+                            // AND the whole user@.service slice; on this machine
+                            // that includes the sddm-helper process that IS this
+                            // session's logind session leader, so killing it made
+                            // SDDM read the session's own clean end as a helper
+                            // "crash" and give up restarting the greeter instead
+                            // of returning to it -- reproduced live: a real
+                            // terminate-user logout left a black screen with no
+                            // greeter until a manual reboot. XDG_SESSION_ID is
+                            // fixed for this process's whole lifetime (set once by
+                            // logind/PAM when the session started), so reading it
+                            // via Quickshell.env here is exactly as reliable as
+                            // reading USER above it.
+                            IconButton {
+                                anchors.centerIn: parent
+                                glyph: "\uf2f5"; size: Theme.iconMd
+                                onClicked: {
+                                    const sid = Quickshell.env("XDG_SESSION_ID");
+                                    if (sid) {
+                                        Quickshell.execDetached(["loginctl", "terminate-session", sid]);
+                                    } else {
+                                        // XDG_SESSION_ID missing for some reason. Ask
+                                        // logind directly which session is this user's
+                                        // DISPLAY session rather than falling back to
+                                        // `terminate-user` -- that command is exactly
+                                        // what caused the black-screen-no-greeter
+                                        // failure this whole fix exists to remove, so
+                                        // reaching for it on a technicality would just
+                                        // reintroduce the bug on the rarer path.
+                                        // Verified to resolve to the same session id
+                                        // as the env var, including with the env var
+                                        // explicitly unset. Does nothing if even that
+                                        // fails: a Log Out button that no-ops is a far
+                                        // better failure than one that strands the
+                                        // machine with no greeter.
+                                        Quickshell.execDetached(["sh", "-c",
+                                            'sid="$(loginctl show-user "$(id -un)" -p Display --value 2>/dev/null)"; '
+                                            + '[ -n "$sid" ] && exec loginctl terminate-session "$sid"']);
+                                    }
+                                }
+                            }
+                        }
+                        Item {
+                            width: powerRow.slot; height: Theme.iconMd
+                            IconButton { anchors.centerIn: parent; glyph: "\uf2ea"; size: Theme.iconMd; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }
+                        }
+                        Item {
+                            width: powerRow.slot; height: Theme.iconMd
+                            IconButton { anchors.centerIn: parent; glyph: "\uf011"; size: Theme.iconMd; destructive: true; onClicked: Quickshell.execDetached(["systemctl", "poweroff"]) }
+                        }
                     }
                 }
             }
         }
     }
 
-    // ==================== PERFORMANCE ====================
-    // A real 3-column metric card grid (CPU/Memory/Storage) instead of a
-    // stack of label+bar+percentage rows -- matches the shell's Level-2
-    // card language (Card.qml) instead of being the one pane in this file
-    // still built from plain hairline-divided Columns. GPU and Network
-    // cards are intentionally NOT here: there is no backend data source for
-    // either yet anywhere in this codebase, and a fake/placeholder card
-    // would be worse than the honest gap. Clipboard and the screenshot/
-    // power actions are their own cards below, each sized to its own
-    // content rather than stretched to fill leftover width -- the old
-    // power-action icons scaled to `(width-spacing*3)/4`, which is exactly
-    // how they became "four enormous circles" once this pane had real
-    // spare width to divide up.
-    Component {
-        id: performancePane
-        Column {
-            width: parent ? parent.width : implicitWidth
-            spacing: ShellSurface.cardGap
+    // A hero readout: label, big number, thin bar. `available: false` is the
+    // honest no-data state (GPU without a utilisation source).
+    component Metric: Column {
+        id: metric
+        property string label: ""
+        property string value: ""
+        property real fraction: 0
+        property bool available: true
+        spacing: Theme.padXs
+        Text {
+            text: metric.label
+            color: Theme.text
+            opacity: Theme.opacityMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            font.letterSpacing: 0.5
+        }
+        Text {
+            text: metric.available ? metric.value : "\u2014"
+            color: Theme.textActive
+            opacity: metric.available ? 1 : 0.4
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeExtraLarge
+            font.weight: Font.Light
+        }
+        LevelBar {
+            width: parent.width
+            implicitHeight: 4
+            visible: metric.available
+            value: metric.fraction
+        }
+        Text {
+            visible: !metric.available
+            height: 4
+            verticalAlignment: Text.AlignVCenter
+            text: "Unavailable"
+            color: Theme.text
+            opacity: Theme.opacityMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+        }
+    }
 
-            // ONE monitoring surface, not five -- CPU/GPU/Memory/Storage/
-            // Network used to each be their own bordered Card, which read
-            // as a "card wall" (five identical borders in a row) rather
-            // than one coherent place to check system load. A single Card
-            // titled "System" now holds all five as plain cells separated
-            // by hairlines (Theme.borderFaint, the same token Card's own
-            // border already uses, so the internal dividers read as the
-            // SAME material language turned down a notch, not a different
-            // one) -- border count drops from 5 to 1 while every cell still
-            // gets its own label, value and bar. GPU shows a genuine
-            // "unavailable" state (never a fabricated percentage) when
-            // this machine has no working GPU-utilization interface -- see
-            // PerformanceService's own comment on why no single cross-
-            // vendor source exists.
-            Card {
-                width: parent.width
-                title: "System"
-                Row {
-                    width: parent.width
-                    // Height follows content (the tallest cell), never a
-                    // guessed constant -- the GPU cell's 2-line
-                    // "Unavailable" state and the normal 3-line state (and
-                    // row 2's 4-line Storage cell, which needs MORE height
-                    // than this row) all size themselves correctly this
-                    // way with nothing to keep in sync by hand.
-                    height: Math.max(cpuCell.implicitHeight, gpuCell.implicitHeight, memCell.implicitHeight)
-                    readonly property real cellWidth: (width - 2) / 3
-
-                    Column {
-                        id: cpuCell
-                        width: parent.cellWidth
-                        spacing: Theme.padXs
-                        Text { text: "CPU"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
-                        Text { text: Math.round(PerformanceService.cpuPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
-                        LevelBar { width: parent.width; value: PerformanceService.cpuPercent / 100 }
-                    }
-                    Rectangle { width: 1; height: parent.height; color: Theme.borderFaint }
-                    Column {
-                        id: gpuCell
-                        width: parent.cellWidth
-                        spacing: Theme.padXs
-                        Text { text: "GPU"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
-                        Text {
-                            visible: PerformanceService.gpuAvailable
-                            text: Math.round(PerformanceService.gpuPercent) + "%"
-                            color: Theme.textActive
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeLarge
-                            font.weight: Font.DemiBold
-                        }
-                        LevelBar { visible: PerformanceService.gpuAvailable; width: parent.width; value: PerformanceService.gpuPercent / 100 }
-                        Text {
-                            visible: !PerformanceService.gpuAvailable
-                            text: "Unavailable"
-                            color: Theme.text
-                            opacity: Theme.opacityMuted
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeNormal
-                        }
-                    }
-                    Rectangle { width: 1; height: parent.height; color: Theme.borderFaint }
-                    Column {
-                        id: memCell
-                        width: parent.cellWidth
-                        spacing: Theme.padXs
-                        Text { text: "Memory"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
-                        Text { text: Math.round(PerformanceService.memPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
-                        LevelBar { width: parent.width; value: PerformanceService.memPercent / 100 }
-                    }
-                }
-
-                Rectangle { width: parent.width; height: 1; color: Theme.surfaceHighlight }
-
-                Row {
-                    width: parent.width
-                    height: Math.max(storageCell.implicitHeight, networkCell.implicitHeight)
-                    readonly property real cellWidth: (width - 1) / 2
-
-                    Column {
-                        id: storageCell
-                        width: parent.cellWidth
-                        spacing: Theme.padXs
-                        Text { text: "Storage"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
-                        Text { text: Math.round(PerformanceService.diskPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
-                        LevelBar { width: parent.width; value: PerformanceService.diskPercent / 100 }
-                        Text {
-                            visible: PerformanceService.diskUsedLabel.length > 0
-                            text: PerformanceService.diskUsedLabel
-                            color: Theme.text
-                            opacity: Theme.opacityMuted
-                            font.pixelSize: Theme.fontSizeSmall
-                        }
-                    }
-                    Rectangle { width: 1; height: parent.height; color: Theme.borderFaint }
-                    Column {
-                        id: networkCell
-                        width: parent.cellWidth
-                        spacing: Theme.padXs
-                        Text { text: "Network"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
-                        Text {
-                            text: PerformanceService.networkRateKBs >= 1024
-                                ? (PerformanceService.networkRateKBs / 1024).toFixed(1) + " MB/s"
-                                : Math.round(PerformanceService.networkRateKBs) + " KB/s"
-                            color: Theme.textActive
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeLarge
-                            font.weight: Font.DemiBold
-                        }
-                        Text {
-                            text: "combined rx + tx"
-                            color: Theme.text
-                            opacity: Theme.opacityMuted
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                        }
-                    }
-                }
+    // A secondary readout: one line -- label, value, detail -- over a thin
+    // bar (fraction < 0 for rates, which have no "full").
+    component SecondaryMetric: Column {
+        id: sm
+        property string label: ""
+        property string value: ""
+        property string detail: ""
+        property real fraction: 0
+        spacing: Theme.padXs + 2
+        Row {
+            width: parent.width
+            spacing: Theme.padSm
+            Text {
+                anchors.baseline: smValue.baseline
+                text: sm.label
+                color: Theme.text
+                opacity: Theme.opacityMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                font.letterSpacing: 0.5
             }
-
-            Card {
-                width: parent.width
-                title: "Clipboard"
-                SettingRow {
-                    width: parent.width
-                    title: "History"
-                    subtitle: clipboardBackend.entries.length + " items"
-                    IconButton { glyph: "\uf021"; size: Theme.iconSm; onClicked: clipboardBackend.refresh() }
-                }
-                Expandable {
-                    width: parent.width
-                    title: "Recent"
-                    trailingText: clipboardBackend.entries.length + " items"
-                    Repeater {
-                        model: clipboardBackend.entries
-                        delegate: Rectangle {
-                            width: parent.width
-                            height: 28
-                            radius: Theme.roundingXs
-                            color: clipArea.containsMouse ? Theme.layer2Hover : "transparent"
-                            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: Theme.padSm
-                                width: parent.width - Theme.padSm * 2
-                                text: modelData.preview.replace(/\n/g, " ")
-                                color: Theme.text
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmaller
-                                elide: Text.ElideRight
-                            }
-                            MouseArea {
-                                id: clipArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: clipboardBackend.copyEntry(modelData.raw)
-                            }
-                        }
-                    }
-                }
+            Text {
+                id: smValue
+                text: sm.value
+                color: Theme.textActive
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeLarger
+                font.weight: Font.Medium
             }
-
-            Card {
-                width: parent.width
-                title: "Quick Actions"
-                Row {
-                    width: parent.width
-                    spacing: Theme.padSm
-                    GlassButton {
-                        text: "Region"
-                        variant: "secondary"
-                        width: (parent.width - parent.spacing) / 2
-                        onClicked: root.takeScreenshot(true)
-                    }
-                    GlassButton {
-                        text: "Full Screen"
-                        variant: "secondary"
-                        width: (parent.width - parent.spacing) / 2
-                        onClicked: root.takeScreenshot(false)
-                    }
-                }
-                Row {
-                    spacing: Theme.padSm
-                    IconButton { glyph: "\uf023"; size: Theme.iconLg; onClicked: Quickshell.execDetached(["hyprlock"]) }
-                    // NOT `hyprctl dispatch exit`: this system launches
-                    // Hyprland through `start-hyprland`, Hyprland's own
-                    // official watchdog binary, which automatically
-                    // restarts Hyprland on anything it reads as a "not
-                    // clean" exit -- confirmed via the watchdog's own
-                    // embedded strings ("Hyprland exit not-cleanly,
-                    // restarting"). `dispatch exit` is the textbook-correct
-                    // way to close a plain Hyprland session, but on this
-                    // launcher it doesn't complete the watchdog's clean-exit
-                    // handshake, so the compositor just silently respawns --
-                    // reboot/shutdown "worked" only because they tear down
-                    // the whole system, watchdog included, not because the
-                    // compositor-level exit path was ever fine.
-                    // `loginctl terminate-session $XDG_SESSION_ID` ends
-                    // JUST this graphical session at the systemd-logind
-                    // layer, the same mechanism a real desktop's own "Log
-                    // out" uses, bypassing the compositor (and its
-                    // watchdog) entirely -- WITHOUT `terminate-user`'s
-                    // blast radius. `terminate-user` kills every session
-                    // AND the whole user@.service slice; on this machine
-                    // that includes the sddm-helper process that IS this
-                    // session's logind session leader, so killing it made
-                    // SDDM read the session's own clean end as a helper
-                    // "crash" and give up restarting the greeter instead
-                    // of returning to it -- reproduced live: a real
-                    // terminate-user logout left a black screen with no
-                    // greeter until a manual reboot. XDG_SESSION_ID is
-                    // fixed for this process's whole lifetime (set once by
-                    // logind/PAM when the session started), so reading it
-                    // via Quickshell.env here is exactly as reliable as
-                    // reading USER above it.
-                    IconButton {
-                        glyph: "\uf2f5"; size: Theme.iconLg
-                        onClicked: {
-                            const sid = Quickshell.env("XDG_SESSION_ID");
-                            if (sid) {
-                                Quickshell.execDetached(["loginctl", "terminate-session", sid]);
-                            } else {
-                                // XDG_SESSION_ID missing for some reason. Ask
-                                // logind directly which session is this user's
-                                // DISPLAY session rather than falling back to
-                                // `terminate-user` -- that command is exactly
-                                // what caused the black-screen-no-greeter
-                                // failure this whole fix exists to remove, so
-                                // reaching for it on a technicality would just
-                                // reintroduce the bug on the rarer path.
-                                // Verified to resolve to the same session id
-                                // as the env var, including with the env var
-                                // explicitly unset. Does nothing if even that
-                                // fails: a Log Out button that no-ops is a far
-                                // better failure than one that strands the
-                                // machine with no greeter.
-                                Quickshell.execDetached(["sh", "-c",
-                                    'sid="$(loginctl show-user "$(id -un)" -p Display --value 2>/dev/null)"; '
-                                    + '[ -n "$sid" ] && exec loginctl terminate-session "$sid"']);
-                            }
-                        }
-                    }
-                    IconButton { glyph: "\uf2ea"; size: Theme.iconLg; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }
-                    IconButton { glyph: "\uf011"; size: Theme.iconLg; destructive: true; onClicked: Quickshell.execDetached(["systemctl", "poweroff"]) }
-                }
+            Text {
+                anchors.baseline: smValue.baseline
+                text: sm.detail
+                color: Theme.text
+                opacity: Theme.opacityMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
             }
+        }
+        LevelBar {
+            width: parent.width
+            implicitHeight: 4
+            visible: sm.fraction >= 0
+            value: Math.max(0, sm.fraction)
         }
     }
 

@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Services.Mpris
 
 // A fake monitor: wallpaper, an ordinary application window underneath the
 // shell (the "Discord" from the dead-zone report), and the REAL shell.qml
@@ -92,6 +93,18 @@ Item {
             out[name] = (out[name] || 0) + n;
         }
         return out;
+    }
+
+    // A fake MPRIS player (null to clear).
+    function setPlayer(p) {
+        if (!p) { Mpris.players = { values: [] }; return; }
+        const player = Object.assign({
+            trackTitle: "", trackArtist: "", trackArtUrl: "", isPlaying: true, identity: "Spotify",
+            metadata: {}, volumeSupported: true, volume: 0.7, positionSupported: true, lengthSupported: true,
+            length: 245, position: 62, shuffleSupported: true, shuffle: false, loopSupported: true, loopState: 0,
+            togglePlaying: function() {}, next: function() {}, previous: function() {},
+        }, p);
+        Mpris.players = { values: [player] };
     }
 
     function desktopClicked(x, y) { root.appClicks += 1; root.lastAppClick = { x: x, y: y }; }

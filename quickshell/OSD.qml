@@ -84,11 +84,11 @@ PanelWindow {
         target: root.sink ? root.sink.audio : null
         function onVolumeChanged() {
             if (!root.sinkSeen) { root.sinkSeen = true; return; }
-            root.trigger(root.sink.audio.muted ? "" : "", root.sink.audio.volume, Math.round(root.sink.audio.volume * 100) + "%");
+            root.trigger(root.sink.audio.muted ? "󰝟" : "", root.sink.audio.volume, Math.round(root.sink.audio.volume * 100) + "%");
         }
         function onMutedChanged() {
             if (!root.sinkSeen) { root.sinkSeen = true; return; }
-            root.trigger(root.sink.audio.muted ? "" : "", root.sink.audio.volume, root.sink.audio.muted ? "Muted" : Math.round(root.sink.audio.volume * 100) + "%");
+            root.trigger(root.sink.audio.muted ? "󰝟" : "", root.sink.audio.volume, root.sink.audio.muted ? "Muted" : Math.round(root.sink.audio.volume * 100) + "%");
         }
     }
     Connections {
