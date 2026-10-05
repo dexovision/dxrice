@@ -2958,6 +2958,48 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
             self.assertLessEqual(moved, arr.NOTCH_REFINE_MAX_TOTAL_SHIFT + 1e-6,
                                   f"{a} moved {moved:.0f}px during refinement -- unbounded cascading drift")
 
+    def test_shrink_closes_the_original_live_user_report_notch(self):
+        """Permanent regression pin for the exact 6-window fixture the
+        shrink extension (_refine_notch_alignment's shrink candidates) was
+        built for, with auto_arrange's normal default (allow_resize=True,
+        the only way this feature is ever actually invoked by SUPER+G).
+        0x4_huge_main (1800px) and 0x1_landscape_wide (1614px) end up
+        flush vertically with a notch no shift alone could close; this
+        asserts the shrink both fires AND wins the whole-composition
+        resize-vs-move-only comparison, closing 0x4_huge_main's own notch
+        to exactly zero with no new dead gap anywhere.
+
+        This exists because a later fix for a DIFFERENT bug (threading
+        allow_resize into this function so auto_arrange(allow_resize=False)
+        genuinely never resizes -- see test_positions_only_pass_never_
+        changes_a_size) was first implemented by gating on the wrong of
+        two allow_resize values in scope, which silently also disabled
+        this exact shrink and reintroduced the live-reported notch even
+        though every other test still passed. Nothing else in this file
+        pins the DEFAULT, allow_resize=True behavior on this fixture, so
+        nothing else would have caught that."""
+        eligible = [
+            {"address": "0x0_portrait", "at": [1830, -131], "size": [323, 1138]},
+            {"address": "0x1_landscape_wide", "at": [-454, -143], "size": [1614, 520]},
+            {"address": "0x2_portrait", "at": [534, -649], "size": [426, 962]},
+            {"address": "0x3_ultra_wide", "at": [-160, -414], "size": [1982, 309]},
+            {"address": "0x4_huge_main", "at": [-556, 570], "size": [1800, 1213]},
+            {"address": "0x5_ultra_wide", "at": [474, 254], "size": [2147, 389]},
+        ]
+        result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
+        huge = next(r for r in result if r[0] == "0x4_huge_main")
+        self.assertEqual((huge[3], huge[4]), (1614, 1186),
+                          f"expected 0x4_huge_main shrunk to match its neighbor's width, got {huge[3]}x{huge[4]}")
+        addrs = [a for a, x, y, w, h in result]
+        rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
+        i = addrs.index("0x4_huge_main")
+        huge_notch = apw._notch_penalty(rects[i], rects[:i] + rects[i + 1:], self.GAP)
+        self.assertEqual(huge_notch, 0.0,
+                          f"expected 0x4_huge_main's own notch to close completely via shrink, got {huge_notch}")
+        penalty_total = sum(apw.composition_penalty(r, rects[:j] + rects[j + 1:], self.GAP)
+                             for j, r in enumerate(rects))
+        self.assertLessEqual(penalty_total, 0.0, f"shrink introduced a dead gap: {penalty_total}")
+
     def test_shrink_closes_a_notch_pure_repositioning_cannot(self):
         """LIVE USER REPORT: a real desktop screenshot showed a gap that
         survived the position-only version of this pass -- confirmed
@@ -3079,6 +3121,47 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
         panel = next(r for r in result if r[0] == "panel")
         self.assertEqual((panel[3], panel[4]), (1900, 950),
                           "panel was shrunk even though it is its own legitimate, dominant size class")
+
+    def test_shrink_does_not_erode_further_on_a_second_press(self):
+        """LIVE-FOUND via a 540-layout repeated-press sweep (2 presses each):
+        a window could shrink again on a SECOND press even though nothing
+        about it was actually wrong, because refine's shrink -- chasing a
+        real but minor notch improvement -- could push the overall
+        cluster's aspect ratio (or similar _shape_is_coherent criteria,
+        unrelated to anything refine itself checks) just far enough that
+        the NEXT press's own _shape_is_coherent precheck saw "not
+        coherent," forced an unnecessary full rebuild, and that rebuild's
+        fresh reference_area/ordering opened a second, compounding shrink
+        on top of the first -- this exact 15-window fixture shrank
+        0x6_huge_main 1700 -> 1405 -> 1054 (1054 is exactly 0.75x1405,
+        hitting MAX_SHRINK_FRACTION's floor AGAIN on the second press
+        alone). Fixed by having _build revert refine's result whenever it
+        turns an already-coherent layout incoherent -- see auto_arrange's
+        own comment at that revert for the full mechanism. Two consecutive
+        presses must now be byte-identical."""
+        eligible = [
+            {"address": "0x0_near_square", "at": [1483, -55], "size": [700, 650]},
+            {"address": "0x1_near_square", "at": [1872, 353], "size": [700, 650]},
+            {"address": "0x2_near_square", "at": [1965, -292], "size": [700, 650]},
+            {"address": "0x3_tiny_dialog", "at": [298, -586], "size": [320, 240]},
+            {"address": "0x4_tiny_dialog", "at": [-92, 856], "size": [320, 240]},
+            {"address": "0x5_near_square", "at": [31, 178], "size": [700, 650]},
+            {"address": "0x6_huge_main", "at": [2062, 558], "size": [1700, 1100]},
+            {"address": "0x7_landscape_wide", "at": [-125, 192], "size": [1200, 700]},
+            {"address": "0x8_tiny_dialog", "at": [945, 720], "size": [320, 240]},
+            {"address": "0x9_near_square", "at": [639, -11], "size": [700, 650]},
+            {"address": "0x10_portrait", "at": [42, 862], "size": [500, 900]},
+            {"address": "0x11_tiny_dialog", "at": [507, 53], "size": [320, 240]},
+            {"address": "0x12_near_square", "at": [-55, 399], "size": [700, 650]},
+            {"address": "0x13_portrait", "at": [329, 849], "size": [500, 900]},
+            {"address": "0x14_huge_main", "at": [1505, 408], "size": [1700, 1100]},
+        ]
+        result1 = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), self.GAP)
+        layout2 = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result1]
+        result2 = arr.auto_arrange(layout2, [], (0, 0, 1920, 1080), self.GAP)
+        self.assertEqual(sorted(result1), sorted(result2),
+                          "a second press changed the layout further -- a window shrank (or moved) again "
+                          "with nothing new to justify it")
 
 
 if __name__ == "__main__":

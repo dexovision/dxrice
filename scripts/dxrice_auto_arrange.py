@@ -1632,8 +1632,37 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         # changes relative positions, so doing this before or after makes
         # no difference to the geometry -- before is simply closer to
         # where the rest of this function's structure already is).
+        #
+        # _shape_is_coherent is checked before AND after: refine's own
+        # internal safety net (correctness_cost/notch_cost) only guards
+        # dead-gap and notch, which says nothing about the SEPARATE
+        # criteria (per-cluster aspect ratio, singleton distance ratios)
+        # a FUTURE press's own _shape_is_coherent precheck uses to decide
+        # whether anything needs rebuilding at all. Live-caught by a
+        # repeated-press sweep: refine could take an already-coherent
+        # layout and, chasing a real but minor notch improvement, shrink
+        # one window just enough to push the overall cluster's aspect
+        # ratio (or a singleton's relative distance) across one of those
+        # separate thresholds -- invisible to refine's own checks, but it
+        # meant the NEXT press's precheck saw "not coherent," forced a
+        # full rebuild that had no reason to run, and that rebuild's own
+        # fresh reference_area/ordering could open a SECOND, compounding
+        # shrink on top of the first. Reverting refine here when it turns
+        # an already-coherent layout incoherent costs nothing -- the main
+        # incremental build's own result is kept instead -- and avoids
+        # kicking off an unnecessary, destabilizing rebuild one press
+        # later for a notch gain _shape_is_coherent doesn't even measure.
+        def _coherent(p):
+            as_eligible = [{"address": a, "at": [x, y], "size": [w, h]} for a, (x, y, w, h) in p.items()]
+            return _shape_is_coherent(as_eligible, fixed_rects, gap)
+
+        pre_refine_coherent = _coherent(placed)
+        pre_refine_snapshot = dict(placed)
         _refine_notch_alignment(placed, fixed_rects, gap, reference_area,
                                  true_original_size, allow_resize=outer_allow_resize)
+        if pre_refine_coherent and not _coherent(placed):
+            placed.clear()
+            placed.update(pre_refine_snapshot)
 
         # Rigid recenter: one (dx, dy) applied to every eligible window's
         # POSITION (never its size -- resize decisions are already final by
