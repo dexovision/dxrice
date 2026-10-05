@@ -430,7 +430,7 @@ PanelWindow {
                     anchors.centerIn: parent
                     spacing: Theme.padXs
                     Text {
-                        text: root.muted ? "" : ""
+                        text: root.muted ? "󰝟" : ""
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmaller
                         color: Theme.text

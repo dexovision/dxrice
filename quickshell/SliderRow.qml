@@ -12,6 +12,9 @@ Item {
     property real value: 0
     property int decimals: 0
     property real debounceMs: 80
+    // The trailing "NN%" readout. Off for sliders whose value is not a
+    // percentage (a seek bar's value is seconds -- it used to read "62%").
+    property bool showValue: true
     signal changed(real value)
 
     implicitHeight: 32
@@ -23,7 +26,7 @@ Item {
 
         Slider {
             id: slider
-            width: parent.width - valueLabel.width - parent.spacing
+            width: root.showValue ? parent.width - valueLabel.width - parent.spacing : parent.width
             anchors.verticalCenter: parent.verticalCenter
             from: root.from
             to: root.to
@@ -71,12 +74,13 @@ Item {
 
         Text {
             id: valueLabel
+            visible: root.showValue
             anchors.verticalCenter: parent.verticalCenter
             text: root.decimals > 0 ? root.value.toFixed(root.decimals) : Math.round(root.value) + "%"
             color: Theme.text
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmaller
-            width: 42
+            width: root.showValue ? 42 : 0
             horizontalAlignment: Text.AlignRight
         }
     }

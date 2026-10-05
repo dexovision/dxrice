@@ -274,6 +274,7 @@ WlSessionLock {
                                 onAccepted: surfaceRoot.tryUnlock()
                             }
                             Text {
+                                font.family: Theme.fontFamily
                                 text: "Password"
                                 color: Theme.text
                                 opacity: passwordField.text.length ? 0 : 0.5
