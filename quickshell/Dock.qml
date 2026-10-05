@@ -69,13 +69,8 @@ PanelWindow {
         }
     }
 
-    // Whether TaskbarManager's own Add-Shortcut branch is open. Unlike the
-    // FloatingWindow this used to be, the branch now lives inside THIS
-    // window (see addBranch below) -- but the click-outside-to-dismiss
-    // region below still has to suspend itself while it's open, for the
-    // same reason as before: a click meant for the branch's search box or
-    // text fields must never be caught by this window's own full-screen
-    // dismiss region first.
+    // Whether TaskbarManager's Add-Shortcut branch is open (see addBranch
+    // below) -- Escape and click-outside close it before the panel.
     readonly property bool taskbarModalOpen: addBranch.open
 
     // Same click-outside-to-dismiss pattern as TopBar.qml: the input region
@@ -104,18 +99,28 @@ PanelWindow {
             width: addBranch.inputActive ? addBranch.width : 0
             height: addBranch.inputActive ? addBranch.height : 0
         }
+        // Click-outside-to-dismiss, only while Taskbar is open. It stays on
+        // while the branch is open too: the branch is an Item in THIS
+        // window now (it used to be a separate FloatingWindow this region
+        // had to stand aside for), stacked above dismissArea with its own
+        // click-eating background, so a click inside it never reaches the
+        // catcher -- and a click outside it peels one layer, exactly like
+        // Escape.
         Region {
             x: 0; y: 0
-            width: (PanelManager.isOpen("taskbar") && !root.taskbarModalOpen) ? root.width : 0
-            height: (PanelManager.isOpen("taskbar") && !root.taskbarModalOpen) ? root.height : 0
+            width: PanelManager.isOpen("taskbar") ? root.width : 0
+            height: PanelManager.isOpen("taskbar") ? root.height : 0
         }
     }
 
     MouseArea {
         id: dismissArea
         anchors.fill: parent
-        enabled: PanelManager.isOpen("taskbar") && !root.taskbarModalOpen
-        onClicked: PanelManager.close("taskbar")
+        enabled: PanelManager.isOpen("taskbar")
+        onClicked: {
+            if (root.taskbarModalOpen) dockIsland.panelItem.addPanelOpen = false;
+            else PanelManager.close("taskbar");
+        }
     }
 
     Binding { target: ShellSurface; property: "bottomEdgeHeight"; value: root.exclusiveZone }
@@ -170,6 +175,7 @@ PanelWindow {
         // editor's own body (options + shortcut list) needs.
         expandedHeight: root.clampToScreen(collapsedHeight + ((panelItem && panelItem.contentHeight) ? panelItem.contentHeight : 460))
         elevation: 2
+        closeCenterY: panelItem ? panelItem.headerCenterY : 24
         panel: taskbarComponent
         onCloseRequested: PanelManager.close("taskbar")
 

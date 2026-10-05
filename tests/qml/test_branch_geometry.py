@@ -1,0 +1,122 @@
+"""BranchGeometry.place() -- where Taskbar Manager's Add Shortcut branch goes.
+
+The dock always puts the taskbar panel bottom-centre, so the live shell can
+only ever exercise one parent position per screen size. This drives the
+pure placement function directly with synthetic parent rects -- near every
+screen edge, on small and large screens -- and checks the invariants that
+matter: never off-screen, never overlapping the parent unless it is the
+inside-the-parent "sheet" fallback, branches toward the side with room,
+sensible minimum size.
+
+    python3 tests/qml/test_branch_geometry.py
+"""
+import sys
+import unittest
+from pathlib import Path
+
+try:
+    from PySide6.QtCore import QCoreApplication
+    from PySide6.QtQml import QJSEngine
+except ImportError:  # pragma: no cover
+    print("SKIP: PySide6 not installed (pip install PySide6-Essentials)")
+    sys.exit(0)
+
+SRC = (Path(__file__).resolve().parents[2] / "quickshell" / "BranchGeometry.js").read_text()
+SRC = SRC.replace(".pragma library", "")
+
+_app = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])
+engine = QJSEngine()
+engine.evaluate(SRC)
+_place = engine.globalObject().property("place")
+
+MARGIN, GAP, MIN_W, MIN_H = 8, 12, 280, 380
+WANT = {"w": 340, "h": 520}
+
+
+def place(parent, screen, anchor=None, header=48, footer=52):
+    if anchor is None:
+        anchor = {"x": parent["x"] + parent["w"] - 80, "y": parent["y"] + header / 2}
+    args = [engine.toScriptValue(v) for v in (
+        parent, anchor, WANT, screen,
+        {"margin": MARGIN, "gap": GAP, "minW": MIN_W, "minH": MIN_H, "headerH": header, "footerH": footer})]
+    r = _place.call(args).toVariant()
+    return {k: (v if k == "side" else float(v)) for k, v in r.items()}
+
+
+def rect(x, y, w, h):
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def overlaps(a, b):
+    return a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"] and a["y"] < b["y"] + b["h"] and b["y"] < a["y"] + a["h"]
+
+
+SCREENS = [(3840, 2160), (2560, 1440), (1920, 1080), (1366, 768), (1280, 720), (1024, 768), (800, 600)]
+
+
+class BranchGeometryTest(unittest.TestCase):
+    def check(self, parent, sw, sh, ctx):
+        r = place(parent, {"w": sw, "h": sh})
+        b = {"x": r["x"], "y": r["y"], "w": r["w"], "h": r["h"]}
+        ctx = f"{ctx} screen={sw}x{sh} parent={parent} -> {r}"
+        # on-screen with margins
+        self.assertGreaterEqual(b["x"], MARGIN - 0.01, ctx)
+        self.assertGreaterEqual(b["y"], MARGIN - 0.01, ctx)
+        self.assertLessEqual(b["x"] + b["w"], sw - MARGIN + 0.01, ctx)
+        self.assertLessEqual(b["y"] + b["h"], sh - MARGIN + 0.01, ctx)
+        self.assertGreater(b["w"], 0, ctx)
+        self.assertGreater(b["h"], 0, ctx)
+        if r["side"] == "sheet":
+            # inside the parent's body, below its header, above its footer
+            self.assertGreaterEqual(b["x"], parent["x"] - 0.01, ctx)
+            self.assertLessEqual(b["x"] + b["w"], parent["x"] + parent["w"] + 0.01, ctx)
+            self.assertGreaterEqual(b["y"], parent["y"] + 48 - 0.01, ctx)
+            self.assertLessEqual(b["y"] + b["h"], parent["y"] + parent["h"] - 52 + 0.01, ctx)
+        else:
+            self.assertFalse(overlaps(b, parent), "branch overlaps its parent: " + ctx)
+            self.assertGreaterEqual(b["w"], min(MIN_W, sw - 2 * MARGIN) - 0.01, ctx)
+        return r
+
+    def test_bottom_centre_dock_all_screens(self):
+        for sw, sh in SCREENS:
+            ph = min(470, sh - 16)
+            parent = rect((sw - 640) / 2, sh - 8 - ph, 640, ph)
+            r = self.check(parent, sw, sh, "dock")
+            if sw >= 1366:
+                self.assertIn(r["side"], ("right", "left"), f"{sw}x{sh}: expected a side branch, got {r}")
+                # side branches line up with the parent's top and bottom
+                self.assertAlmostEqual(r["y"], parent["y"], delta=0.5)
+                self.assertAlmostEqual(r["h"], parent["h"], delta=0.5)
+
+    def test_parent_near_each_edge(self):
+        for sw, sh in SCREENS:
+            pw, ph = min(640, sw - 16), min(470, sh - 16)
+            cases = {
+                "left": rect(MARGIN, (sh - ph) / 2, pw, ph),
+                "right": rect(sw - MARGIN - pw, (sh - ph) / 2, pw, ph),
+                "top": rect((sw - pw) / 2, MARGIN, pw, ph),
+                "bottom": rect((sw - pw) / 2, sh - MARGIN - ph, pw, ph),
+                "top-left": rect(MARGIN, MARGIN, pw, ph),
+                "bottom-right": rect(sw - MARGIN - pw, sh - MARGIN - ph, pw, ph),
+            }
+            for name, parent in cases.items():
+                r = self.check(parent, sw, sh, name)
+                if name in ("left", "top-left") and r["side"] in ("left", "right"):
+                    self.assertEqual(r["side"], "right", f"parent at left edge must branch right: {r}")
+                if name in ("right", "bottom-right") and r["side"] in ("left", "right"):
+                    self.assertEqual(r["side"], "left", f"parent at right edge must branch left: {r}")
+
+    def test_small_parent_keeps_usable_branch(self):
+        # A short parent must not squash the branch below its usable minimum.
+        parent = rect(400, 900, 640, 160)
+        r = self.check(parent, 1920, 1080, "short parent")
+        self.assertGreaterEqual(r["h"], MIN_H - 0.01)
+
+    def test_sheet_fallback_on_tiny_screen(self):
+        parent = rect(80, 120, 640, 472)
+        r = self.check(parent, 800, 600, "tiny")
+        self.assertEqual(r["side"], "sheet")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
