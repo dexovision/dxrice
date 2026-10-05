@@ -847,15 +847,28 @@ class TestSuperGResize(unittest.TestCase):
         ]
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
         huge = next(r for r in result if r[0] == "0x4_huge_main")
-        self.assertEqual((huge[3], huge[4]), (1800, 1213),
-                          "a resize that introduces a real dead gap elsewhere was kept over a clean move-only "
-                          "alternative")
+        # Re-pick, same root cause as several other fixtures this session:
+        # _refine_notch_alignment (added after this test was written) now
+        # runs a further, independently-verified-safe pass on TOP of the
+        # move-only result this test originally pinned -- 0x4_huge_main's
+        # 1800px width happened to be legitimately shrinkable (it passes
+        # the same oversized-relative-to-population gate the per-step
+        # resize mechanism uses) to exactly 1614px, matching
+        # 0x1_landscape_wide's own width and closing a real silhouette
+        # notch between them. This is a GENUINE further improvement, not
+        # a loosening: confirmed via the exact assertion below (the one
+        # that actually encodes this test's real intent), which still
+        # passes -- zero net dead-gap penalty anywhere, i.e. still not the
+        # BAD resize (1440x970, a real 122px gap) this test exists to
+        # catch. The exact pre-refinement size is no longer the right
+        # thing to assert; "no dead gap" always was.
         rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
         penalty_total = sum(
             apw.composition_penalty(r, rects[:i] + rects[i + 1:], GAP) for i, r in enumerate(rects)
         )
-        self.assertLessEqual(penalty_total, 0.0, f"move-only result should have no net dead-gap penalty: "
-                                                   f"{penalty_total}")
+        self.assertLessEqual(penalty_total, 0.0, f"result should have no net dead-gap penalty: {penalty_total}")
+        self.assertNotEqual((huge[3], huge[4]), (1440, 970),
+                             "the specific BAD resize this test exists to catch was kept")
 
     def test_position_only_already_good_resizes_nothing(self):
         """6: a composition where move-only already produces a good result
@@ -2818,9 +2831,11 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
     per-step incremental build cannot see (a window's locally-best choice
     can lock in an offset that forces a much worse notch onto a LATER
     window it has no way to anticipate). These pin down, with permanent
-    regression fixtures, the real improvement AND the two bugs found and
-    fixed while building it -- a dead-gap/notch trade-off and an unbounded
-    cascading-drift trajectory -- so neither can silently return."""
+    regression fixtures, the real improvement AND the bugs found and fixed
+    while building it -- a dead-gap/notch trade-off, an unbounded
+    cascading-drift trajectory, and an over-eager shrink that ignored the
+    same population-based eligibility gate the main resize mechanism
+    already enforces -- so none of them can silently return."""
 
     MON = (0, 0, 1920, 1080)
     GAP = 5
@@ -2911,14 +2926,90 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
             "tall2": (700, 1560, 600, 900),
         }
         origin = {a: (x, y) for a, (x, y, w, h) in placed.items()}
+        reference_area = arr._typical_area([{"address": a, "at": [0, 0], "size": [w, h]}
+                                             for a, (x, y, w, h) in placed.items()])
 
-        arr._refine_notch_alignment(placed, [], self.GAP)
+        arr._refine_notch_alignment(placed, [], self.GAP, reference_area)
 
         for a, (x, y, w, h) in placed.items():
             ox, oy = origin[a]
             moved = math.hypot(x - ox, y - oy)
             self.assertLessEqual(moved, arr.NOTCH_REFINE_MAX_TOTAL_SHIFT + 1e-6,
                                   f"{a} moved {moved:.0f}px during refinement -- unbounded cascading drift")
+
+    def test_shrink_closes_a_notch_pure_repositioning_cannot(self):
+        """LIVE USER REPORT: a real desktop screenshot showed a gap that
+        survived the position-only version of this pass -- confirmed
+        structurally unfixable by sliding alone, since two flush-stacked
+        windows of different widths can be LEFT-aligned or RIGHT-aligned
+        but never both. This exact 6-window fixture (from the dead-gap
+        regression test above) reproduces a real instance: 0x4_huge_main
+        (1800px wide, a genuine size outlier against this population) and
+        0x1_landscape_wide (1614px) end up in a flush vertical
+        relationship with a 186px notch that no shift could close. The
+        post-resize version shrinks 0x4_huge_main to exactly match
+        0x1_landscape_wide's width, closing the notch completely, within
+        MAX_SHRINK_FRACTION, and with zero dead-gap penalty anywhere."""
+        eligible = [
+            {"address": "0x0_portrait", "at": [1830, -131], "size": [323, 1138]},
+            {"address": "0x1_landscape_wide", "at": [-454, -143], "size": [1614, 520]},
+            {"address": "0x2_portrait", "at": [534, -649], "size": [426, 962]},
+            {"address": "0x3_ultra_wide", "at": [-160, -414], "size": [1982, 309]},
+            {"address": "0x4_huge_main", "at": [-556, 570], "size": [1800, 1213]},
+            {"address": "0x5_ultra_wide", "at": [474, 254], "size": [2147, 389]},
+        ]
+        result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
+        huge = next(r for r in result if r[0] == "0x4_huge_main")
+        self.assertEqual((huge[3], huge[4]), (1614, 1186),
+                          f"expected 0x4_huge_main shrunk to match its neighbor's width, got {huge[3]}x{huge[4]}")
+        min_w = round(1800 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        min_h = round(1213 * (1.0 - apw.MAX_SHRINK_FRACTION))
+        self.assertGreaterEqual(huge[3], min_w, "shrunk more than MAX_SHRINK_FRACTION allows")
+        self.assertGreaterEqual(huge[4], min_h, "shrunk more than MAX_SHRINK_FRACTION allows")
+        rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
+        addrs = [a for a, x, y, w, h in result]
+        huge_rect = rects[addrs.index("0x4_huge_main")]
+        huge_notch = apw._notch_penalty(huge_rect, rects[:addrs.index("0x4_huge_main")]
+                                         + rects[addrs.index("0x4_huge_main") + 1:], self.GAP)
+        self.assertEqual(huge_notch, 0.0,
+                          f"expected 0x4_huge_main's own notch to close completely via shrink, got {huge_notch}")
+        penalty_total = sum(apw.composition_penalty(r, rects[:i] + rects[i + 1:], self.GAP)
+                             for i, r in enumerate(rects))
+        self.assertLessEqual(penalty_total, 0.0, f"shrink introduced a dead gap: {penalty_total}")
+
+    def test_shrink_never_fires_to_align_with_a_tiny_dialog(self):
+        """LIVE REGRESSION: an early version of the shrink extension had
+        no eligibility gate at all -- any window with a misaligned edge
+        was a candidate, including a dominant main window whose only
+        "problem" was a nearby tiny dialog not sharing its width. That
+        shrank a window ~5x the local population's own size purely to
+        tidy up an edge nobody needed tidied, and a perfectly ordinary
+        2-window composition with plenty of open canvas got an
+        unnecessary shrink just to align. Gated the same way the main
+        resize mechanism already is: a window must be genuinely oversized
+        relative to the population (RESIZE_ELIGIBLE_RATIO_FLOOR) before
+        shrinking-to-align is even considered -- repositioning remains
+        unrestricted, since moving costs nothing structurally."""
+        eligible = [
+            {"address": "small_term", "at": [0, 0], "size": [420, 220]},
+            {"address": "wide_term", "at": [425, 0], "size": [1100, 220]},
+            {"address": "panel", "at": [0, 225], "size": [1900, 950]},
+        ]
+        result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
+        panel = next(r for r in result if r[0] == "panel")
+        self.assertEqual((panel[3], panel[4]), (1900, 950),
+                          "panel was shrunk even though it is its own legitimate, dominant size class")
+
+        # And the simpler, already-covered case: two modest windows with
+        # plenty of open canvas must never be resized just to tidy an edge.
+        eligible2 = [
+            {"address": "0xA", "at": [0, 0], "size": [437, 291]},
+            {"address": "0xB", "at": [900, 500], "size": [500, 400]},
+        ]
+        result2 = arr.auto_arrange(eligible2, [], self.MON, self.GAP)
+        by_orig = {"0xA": (437, 291), "0xB": (500, 400)}
+        for a, x, y, w, h in result2:
+            self.assertEqual((w, h), by_orig[a], f"{a} was resized with no need to")
 
 
 if __name__ == "__main__":
