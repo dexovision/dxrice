@@ -29,10 +29,13 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
+# Pre-existing, harmless "Member data ... overrides a member" notices from
+# Card/ModalSurface/Expandable's `default property alias data`.
+os.environ.setdefault("QT_LOGGING_RULES", "qt.qml.propertyCache.append=false")
 
 from PySide6.QtCore import QObject, QPointF, QTimer, QUrl, Qt, Slot, Property, QEventLoop, QRect  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtQml import QQmlExpression, qmlRegisterSingletonInstance  # noqa: E402
+from PySide6.QtQml import QQmlExpression, qmlRegisterSingletonType, QQmlEngine  # noqa: E402
 from PySide6.QtQuick import QQuickView, QQuickItem  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -95,8 +98,9 @@ DEFAULT_FILES = {
 
 
 class HarnessBridge(QObject):
-    """One per process (a QML singleton instance can only be registered
-    once); Scene.__init__ re-points it at each new scene's config/screen."""
+    """One per Scene. Registered through a singleton FACTORY (not a fixed
+    instance, which Qt only lets a single engine ever touch), handing each
+    new engine the bridge of the scene being constructed."""
 
     def __init__(self):
         super().__init__()
@@ -171,7 +175,7 @@ def _prepare_shell(dest: Path):
     """Copy the real shell sources, stripping only window-protocol lines a
     stub Item cannot carry (layer-shell anchors / WlrLayershell.*)."""
     for src in SHELL_SRC.iterdir():
-        if src.suffix not in (".qml", "") and src.name != "qmldir":
+        if src.suffix not in (".qml", ".js") and src.name != "qmldir":
             continue
         if src.is_dir():
             continue
@@ -186,15 +190,19 @@ def _prepare_shell(dest: Path):
 
 
 _app = None
-_bridge = None
+_current_bridge = None
+
+
+def _bridge_factory(engine):
+    QQmlEngine.setObjectOwnership(_current_bridge, QQmlEngine.CppOwnership)
+    return _current_bridge
 
 
 def app():
-    global _app, _bridge
+    global _app
     if _app is None:
         _app = QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
-        _bridge = HarnessBridge()
-        qmlRegisterSingletonInstance(HarnessBridge, "Harness", 1, 0, "Harness", _bridge)
+        qmlRegisterSingletonType(HarnessBridge, "Harness", 1, 0, "Harness", _bridge_factory)
     return _app
 
 
@@ -210,7 +218,9 @@ class Scene:
         shutil.copy(REPO / "theme" / "theme.json", cfg / "dxrice" / "theme.json")
         (cfg / "waybar" / "config-dock").write_text(json.dumps(dock_config or DEFAULT_DOCK, indent=4))
         _prepare_shell(self.shell)
-        self.bridge = _bridge
+        global _current_bridge
+        self.bridge = HarnessBridge()
+        _current_bridge = self.bridge
         self.bridge.configure(width, height, self.shell, cfg)
         if setup:
             setup(self.bridge)

@@ -56,6 +56,13 @@ Item {
     property color surfaceColor: Theme.panel
     property int elevation: 3
 
+    // Vertical centre of the close button, in surface coordinates. Defaults
+    // to the centre of the persistent header for top-pinned islands (the X
+    // sits on the same line as the clock/status capsule); a bottom-pinned
+    // island's own header is the TOP row of its panel content instead, so
+    // the host passes that row's centre (Dock.qml, from TaskbarManager).
+    property real closeCenterY: collapsedHeight / 2
+
     // Constructed on first expand and torn down once fully collapsed again,
     // so an unopened panel costs nothing (the old LazyLoader behaviour, kept).
     property Component panel: null
@@ -222,17 +229,12 @@ Item {
         CloseButton {
             id: closeButton
             x: surface.width - width - 8
-            // Always the top-right corner of the SURFACE regardless of
-            // pinY -- this used to be written as a `pinY === "bottom" ? 8 :
-            // 8` ternary that always evaluated to the same value either way,
-            // which read as if the two cases were meant to differ (they
-            // never did). Every panel closes from the same corner on
-            // purpose (see the comment below); a bottom-pinned island's own
-            // header content has to stay clear of this fixed corner itself,
-            // not the other way around -- see TaskbarManager.qml's
-            // closeButtonReserve for the one place that actually collided
-            // with it.
-            y: 8
+            // Always the top-right corner of the SURFACE regardless of pinY,
+            // so every panel closes from the same corner; vertically centred
+            // on that panel's own header line (closeCenterY) rather than a
+            // fixed offset, which sat 1px low on the 36px capsules and ~10px
+            // high against Taskbar's taller header row.
+            y: Math.round(root.closeCenterY - height / 2)
             opacity: root.sub(root.morph, 0.35, 0.7)
             visible: opacity > 0.01
             onClicked: root.closeRequested()

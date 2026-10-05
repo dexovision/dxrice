@@ -44,6 +44,7 @@ Item {
         ? root.allApps
         : root.allApps.filter((a) => a.name.toLowerCase().includes(root.query.toLowerCase()))
 
+    readonly property bool appsLoading: appsProc.running
     Process {
         id: appsProc
         command: ["python3", root.repoDir + "/scripts/dxrice_list_desktop_apps.py"]
@@ -92,6 +93,13 @@ Item {
     // silently clipping Quick Settings' Overview cards with no way to scroll
     // to them. Computing the cap here instead means the outer clamp in
     // Dock.qml is a pure backstop, never the thing actually doing the work.
+    // Header metrics, read by Dock.qml (close-button alignment) and
+    // AddShortcutBranch.qml (where the branch leaves the panel).
+    readonly property real headerHeight: 48
+    readonly property real headerCenterY: headerHeight / 2
+    readonly property real addAnchorX: addChip.x + addChip.width / 2
+    readonly property int shortcutCount: root.loaded ? (root.cfg["modules-left"] || []).length : 0
+
     readonly property real maxAvailableBodyHeight: ShellSurface.screenHeight - ShellSurface.gap * 2 - ShellSurface.dockUnit - header.height
     readonly property real bodyHeight: Math.min(360, maxAvailableBodyHeight, body.implicitHeight + Theme.padXl * 2)
     readonly property real contentHeight: header.height + bodyHeight
@@ -407,29 +415,92 @@ Item {
         // Item) -- Taskbar was the one panel missing it, which is also why
         // its header sat close enough to the rounded top corner to look like
         // it was escaping the surface even before accounting for the 5px.
+        // The panel's header strip: what this is on the left, and the Add
+        // toggle on the right, vertically centred on the same line as the
+        // island's own close button (Dock.qml feeds `headerCenterY` to the
+        // island's `closeCenterY`), so X and Add read as one row of chrome.
+        // Add is a compact toggle, not a full GlassButton: a 42px accent
+        // pill beside a 22px X was the loudest object on the whole panel
+        // for an action used rarely. It shows the branch's state (tinted,
+        // its "+" turned into a "x") because it IS the branch's origin --
+        // the branch grows out of this line (see AddShortcutBranch.qml).
         Item {
             id: header
             width: parent.width
-            height: headerRow.implicitHeight + Theme.padSm * 2
+            height: root.headerHeight
 
-            // CLOSE REGION: ShellIsland.qml's own closeButton is fixed at
-            // `surface.width - 22 - 8` regardless of which edge this island
-            // grows from, so it always claims the surface's top-right
-            // corner -- confirmed by grabbing the actual rendered surface
-            // and finding the close "X" partially hidden behind this very
-            // Add button, which was positioned as if that corner were free.
-            // ACTION REGION (the Add button) has to stop clear of it: this
-            // is that same 22+8 footprint plus a visible gap, kept as one
-            // named value instead of folded into the position expression so
-            // the reason isn't just a bare magic number.
+            // Clear of ShellIsland's close button (22px at 8px from the
+            // right edge) plus a visible gap.
             readonly property real closeButtonReserve: 22 + 8 + Theme.padSm
 
             Row {
-                id: headerRow
-                anchors.top: parent.top
-                anchors.topMargin: Theme.padSm
-                x: header.width - width - Theme.padLg - header.closeButtonReserve
-                GlassButton { text: "Add"; variant: "primary"; onClicked: root.addPanelOpen = !root.addPanelOpen }
+                anchors.left: parent.left
+                anchors.leftMargin: Theme.padXl
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Theme.padSm
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Taskbar"
+                    color: Theme.textActive
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeNormal
+                    font.weight: Font.DemiBold
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.loaded
+                    text: root.shortcutCount + (root.shortcutCount === 1 ? " shortcut" : " shortcuts")
+                    color: Theme.text
+                    opacity: Theme.opacityMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmaller
+                }
+            }
+
+            Rectangle {
+                id: addChip
+                objectName: "taskbarAddToggle"
+                x: header.width - width - header.closeButtonReserve
+                anchors.verticalCenter: parent.verticalCenter
+                height: 28
+                width: addChipRow.implicitWidth + Theme.padMd * 2
+                radius: height / 2
+                color: root.addPanelOpen
+                    ? Theme.mix(Theme.layer1, Theme.accent, addChipArea.containsMouse ? 0.34 : 0.24)
+                    : (addChipArea.pressed ? Theme.layer2Active : (addChipArea.containsMouse ? Theme.layer2Hover : Theme.layer1))
+                scale: addChipArea.pressed ? 0.96 : 1
+                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
+                Row {
+                    id: addChipRow
+                    anchors.centerIn: parent
+                    spacing: Theme.padXs + 2
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "+"
+                        color: root.addPanelOpen ? Theme.textActive : Theme.accent
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeLarger
+                        font.weight: Font.DemiBold
+                        rotation: root.addPanelOpen ? 45 : 0
+                        Behavior on rotation { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Add"
+                        color: Theme.textActive
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmaller
+                        font.weight: Font.Medium
+                    }
+                }
+                MouseArea {
+                    id: addChipArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.addPanelOpen = !root.addPanelOpen
+                }
             }
         }
 
@@ -663,7 +734,11 @@ Item {
                                         anchors.right: actionsRow.left
                                         anchors.rightMargin: Theme.padSm
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: shortcutRow.meta.dxrice_label || shortcutRow.modid
+                                        // The launcher (and any hand-written module) has no
+                                        // dxrice_label -- its human name lives in
+                                        // tooltip-format ("App Launcher"), which is
+                                        // what the dock's own tooltip shows too.
+                                        text: shortcutRow.meta.dxrice_label || shortcutRow.meta["tooltip-format"] || shortcutRow.modid
                                         color: Theme.textActive
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeNormal
