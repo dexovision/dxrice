@@ -703,54 +703,84 @@ Item {
                             // entirely invisible. Two lines gives the name
                             // the card's FULL width to elide against,
                             // which this column was always going to need.
-                            delegate: Column {
+                            // One coherent row object, not a name
+                            // with controls bolted beside it: a thin
+                            // accent bar marks the connected network (the
+                            // same left-edge-accent language the active
+                            // tab's own indicator uses elsewhere in this
+                            // file, not a one-off), the name is the one
+                            // thing sized to actually read, and the
+                            // action is a CompactChip rather than a full
+                            // GlassButton -- a GlassButton "Connect" came
+                            // out wider than most network names
+                            // themselves in this card's real width, the
+                            // opposite of "a compact action."
+                            delegate: Item {
                                 width: parent.width
-                                spacing: 2
-                                Row {
-                                    width: parent.width
-                                    spacing: Theme.padXs
-                                    Text {
-                                        text: modelData.ssid
-                                        color: Theme.text
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeSmaller
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width - (modelData.connected ? 20 : 0)
-                                        elide: Text.ElideRight
-                                    }
-                                    Text {
-                                        visible: modelData.connected
-                                        text: "\u2713"
-                                        color: Theme.accent
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 16
-                                    }
+                                height: nameRow.implicitHeight + detailRow.implicitHeight + 3
+                                Rectangle {
+                                    visible: modelData.connected
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    width: 2
+                                    radius: 1
+                                    color: Theme.accent
                                 }
-                                Row {
-                                    width: parent.width
-                                    height: 24
-                                    Text {
-                                        text: modelData.signal + "%"
-                                        color: Theme.text
-                                        opacity: Theme.opacityMuted
-                                        font.pixelSize: Theme.fontSizeSmall
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width - 24 - (modelData.connected ? 0 : 76)
+                                Column {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: modelData.connected ? 8 : 0
+                                    anchors.right: parent.right
+                                    spacing: 3
+                                    Row {
+                                        id: nameRow
+                                        width: parent.width
+                                        spacing: Theme.padXs
+                                        Text {
+                                            text: modelData.ssid
+                                            color: modelData.connected ? Theme.textActive : Theme.text
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmaller
+                                            font.weight: modelData.connected ? Font.DemiBold : Font.Normal
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: parent.width - (modelData.connected ? 20 : 0)
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            visible: modelData.connected
+                                            text: "\u2713"
+                                            color: Theme.accent
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 16
+                                        }
                                     }
-                                    IconButton {
-                                        visible: modelData.known
-                                        glyph: ""
-                                        size: 24
-                                        destructive: true
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        onClicked: wifiBackend.forget(modelData.ssid)
-                                    }
-                                    GlassButton {
-                                        visible: !modelData.connected
-                                        text: "Connect"
-                                        variant: "secondary"
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        onClicked: wifiBackend.connectTo(modelData.ssid, modelData.security)
+                                    Row {
+                                        id: detailRow
+                                        width: parent.width
+                                        height: Math.max(24, signalText.implicitHeight)
+                                        Text {
+                                            id: signalText
+                                            text: modelData.signal + "%"
+                                            color: Theme.text
+                                            opacity: Theme.opacityMuted
+                                            font.pixelSize: Theme.fontSizeSmall
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: parent.width - 24 - (modelData.connected ? 0 : connectChip.width + Theme.padXs)
+                                        }
+                                        IconButton {
+                                            visible: modelData.known
+                                            glyph: ""
+                                            size: 24
+                                            destructive: true
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            onClicked: wifiBackend.forget(modelData.ssid)
+                                        }
+                                        CompactChip {
+                                            id: connectChip
+                                            visible: !modelData.connected
+                                            text: "Connect"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            onClicked: wifiBackend.connectTo(modelData.ssid, modelData.security)
+                                        }
                                     }
                                 }
                             }
@@ -771,47 +801,76 @@ Item {
                             // one line had no real chance of fitting name
                             // + battery% + forget + connect/disconnect in
                             // this card's actual ~160px width.
-                            delegate: Column {
+                            delegate: Item {
                                 width: parent.width
-                                spacing: 2
-                                Text {
-                                    text: modelData.name
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmaller
-                                    width: parent.width
-                                    elide: Text.ElideRight
+                                height: btNameRow.implicitHeight + btDetailRow.implicitHeight + 3
+                                Rectangle {
+                                    visible: modelData.connected
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    width: 2
+                                    radius: 1
+                                    color: Theme.accent
                                 }
-                                Row {
-                                    width: parent.width
-                                    height: 24
-                                    Text {
-                                        visible: modelData.battery >= 0
-                                        text: modelData.battery + "%"
-                                        color: Theme.text
-                                        opacity: Theme.opacityMuted
-                                        font.pixelSize: Theme.fontSizeSmall
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width - 24 - connectBtn.width
+                                Column {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: modelData.connected ? 8 : 0
+                                    anchors.right: parent.right
+                                    spacing: 3
+                                    Row {
+                                        id: btNameRow
+                                        width: parent.width
+                                        spacing: Theme.padXs
+                                        Text {
+                                            text: modelData.name
+                                            color: modelData.connected ? Theme.textActive : Theme.text
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmaller
+                                            font.weight: modelData.connected ? Font.DemiBold : Font.Normal
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: parent.width - (modelData.connected ? 20 : 0)
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            visible: modelData.connected
+                                            text: "\u2713"
+                                            color: Theme.accent
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 16
+                                        }
                                     }
-                                    Item {
-                                        visible: !(modelData.battery >= 0)
-                                        width: parent.width - 24 - connectBtn.width
-                                        height: 1
-                                    }
-                                    IconButton {
-                                        glyph: ""
-                                        size: 24
-                                        destructive: true
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        onClicked: btBackend.forget(modelData.mac)
-                                    }
-                                    GlassButton {
-                                        id: connectBtn
-                                        text: modelData.connected ? "Disconnect" : "Connect"
-                                        variant: "secondary"
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        onClicked: btBackend.toggleConnect(modelData.mac, modelData.connected)
+                                    Row {
+                                        id: btDetailRow
+                                        width: parent.width
+                                        height: Math.max(24, btSignalText.implicitHeight)
+                                        Text {
+                                            id: btSignalText
+                                            visible: modelData.battery >= 0
+                                            text: modelData.battery + "%"
+                                            color: Theme.text
+                                            opacity: Theme.opacityMuted
+                                            font.pixelSize: Theme.fontSizeSmall
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: parent.width - 24 - connectBtn.width - Theme.padXs
+                                        }
+                                        Item {
+                                            visible: !(modelData.battery >= 0)
+                                            width: parent.width - 24 - connectBtn.width - Theme.padXs
+                                            height: 1
+                                        }
+                                        IconButton {
+                                            glyph: ""
+                                            size: 24
+                                            destructive: true
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            onClicked: btBackend.forget(modelData.mac)
+                                        }
+                                        CompactChip {
+                                            id: connectBtn
+                                            text: modelData.connected ? "Disconnect" : "Connect"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            onClicked: btBackend.toggleConnect(modelData.mac, modelData.connected)
+                                        }
                                     }
                                 }
                             }
@@ -819,19 +878,34 @@ Item {
                     }
                 }
 
-                Card {
+                // Plain tertiary info, not a Card -- a list of read-only
+                // times to glance at needs no border/fill of its own any
+                // more than "This device" (leftCol's own equivalent) does.
+                // Matches that block's exact caption convention
+                // (opacityMuted, fontSizeSmall) so the two tertiary blocks
+                // on this Dashboard read as the same register, and gives
+                // the Networks card above it room to be the one real,
+                // bordered surface in this column.
+                Column {
                     width: parent.width
-                    title: "World Clock"
+                    spacing: Theme.padXs
                     visible: worldClock.cities.length > 0
                     height: visible ? implicitHeight : 0
-                        Repeater {
-                            model: worldClock.cities
-                            delegate: Row {
-                                width: parent.width
-                                Text { text: modelData.label; color: Theme.text; opacity: Theme.opacityFaint; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: parent.width - 50 }
-                                Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: 50; horizontalAlignment: Text.AlignRight }
-                            }
+                    Text {
+                        text: "World Clock"
+                        color: Theme.text
+                        opacity: Theme.opacityMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+                    Repeater {
+                        model: worldClock.cities
+                        delegate: Row {
+                            width: parent.width
+                            Text { text: modelData.label; color: Theme.text; opacity: Theme.opacityFaint; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: parent.width - 50 }
+                            Text { text: modelData.time; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; width: 50; horizontalAlignment: Text.AlignRight }
                         }
+                    }
                 }
             }
         }
@@ -1162,89 +1236,121 @@ Item {
             width: parent ? parent.width : implicitWidth
             spacing: ShellSurface.cardGap
 
-            // Row 1: CPU / GPU / Memory. Row 2: Storage / Network, at the
-            // same card width -- two cards using the panel's full width
-            // reads as deliberate, not as three cards with a fourth slot
-            // left dangling. GPU shows a genuine "unavailable" state
-            // (never a fabricated percentage) when this machine has no
-            // working GPU-utilization interface -- see PerformanceService's
-            // own comment on why no single cross-vendor source exists.
-            Row {
+            // ONE monitoring surface, not five -- CPU/GPU/Memory/Storage/
+            // Network used to each be their own bordered Card, which read
+            // as a "card wall" (five identical borders in a row) rather
+            // than one coherent place to check system load. A single Card
+            // titled "System" now holds all five as plain cells separated
+            // by hairlines (Theme.borderFaint, the same token Card's own
+            // border already uses, so the internal dividers read as the
+            // SAME material language turned down a notch, not a different
+            // one) -- border count drops from 5 to 1 while every cell still
+            // gets its own label, value and bar. GPU shows a genuine
+            // "unavailable" state (never a fabricated percentage) when
+            // this machine has no working GPU-utilization interface -- see
+            // PerformanceService's own comment on why no single cross-
+            // vendor source exists.
+            Card {
                 width: parent.width
-                spacing: ShellSurface.cardGap
-                readonly property real cardWidth: (width - spacing * 2) / 3
+                title: "System"
+                Row {
+                    width: parent.width
+                    // Height follows content (the tallest cell), never a
+                    // guessed constant -- the GPU cell's 2-line
+                    // "Unavailable" state and the normal 3-line state (and
+                    // row 2's 4-line Storage cell, which needs MORE height
+                    // than this row) all size themselves correctly this
+                    // way with nothing to keep in sync by hand.
+                    height: Math.max(cpuCell.implicitHeight, gpuCell.implicitHeight, memCell.implicitHeight)
+                    readonly property real cellWidth: (width - 2) / 3
 
-                Card {
-                    width: parent.cardWidth
-                    title: "CPU"
-                    Text { text: Math.round(PerformanceService.cpuPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
-                    LevelBar { width: parent.width; value: PerformanceService.cpuPercent / 100 }
-                }
-                Card {
-                    width: parent.cardWidth
-                    title: "GPU"
-                    Text {
-                        visible: PerformanceService.gpuAvailable
-                        text: Math.round(PerformanceService.gpuPercent) + "%"
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeLarge
-                        font.weight: Font.DemiBold
+                    Column {
+                        id: cpuCell
+                        width: parent.cellWidth
+                        spacing: Theme.padXs
+                        Text { text: "CPU"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
+                        Text { text: Math.round(PerformanceService.cpuPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
+                        LevelBar { width: parent.width; value: PerformanceService.cpuPercent / 100 }
                     }
-                    LevelBar { visible: PerformanceService.gpuAvailable; width: parent.width; value: PerformanceService.gpuPercent / 100 }
-                    Text {
-                        visible: !PerformanceService.gpuAvailable
-                        text: "Unavailable"
-                        color: Theme.text
-                        opacity: Theme.opacityMuted
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeNormal
+                    Rectangle { width: 1; height: parent.height; color: Theme.borderFaint }
+                    Column {
+                        id: gpuCell
+                        width: parent.cellWidth
+                        spacing: Theme.padXs
+                        Text { text: "GPU"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
+                        Text {
+                            visible: PerformanceService.gpuAvailable
+                            text: Math.round(PerformanceService.gpuPercent) + "%"
+                            color: Theme.textActive
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeLarge
+                            font.weight: Font.DemiBold
+                        }
+                        LevelBar { visible: PerformanceService.gpuAvailable; width: parent.width; value: PerformanceService.gpuPercent / 100 }
+                        Text {
+                            visible: !PerformanceService.gpuAvailable
+                            text: "Unavailable"
+                            color: Theme.text
+                            opacity: Theme.opacityMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeNormal
+                        }
+                    }
+                    Rectangle { width: 1; height: parent.height; color: Theme.borderFaint }
+                    Column {
+                        id: memCell
+                        width: parent.cellWidth
+                        spacing: Theme.padXs
+                        Text { text: "Memory"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
+                        Text { text: Math.round(PerformanceService.memPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
+                        LevelBar { width: parent.width; value: PerformanceService.memPercent / 100 }
                     }
                 }
-                Card {
-                    width: parent.cardWidth
-                    title: "Memory"
-                    Text { text: Math.round(PerformanceService.memPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
-                    LevelBar { width: parent.width; value: PerformanceService.memPercent / 100 }
-                }
-            }
 
-            Row {
-                width: parent.width
-                spacing: ShellSurface.cardGap
-                readonly property real cardWidth: (width - spacing) / 2
+                Rectangle { width: parent.width; height: 1; color: Theme.surfaceHighlight }
 
-                Card {
-                    width: parent.cardWidth
-                    title: "Storage"
-                    Text { text: Math.round(PerformanceService.diskPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
-                    LevelBar { width: parent.width; value: PerformanceService.diskPercent / 100 }
-                    Text {
-                        visible: PerformanceService.diskUsedLabel.length > 0
-                        text: PerformanceService.diskUsedLabel
-                        color: Theme.text
-                        opacity: Theme.opacityMuted
-                        font.pixelSize: Theme.fontSizeSmall
+                Row {
+                    width: parent.width
+                    height: Math.max(storageCell.implicitHeight, networkCell.implicitHeight)
+                    readonly property real cellWidth: (width - 1) / 2
+
+                    Column {
+                        id: storageCell
+                        width: parent.cellWidth
+                        spacing: Theme.padXs
+                        Text { text: "Storage"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
+                        Text { text: Math.round(PerformanceService.diskPercent) + "%"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge; font.weight: Font.DemiBold }
+                        LevelBar { width: parent.width; value: PerformanceService.diskPercent / 100 }
+                        Text {
+                            visible: PerformanceService.diskUsedLabel.length > 0
+                            text: PerformanceService.diskUsedLabel
+                            color: Theme.text
+                            opacity: Theme.opacityMuted
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
                     }
-                }
-                Card {
-                    width: parent.cardWidth
-                    title: "Network"
-                    Text {
-                        text: PerformanceService.networkRateKBs >= 1024
-                            ? (PerformanceService.networkRateKBs / 1024).toFixed(1) + " MB/s"
-                            : Math.round(PerformanceService.networkRateKBs) + " KB/s"
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeLarge
-                        font.weight: Font.DemiBold
-                    }
-                    Text {
-                        text: "combined rx + tx"
-                        color: Theme.text
-                        opacity: Theme.opacityMuted
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                    Rectangle { width: 1; height: parent.height; color: Theme.borderFaint }
+                    Column {
+                        id: networkCell
+                        width: parent.cellWidth
+                        spacing: Theme.padXs
+                        Text { text: "Network"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
+                        Text {
+                            text: PerformanceService.networkRateKBs >= 1024
+                                ? (PerformanceService.networkRateKBs / 1024).toFixed(1) + " MB/s"
+                                : Math.round(PerformanceService.networkRateKBs) + " KB/s"
+                            color: Theme.textActive
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeLarge
+                            font.weight: Font.DemiBold
+                        }
+                        Text {
+                            text: "combined rx + tx"
+                            color: Theme.text
+                            opacity: Theme.opacityMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
                     }
                 }
             }
