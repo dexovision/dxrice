@@ -23,11 +23,27 @@ FloatingWindow {
             anchors.margins: Theme.padLg
             spacing: Theme.padMd
 
-            Text {
-                text: "Password for " + root.ssid
-                color: Theme.textActive
-                font.family: Theme.fontFamily
-                font.weight: Font.DemiBold
+            Item {
+                width: parent.width
+                height: Math.max(pwTitle.implicitHeight, pwCloseBtn.height)
+                Text {
+                    id: pwTitle
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.right: pwCloseBtn.left
+                    anchors.rightMargin: Theme.padSm
+                    text: "Password for " + root.ssid
+                    color: Theme.textActive
+                    font.family: Theme.fontFamily
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+                CloseButton {
+                    id: pwCloseBtn
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: root.visible = false
+                }
             }
             Rectangle {
                 width: parent.width; height: 34; radius: Theme.entryRadius
