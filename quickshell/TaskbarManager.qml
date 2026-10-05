@@ -813,7 +813,24 @@ Item {
                 anchors.margins: Theme.padLg
                 spacing: Theme.padMd
 
-                Text { text: "Add Shortcut"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold }
+                Item {
+                    width: parent.width
+                    height: Math.max(titleText.implicitHeight, closeBtn.height)
+                    Text {
+                        id: titleText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Add Shortcut"
+                        color: Theme.textActive
+                        font.family: Theme.fontFamily
+                        font.weight: Font.DemiBold
+                    }
+                    CloseButton {
+                        id: closeBtn
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: addDialog.visible = false
+                    }
+                }
 
                 Rectangle {
                     width: parent.width; height: ShellSurface.rowHeight; radius: Theme.entryRadius
