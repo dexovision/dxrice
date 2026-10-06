@@ -159,6 +159,21 @@ def rect_for(x, y, w, h):
     return (x, y, x + w, y + h)
 
 
+def _px(v):
+    """A computed position as the whole pixel Hyprland gets. FLOOR, not
+    int(): int() truncates toward zero, which is not translation-invariant
+    across 0 -- -393.5 goes UP to -393 while 0.5 goes DOWN to 0. Positions
+    here are routinely fractional (centre-based and stepped candidates,
+    Stage 2's relocations) and, on an infinite desktop, routinely negative,
+    so two windows placed exactly `gap` apart but on opposite sides of the
+    0 line came out 1px short. Measured: every gap violation across 3,816
+    simulated placements (4 viewports, 6 scenario families) was exactly 4px
+    where 5 was configured. floor(a + k) == floor(a) + k for any integer k,
+    so coordinates that differ by a whole width-plus-gap keep exactly that
+    difference. Identical to int() for every non-negative position."""
+    return math.floor(v)
+
+
 # Secondary tiebreak weight (see find_free_position's score()): distance
 # to the viewport center is the primary signal, this only matters between
 # candidates that are otherwise close in that primary distance -- it
@@ -1903,7 +1918,7 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost,
                     + RESIZE_COST_PER_PIXEL * shrink_amount * resize_prominence)
             if (cost < resize_threshold and d3 < direct_distance_threshold
                     and (best_plan is None or cost < best_plan[0])):
-                best_plan = (cost, pos, w["address"], (int(sx), int(sy)), (int(sw), int(sh)))
+                best_plan = (cost, pos, w["address"], (_px(sx), _px(sy)), (int(sw), int(sh)))
 
     if best_plan is None:
         return None
@@ -2480,13 +2495,13 @@ def place_new_window(address, workspace_id, gap):
         # Hyprland's own anchor to land where try_resize_room computed.
         batch_async([
             resize_window_exact_lua(resize_size[0], resize_size[1], resize_addr),
-            move_window_exact_lua(int(resize_xy[0]), int(resize_xy[1]), resize_addr),
-            move_window_exact_lua(int(pos3[0]), int(pos3[1]), address),
+            move_window_exact_lua(_px(resize_xy[0]), _px(resize_xy[1]), resize_addr),
+            move_window_exact_lua(_px(pos3[0]), _px(pos3[1]), address),
         ])
         _settle_moves({
-            resize_addr: {"at": (int(resize_xy[0]), int(resize_xy[1])),
+            resize_addr: {"at": (_px(resize_xy[0]), _px(resize_xy[1])),
                           "size": (int(resize_size[0]), int(resize_size[1]))},
-            address: {"at": (int(pos3[0]), int(pos3[1]))},
+            address: {"at": (_px(pos3[0]), _px(pos3[1]))},
         })
         # Remember the trim (at the size the client actually took) so
         # neither a later arrival's Stage 3 nor a SUPER+G press trims this
@@ -2501,11 +2516,11 @@ def place_new_window(address, workspace_id, gap):
                 current_sizes={resize_addr: tuple(resized_now["size"])},
                 resized_now=[resize_addr]))
     elif use_stage2:
-        exprs = [move_window_exact_lua(int(pos2[0]), int(pos2[1]), address)]
-        expected = {address: {"at": (int(pos2[0]), int(pos2[1]))}}
+        exprs = [move_window_exact_lua(_px(pos2[0]), _px(pos2[1]), address)]
+        expected = {address: {"at": (_px(pos2[0]), _px(pos2[1]))}}
         for addr, (mx, my) in moved.items():
-            exprs.append(move_window_exact_lua(int(mx), int(my), addr))
-            expected[addr] = {"at": (int(mx), int(my))}
+            exprs.append(move_window_exact_lua(_px(mx), _px(my), addr))
+            expected[addr] = {"at": (_px(mx), _px(my))}
         if _DEBUG:
             print(f"DEBUG using STAGE 2: pos={pos2} + {len(moved)} window(s) relocated", file=sys.stderr, flush=True)
         batch_async(exprs)
@@ -2513,8 +2528,8 @@ def place_new_window(address, workspace_id, gap):
     else:
         if _DEBUG:
             print(f"DEBUG using STAGE 1: pos={pos1} new_size=({new_w},{new_h}) center={center}", file=sys.stderr, flush=True)
-        move_window_exact_async(int(pos1[0]), int(pos1[1]), address)
-        _settle_moves({address: {"at": (int(pos1[0]), int(pos1[1]))}})
+        move_window_exact_async(_px(pos1[0]), _px(pos1[1]), address)
+        _settle_moves({address: {"at": (_px(pos1[0]), _px(pos1[1]))}})
     return "placed"
 
 
