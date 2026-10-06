@@ -377,6 +377,12 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_s
     snapshot = dict(placed)
     start_correctness = correctness_cost()
     start_notch = notch_cost()
+    # Both whole-set costs of the CURRENT `placed`, kept in step with it:
+    # they only change when a trial is accepted, so recomputing them as
+    # "before" for every trial (two O(n^2) sums each) was pure repetition --
+    # half of this function's runtime on a 27-window desktop. Same values,
+    # same comparisons, same decisions.
+    current_correctness, current_notch = start_correctness, start_notch
 
     for _ in range(max_rounds):
         improved = False
@@ -541,14 +547,15 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_s
                     trial_rect = rect_for(x + dx, y + dy, nw, nh)
                     if collides(addr, trial_rect):
                         continue
-                    correctness_before = correctness_cost()
-                    notch_before = notch_cost()
+                    correctness_before = current_correctness
+                    notch_before = current_notch
                     saved = placed[addr]
                     placed[addr] = (x + dx, y + dy, nw, nh)
                     correctness_after = correctness_cost()
                     notch_after = notch_cost()
                     if correctness_after <= correctness_before + 1e-6 and notch_after < notch_before - 1e-6:
                         improved = True
+                        current_correctness, current_notch = correctness_after, notch_after
                         x, y, w, h = x + dx, y + dy, nw, nh
                         # Stop consuming this other_addr's candidate list --
                         # live-caught bug: the remaining candidates here were
