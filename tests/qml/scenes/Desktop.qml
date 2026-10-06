@@ -45,6 +45,10 @@ Item {
     }
 
     Loader { id: shellLoader; anchors.fill: parent; source: "shell.qml" }
+    // Where a test can re-parent a separate toplevel (a FloatingWindow
+    // stub) to render it on top of the desktop for a screenshot.
+    Item { id: overlayLayer; anchors.fill: parent; z: 1000 }
+    readonly property Item overlay: overlayLayer
 
     readonly property QtObject panels: PanelManager
     readonly property QtObject theme: Theme

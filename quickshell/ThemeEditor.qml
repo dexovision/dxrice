@@ -666,6 +666,12 @@ PanelWindow {
                                         anchors.left: parent.left
                                         anchors.leftMargin: Theme.padMd
                                         anchors.verticalCenter: parent.verticalCenter
+                                        // A fixed, centred icon column: the
+                                        // glyphs have different advances, so
+                                        // labels placed after their natural
+                                        // width started at 4 different x's.
+                                        width: 20
+                                        horizontalAlignment: Text.AlignHCenter
                                         text: catRow.modelData.glyph
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeLarger
