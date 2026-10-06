@@ -107,6 +107,7 @@ from dxrice_hypr_ipc import (hyprctl_json, move_window_exact_async, move_window_
                              batch_async, resize_window_exact_lua, dispatch_async)
 import dxrice_singleton
 import dxrice_xdg
+import dxrice_resize_memory
 
 DEFAULT_GAP = 5
 
@@ -1721,7 +1722,8 @@ def clamp_to_usable_size(w, h):
     return (max(MIN_USABLE_WIDTH, round(w * scale)), max(MIN_USABLE_HEIGHT, round(h * scale)))
 
 
-def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost, best_direct_distance):
+def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost, best_direct_distance,
+                    resize_locked=frozenset()):
     """DECISION (investigated, not assumed): a live sizing audit (6
     deterministic mixed-size scenarios, see this change's own report and
     dxrice_test_placement.py's TestResizeCompositionAware) found the
@@ -1804,6 +1806,12 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost,
     definition, not satisfied that justification, regardless of how the
     abstract score reads.
 
+    resize_locked: addresses DXrice already resized and the user hasn't
+    resized since (see dxrice_resize_memory.py) -- never offered as the
+    window to trim. STAGE3_RESIZE_MARGIN_FRACTION slows repeated trims of
+    the same window across separate arrivals but cannot prevent them, and
+    it cannot see a trim SUPER+G made at all.
+
     Returns (target_pos, address_to_resize, (new_x, new_y), (new_w, new_h))
     or None. new_x/new_y is the resized window's own corrected top-left,
     which the caller must move it to (not just resize it) for the geometry
@@ -1835,6 +1843,8 @@ def try_resize_room(new_size, eligible, fixed_obstacles, center, gap, best_cost,
         resize_candidates = sorted(eligible, key=lambda w: -(w["size"][0] * w["size"][1]))[:STAGE3_RESIZE_CANDIDATE_CAP]
 
     for w in resize_candidates:
+        if w["address"] in resize_locked:
+            continue
         ow, oh = w["size"]
         ox, oy = w["at"]
         other_eligible = [o for o in eligible if o["address"] != w["address"]]
@@ -2453,7 +2463,10 @@ def place_new_window(address, workspace_id, gap):
     # EXISTING windows' own composition, without moving the actual new
     # window any closer to a usable spot, isn't doing Stage 3's job no
     # matter how the aggregate score reads.
-    stage3 = (try_resize_room((new_w, new_h), eligible, fixed_only, center, gap, best_cost, best_direct_distance)
+    memory_path = dxrice_resize_memory.resize_state_path()
+    resize_memory = dxrice_resize_memory.load_resize_state(memory_path)
+    stage3 = (try_resize_room((new_w, new_h), eligible, fixed_only, center, gap, best_cost, best_direct_distance,
+                              resize_locked=dxrice_resize_memory.locked_addresses(resize_memory, eligible))
               if eligible else None)
 
     if stage3 is not None:
@@ -2475,6 +2488,18 @@ def place_new_window(address, workspace_id, gap):
                           "size": (int(resize_size[0]), int(resize_size[1]))},
             address: {"at": (int(pos3[0]), int(pos3[1]))},
         })
+        # Remember the trim (at the size the client actually took) so
+        # neither a later arrival's Stage 3 nor a SUPER+G press trims this
+        # window again until the user resizes it -- see
+        # dxrice_resize_memory.py.
+        settled = hyprctl_json(["clients"]) or clients
+        resized_now = find_window(settled, resize_addr)
+        if resized_now:
+            dxrice_resize_memory.save_resize_state(memory_path, dxrice_resize_memory.next_resize_state(
+                resize_memory,
+                alive_addrs={c.get("address") for c in settled},
+                current_sizes={resize_addr: tuple(resized_now["size"])},
+                resized_now=[resize_addr]))
     elif use_stage2:
         exprs = [move_window_exact_lua(int(pos2[0]), int(pos2[1]), address)]
         expected = {address: {"at": (int(pos2[0]), int(pos2[1]))}}
