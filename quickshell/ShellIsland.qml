@@ -169,6 +169,20 @@ Item {
         border.color: Theme.borderIdle
         clip: true
 
+        // Eats clicks on the surface's own bare areas (a calendar day, a
+        // header title, the gap between dock tiles). The host windows
+        // (TopBar.qml, Dock.qml) put a full-window click-outside catcher
+        // UNDER the islands while a panel is open, so any press that no
+        // control inside the panel accepted fell straight through to it and
+        // closed the panel -- clicking a date closed the Calendar. Declared
+        // first, so every control below sits above it and still gets its
+        // own clicks first; hover and wheel are not accepted here and pass
+        // on as before.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+        }
+
         function pinnedX(w) {
             if (root.pinX === "left") return 0;
             if (root.pinX === "right") return surface.width - w;

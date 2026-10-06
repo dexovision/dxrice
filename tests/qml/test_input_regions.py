@@ -176,6 +176,32 @@ class InputRegionTest(unittest.TestCase):
         self.assertEqual(s.ev("panels.current"), "", "second Escape did not close the taskbar")
         self.assert_idle("after Escape x2")
 
+    def _center_of_text(self, panel_prop, text):
+        v = self.scene.ev(f"""(function(){{ const st=[findPanel('{panel_prop}')]; while (st.length) {{ const it=st.pop();
+            if (String(it).startsWith('QQuickText') && String(it.text) === '{text}') {{ const p = it.mapToItem(null, it.width/2, it.height/2); return [p.x, p.y]; }}
+            for (let i=0;i<it.children.length;i++) st.push(it.children[i]); }} }})()""").toVariant()
+        return v[0], v[1]
+
+    def test_08_clicks_inside_a_panel_never_dismiss_it(self):
+        """The other half of the invariant: inside an open surface, bare
+        (non-control) areas must not fall through to the click-outside
+        catcher underneath and close it."""
+        s = self.scene
+        s.ev("panels.open('calendar')"); self.settle(900)
+        x, y = self._center_of_text("viewDate", "15")
+        self.assertEqual(s.click(x, y), "TopBar")
+        s.wait(500)
+        self.assertEqual(s.ev("panels.current"), "calendar", "clicking a calendar day closed the calendar")
+        s.ev("panels.open('taskbar')"); self.settle(900)
+        x, y = self._center_of_text("addPanelOpen", "Taskbar")
+        s.click(x, y); s.wait(500)
+        self.assertEqual(s.ev("panels.current"), "taskbar", "clicking the taskbar header closed the taskbar")
+        s.ev("findPanel('addPanelOpen').addPanelOpen = true"); self.settle(800)
+        s.click(x, y); s.wait(500)
+        self.assertTrue(s.ev("findPanel('addPanelOpen').addPanelOpen"), "clicking the parent panel closed the branch")
+        s.ev("panels.closeCurrent()"); self.settle()
+        self.assert_idle("after inside-panel clicks")
+
 
 def main():
     # One process per screen size: a QML engine binds the harness singleton
