@@ -102,7 +102,19 @@ Item {
     // Clear the form once fully closed -- not on the close itself, so the
     // fields don't visibly empty while the surface is still folding away.
     onRevealChanged: if (reveal === 0 && !open) { searchInput.text = ""; nameInput.text = ""; cmdInput.text = ""; appFlick.contentY = 0; }
-    onOpenChanged: if (open) searchInput.forceActiveFocus()
+    // Focus follows visibility both ways. Closed, a field that kept active
+    // focus would go on taking keystrokes while invisible (typing with the
+    // taskbar still open edited a hidden search query) and keep its cursor
+    // blinking -- repainting the dock window twice a second forever.
+    onOpenChanged: {
+        if (open) {
+            searchInput.forceActiveFocus();
+        } else {
+            searchInput.focus = false;
+            nameInput.focus = false;
+            cmdInput.focus = false;
+        }
+    }
 
     // Start rect: a header-height pill where the branch leaves the parent.
     readonly property rect startRect: {
