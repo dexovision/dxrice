@@ -152,6 +152,20 @@ class AddShortcutTest(unittest.TestCase):
         self.s.ev("panels.close('taskbar')"); self.s.wait(60)
         self.assertFalse(self.s.ev(f"{B}.open"), "branch stayed open while the taskbar closed")
 
+    def _focus_in_branch(self):
+        it = self.s.view.activeFocusItem()
+        while it is not None:
+            if it.objectName() == "addShortcutBranch":
+                return True
+            it = it.parentItem()
+        return False
+
+    def test_closed_branch_releases_keyboard_focus(self):
+        self.open_branch()
+        self.assertTrue(self._focus_in_branch(), "search field should take focus on open")
+        self.s.ev(f"{TB}.addPanelOpen = false"); self.s.wait(700)
+        self.assertFalse(self._focus_in_branch(), "a hidden branch field kept keyboard focus after close")
+
     def test_no_new_warnings(self):
         self.open_branch()
         self.s.ev(f"{TB}.query = 'x'"); self.s.wait(200)
