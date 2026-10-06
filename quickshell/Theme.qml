@@ -215,6 +215,10 @@ QtObject {
     // near-identical formulas that had quietly drifted to three different
     // alphas. This is the one shared value they now all reach for.
     readonly property color borderFaint: Qt.rgba(borderTint.r, borderTint.g, borderTint.b, 0.22)
+    // Level-2 (Card) edge: a whisper, fixed like borderFaint, because a
+    // card's boundary is already carried by its tone -- this only keeps the
+    // corner crisp where tone alone goes soft.
+    readonly property color cardBorder: Qt.rgba(borderTint.r, borderTint.g, borderTint.b, 0.09)
     // The hairline border width used everywhere a `border.width` is drawn --
     // was a bare literal `1` at 15+ call sites with no shared name.
     readonly property real borderWidth: 1

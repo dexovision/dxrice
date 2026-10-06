@@ -15,12 +15,25 @@ QtObject {
     signal started()
     function write(data) {}
     function signal(sig) {}
-    onRunningChanged: if (running) Qt.callLater(root._finish)
+    // Mirrors quickshell src/io/process.cpp: a start request made while a
+    // process is live is remembered (targetRunning) and honoured once it
+    // exits; on exit `running` is ALREADY false when the stdout parser's
+    // streamFinished fires, so handlers may set `running = true` to chain
+    // the next command (BluetoothBackend does exactly that).
+    property bool _live: false
+    property bool _target: false
+    onRunningChanged: {
+        if (root.running && !root._live) { root._live = true; Qt.callLater(root._finish); }
+        else if (root.running && root._live) root._target = true;
+    }
     function _finish() {
-        if (!root.running) return;
         const out = Harness.run(root.command || []);
-        if (root.stdout) { root.stdout.text = out; root.stdout.streamFinished(); }
+        // Fixture sentinel for "still loading": the process never finishes.
+        if (out === "__HANG__") return;
+        root._live = false;
         root.running = false;
+        if (root.stdout) { root.stdout.text = out; root.stdout.streamFinished(); }
         root.exited(0, 0);
+        if (root._target && !root.running) { root._target = false; root.running = true; }
     }
 }

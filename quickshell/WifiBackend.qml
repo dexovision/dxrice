@@ -17,6 +17,15 @@ Item {
     // Refreshed alongside the scan (not per-row) so "Forget" only shows for
     // networks nmcli actually has a saved connection profile for.
     property var savedNames: []
+    // `known` is stamped onto each network when the SCAN finishes, but the
+    // saved-profile list arrives from a separate nmcli call running at the
+    // same time -- whichever finished second used to lose: a scan landing
+    // first marked every saved network unknown, and its Forget button never
+    // appeared. Re-stamp whenever the saved list itself arrives.
+    onSavedNamesChanged: {
+        if (root.networks.length === 0) return;
+        root.networks = root.networks.map((n) => Object.assign({}, n, { known: root.savedNames.includes(n.ssid) }));
+    }
 
     onRadioOnChanged: if (radioOn) refresh()
 

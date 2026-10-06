@@ -1,25 +1,18 @@
 import QtQuick
-import QtQuick.Effects
 
-// A rounded, borderless surface with a soft, barely-there drop shadow for
-// separation -- end-4/caelestia-style cards are flat fills at a slightly
-// different tone than the panel behind them, not bordered boxes. Content
-// goes in `contentItem`'s implicit children (this is a Column by default
+// The shell's Level-2 surface: content grouped inside an open panel. The
+// panel itself (ShellIsland.qml) is Level 1 -- the outer arc
+// (ShellSurface.radius), the shell's elevation and its strongest edge. A
+// card is told apart from it by tone (Theme.cardTone), a visibly smaller
+// corner (ShellSurface.cardRadius), tighter padding (ShellSurface.cardPad)
+// and only a whisper of an edge (Theme.cardBorder) -- not by a second
+// shadow or a strong outline, which made every group compete with the panel
+// hosting it. Level 3 (secondary information) gets no surface at all: plain
+// text on the panel. Content goes in the card's default children (a Column,
 // so rows just stack).
 //
-// This is the shell's Level-2 surface: the panel itself (ShellIsland.qml) is
-// Level 1, using ShellSurface.radius; this uses the deliberately smaller
-// ShellSurface.cardRadius, so a viewer can tell "content grouped inside the
-// panel" from "the panel itself" by the corner alone, not just by a color
-// shift. Padding likewise comes from ShellSurface.cardPad, not the panel's
-// own Theme.padLg, for the same reason: a card should read as visibly
-// tighter than the surface hosting it.
-//
-// Root is a plain Item, not a Rectangle: the shadow has to be a true
-// sibling painted *before* the visible surface, not a child nested inside
-// it (a shadow child anchored to its own rectangle paints on top of that
-// rectangle's fill, not behind it -- parent fills always paint under their
-// children regardless of z).
+// Root is a plain Item rather than the Rectangle itself so a title label and
+// the content column can be laid out against shared padding.
 Item {
     id: root
     default property alias data: column.data
@@ -54,21 +47,12 @@ Item {
     implicitWidth: column.implicitWidth + root.padding * 2
     implicitHeight: root.titleHeight + column.implicitHeight + root.padding * 2
 
-    RectangularShadow {
-        anchors.fill: surface
-        radius: surface.radius
-        color: Theme.shadowColor
-        // Restrained on purpose: a strong shadow was making individual
-        // cards the loudest thing on the surface, competing with the panel
-        // for attention instead of sitting quietly inside it. Definition
-        // now comes mainly from the border + the closer-to-panel fill
-        // below (Theme.cardTone), with the shadow only adding a whisper of
-        // separation, not a spotlight.
-        blur: Theme.elevationBlur(1)
-        spread: Theme.elevationSpread(1)
-        offset.y: Theme.elevationOffsetY(1)
-    }
-
+    // No drop shadow. A card is content grouped INSIDE a panel, not an
+    // object floating above it: the panel (Level 1) carries the shell's
+    // elevation; a second, smaller shadow under every card only muddied the
+    // translucent panel behind it. Level 2 is told apart by tone (cardTone),
+    // the smaller corner, and a hairline far quieter than before -- the old
+    // 22%-alpha border made card outlines the loudest lines on every panel.
     Rectangle {
         id: surface
         anchors.fill: parent
@@ -81,7 +65,7 @@ Item {
         // boundary legible without needing a loud fill to do it.
         color: Theme.cardTone
         border.width: root.highlighted ? 2 : Theme.borderWidth
-        border.color: root.highlighted ? Theme.accent : Theme.borderFaint
+        border.color: root.highlighted ? Theme.accent : Theme.cardBorder
         clip: true
 
         Behavior on border.width {
