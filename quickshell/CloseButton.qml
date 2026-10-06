@@ -20,8 +20,10 @@ Rectangle {
     width: 22
     height: 22
     radius: Theme.roundingFull
-    color: area.containsMouse ? Theme.layer2Hover : Theme.layer1
+    color: area.pressed ? Theme.layer2Active : (area.containsMouse ? Theme.layer2Hover : Theme.layer1)
+    scale: area.pressed ? 0.92 : 1.0
     Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+    Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
 
     Text {
         font.family: Theme.fontFamily
@@ -32,7 +34,13 @@ Rectangle {
     }
     MouseArea {
         id: area
+        // A 30px target around the 22px disc: the visual stays small so it
+        // sits quietly in a corner, but it is still the one way out of every
+        // panel and should not demand pixel-precise aim. Every placement
+        // keeps >= 4px of its host surface around the disc, so the larger
+        // target never reaches outside it.
         anchors.fill: parent
+        anchors.margins: -4
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: root.clicked()

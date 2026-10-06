@@ -246,6 +246,11 @@ class Scene:
             raise RuntimeError(f"QML eval error in {js!r}: {expr.error().toString()}")
         return val[0] if isinstance(val, tuple) else val
 
+    def set_command(self, key, output):
+        """Override a fixture before the command next runs ("__HANG__" =
+        a process that never finishes, for loading states)."""
+        self.bridge.commands.insert(0, (key, output))
+
     def wait(self, ms):
         loop = QEventLoop()
         QTimer.singleShot(int(ms), loop.quit)

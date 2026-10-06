@@ -112,7 +112,10 @@ Item {
     function _syncPerformanceActive() {
         PerformanceService.active = (root.currentTab === "performance");
     }
-    onCurrentTabChanged: root._syncPerformanceActive()
+    onCurrentTabChanged: {
+        root._syncPerformanceActive();
+        tabFade.restart();
+    }
     Component.onDestruction: PerformanceService.active = false
 
     // ---- live media position, polled locally since MPRIS doesn't push a
@@ -345,6 +348,17 @@ Item {
                     // deliberately instead, via root.paneAvailableHeight.
                     y: Theme.padLg
                     width: parent.width - Theme.padXl * 2
+                    // Content-level motion for a tab switch: the indicator
+                    // slides (micro) while the new pane fades up (content),
+                    // instead of the pane hard-cutting under a moving mark.
+                    NumberAnimation on opacity {
+                        id: tabFade
+                        running: false
+                        from: 0; to: 1
+                        duration: Theme.durationFast
+                        easing.type: Theme.easingType
+                        easing.bezierCurve: Theme.curveStandard
+                    }
                     sourceComponent: {
                         switch (root.currentTab) {
                         case "media": return mediaPane;
@@ -734,8 +748,11 @@ Item {
                                     required property var modelData
                                     glyph: modelData.connected ? "\u{f00b1}" : "\u{f00af}"
                                     title: modelData.name
+                                    // Battery as a glyph + number: the word "battery"
+                                    // was what got elided on a connected row
+                                    // (its Disconnect chip is the widest action).
                                     detail: (modelData.connected ? "Connected" : "Paired")
-                                        + (modelData.battery >= 0 ? " \u00b7 " + modelData.battery + "% battery" : "")
+                                        + (modelData.battery >= 0 ? " \u00b7 \u{f0079} " + modelData.battery + "%" : "")
                                     connected: modelData.connected
                                     actionText: modelData.connected ? "Disconnect" : "Connect"
                                     canForget: true

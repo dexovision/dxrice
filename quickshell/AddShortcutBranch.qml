@@ -61,13 +61,20 @@ Item {
     readonly property var anchorPoint: Qt.point(
         anchorIsland.x + (manager ? manager.addAnchorX : anchorIsland.width / 2),
         anchorIsland.y + (manager ? manager.headerCenterY : 24))
-    readonly property var placement: BranchGeometry.place(
+    // Only computed while the branch is showing (or folding away). It
+    // depends on the island's live geometry, which animates on every
+    // taskbar open/close -- unguarded, this JS ran every frame of every
+    // morph even with the branch closed. Closed, it keeps its last value.
+    property var _lastPlacement: ({ side: "right", x: 0, y: 0, w: 340, h: 0 })
+    readonly property bool _placing: root.open || root.reveal > 0
+    readonly property var placement: !root._placing ? root._lastPlacement : BranchGeometry.place(
         { x: anchorIsland.x, y: anchorIsland.y, w: anchorIsland.width, h: anchorIsland.height },
         anchorPoint,
         { w: 340, h: wantH },
         { w: screenWidth, h: screenHeight },
         { margin: edgeMargin, gap: gap, minW: 280, minH: fixedH + rowH * 3,
           headerH: manager ? manager.headerHeight : 48, footerH: anchorIsland.collapsedHeight })
+    onPlacementChanged: if (root._placing) root._lastPlacement = root.placement
     readonly property string side: placement.side
     readonly property bool horizontal: side === "right" || side === "left"
 
