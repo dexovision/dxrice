@@ -3163,6 +3163,40 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
                           "a second press changed the layout further -- a window shrank (or moved) again "
                           "with nothing new to justify it")
 
+    def test_refine_never_moves_a_window_inside_the_gap_of_a_third(self):
+        """Refine's own collision check used a bare overlaps(), so an
+        alignment shift that left a window 0-4px from some THIRD window
+        (not the one it was aligning with) was accepted -- physically
+        non-overlapping, but inside the configured gap. Every sub-gap pair
+        the placement benchmark ever reported came from here: the
+        incremental build's own output was a clean 5px in each case.
+        Fixture is a real benchmark layout (tiny_and_huge), delta-minimized
+        to the 11 windows that still reproduce it; before the fix press 1
+        left two windows 1px apart and every later press kept them there."""
+        eligible = [
+            {"address": "W13", "at": [779, 1009], "size": [211, 215]},
+            {"address": "W16", "at": [2475, 518], "size": [194, 210]},
+            {"address": "W17", "at": [1119, 1655], "size": [274, 199]},
+            {"address": "W20", "at": [1083, 1998], "size": [293, 165]},
+            {"address": "W21", "at": [1083, 2168], "size": [298, 148]},
+            {"address": "W23", "at": [40, 853], "size": [177, 201]},
+            {"address": "W25", "at": [1040, 2491], "size": [250, 121]},
+            {"address": "W26", "at": [1029, 2617], "size": [276, 123]},
+            {"address": "W27", "at": [1119, 2745], "size": [255, 139]},
+            {"address": "W28", "at": [1580, 1127], "size": [289, 208]},
+            {"address": "W29", "at": [222, 893], "size": [173, 189]},
+        ]
+        layout = eligible
+        for press in (1, 2):
+            result = arr.auto_arrange(layout, [], self.MON, self.GAP)
+            rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
+            for i in range(len(rects)):
+                for j in range(i + 1, len(rects)):
+                    self.assertFalse(overlaps_with_gap(rects[i], rects[j], self.GAP),
+                                     f"press {press}: {result[i][0]} and {result[j][0]} closer than "
+                                     f"{self.GAP}px: {rects[i]} vs {rects[j]}")
+            layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

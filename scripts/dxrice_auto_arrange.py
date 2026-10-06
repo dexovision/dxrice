@@ -318,10 +318,23 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_s
         return sum(_notch_penalty(rect_for(*placed[a]), rects_except(a), gap) for a in addrs)
 
     def collides(addr, trial_rect):
+        # Inflated by `gap` first, exactly like _find_best_position's own
+        # free() and _shift_is_safe -- a bare overlaps() only rejects a
+        # trial that physically intersects something, so a shift that
+        # slid a window to 0-4px from a THIRD window (not the one it was
+        # aligning with) passed this check. Measured: every sub-gap pair
+        # the placement benchmark ever reported was created here (the
+        # incremental build's own output was 5px in every case, refine's
+        # output 0-2px), and that sub-gap result then failed the NEXT
+        # press's _shape_is_coherent overlap test, forcing a full rebuild
+        # on a layout that had nothing left to fix. A neighbor sitting at
+        # exactly `gap` still passes: overlaps() is strict.
+        x0, y0, x1, y1 = trial_rect
+        inflated = (x0 - gap, y0 - gap, x1 + gap, y1 + gap)
         for other in addrs:
-            if other != addr and overlaps(trial_rect, rect_for(*placed[other])):
+            if other != addr and overlaps(inflated, rect_for(*placed[other])):
                 return True
-        return any(overlaps(trial_rect, fr) for fr in fixed_rects)
+        return any(overlaps(inflated, fr) for fr in fixed_rects)
 
     # Cumulative displacement per window, from where the incremental build
     # itself left it, across EVERY round combined -- not reset per round.
