@@ -182,6 +182,38 @@ class InputRegionTest(unittest.TestCase):
             for (let i=0;i<it.children.length;i++) st.push(it.children[i]); }} }})()""").toVariant()
         return v[0], v[1]
 
+    def test_09_closing_panel_releases_input_immediately(self):
+        """A panel that is visually closing must stop taking input at once,
+        not when its close animation finishes. The Theme editor's window
+        lives on for its reverse-reveal (~440ms) and kept an unconditional
+        full-screen dismiss region the whole time: every click anywhere on
+        the desktop in that window was swallowed by an invisible catcher.
+        Probes the app well away from every island mid-close."""
+        s = self.scene
+        # Left of the centred Taskbar panel's own span (640px) at every screen
+        # size: that island is still visibly collapsing 60ms into its close,
+        # and a visible surface taking input is correct.
+        x_max = min(int(s.width * 0.30), (s.width - 640) // 2 - 20)
+        probes = [(x, y) for x in range(int(s.width * 0.05), x_max, max(30, s.width // 32))
+                  for y in range(int(s.height * 0.55), int(s.height * 0.80), max(40, s.height // 14))]
+        for name in ["quicksettings", "calendar", "taskbar", "theme"]:
+            s.ev(f"panels.open('{name}')")
+            self.settle()
+            s.ev("panels.closeCurrent()")
+            s.wait(60)  # mid close animation
+            blocked = [(x, y) for (x, y) in probes if s.input_owner(x, y) is not None]
+            self.assertEqual(blocked, [], f"{name} closing: {len(blocked)} points over the app intercepted, "
+                                          f"e.g. {blocked[:3]} by {s.input_owner(*blocked[0]) if blocked else None}")
+            before = s.ev("appClicks")
+            s.click(*probes[0])
+            self.assertEqual(s.ev("appClicks"), before + 1, f"{name} closing: a click over the app did not reach it")
+            if name == "theme":
+                focusable = s.ev("surfaces().filter(w => _name(w).indexOf('ThemeEditor') === 0).map(w => w.focusable)")
+                self.assertEqual(list(focusable.toVariant()) if hasattr(focusable, "toVariant") else list(focusable),
+                                 [False], "closing Theme editor still holds keyboard focus")
+            self.settle()
+            self.assert_idle(f"after {name} finished closing")
+
     def test_08_clicks_inside_a_panel_never_dismiss_it(self):
         """The other half of the invariant: inside an open surface, bare
         (non-control) areas must not fall through to the click-outside

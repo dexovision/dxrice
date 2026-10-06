@@ -59,7 +59,10 @@ PanelWindow {
     aboveWindows: true
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "dxrice-theme"
-    focusable: true
+    // Released the moment the close starts, like TopBar's own focusable:
+    // keystrokes typed right after closing belong to the app underneath,
+    // not to a panel that is only still alive to finish animating away.
+    focusable: !root.closing
 
     // The panel's own natural size -- was the whole window's implicitWidth/
     // Height back when this was a plain top-center window with no
@@ -104,18 +107,24 @@ PanelWindow {
     // with the reveal animation rather than being some fixed box from frame
     // one); the second is click-outside-to-dismiss -- the rest of the
     // now-full-screen window, so a click that misses the panel entirely
-    // still reaches `dismissArea` below and closes it. There is no state
-    // where this sits there as a permanent invisible click-blocker: the
-    // whole window (and this mask with it) is torn down by the LazyLoader
-    // once the close sequence described above finishes.
+    // still reaches `dismissArea` below and closes it.
+    //
+    // Both collapse to nothing the moment a close STARTS (`closing`), not
+    // when the window is torn down: the window has to outlive the close for
+    // its reverse-reveal to play (closeTimer, ~440ms at the default speed),
+    // and for all of that time the full-screen region used to keep catching
+    // every click anywhere on the desktop -- an invisible catcher over the
+    // whole screen, right after the user asked for the panel to go away.
+    // Reopening mid-close (cancelClose) restores both.
     mask: Region {
-        Region { item: panelSurface }
-        Region { x: 0; y: 0; width: root.width; height: root.height }
+        Region { item: root.closing ? null : panelSurface }
+        Region { x: 0; y: 0; width: root.closing ? 0 : root.width; height: root.closing ? 0 : root.height }
     }
 
     MouseArea {
         id: dismissArea
         anchors.fill: parent
+        enabled: !root.closing
         onClicked: PanelManager.close("theme")
     }
 
