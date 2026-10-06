@@ -3198,5 +3198,238 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
             layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
 
 
+class TestCrossPressResizeMemory(unittest.TestCase):
+    """auto_arrange only sees CURRENT sizes, so before the resize memory
+    every press treated a window's current size as its original one: the
+    once-per-window resize rule and the MAX_SHRINK_FRACTION bound both reset
+    on every press. These pin the memory itself (_locked_addresses /
+    _next_resize_state / the state file) and the real main() flow that
+    reads and writes it."""
+
+    MON = (0, 0, 1920, 1080)
+    GAP = 5
+
+    # Real benchmark layouts, delta-minimized to the windows that still
+    # re-shrink one window on consecutive presses when there is no memory.
+    BUILD_PATH = [("BIG", 660, 300, 500, 400), ("W7", 1165, 1426, 258, 160), ("W8", 1165, 1591, 262, 203),
+                  ("W9", 1165, 1799, 241, 182), ("W14", 1165, 2675, 265, 169), ("W15", 1165, 2849, 283, 187),
+                  ("W16", 1165, 3041, 255, 171), ("W17", 1165, 3217, 229, 191), ("W18", 1165, 3413, 216, 219),
+                  ("W19", 1165, 3637, 281, 201), ("W20", 1165, 3843, 277, 220)]
+    REFINE_PATH = [("W0", 790, 811, 1504, 154), ("W5", 1181, -173, 1279, 198), ("W6", 1160, 1137, 171, 1380),
+                   ("W12", 73, -51, 173, 1356), ("W13", 468, 2695, 190, 1077), ("W14", 1336, 2145, 1359, 160),
+                   ("W15", 3021, 773, 155, 705), ("W16", 3181, 834, 1563, 216), ("W17", 663, 2694, 203, 1399),
+                   ("W19", 2154, 2310, 1755, 185)]
+
+    def _layout(self, rows):
+        return [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in rows]
+
+    def _chain(self, rows, presses, memory):
+        layout, state, resized_per_press = self._layout(rows), {}, []
+        for _ in range(presses):
+            before = {w["address"]: tuple(w["size"]) for w in layout}
+            locked = arr._locked_addresses(state, layout) if memory else frozenset()
+            result = arr.auto_arrange(layout, [], self.MON, self.GAP, resize_locked=locked)
+            resized = {a for a, x, y, w, h in result if (w, h) != before[a]}
+            resized_per_press.append(resized)
+            state = arr._next_resize_state(state, set(before), {a: (w, h) for a, x, y, w, h in result}, resized)
+            layout = self._layout(result)
+        return resized_per_press, {w["address"]: tuple(w["size"]) for w in layout}
+
+    def _assert_never_resized_twice(self, rows):
+        without, _ = self._chain(rows, 4, memory=False)
+        twice = set.union(*[a & b for i, a in enumerate(without) for b in without[i + 1:]])
+        self.assertTrue(twice, "fixture no longer reproduces the cross-press re-shrink it pins")
+
+        with_memory, final = self._chain(rows, 4, memory=True)
+        seen = set()
+        for press, resized in enumerate(with_memory, 1):
+            self.assertFalse(resized & seen, f"press {press} resized {resized & seen} again")
+            seen |= resized
+        self.assertFalse(with_memory[-1], "still resizing on the 4th press")
+        original = {a: (w, h) for a, _x, _y, w, h in rows}
+        for addr, (w, h) in final.items():
+            ow, oh = original[addr]
+            self.assertGreaterEqual(min(w / ow, h / oh), 1.0 - apw.MAX_SHRINK_FRACTION - 0.002,
+                                    f"{addr} shrank past MAX_SHRINK_FRACTION cumulatively: {(ow, oh)} -> {(w, h)}")
+
+    def test_build_path_resize_is_not_repeated_on_later_presses(self):
+        """Without memory: BIG (2x typical) loses another 10% per press,
+        500x400 -> 450x360 -> 405x324 -> 364x292."""
+        self._assert_never_resized_twice(self.BUILD_PATH)
+
+    def test_refine_trim_is_not_repeated_on_later_presses(self):
+        """Without memory: refine trims W6's height on press 1 and trims it
+        again on press 2 (1380 -> 1196 -> 1077)."""
+        self._assert_never_resized_twice(self.REFINE_PATH)
+
+    def test_empty_lock_changes_nothing(self):
+        """The memory must be a pure addition: no lock, identical output."""
+        for rows in (self.BUILD_PATH, self.REFINE_PATH):
+            layout = self._layout(rows)
+            self.assertEqual(arr.auto_arrange(layout, [], self.MON, self.GAP),
+                             arr.auto_arrange(layout, [], self.MON, self.GAP, resize_locked=frozenset()))
+
+    def test_locked_window_still_moves(self):
+        """A lock forbids resizing, not participating: the locked window is
+        still placed like any other."""
+        layout = self._layout(self.BUILD_PATH)
+        result = arr.auto_arrange(layout, [], self.MON, self.GAP, resize_locked=frozenset({"BIG"}))
+        big = next(r for r in result if r[0] == "BIG")
+        self.assertEqual(big[3:], (500, 400))
+        self.assertNotEqual(big[1:3], (660, 300), "locked window was frozen in place, not just in size")
+
+    def test_state_lifecycle(self):
+        state = {"0xA": (450, 360), "0xB": (800, 600), "0xC": (300, 200), "0xD": (640, 480)}
+        eligible = [{"address": "0xA", "at": [0, 0], "size": [450, 360]},   # untouched since: locked
+                    {"address": "0xB", "at": [0, 0], "size": [820, 600]},   # user resized it: not locked
+                    {"address": "0xE", "at": [0, 0], "size": [500, 500]}]   # never resized: not locked
+        self.assertEqual(arr._locked_addresses(state, eligible), frozenset({"0xA"}))
+        # 1px of client rounding is still "the size SUPER+G gave it".
+        self.assertEqual(arr._locked_addresses({"0xA": (450, 360)},
+                                               [{"address": "0xA", "at": [0, 0], "size": [451, 359]}]),
+                         frozenset({"0xA"}))
+        nxt = arr._next_resize_state(
+            state,
+            alive_addrs={"0xA", "0xB", "0xD", "0xE"},          # 0xC was closed
+            current_sizes={"0xA": (450, 360), "0xB": (820, 600), "0xE": (450, 450)},
+            resized_now=["0xE"])
+        self.assertEqual(nxt, {"0xA": (450, 360),   # still at its recorded size
+                               "0xD": (640, 480),   # alive on another workspace: kept for that press
+                               "0xE": (450, 450)})  # newly resized: recorded at its final size
+
+    def test_state_file_roundtrip_and_bad_input(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "dxrice", "super_g_resized.json")
+            self.assertEqual(arr._load_resize_state(path), {})
+            arr._save_resize_state(path, {"0xA": (450, 360)})
+            self.assertEqual(arr._load_resize_state(path), {"0xA": (450, 360)})
+            self.assertEqual(os.listdir(os.path.dirname(path)), ["super_g_resized.json"], "temp file left behind")
+            for junk in ("{not json", "[1, 2]", '{"0xA": "big", "0xB": [1]}'):
+                with open(path, "w") as f:
+                    f.write(junk)
+                self.assertEqual(arr._load_resize_state(path), {}, junk)
+
+
+class _FakeHyprland:
+    """In-memory stand-in for the three things auto_arrange.main() talks to
+    Hyprland through (hyprctl_json, batch_async, live_gap/monitor) -- no
+    socket, no hyprctl. Applies dispatched resizes centre-anchored, like
+    Hyprland's own floating resize, optionally clamped to a per-window
+    minimum size so a client can "refuse" the size it was asked for."""
+
+    def __init__(self, rows, min_size=None):
+        self.clients = {a: {"address": a, "at": [x, y], "size": [w, h], "floating": True, "fullscreen": 0,
+                            "workspace": {"id": 1}, "title": a} for a, x, y, w, h in rows}
+        self.min_size = min_size or {}
+        self.batches = []
+
+    def hyprctl_json(self, args, **kw):
+        if args and args[0] == "activeworkspace":
+            return {"id": 1}
+        if args and args[0] == "clients":
+            return [{**c, "at": list(c["at"]), "size": list(c["size"])} for c in self.clients.values()]
+        return None
+
+    def batch_async(self, exprs):
+        import re
+        self.batches.append(list(exprs))
+        for e in exprs:
+            m = re.search(r'window\.(move|resize)\(\{ window = "address:([^"]+)", x = (-?\d+), y = (-?\d+)', e)
+            kind, addr, a, b = m.group(1), m.group(2), int(m.group(3)), int(m.group(4))
+            c = self.clients[addr]
+            if kind == "move":
+                c["at"] = [a, b]
+            else:
+                mw, mh = self.min_size.get(addr, (0, 0))
+                a, b = max(a, mw), max(b, mh)
+                cx, cy = c["at"][0] + c["size"][0] / 2, c["at"][1] + c["size"][1] / 2
+                c["size"] = [a, b]
+                c["at"] = [round(cx - a / 2), round(cy - b / 2)]
+
+    def rows(self):
+        return [(a, *c["at"], *c["size"]) for a, c in self.clients.items()]
+
+
+class TestSuperGMainFlow(unittest.TestCase):
+    """main() itself, end to end against _FakeHyprland: what actually gets
+    dispatched after a resize, and that the resize memory is written and
+    honored by the next press."""
+
+    MON = (0, 0, 1920, 1080)
+    GAP = 5
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = self._tmp.name
+        self._saved = (arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds)
+
+    def tearDown(self):
+        arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds = self._saved
+        if self._env is None:
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+        else:
+            os.environ["XDG_RUNTIME_DIR"] = self._env
+        self._tmp.cleanup()
+
+    def _press(self, hypr):
+        import contextlib, io
+        arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
+        arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda: self.MON)
+        with contextlib.redirect_stdout(io.StringIO()):
+            arr.main()
+
+    def _assert_gaps(self, rows):
+        rects = [apw.rect_for(x, y, w, h) for _a, x, y, w, h in rows]
+        for i in range(len(rects)):
+            for j in range(i + 1, len(rects)):
+                self.assertFalse(overlaps_with_gap(rects[i], rects[j], self.GAP), f"{rows[i]} vs {rows[j]}")
+
+    def test_dispatches_the_planned_layout_when_clients_take_the_size(self):
+        """Before: after landing the resizes main() re-ran the whole build
+        from the windows' PRE-press positions, and dispatched that -- a
+        different composition from the one the resize was chosen for (56/58
+        resizing benchmark presses), usually with more dead-gap/notch."""
+        rows = TestCrossPressResizeMemory.BUILD_PATH
+        plan = arr.auto_arrange([{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in rows],
+                                [], self.MON, self.GAP)
+        self.assertTrue(any((w, h) != (r[3], r[4]) for (a, x, y, w, h), r in zip(sorted(plan), sorted(rows))),
+                        "fixture must resize something on press 1")
+        hypr = _FakeHyprland(rows)
+        self._press(hypr)
+        self.assertEqual(sorted(hypr.rows()), sorted(plan))
+        # The resize is landed once; the follow-up batch only moves.
+        self.assertFalse(any("resize" in e for e in hypr.batches[-1]))
+
+    def test_memory_is_written_and_honored_by_the_next_press(self):
+        hypr = _FakeHyprland(TestCrossPressResizeMemory.BUILD_PATH)
+        self._press(hypr)
+        after_first = {a: (w, h) for a, _x, _y, w, h in hypr.rows()}
+        state = arr._load_resize_state(arr._resize_state_path())
+        self.assertTrue(state, "a resizing press recorded nothing")
+        for addr, size in state.items():
+            self.assertEqual(tuple(after_first[addr]), size)
+        for _ in range(2):
+            self._press(hypr)
+            for a, _x, _y, w, h in hypr.rows():
+                if a in state:
+                    self.assertEqual((w, h), state[a], f"{a} was resized again on a later press")
+
+    def test_client_that_refuses_its_size_gets_positions_recomputed(self):
+        """The existing settle-pass guarantee still holds when a client does
+        NOT take the size it was asked for: positions are recomputed against
+        the size it really took (exact gaps, no overlap), and that real size
+        is what the memory records."""
+        rows = TestCrossPressResizeMemory.BUILD_PATH
+        hypr = _FakeHyprland(rows, min_size={"BIG": (480, 390)})
+        self._press(hypr)
+        big = next(r for r in hypr.rows() if r[0] == "BIG")
+        self.assertEqual(big[3:], (480, 390), "fixture must ask BIG for less than its minimum")
+        self._assert_gaps(hypr.rows())
+        self.assertEqual(arr._load_resize_state(arr._resize_state_path()).get("BIG"), (480, 390))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

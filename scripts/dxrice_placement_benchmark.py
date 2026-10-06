@@ -248,11 +248,19 @@ def run_super_g_chain(eligible, fixed, iterations=6):
     layout = eligible
     history = []
     final_rects = []
+    # The same cross-press resize memory main() keeps on disk, carried here
+    # in a dict -- without it this would measure presses no real SUPER+G
+    # performs (each one forgetting what the previous one resized).
+    resize_state = {}
     for it in range(iterations):
         t0 = time.perf_counter()
-        result = arr.auto_arrange(layout, fixed, MONITOR, GAP)
+        result = arr.auto_arrange(layout, fixed, MONITOR, GAP,
+                                  resize_locked=arr._locked_addresses(resize_state, layout))
         t1 = time.perf_counter()
         before = {w["address"]: (w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in layout}
+        resize_state = arr._next_resize_state(
+            resize_state, set(before), {a: (w, h) for a, x, y, w, h in result},
+            [a for a, x, y, w, h in result if (w, h) != before[a][2:]])
         movement = 0.0
         resize_count = 0
         resize_total = 0.0

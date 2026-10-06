@@ -71,6 +71,7 @@ or a grid), and only when the honest, consistently-scaled comparison says
 it genuinely helps -- resizing is an available OPTION the search may pick,
 never a forced step every run performs.
 """
+import json
 import math
 import os
 import sys
@@ -231,7 +232,8 @@ NOTCH_REFINE_SHRINK_MIN_DEPTH = 100.0
 
 
 def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_size,
-                             allow_resize=True, max_rounds=NOTCH_REFINE_MAX_ROUNDS):
+                             allow_resize=True, max_rounds=NOTCH_REFINE_MAX_ROUNDS,
+                             resize_locked=frozenset()):
     """Post-hoc structural repair for a root cause live-traced directly,
     not assumed: the incremental build places one window at a time with
     only the ALREADY-PLACED windows visible. A window's locally-best
@@ -296,6 +298,10 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_s
     break auto_arrange(allow_resize=False)'s own documented "positions only,
     no size changes" contract that main()'s second, post-settle pass relies
     on.
+
+    resize_locked: addresses a PREVIOUS press already resized (see
+    auto_arrange's own parameter of the same name) -- they may still be
+    repositioned here, but never offered a shrink candidate again.
 
     Mutates `placed` in place and returns nothing, matching this file's
     existing convention for the incremental build's own `placed` dict."""
@@ -376,6 +382,7 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_s
         improved = False
         for addr in addrs:
             x, y, w, h = placed[addr]
+            may_shrink = allow_resize and addr not in resize_locked
             # Shrinking to close a notch must be gated -- is there a
             # genuine, substantial reason to shrink THIS window -- not
             # just "does some edge happen not to line up." Live-caught
@@ -464,7 +471,7 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_s
                         # position-only settle pass), and this function must
                         # honor that the same way the main incremental build
                         # already does for its own per-step resize mechanism.
-                        if allow_resize:
+                        if may_shrink:
                             # Shrink: pull in whichever side sticks out past
                             # `other_addr`, instead of moving to meet it --
                             # "5-10% shrink to eliminate a skinny side
@@ -505,9 +512,9 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_s
                     if frac >= DEAD_GAP_FACING_COVERAGE_THRESHOLD:
                         candidates.append((0, ory0 - ry0, w, h))  # move: align top edges
                         candidates.append((0, ory1 - ry1, w, h))  # move: align bottom edges
-                        # Gated on allow_resize for the same reason as the
-                        # width branch above.
-                        if allow_resize:
+                        # Gated on allow_resize (and resize_locked) for the
+                        # same reason as the width branch above.
+                        if may_shrink:
                             # Relevant axis here is HEIGHT -- see the width
                             # branch above for why partner-substantial also
                             # requires a material depth.
@@ -1102,7 +1109,14 @@ def _choose_size_and_position(w, current_pos, bearing_unit, cluster_centroid, cl
     # a window at or below the group's own typical size was never the
     # dominant one, so it is never offered as a shrink candidate AT ALL,
     # regardless of how cheap the formula would otherwise price it.
-    if allow_resize and cluster_bbox is not None and _mass_ratio(own_w, own_h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR:
+    # `addr not in resized_addrs`: within one pass a window's own step always
+    # comes before any later step could pick it as a neighbor, so this was
+    # vacuous until resized_addrs started being SEEDED with windows a
+    # previous press already resized (see auto_arrange's resize_locked) --
+    # those must not shrink themselves again any more than be shrunk as a
+    # neighbor.
+    if (allow_resize and cluster_bbox is not None and addr not in resized_addrs
+            and _mass_ratio(own_w, own_h, reference_area) > RESIZE_ELIGIBLE_RATIO_FLOOR):
         for scale in RESIZE_SCALE_STEPS:
             sized = _usable_scaled_size(own_w, own_h, scale)
             if sized is None:
@@ -1454,7 +1468,7 @@ def _typical_area(eligible):
     return dominant[mid] if len(dominant) % 2 else (dominant[mid - 1] + dominant[mid]) / 2
 
 
-def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
+def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize_locked=frozenset()):
     """eligible / fixed: [{"address":..., "at":[x,y], "size":[w,h]}, ...].
     Returns [(address, new_x, new_y, new_w, new_h), ...] for EVERY eligible
     window (not just ones that changed -- the caller compares against each
@@ -1468,6 +1482,16 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
     after a resize has actually landed, so the final positions are always
     computed against the sizes windows REALLY ended up with rather than the
     ones that were requested -- see main() for the gap bug that requires.
+
+    resize_locked: addresses whose CURRENT size is one a previous SUPER+G
+    press gave them (see _locked_addresses / RESIZE_STATE_PATH). They are
+    still free to move, but are never offered as a resize target again --
+    the cross-press form of "each window may be a resize target at most
+    once per pass." Without it every press measured a window's current
+    size as its "original," so MAX_SHRINK_FRACTION bounded each press but
+    not their sum: a 500x400 window 2x the typical size lost another 10%
+    on each of three consecutive presses (500 -> 450 -> 405 -> 364), and
+    refine re-trimmed windows it had already trimmed the press before.
     """
     if not eligible:
         return []
@@ -1504,7 +1528,8 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
             return unchanged
         reference_area = _typical_area(eligible)
         nothing_resizable = all(
-            _mass_ratio(w["size"][0], w["size"][1], reference_area) <= RESIZE_ELIGIBLE_RATIO_FLOOR
+            w["address"] in resize_locked
+            or _mass_ratio(w["size"][0], w["size"][1], reference_area) <= RESIZE_ELIGIBLE_RATIO_FLOOR
             for w in eligible)
         if nothing_resizable:
             return [(a, x + dx, y + dy, w, h) for a, x, y, w, h in unchanged]
@@ -1575,7 +1600,10 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         at all."""
         placed = {}  # {address: (x, y, w, h)} -- FINAL geometry, mutated in place when
                      # a neighbor is chosen as a resize target at a later step
-        resized_addrs = set()  # each window may be a resize target at most once per pass
+        # Each window may be a resize target at most once per pass -- and a
+        # window a previous press already resized (resize_locked) starts
+        # this pass as if it had already been one.
+        resized_addrs = set(resize_locked)
         cluster_bbox = None
 
         for i, w in enumerate(ordered):
@@ -1689,7 +1717,8 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True):
         pre_refine_coherent = _coherent(placed)
         pre_refine_snapshot = dict(placed)
         _refine_notch_alignment(placed, fixed_rects, gap, reference_area,
-                                 true_original_size, allow_resize=outer_allow_resize)
+                                 true_original_size, allow_resize=outer_allow_resize,
+                                 resize_locked=resize_locked)
         if pre_refine_coherent and not _coherent(placed):
             placed.clear()
             placed.update(pre_refine_snapshot)
@@ -1809,6 +1838,96 @@ def _xywh(w):
     return (w["at"][0], w["at"][1], w["size"][0], w["size"][1])
 
 
+# ============================================================================
+# Cross-press resize memory
+# ============================================================================
+#
+# auto_arrange is a pure function of the windows' CURRENT geometry, so on its
+# own it cannot tell "a window the user made this size" from "a window the
+# previous press already shrank" -- and the per-pass guarantees (each window
+# resized at most once, never past MAX_SHRINK_FRACTION of its original size)
+# silently reset on every press. Measured on the placement benchmark: 8/300
+# layouts resized again on press 2+ (one window three presses in a row,
+# ending at 0.73x). This file is the missing memory: the size SUPER+G last
+# GAVE each window, keyed by Hyprland address. A window still at exactly that
+# size is resize-locked (it may move, never re-shrink). The moment its size
+# differs -- the user resized it -- the entry is dropped and the user's own
+# size is the new baseline, exactly as if SUPER+G had never touched it.
+#
+# Lives in $XDG_RUNTIME_DIR (per-login, tmpfs), so it can never outlive the
+# Hyprland session whose addresses it names.
+RESIZE_STATE_SIZE_TOLERANCE = 1.0
+
+
+def _resize_state_path():
+    base = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/dxrice-{os.getuid()}"
+    return os.path.join(base, "dxrice", "super_g_resized.json")
+
+
+def _load_resize_state(path):
+    """{address: (w, h)}; an unreadable/corrupt/missing file is simply "no
+    memory" -- SUPER+G must never fail because of its own bookkeeping."""
+    try:
+        with open(path) as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    state = {}
+    for addr, size in raw.items():
+        if (isinstance(addr, str) and isinstance(size, list) and len(size) == 2
+                and all(isinstance(v, (int, float)) for v in size)):
+            state[addr] = (size[0], size[1])
+    return state
+
+
+def _size_matches(a, b, tol=RESIZE_STATE_SIZE_TOLERANCE):
+    return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
+
+
+def _locked_addresses(state, eligible):
+    """The eligible windows still at the exact size a previous press gave
+    them -- auto_arrange's resize_locked."""
+    return frozenset(w["address"] for w in eligible
+                     if w["address"] in state and _size_matches(tuple(w["size"]), state[w["address"]]))
+
+
+def _next_resize_state(state, alive_addrs, current_sizes, resized_now):
+    """The state to persist after this press.
+
+    current_sizes: {address: (w, h)} for every window this press SAW, at the
+    size it ends the press with. resized_now: addresses this press resized.
+    An entry survives only while its window exists and, if this press saw
+    it, is still at the recorded size; windows on other workspaces (alive
+    but unseen) keep their entry until a press that can see them decides."""
+    nxt = {}
+    for addr, size in state.items():
+        if addr not in alive_addrs:
+            continue
+        if addr in current_sizes and not _size_matches(current_sizes[addr], size):
+            continue
+        nxt[addr] = size
+    for addr in resized_now:
+        if addr in current_sizes:
+            nxt[addr] = tuple(current_sizes[addr])
+    return nxt
+
+
+def _save_resize_state(path, state):
+    """Atomic (temp file + rename in the same directory) so a crash or a
+    concurrent press can never leave a half-written file; failure to save
+    only costs the memory, never the arrangement that was just dispatched."""
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump({a: [int(round(w)), int(round(h))] for a, (w, h) in state.items()}, f)
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"Could not save SUPER+G resize memory ({e}); continuing.", file=sys.stderr)
+
+
 def _settle_sizes(addresses, workspace_id, timeout=1.0, poll=0.02):
     """Re-read this workspace until every address in `addresses` reports the
     same size on two consecutive reads, then return the fresh floating
@@ -1876,7 +1995,10 @@ def main():
     gap = live_gap()
     monitor = get_monitor_bounds()
 
-    results = auto_arrange(eligible, fixed, monitor, gap)
+    state_path = _resize_state_path()
+    resize_state = _load_resize_state(state_path)
+    results = auto_arrange(eligible, fixed, monitor, gap,
+                           resize_locked=_locked_addresses(resize_state, eligible))
 
     THRESHOLD = 1.0  # sub-pixel differences from floating point aren't a real move/resize
     by_addr = {w["address"]: w for w in eligible}
@@ -1904,15 +2026,40 @@ def main():
         # this can't turn into a resize feedback loop, and it costs nothing
         # on the overwhelmingly common no-resize path, which returns above
         # without ever getting here.
+        #
+        # But only when a client actually deviated. When every window took
+        # exactly the size it was asked for, the first pass's positions
+        # are ALREADY correct for those sizes -- and they are the layout the
+        # resize was chosen FOR (auto_arrange keeps a resize only when its
+        # whole finished composition beats the move-only alternative).
+        # Rebuilding anyway threw that away: re-running the build from the
+        # windows' pre-press positions produced a different composition in
+        # 56 of 58 resizing presses on the placement benchmark, with MORE
+        # dead-gap/notch penalty than the one that justified the resize in
+        # 33 of them -- the windows shrank, the arrangement that made the
+        # shrink worth it never appeared.
         batch_async([resize_window_exact_lua(w, h, a) for a, w, h in resize_exprs])
         settled = _settle_sizes([a for a, _, _ in resize_exprs], workspace_id)
         if settled:
-            eligible = [w for w in settled
-                        if not w.get("fullscreen") and w.get("address") in by_addr]
-            fixed = [w for w in settled if w.get("fullscreen")]
-            if eligible:
-                results = auto_arrange(eligible, fixed, monitor, gap, allow_resize=False)
-                by_addr = {w["address"]: w for w in eligible}
+            settled_eligible = [w for w in settled
+                                if not w.get("fullscreen") and w.get("address") in by_addr]
+            settled_by_addr = {w["address"]: w for w in settled_eligible}
+            planned = {a: (w, h) for a, _x, _y, w, h in results}
+            deviated = any(
+                a not in settled_by_addr
+                or not _size_matches(tuple(settled_by_addr[a]["size"]), planned[a], THRESHOLD)
+                for a, _, _ in resize_exprs)
+            if not deviated:
+                # Plan stands; compare against where the resize LEFT each
+                # window (Hyprland's resize is centre-anchored), so the
+                # dispatch below moves rather than re-resizes.
+                by_addr.update(settled_by_addr)
+            else:
+                eligible = settled_eligible
+                fixed = [w for w in settled if w.get("fullscreen")]
+                if eligible:
+                    results = auto_arrange(eligible, fixed, monitor, gap, allow_resize=False)
+                    by_addr = {w["address"]: w for w in eligible}
 
     exprs = []
     moved = 0
@@ -1939,6 +2086,14 @@ def main():
 
     if exprs:
         batch_async(exprs)
+
+    next_state = _next_resize_state(
+        resize_state,
+        alive_addrs={c.get("address") for c in clients},
+        current_sizes={a: (w, h) for a, _x, _y, w, h in results},
+        resized_now=[a for a, _, _ in resize_exprs])
+    if next_state != resize_state:
+        _save_resize_state(state_path, next_state)
     print(f"Arranged {len(eligible)} window(s); {moved} moved, {resized} resized, "
           f"{max(0, len(eligible) - moved)} already in place.")
     if fixed:
