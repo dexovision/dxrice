@@ -23,6 +23,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_auto_place_window as apw
 import dxrice_auto_arrange as arr
+import dxrice_resize_memory
 
 GAP = 5
 
@@ -3300,11 +3301,11 @@ class TestCrossPressResizeMemory(unittest.TestCase):
     def test_state_file_roundtrip_and_bad_input(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "dxrice", "super_g_resized.json")
+            path = os.path.join(d, "dxrice", "resize_memory.json")
             self.assertEqual(arr._load_resize_state(path), {})
             arr._save_resize_state(path, {"0xA": (450, 360)})
             self.assertEqual(arr._load_resize_state(path), {"0xA": (450, 360)})
-            self.assertEqual(os.listdir(os.path.dirname(path)), ["super_g_resized.json"], "temp file left behind")
+            self.assertEqual(os.listdir(os.path.dirname(path)), ["resize_memory.json"], "temp file left behind")
             for junk in ("{not json", "[1, 2]", '{"0xA": "big", "0xB": [1]}'):
                 with open(path, "w") as f:
                     f.write(junk)
@@ -3318,11 +3319,20 @@ class _FakeHyprland:
     Hyprland's own floating resize, optionally clamped to a per-window
     minimum size so a client can "refuse" the size it was asked for."""
 
-    def __init__(self, rows, min_size=None):
+    MON = (0, 0, 1920, 1080)
+
+    def __init__(self, rows=(), min_size=None):
         self.clients = {a: {"address": a, "at": [x, y], "size": [w, h], "floating": True, "fullscreen": 0,
                             "workspace": {"id": 1}, "title": a} for a, x, y, w, h in rows}
         self.min_size = min_size or {}
         self.batches = []
+
+    def open(self, addr, w, h, cls, pid):
+        """A new floating window, mapped where Hyprland maps one: centred."""
+        mx0, my0, mx1, my1 = self.MON
+        self.clients[addr] = {"address": addr, "at": [round((mx0 + mx1 - w) / 2), round((my0 + my1 - h) / 2)],
+                              "size": [w, h], "floating": True, "fullscreen": 0, "workspace": {"id": 1},
+                              "title": addr, "class": cls, "initialClass": cls, "pid": pid}
 
     def hyprctl_json(self, args, **kw):
         if args and args[0] == "activeworkspace":
@@ -3330,6 +3340,12 @@ class _FakeHyprland:
         if args and args[0] == "clients":
             return [{**c, "at": list(c["at"]), "size": list(c["size"])} for c in self.clients.values()]
         return None
+
+    def dispatch_async(self, expr):
+        self.batch_async([expr])
+
+    def move_window_exact_async(self, x, y, address):
+        self.batch_async([apw.move_window_exact_lua(x, y, address)])
 
     def batch_async(self, exprs):
         import re
@@ -3429,6 +3445,89 @@ class TestSuperGMainFlow(unittest.TestCase):
         self.assertEqual(big[3:], (480, 390), "fixture must ask BIG for less than its minimum")
         self._assert_gaps(hypr.rows())
         self.assertEqual(arr._load_resize_state(arr._resize_state_path()).get("BIG"), (480, 390))
+
+
+class TestResizeMemoryAcrossMechanisms(unittest.TestCase):
+    """New-window placement's Stage 3 trims an EXISTING window to make room;
+    SUPER+G can shrink windows too. Each only ever saw current sizes, so a
+    window Stage 3 had already cut by 25% looked like an untouched window to
+    the next SUPER+G press, which could cut it again. Measured over 400
+    simulated realistic open sequences followed by one SUPER+G press: 4 of
+    the 48 Stage-3-trimmed windows were shrunk again, the worst to 0.56x
+    (two 25% cuts). Both now share dxrice_resize_memory.py."""
+
+    # A real simulated sequence (seed 148): opening the 4th window makes
+    # Stage 3 trim browser2.
+    SEQUENCE = [("0xfiles0", 809, 653, "files", 1000), ("0xpip1", 552, 304, "pip", 1001),
+                ("0xbrowser2", 1754, 1011, "browser", 1002), ("0xbrowser3", 1629, 986, "browser", 1003),
+                ("0xfiles4", 979, 606, "files", 1004), ("0xterminal5", 859, 556, "terminal", 1005)]
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = self._tmp.name
+        self._saved_apw = (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
+                           apw.get_monitor_bounds, apw.time.sleep)
+        self._saved_arr = (arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds)
+
+    def tearDown(self):
+        (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
+         apw.get_monitor_bounds, apw.time.sleep) = self._saved_apw
+        arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds = self._saved_arr
+        if self._env is None:
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+        else:
+            os.environ["XDG_RUNTIME_DIR"] = self._env
+        self._tmp.cleanup()
+
+    def _open_all_then_super_g(self, forget_between):
+        import contextlib, io
+        hypr = _FakeHyprland()
+        apw.hyprctl_json, apw.batch_async = hypr.hyprctl_json, hypr.batch_async
+        apw.dispatch_async, apw.move_window_exact_async = hypr.dispatch_async, hypr.move_window_exact_async
+        apw.get_monitor_bounds = lambda: _FakeHyprland.MON
+        apw.time.sleep = lambda s: None  # the fake settles instantly
+        trimmed = set()
+        for addr, w, h, cls, pid in self.SEQUENCE:
+            hypr.open(addr, w, h, cls, pid)
+            before = {a: tuple(c["size"]) for a, c in hypr.clients.items() if a != addr}
+            self.assertEqual(apw.place_new_window(addr, 1, GAP), "placed")
+            # Only an EXISTING window changing size while another one is
+            # placed is a Stage 3 trim (the new window's own startup sizing
+            # is not).
+            trimmed |= {a for a, size in before.items() if tuple(hypr.clients[a]["size"]) != size}
+        after_open = {a: tuple(c["size"]) for a, c in hypr.clients.items()}
+        if forget_between:
+            os.remove(arr._resize_state_path())
+        arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
+        arr.live_gap, arr.get_monitor_bounds = (lambda: GAP), (lambda: _FakeHyprland.MON)
+        with contextlib.redirect_stdout(io.StringIO()):
+            arr.main()
+        after_g = {a: tuple(c["size"]) for a, c in hypr.clients.items()}
+        return trimmed, after_open, after_g
+
+    def test_super_g_does_not_shrink_a_window_stage3_already_trimmed(self):
+        trimmed, after_open, after_g = self._open_all_then_super_g(forget_between=False)
+        self.assertEqual(trimmed, {"0xbrowser2"}, "fixture must make Stage 3 trim browser2")
+        self.assertEqual(arr._load_resize_state(arr._resize_state_path()).get("0xbrowser2"),
+                         after_open["0xbrowser2"], "Stage 3 did not record its trim")
+        self.assertEqual(after_g["0xbrowser2"], after_open["0xbrowser2"],
+                         "SUPER+G shrank a window Stage 3 had already trimmed")
+
+    def test_fixture_still_reproduces_the_double_cut_without_memory(self):
+        """Pins that the fixture exercises the bug: with the memory wiped
+        between the opens and the press, browser2 is cut a second time."""
+        trimmed, after_open, after_g = self._open_all_then_super_g(forget_between=True)
+        self.assertNotEqual(after_g["0xbrowser2"], after_open["0xbrowser2"])
+
+    def test_stage3_never_trims_a_locked_window(self):
+        """Same opens with browser2 pre-recorded at its own original size --
+        as if SUPER+G had already resized it to exactly that: Stage 3 must
+        leave it alone (it may trim a different window, or none)."""
+        dxrice_resize_memory.save_resize_state(arr._resize_state_path(), {"0xbrowser2": (1754, 1011)})
+        trimmed, _, _ = self._open_all_then_super_g(forget_between=False)
+        self.assertNotIn("0xbrowser2", trimmed)
 
 
 if __name__ == "__main__":

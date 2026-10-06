@@ -1207,6 +1207,7 @@ verify_deploy() {
         "$REPO_DIR/scripts/dxrice_auto_place_window.py"
         "$REPO_DIR/scripts/dxrice_auto_arrange.py"
         "$REPO_DIR/scripts/dxrice_hypr_ipc.py"
+        "$REPO_DIR/scripts/dxrice_resize_memory.py"
         "$REPO_DIR/scripts/dxrice_singleton.py"
         "$REPO_DIR/scripts/dxrice_xdg.py"
         "$REPO_DIR/scripts/dxrice_taskbar_gui.py"

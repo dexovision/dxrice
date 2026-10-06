@@ -71,7 +71,6 @@ or a grid), and only when the honest, consistently-scaled comparison says
 it genuinely helps -- resizing is an available OPTION the search may pick,
 never a forced step every run performs.
 """
-import json
 import math
 import os
 import sys
@@ -79,6 +78,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, batch_async, move_window_exact_lua, resize_window_exact_lua
+from dxrice_resize_memory import (resize_state_path as _resize_state_path,
+                                  load_resize_state as _load_resize_state,
+                                  save_resize_state as _save_resize_state,
+                                  size_matches as _size_matches,
+                                  locked_addresses as _locked_addresses,
+                                  next_resize_state as _next_resize_state)
 from dxrice_auto_place_window import (get_monitor_bounds, live_gap, rect_for, overlaps,
                                        composition_penalty, composition_cost, window_mass, mass_center,
                                        MIN_USABLE_WIDTH, MIN_USABLE_HEIGHT, MAX_SHRINK_FRACTION,
@@ -1490,8 +1495,9 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize
     computed against the sizes windows REALLY ended up with rather than the
     ones that were requested -- see main() for the gap bug that requires.
 
-    resize_locked: addresses whose CURRENT size is one a previous SUPER+G
-    press gave them (see _locked_addresses / RESIZE_STATE_PATH). They are
+    resize_locked: addresses whose CURRENT size is one DXrice itself gave
+    them -- a previous SUPER+G press, or new-window placement's Stage 3 (see
+    dxrice_resize_memory.py). They are
     still free to move, but are never offered as a resize target again --
     the cross-press form of "each window may be a resize target at most
     once per pass." Without it every press measured a window's current
@@ -1843,96 +1849,6 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize
 
 def _xywh(w):
     return (w["at"][0], w["at"][1], w["size"][0], w["size"][1])
-
-
-# ============================================================================
-# Cross-press resize memory
-# ============================================================================
-#
-# auto_arrange is a pure function of the windows' CURRENT geometry, so on its
-# own it cannot tell "a window the user made this size" from "a window the
-# previous press already shrank" -- and the per-pass guarantees (each window
-# resized at most once, never past MAX_SHRINK_FRACTION of its original size)
-# silently reset on every press. Measured on the placement benchmark: 8/300
-# layouts resized again on press 2+ (one window three presses in a row,
-# ending at 0.73x). This file is the missing memory: the size SUPER+G last
-# GAVE each window, keyed by Hyprland address. A window still at exactly that
-# size is resize-locked (it may move, never re-shrink). The moment its size
-# differs -- the user resized it -- the entry is dropped and the user's own
-# size is the new baseline, exactly as if SUPER+G had never touched it.
-#
-# Lives in $XDG_RUNTIME_DIR (per-login, tmpfs), so it can never outlive the
-# Hyprland session whose addresses it names.
-RESIZE_STATE_SIZE_TOLERANCE = 1.0
-
-
-def _resize_state_path():
-    base = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/dxrice-{os.getuid()}"
-    return os.path.join(base, "dxrice", "super_g_resized.json")
-
-
-def _load_resize_state(path):
-    """{address: (w, h)}; an unreadable/corrupt/missing file is simply "no
-    memory" -- SUPER+G must never fail because of its own bookkeeping."""
-    try:
-        with open(path) as f:
-            raw = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    state = {}
-    for addr, size in raw.items():
-        if (isinstance(addr, str) and isinstance(size, list) and len(size) == 2
-                and all(isinstance(v, (int, float)) for v in size)):
-            state[addr] = (size[0], size[1])
-    return state
-
-
-def _size_matches(a, b, tol=RESIZE_STATE_SIZE_TOLERANCE):
-    return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
-
-
-def _locked_addresses(state, eligible):
-    """The eligible windows still at the exact size a previous press gave
-    them -- auto_arrange's resize_locked."""
-    return frozenset(w["address"] for w in eligible
-                     if w["address"] in state and _size_matches(tuple(w["size"]), state[w["address"]]))
-
-
-def _next_resize_state(state, alive_addrs, current_sizes, resized_now):
-    """The state to persist after this press.
-
-    current_sizes: {address: (w, h)} for every window this press SAW, at the
-    size it ends the press with. resized_now: addresses this press resized.
-    An entry survives only while its window exists and, if this press saw
-    it, is still at the recorded size; windows on other workspaces (alive
-    but unseen) keep their entry until a press that can see them decides."""
-    nxt = {}
-    for addr, size in state.items():
-        if addr not in alive_addrs:
-            continue
-        if addr in current_sizes and not _size_matches(current_sizes[addr], size):
-            continue
-        nxt[addr] = size
-    for addr in resized_now:
-        if addr in current_sizes:
-            nxt[addr] = tuple(current_sizes[addr])
-    return nxt
-
-
-def _save_resize_state(path, state):
-    """Atomic (temp file + rename in the same directory) so a crash or a
-    concurrent press can never leave a half-written file; failure to save
-    only costs the memory, never the arrangement that was just dispatched."""
-    try:
-        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-        tmp = f"{path}.{os.getpid()}.tmp"
-        with open(tmp, "w") as f:
-            json.dump({a: [int(round(w)), int(round(h))] for a, (w, h) in state.items()}, f)
-        os.replace(tmp, path)
-    except OSError as e:
-        print(f"Could not save SUPER+G resize memory ({e}); continuing.", file=sys.stderr)
 
 
 def _settle_sizes(addresses, workspace_id, timeout=1.0, poll=0.02):
