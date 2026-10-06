@@ -3447,6 +3447,57 @@ class TestSuperGMainFlow(unittest.TestCase):
         self.assertEqual(arr._load_resize_state(arr._resize_state_path()).get("BIG"), (480, 390))
 
 
+class TestNewWindowDispatchRounding(unittest.TestCase):
+    """place_new_window dispatched computed (often fractional, often
+    negative) positions with int(), which truncates toward zero: two windows
+    placed exactly `gap` apart but on opposite sides of the 0 line came out
+    1px short. Every gap violation across 3,816 simulated placements was
+    exactly 4px where 5 was configured."""
+
+    def setUp(self):
+        self._saved = (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
+                       apw.get_monitor_bounds, apw.time.sleep)
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = self._tmp.name
+
+    def tearDown(self):
+        (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
+         apw.get_monitor_bounds, apw.time.sleep) = self._saved
+        if self._env is None:
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+        else:
+            os.environ["XDG_RUNTIME_DIR"] = self._env
+        self._tmp.cleanup()
+
+    def test_px_is_translation_invariant(self):
+        for a in (-393.5, -0.5, 0.5, 12.25, -7.75):
+            for k in (-2000, -1, 0, 1, 891):
+                self.assertEqual(apw._px(a + k), apw._px(a) + k)
+
+    def test_windows_opened_in_sequence_keep_exact_gaps(self):
+        # A real simulated sequence, delta-minimized to the three opens that
+        # still reproduce it: Stage 2 relocates a window to a half-pixel,
+        # negative y, and the next window is placed flush against it.
+        hypr = _FakeHyprland()
+        apw.hyprctl_json, apw.batch_async = hypr.hyprctl_json, hypr.batch_async
+        apw.dispatch_async, apw.move_window_exact_async = hypr.dispatch_async, hypr.move_window_exact_async
+        apw.get_monitor_bounds = lambda: _FakeHyprland.MON
+        apw.time.sleep = lambda s: None
+        for addr, w, h, cls, pid in (("0xsettings0", 824, 566, "settings", 1000),
+                                     ("0xsettings4", 886, 605, "settings", 1004),
+                                     ("0xbrowser6", 1788, 991, "browser", 1006)):
+            hypr.open(addr, w, h, cls, pid)
+            self.assertEqual(apw.place_new_window(addr, 1, GAP), "placed")
+            rows = hypr.rows()
+            rects = [apw.rect_for(x, y, ww, hh) for _a, x, y, ww, hh in rows]
+            for i in range(len(rects)):
+                for j in range(i + 1, len(rects)):
+                    self.assertFalse(overlaps_with_gap(rects[i], rects[j], GAP),
+                                     f"after opening {addr}: {rows[i]} and {rows[j]} closer than {GAP}px")
+
+
 class TestResizeMemoryAcrossMechanisms(unittest.TestCase):
     """New-window placement's Stage 3 trims an EXISTING window to make room;
     SUPER+G can shrink windows too. Each only ever saw current sizes, so a
