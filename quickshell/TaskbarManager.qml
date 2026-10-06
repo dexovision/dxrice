@@ -724,7 +724,7 @@ Item {
                                         visible: !shortcutRow.pinned
                                         opacity: (rowHover.hovered || shortcutRow.expanded) ? 1 : 0
                                         Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
-                                        IconButton { glyph: shortcutRow.expanded ? "︿" : "﹀"; size: Theme.iconSm; onClicked: shortcutRow.expanded = !shortcutRow.expanded }
+                                        IconButton { glyph: shortcutRow.expanded ? "\uf077" : "\uf078"; size: Theme.iconSm; onClicked: shortcutRow.expanded = !shortcutRow.expanded }
                                         IconButton { glyph: "↑"; size: Theme.iconSm; onClicked: root.moveShortcut(shortcutRow.modid, "up") }
                                         IconButton { glyph: "↓"; size: Theme.iconSm; onClicked: root.moveShortcut(shortcutRow.modid, "down") }
                                         IconButton { glyph: "🗑"; size: Theme.iconSm; destructive: true; onClicked: root.removeShortcut(shortcutRow.modid) }
@@ -799,10 +799,19 @@ Item {
                 // -- system modules: same compact-row language, and
                 // underline-style inputs (a bottom hairline, no filled
                 // box) instead of bordered text fields. --
-                Text { text: "System Modules"; color: Theme.text; opacity: 0.55; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-                Text {
-                    text: "Click actions for the volume/network/CPU/RAM/clock modules"
-                    color: Theme.text; opacity: 0.55; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
+                // Heading and its explanation are one unit: as two separate
+                // children of `body` they inherited the 24px between-cards
+                // gap, which left the explanation floating on its own.
+                Column {
+                    width: body.width
+                    spacing: 2
+                    Text { text: "System Modules"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
+                    Text {
+                        width: parent.width
+                        text: "Click actions for the volume/network/CPU/RAM/clock modules"
+                        color: Theme.text; opacity: Theme.opacityMuted; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
+                        elide: Text.ElideRight
+                    }
                 }
                 Column {
                     width: body.width
@@ -821,7 +830,7 @@ Item {
                                 width: parent.width
                                 title: root.systemModuleLabels[sysRow.modid] || sysRow.modid
                                 subtitle: sysRow.meta["on-click"] || "No click action set"
-                                IconButton { glyph: sysRow.expanded ? "︿" : "﹀"; size: Theme.iconSm; onClicked: sysRow.expanded = !sysRow.expanded }
+                                IconButton { glyph: sysRow.expanded ? "\uf077" : "\uf078"; size: Theme.iconSm; onClicked: sysRow.expanded = !sysRow.expanded }
                             }
                             Column {
                                 width: parent.width

@@ -46,24 +46,45 @@ FloatingWindow {
                 }
             }
             Rectangle {
-                width: parent.width; height: 34; radius: Theme.entryRadius
+                width: parent.width; height: ShellSurface.rowHeight; radius: Theme.entryRadius
                 color: Theme.inputFill
-                border.width: Theme.borderWidth; border.color: Theme.borderIdle
+                border.width: Theme.borderWidth
+                // Same focus treatment as the Add Shortcut fields.
+                border.color: pwInput.activeFocus ? Theme.withAlpha(Theme.accent, 0.6) : Theme.borderIdle
                 TextInput {
                     id: pwInput
-                    anchors.fill: parent; anchors.margins: 8
+                    anchors.fill: parent; anchors.leftMargin: Theme.padMd; anchors.rightMargin: Theme.padMd
                     color: Theme.textActive
                     font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeNormal
                     echoMode: TextInput.Password
                     verticalAlignment: TextInput.AlignVCenter
+                    clip: true
                     focus: true
-                    onAccepted: { root.submitted(text); root.visible = false; }
+                    onAccepted: if (text.length > 0) { root.submitted(text); root.visible = false; }
+                }
+                Text {
+                    anchors.fill: pwInput
+                    verticalAlignment: Text.AlignVCenter
+                    visible: pwInput.text.length === 0
+                    text: "Password"
+                    color: Theme.text
+                    opacity: Theme.opacityMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeNormal
                 }
             }
-            GlassButton {
-                text: "Connect"
-                variant: "primary"
-                onClicked: { root.submitted(pwInput.text); root.visible = false; }
+            Item {
+                width: parent.width
+                height: connectBtn.implicitHeight
+                GlassButton {
+                    id: connectBtn
+                    anchors.right: parent.right
+                    text: "Connect"
+                    variant: "primary"
+                    enabled: pwInput.text.length > 0
+                    onClicked: { root.submitted(pwInput.text); root.visible = false; }
+                }
             }
         }
     }
