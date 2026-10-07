@@ -1,25 +1,48 @@
 .pragma library
 
-// Where a child surface that "branches" off a parent panel should go.
-// Pure geometry -- no QML, no state -- so it can be exercised with any
-// parent rectangle and screen size (tests/qml/test_branch_geometry.py),
-// not just the one spot the dock happens to put its panel today.
+// Where a child surface that "branches" off something should go. Pure
+// geometry -- no QML, no state -- so it can be exercised with any target
+// rectangle and screen size (tests/qml/test_branch_geometry.py).
+//
+// Two policies share the same primitives (the room on each side of a
+// target, where a surface beside / stacked off it starts, clamping):
+//
+//   place()   a branch off a whole PANEL -- the Taskbar's Add Shortcut.
+//   attach()  a branch off one small CONTROL inside a panel -- the Theme
+//             editor's colour picker growing out of the swatch clicked.
+//
+// Rects are {x, y, w, h}; points {x, y}; sizes {w, h}; all in the same
+// (screen) coordinates.
+
+function _rooms(t, bounds, g) {
+    // Space between the target's edges (plus the gap) and the bounds.
+    return {
+        right: bounds.x + bounds.w - (t.x + t.w + g),
+        left: t.x - g - bounds.x,
+        below: bounds.y + bounds.h - (t.y + t.h + g),
+        above: t.y - g - bounds.y,
+    };
+}
+
+function _besideX(t, side, w, g) {
+    return side === "right" ? t.x + t.w + g : t.x - g - w;
+}
+
+function _stackY(t, side, h, g) {
+    return side === "below" ? t.y + t.h + g : t.y - g - h;
+}
+
+function _clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(v, hi));
+}
+
+// ---- place(): a branch off a panel (Add Shortcut) ---------------------------
 //
 //   parent  {x, y, w, h}  the parent panel's live on-screen rect
 //   anchor  {x, y}        the control the branch grows out of (screen coords)
 //   want    {w, h}        the branch's preferred size
 //   screen  {w, h}
-//   opts    {margin, gap, minW, minH, headerH, footerH,
-//            preferSide?, alignToAnchor?}
-//
-// Two options, both off unless given (the Add Shortcut branch uses
-// neither): `preferSide` ("right" | "left") tries that side first whenever
-// it fits instead of whichever side has more room; `alignToAnchor` centres
-// a beside-the-parent result vertically on `anchor` -- kept within the
-// parent's own vertical span, so it never rides up over whatever the
-// parent hangs from -- instead of matching the parent's height. That is
-// what a small popover (the Theme editor's colour picker) wants: to sit
-// level with the control that opened it, not be stretched to the parent.
+//   opts    {margin, gap, minW, minH, headerH, footerH}
 //
 // Preference order -- each the first that fits:
 //   "right" / "left"  beside the parent, the same height as it and
@@ -43,43 +66,29 @@ function place(parent, anchor, want, screen, opts) {
     function clampY(y, h) { return Math.max(m, Math.min(y, screen.h - m - h)); }
     function clampX(x, w) { return Math.max(m, Math.min(x, screen.w - m - w)); }
 
-    const roomRight = screen.w - m - (parent.x + parent.w + g);
-    const roomLeft = parent.x - g - m;
-    let sides = roomRight >= roomLeft
-        ? [["right", roomRight], ["left", roomLeft]]
-        : [["left", roomLeft], ["right", roomRight]];
-    if (opts.preferSide === "right") sides = [["right", roomRight], ["left", roomLeft]];
-    else if (opts.preferSide === "left") sides = [["left", roomLeft], ["right", roomRight]];
-    for (const [side, room] of sides) {
-        if (room < minW) continue;
-        const w = Math.min(want.w, room);
-        if (opts.alignToAnchor) {
-            const ah = Math.max(minH, maxH);
-            const lo = parent.y, hi = Math.max(parent.y, parent.y + parent.h - ah);
-            const ay = Math.max(lo, Math.min(anchor.y - ah / 2, hi));
-            const ax = side === "right" ? parent.x + parent.w + g : parent.x - g - w;
-            return { side: side, x: ax, y: clampY(ay, ah), w: w, h: ah };
-        }
+    const room = _rooms(parent, { x: m, y: m, w: screen.w - 2 * m, h: screen.h - 2 * m }, g);
+    const sides = room.right >= room.left
+        ? [["right", room.right], ["left", room.left]]
+        : [["left", room.left], ["right", room.right]];
+    for (const [side, r] of sides) {
+        if (r < minW) continue;
+        const w = Math.min(want.w, r);
         // Matching the parent's height (top AND bottom edges line up) is
         // what makes two surfaces read as one composition; the branch only
         // outgrows its parent when the parent is shorter than the branch's
         // usable minimum.
         const h = Math.min(maxH, Math.max(parent.h, minH));
-        const x = side === "right" ? parent.x + parent.w + g : parent.x - g - w;
-        return { side: side, x: x, y: clampY(parent.y, h), w: w, h: h };
+        return { side: side, x: _besideX(parent, side, w, g), y: clampY(parent.y, h), w: w, h: h };
     }
 
-    const roomAbove = parent.y - g - m;
-    const roomBelow = screen.h - m - (parent.y + parent.h + g);
-    const stacks = roomAbove >= roomBelow
-        ? [["above", roomAbove], ["below", roomBelow]]
-        : [["below", roomBelow], ["above", roomAbove]];
-    for (const [side, room] of stacks) {
-        if (room < minH) continue;
-        const h = Math.min(maxH, room);
+    const stacks = room.above >= room.below
+        ? [["above", room.above], ["below", room.below]]
+        : [["below", room.below], ["above", room.above]];
+    for (const [side, r] of stacks) {
+        if (r < minH) continue;
+        const h = Math.min(maxH, r);
         const w = Math.min(want.w, screen.w - 2 * m);
-        const y = side === "above" ? parent.y - g - h : parent.y + parent.h + g;
-        return { side: side, x: clampX(anchor.x - w / 2, w), y: y, w: w, h: h };
+        return { side: side, x: clampX(anchor.x - w / 2, w), y: _stackY(parent, side, h, g), w: w, h: h };
     }
 
     // Sheet: inside the parent, below its header, inset like the parent's
@@ -89,4 +98,55 @@ function place(parent, anchor, want, screen, opts) {
     const top = parent.y + opts.headerH;
     const h = Math.max(0, Math.min(maxH, parent.y + parent.h - (opts.footerH || 0) - inset - top));
     return { side: "sheet", x: clampX(Math.min(anchor.x + 24, parent.x + parent.w - inset) - w, w), y: clampY(top, h), w: w, h: h };
+}
+
+// ---- attach(): a branch off one control (the colour picker) ----------------
+//
+//   target  {x, y, w, h}  the control's live rect (the swatch)
+//   want    {w, h}        the surface's preferred size
+//   bounds  {x, y, w, h}  where the surface may go (the screen minus its
+//                         margin -- and minus whatever the caller's panel
+//                         hangs from, so it never rides over the bar)
+//   opts    {gap, minW, minH, order?}
+//
+// The surface starts `gap` from the target's own edge and sits centred on
+// it along that edge, so the control it grows out of is always right
+// there -- never "beside the panel somewhere". Tries `order` (default
+// right, left, below, above) and takes the first side with at least
+// minW/minH of room. If none has, it squeezes onto the side with the most
+// room rather than covering the target: `fallback: true` marks that.
+// Every result lies inside `bounds`.
+function attach(target, want, bounds, opts) {
+    const g = opts.gap;
+    const order = opts.order || ["right", "left", "below", "above"];
+    const room = _rooms(target, bounds, g);
+    const cx = target.x + target.w / 2, cy = target.y + target.h / 2;
+
+    function make(side, w, h, fallback) {
+        w = Math.max(0, Math.min(w, bounds.w));
+        h = Math.max(0, Math.min(h, bounds.h));
+        const horizontal = side === "right" || side === "left";
+        const x = horizontal ? _besideX(target, side, w, g)
+                             : _clamp(cx - w / 2, bounds.x, bounds.x + bounds.w - w);
+        const y = horizontal ? _clamp(cy - h / 2, bounds.y, bounds.y + bounds.h - h)
+                             : _stackY(target, side, h, g);
+        return { side: side, x: x, y: y, w: w, h: h, fallback: fallback };
+    }
+
+    for (const side of order) {
+        const horizontal = side === "right" || side === "left";
+        if (horizontal && room[side] >= opts.minW) return make(side, Math.min(want.w, room[side]), want.h, false);
+        if (!horizontal && room[side] >= opts.minH) return make(side, want.w, Math.min(want.h, room[side]), false);
+    }
+    // Nowhere fits: the roomiest side (relative to what each axis needs),
+    // squeezed to its room -- still beside the target, still not over it.
+    let best = order[0], bestScore = -Infinity;
+    for (const side of order) {
+        const horizontal = side === "right" || side === "left";
+        const score = room[side] / (horizontal ? opts.minW : opts.minH);
+        if (score > bestScore) { best = side; bestScore = score; }
+    }
+    const horizontal = best === "right" || best === "left";
+    return horizontal ? make(best, Math.max(0, room[best]), want.h, true)
+                      : make(best, want.w, Math.max(0, room[best]), true);
 }

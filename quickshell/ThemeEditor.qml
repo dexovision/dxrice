@@ -372,17 +372,19 @@ PanelWindow {
 
     // ---- shared dialogs ----
     property string editingColorKey: ""
-    // The colour picker is ColorPopover, a child surface of the panel (see
-    // its own header for why it is no longer a ColorDialog / separate
-    // window). It hangs off the swatch that opened it: the anchor is kept
-    // relative to the drawer and corrected for how far the content pane has
-    // scrolled since, so it follows the panel (open/close settle, height
-    // changes) and the swatch rather than staying at a fixed screen point.
+    // The colour picker is ColorPopover, a branch that grows out of the
+    // swatch that opened it (see its own header). The swatch's rect is
+    // captured relative to the drawer when it opens and then corrected for
+    // how far the content pane has scrolled since, so the picker follows
+    // the swatch -- panel settle, scrolling -- with plain bindings, not a
+    // per-frame lookup. A swatch scrolled fully out of the pane closes it
+    // (onContentYChanged below): there is nothing left to be attached to.
     property bool pickerOpen: false
     property string pickerTitle: ""
     property int pickerSession: 0
-    property point _pickerOffset: Qt.point(0, 0)
+    property rect _pickerSwatch: Qt.rect(0, 0, 0, 0)
     property real _pickerScrollAtOpen: 0
+    readonly property real _pickerScroll: contentFlick.contentY - root._pickerScrollAtOpen
     // editingColorKey is deliberately left set: the picker is still
     // animating closed and keeps showing that colour until it is gone.
     function closePicker() {
@@ -403,8 +405,8 @@ PanelWindow {
             root.closePicker();
             return;
         }
-        const p = swatch.mapToItem(drawer, swatch.width / 2, swatch.height / 2);
-        root._pickerOffset = Qt.point(p.x, p.y);
+        const p = swatch.mapToItem(drawer, 0, 0);
+        root._pickerSwatch = Qt.rect(p.x, p.y, swatch.width, swatch.height);
         root._pickerScrollAtOpen = contentFlick.contentY;
         root.editingColorKey = key;
         root.pickerTitle = label || "Colour";
@@ -416,6 +418,15 @@ PanelWindow {
     // replacing the value it was opened on.
     onClosingChanged: if (root.closing) root.closePicker()
     onCurrentCategoryChanged: root.closePicker()
+    Connections {
+        target: contentFlick
+        enabled: root.pickerOpen
+        function onContentYChanged() {
+            const view = contentViewport.mapToItem(drawer, 0, 0);
+            const cy = root._pickerSwatch.y + root._pickerSwatch.height / 2 - root._pickerScroll;
+            if (cy < view.y || cy > view.y + contentViewport.height) root.closePicker();
+        }
+    }
 
     FileDialog {
         id: wallpaperDialog
@@ -832,11 +843,17 @@ PanelWindow {
         title: root.pickerTitle
         initialHex: root.editingColorKey ? root[root.editingColorKey] : "ffffff"
         session: root.pickerSession
-        parentRect: Qt.rect(drawer.x, drawer.y, drawer.width, drawer.revealHeight)
-        anchorPoint: Qt.point(drawer.x + root._pickerOffset.x,
-                              drawer.y + root._pickerOffset.y - (contentFlick.contentY - root._pickerScrollAtOpen))
-        screenWidth: root.width
-        screenHeight: root.height
+        targetRect: Qt.rect(drawer.x + root._pickerSwatch.x,
+                            drawer.y + root._pickerSwatch.y - root._pickerScroll,
+                            root._pickerSwatch.width, root._pickerSwatch.height)
+        // Horizontally the screen minus the shell's edge margin; vertically
+        // the panel's own span (or the picker's height, if the panel is
+        // shorter), so it stays level with the Theme editor -- never up over
+        // the bar, never down over the dock.
+        bounds: Qt.rect(ShellSurface.gap, drawer.y, root.width - ShellSurface.gap * 2,
+                        Math.min(root.height - ShellSurface.gap - drawer.y,
+                                 Math.max(drawer.revealHeight, colorPopover.wantH)))
+        occluder: Qt.rect(drawer.x, drawer.y, drawer.width, drawer.revealHeight)
         onAccepted: (hex) => {
             if (root.editingColorKey) {
                 root[root.editingColorKey] = hex;

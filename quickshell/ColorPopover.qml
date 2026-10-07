@@ -19,8 +19,16 @@ import "BranchGeometry.js" as BranchGeometry
 // with grabFocus the compositor dismisses it on ANY outside click,
 // including clicks on the Theme panel itself.
 //
-// Owns presentation only. ThemeEditor decides when it is open, where it is
-// anchored, and what happens to the result:
+// It is the Theme editor's counterpart of the Taskbar's Add Shortcut branch
+// (AddShortcutBranch.qml) -- same material, same one-value reveal, same
+// connector -- but it branches off ONE CONTROL, the swatch that opened it,
+// rather than off the whole panel: BranchGeometry.attach() puts it `gap`
+// from the swatch's own edge, centred on it (right of it, else left, below,
+// above; squeezed onto the roomiest side, never over the swatch, if nothing
+// fits), and the surface starts as the swatch's own footprint on that edge.
+//
+// Owns presentation only. ThemeEditor decides when it is open, which swatch
+// it hangs off, and what happens to the result:
 //   accepted(hex)  Done / Enter -- hex is "rrggbb", no leading '#'
 //   dismissed()    X / Cancel
 // Escape and click-outside are ThemeEditor's (one Escape Shortcut per
@@ -35,12 +43,25 @@ Item {
     // Bumped by the owner on every (re)target, so picking a second swatch
     // while open reloads the draft without a close/open cycle.
     property int session: 0
-    // Where it hangs from, in this item's parent's coordinates.
-    property rect parentRect: Qt.rect(0, 0, 0, 0)
-    property point anchorPoint: Qt.point(0, 0)
-    property real screenWidth: 1920
-    property real screenHeight: 1080
-    property real edgeMargin: ShellSurface.gap
+    // The swatch it grows out of, and where it may go -- both in this
+    // item's parent's coordinates. targetRect is LIVE (the owner keeps it
+    // on the swatch as the pane scrolls and the panel settles), so the
+    // picker follows the control rather than a screen point.
+    property rect targetRect: Qt.rect(0, 0, 0, 0)
+    property rect bounds: Qt.rect(0, 0, 1920, 1080)
+    // The panel it hangs from. Where the picker mostly sits ON it (a
+    // narrow screen, where it branches left of the swatch over the
+    // panel's own content), the panel's translucent material would let
+    // that content show through -- blur only ever sees what is behind the
+    // whole shell surface, not the panel drawn in it -- so it switches to
+    // the same near-opaque fill the Add Shortcut branch uses for its own
+    // inside-the-panel sheet.
+    property rect occluder: Qt.rect(0, 0, 0, 0)
+    readonly property bool overPanel: {
+        const ox = Math.min(x + width, occluder.x + occluder.width) - Math.max(x, occluder.x);
+        const oy = Math.min(y + height, occluder.y + occluder.height) - Math.max(y, occluder.y);
+        return ox > 0 && oy > 0 && ox * oy > 0.25 * width * height;
+    }
 
     signal accepted(string hex)
     signal dismissed()
@@ -51,17 +72,15 @@ Item {
     readonly property real wantH: pad * 2 + header.height + svArea.height + hueBar.height + valueRow.height
         + buttonRow.height + Theme.padMd * 4
 
-    // Placement only while visible or animating: a closed popover never
-    // recomputes anything as the panel above it animates.
-    property var _lastPlacement: ({ side: "right", x: 0, y: 0, w: 288, h: 0 })
+    // Placement only while visible or animating: a closed picker never
+    // recomputes anything as the panel under it scrolls or animates.
+    property var _lastPlacement: ({ side: "right", x: 0, y: 0, w: 288, h: 0, fallback: false })
     readonly property bool _placing: root.open || root.reveal > 0
-    readonly property var placement: !root._placing ? root._lastPlacement : BranchGeometry.place(
-        { x: parentRect.x, y: parentRect.y, w: parentRect.width, h: parentRect.height },
-        anchorPoint,
+    readonly property var placement: !root._placing ? root._lastPlacement : BranchGeometry.attach(
+        { x: targetRect.x, y: targetRect.y, w: targetRect.width, h: targetRect.height },
         { w: wantW, h: wantH },
-        { w: screenWidth, h: screenHeight },
-        { margin: edgeMargin, gap: gap, minW: 260, minH: wantH, headerH: 56, footerH: 0,
-          preferSide: "right", alignToAnchor: true })
+        { x: bounds.x, y: bounds.y, w: bounds.width, h: bounds.height },
+        { gap: gap, minW: 260, minH: wantH })
     onPlacementChanged: if (root._placing) root._lastPlacement = root.placement
     readonly property string side: placement.side
     readonly property bool horizontal: side === "right" || side === "left"
@@ -72,8 +91,12 @@ Item {
     height: placement.h
     z: 20
 
-    readonly property real anchorLocalX: Math.max(0, Math.min(width, anchorPoint.x - x))
-    readonly property real anchorLocalY: Math.max(0, Math.min(height, anchorPoint.y - y))
+    // The swatch's centre in this item's own coordinates (it sits just
+    // outside it, `gap` away). Clamped into this item's span where the stem
+    // and neck use it (_span), so they always meet the surface even when
+    // the picker itself is clamped.
+    readonly property real targetCX: targetRect.x + targetRect.width / 2 - x
+    readonly property real targetCY: targetRect.y + targetRect.height / 2 - y
 
     // ONE animated value drives the whole open/close, so an interrupted
     // close simply reverses from wherever it is -- nothing to cancel.
@@ -127,51 +150,68 @@ Item {
     }
 
     // ---- the surface: grows out of the swatch that opened it ----
-    readonly property real seed: 28
-    readonly property rect startRect: Qt.rect(
-        Math.max(0, Math.min(width - seed, anchorLocalX - seed / 2)),
-        Math.max(0, Math.min(height - seed, anchorLocalY - seed / 2)), seed, seed)
+    // It starts as exactly the swatch's own footprint on the edge facing it
+    // (the swatch's height for a side branch, its width for a stacked one),
+    // so frame one reads as the swatch extending; then it stretches away
+    // from the swatch along the branching axis and unfolds on the other --
+    // the Add Shortcut branch's motion, from a control instead of a panel.
+    readonly property real stemMain: Math.min(targetRect.width, targetRect.height)
+    readonly property real stemCross: horizontal ? targetRect.height : targetRect.width
+    function _span(c, size, extent) { return Math.max(0, Math.min(extent - size, c - size / 2)); }
+    readonly property rect startRect: {
+        switch (root.side) {
+        case "right": return Qt.rect(0, _span(targetCY, stemCross, height), stemMain, stemCross);
+        case "left": return Qt.rect(width - stemMain, _span(targetCY, stemCross, height), stemMain, stemCross);
+        case "below": return Qt.rect(_span(targetCX, stemCross, width), 0, stemCross, stemMain);
+        default: return Qt.rect(_span(targetCX, stemCross, width), height - stemMain, stemCross, stemMain);
+        }
+    }
+    readonly property real pX: horizontal ? pMain : pCross
+    readonly property real pY: horizontal ? pCross : pMain
 
-    // A short bridge across the gap to the panel edge, level with the
-    // swatch -- only when beside/above/below the panel, not as an inset sheet.
+    // The connector: grows out of the SWATCH's own edge across the gap
+    // first, level with the swatch's centre, then the surface follows it.
     Rectangle {
         id: neck
-        visible: root.side !== "sheet"
-        readonly property real thickness: 16
-        readonly property real grow: (root.gap + 2) * root.sub(root.reveal, 0, 0.25)
-        // Grows out of the PANEL's edge toward the popover on every side.
+        objectName: "colorPopoverNeck"
+        readonly property real thickness: Math.max(8, Math.round(root.stemCross / 2))
+        readonly property real grow: (root.gap + 2) * root.sub(root.reveal, 0, 0.2)
         x: root.side === "right" ? -root.gap - 1
-           : (root.side === "left" ? root.width + root.gap + 1 - grow : root.anchorLocalX - thickness / 2)
-        y: root.horizontal ? root.anchorLocalY - thickness / 2
+           : (root.side === "left" ? root.width + root.gap + 1 - grow
+              : root._span(root.targetCX, thickness, root.width))
+        y: root.horizontal ? root._span(root.targetCY, thickness, root.height)
            : (root.side === "above" ? root.height + root.gap + 1 - grow : -root.gap - 1)
         width: root.horizontal ? grow : thickness
         height: root.horizontal ? thickness : grow
-        color: Theme.bg
-        opacity: root.sub(root.reveal, 0, 0.2)
+        radius: Math.min(width, height) / 2
+        color: Theme.panel
+        border.width: Theme.borderWidth
+        border.color: Theme.borderIdle
+        opacity: root.sub(root.reveal, 0, 0.15)
     }
 
+    // Same material as the Add Shortcut branch: panel fill, idle hairline,
+    // the shell's outer arc, one elevation step below a modal.
     RectangularShadow {
         anchors.fill: surface
         radius: surface.radius
         color: Theme.shadowColor
-        blur: Theme.elevationBlur(2)
-        spread: Theme.elevationSpread(2)
-        offset.y: Theme.elevationOffsetY(2)
+        blur: Theme.elevationBlur(1)
+        spread: Theme.elevationSpread(1)
+        offset.y: Theme.elevationOffsetY(1)
         opacity: root.pCross
     }
 
     Rectangle {
         id: surface
-        x: root.startRect.x * (1 - pX)
-        y: root.startRect.y * (1 - pY)
-        width: root.startRect.width + (root.width - root.startRect.width) * pX
-        height: root.startRect.height + (root.height - root.startRect.height) * pY
-        readonly property real pX: root.horizontal ? root.pMain : root.pCross
-        readonly property real pY: root.horizontal ? root.pCross : root.pMain
-        radius: Math.min(Theme.roundingXl, width / 2, height / 2)
-        color: root.side === "sheet" ? Theme.withAlpha(Theme.mix(Theme.panelTone, Theme.layer1Tone, 0.25), 0.98) : Theme.bg
+        x: root.startRect.x + (0 - root.startRect.x) * root.pX
+        y: root.startRect.y + (0 - root.startRect.y) * root.pY
+        width: root.startRect.width + (root.width - root.startRect.width) * root.pX
+        height: root.startRect.height + (root.height - root.startRect.height) * root.pY
+        radius: Math.min(ShellSurface.radius, width / 2, height / 2)
+        color: root.overPanel ? Theme.withAlpha(Theme.mix(Theme.panelTone, Theme.layer1Tone, 0.25), 0.98) : Theme.panel
         border.width: Theme.borderWidth
-        border.color: root.side === "sheet" ? Theme.border : Theme.borderIdle
+        border.color: root.overPanel ? Theme.border : Theme.borderIdle
         clip: true
 
         Item {

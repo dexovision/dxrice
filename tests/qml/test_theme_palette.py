@@ -85,9 +85,9 @@ class ThemePaletteTest(unittest.TestCase):
         return px <= x <= px + pw and py <= y <= py + ph
 
     def pick(self, key, label):
-        """Click the swatch when it is reachable; under the small-screen
-        inset sheet a swatch can sit beneath the picker itself, so drive
-        the same pickColor() path the swatch's own handler calls."""
+        """Click the swatch when it is reachable; if the open picker happens
+        to sit over it, drive the same pickColor() path the swatch's own
+        handler calls (a covered control is not clickable by design)."""
         self.scroll_into_view(key)
         if self.covered_by_picker(key):
             self.s.ev(f"{TE}.pickColor('{key}', findNamed('swatch_{key}'), '{label}')")
@@ -102,7 +102,12 @@ class ThemePaletteTest(unittest.TestCase):
         return self.s.ev("panels.current") == "theme"
 
     def expected_side(self):
-        return "sheet" if self.size[0] <= 1024 else "right"
+        # Right of the swatch while the screen leaves 260px there; on a
+        # narrow screen, left of it -- over the panel's own labels.
+        return "left" if self.size[0] <= 1024 else "right"
+
+    def swatch_rect(self, key):
+        return self.rect_of(f"findNamed('swatch_{key}')")
 
     # ---- tests ----
     def test_01_swatch_opens_an_attached_picker(self):
@@ -114,14 +119,22 @@ class ThemePaletteTest(unittest.TestCase):
         self.assertEqual(side, self.expected_side())
         px, py, pw, ph = self.rect_of(POP)
         bx, by, bw, bh = self.panel()
-        sx, sy = self.center("swatch_glass_bg")
+        tx, ty, tw, th = self.swatch_rect("glass_bg")
+        # Attached to the SWATCH's own edge, not the panel's.
         if side == "right":
-            self.assertAlmostEqual(px - (bx + bw), GAP, delta=0.6, msg="not attached to the panel's edge")
-            self.assertTrue(py <= sy <= py + ph, "the swatch is not level with the picker")
-            self.assertGreaterEqual(py, by - 0.6)
-            self.assertLessEqual(py + ph, by + bh + 0.6)
+            self.assertAlmostEqual(px - (tx + tw), GAP, delta=0.6, msg="not attached to the swatch's right edge")
         else:
-            self.assertTrue(bx - 0.6 <= px and px + pw <= bx + bw + 0.6, "sheet is not inside the panel")
+            self.assertAlmostEqual(tx - (px + pw), GAP, delta=0.6, msg="not attached to the swatch's left edge")
+        self.assertTrue(py <= ty + th / 2 <= py + ph, "the swatch is not level with the picker")
+        self.assertGreaterEqual(py, by - 0.6, "picker rides up over the bar")
+        self.assertLessEqual(py + ph, by + bh + 0.6, "picker hangs below the Theme editor")
+        # The connector spans the gap from the swatch's edge to the picker,
+        # level with the swatch.
+        nx, ny, nw, nh = self.rect_of("findNamed('colorPopoverNeck')")
+        near = tx + tw if side == "right" else tx
+        self.assertTrue(min(abs(nx - near), abs(nx + nw - near)) <= 1.6, f"connector does not start at the swatch: neck={nx,nw} swatch edge={near}")
+        self.assertTrue(ny <= ty + th / 2 <= ny + nh, "connector is not level with the swatch")
+        self.assertGreater(self.s.ev("findNamed('colorPopoverNeck').opacity"), 0.99)
         self.assertEqual(self.s.ev(f"{POP}.title"), "Panel background")
 
     def test_02_one_surface_not_a_separate_window(self):
@@ -134,6 +147,20 @@ class ThemePaletteTest(unittest.TestCase):
         self.assertTrue(owner, "the picker is not a child of the Theme editor's own window")
         src = (Path(__file__).resolve().parents[2] / "quickshell" / "ThemeEditor.qml").read_text()
         self.assertNotIn("ColorDialog {", src, "a ColorDialog (a separate top-level window) is back")
+
+    def test_02b_opens_from_the_swatch(self):
+        """The surface's first frame is the swatch's own footprint on the
+        facing edge, level with it -- it grows out of the swatch rather
+        than appearing at its final place and scaling."""
+        self.click_swatch("glass_bg")
+        s = self.s
+        tx, ty, tw, th = self.swatch_rect("glass_bg")
+        px, py, pw, ph = self.rect_of(POP)
+        st = v(s.ev(f"(function(){{ const r = {POP}.startRect; return [r.x, r.y, r.width, r.height]; }})()"))
+        self.assertAlmostEqual(st[3], th, delta=0.6, msg="stem is not the swatch's height")
+        self.assertAlmostEqual(py + st[1] + st[3] / 2, ty + th / 2, delta=1.0, msg="stem is not level with the swatch")
+        edge = px if s.ev(f"{POP}.side") == "right" else px + pw - st[2]
+        self.assertAlmostEqual(px + st[0], edge, delta=0.6, msg="stem is not on the edge facing the swatch")
 
     def test_03_stays_on_screen(self):
         for key in ("glass_bg", "glass_bg_active", "glass_text"):
@@ -268,8 +295,16 @@ class ThemePaletteTest(unittest.TestCase):
         spot = (int(px + pw / 2), int(py + ph / 2))
         s.ev(f"{TE}.closePicker()"); s.wait(SETTLE_MS)
         self.assertFalse(s.ev(f"{POP}.visible"))
-        if self.s.ev(f"{POP}.side") != "sheet":
-            # Where the picker was is plain Theme click-outside again: it closes
+        bx, by, bw, bh = self.panel()
+        if bx <= spot[0] <= bx + bw and by <= spot[1] <= by + bh:
+            # Over the panel (narrow screen): the click reaches the panel
+            # again -- it neither reopens a ghost picker nor closes anything.
+            s.click(*spot); s.wait(400)
+            self.assertTrue(self.theme_open())
+            self.assertFalse(self.picker_open())
+            self.assertFalse(s.ev(f"{POP}.visible"))
+        else:
+            # Outside the panel: plain Theme click-outside again -- it closes
             # the editor (existing behaviour), nothing invisible swallows it.
             s.click(*spot); s.wait(1100)
             self.assertFalse(self.theme_open(), "a click where the closed picker was did not reach click-outside")
@@ -303,15 +338,31 @@ class ThemePaletteTest(unittest.TestCase):
     def test_15_follows_the_swatch_when_the_pane_scrolls(self):
         s = self.s
         self.click_swatch("glass_bg")
-        if s.ev(f"{POP}.side") == "sheet":
-            self.skipTest("inset sheet: no edge attachment to follow")
-        before = s.ev(f"{POP}.anchorPoint.y")
-        _, y0 = self.center("swatch_glass_bg")
-        s.ev(f"(function(){{ const f = {self.flick_of('glass_bg')}; f.contentY = f.contentY + 30; }})()"); s.wait(400)
-        _, y1 = self.center("swatch_glass_bg")
-        after = s.ev(f"{POP}.anchorPoint.y")
-        self.assertAlmostEqual(after - before, y1 - y0, delta=1.0, msg="picker anchor did not follow the scrolled swatch")
+        tx0, ty0, _, th = self.swatch_rect("glass_bg")
+        delta = 30 if s.ev(f"{self.flick_of('glass_bg')}.contentY") + 30 <= s.ev(f"(function(){{ const f = {self.flick_of('glass_bg')}; return f.contentHeight - f.height; }})()") else -30
+        s.ev(f"(function(){{ const f = {self.flick_of('glass_bg')}; f.contentY = f.contentY + {delta}; }})()"); s.wait(400)
+        tx1, ty1, _, _ = self.swatch_rect("glass_bg")
+        self.assertAlmostEqual(ty1 - ty0, -delta, delta=0.6, msg="fixture: the swatch did not move")
+        self.assertTrue(self.picker_open(), "a small scroll closed the picker")
+        t = v(s.ev(f"(function(){{ const r = {POP}.targetRect; return [r.x, r.y]; }})()"))
+        self.assertAlmostEqual(t[1], ty1, delta=0.6, msg="picker is still attached to the swatch's OLD position")
+        nx, ny, nw, nh = self.rect_of("findNamed('colorPopoverNeck')")
+        self.assertTrue(ny <= ty1 + th / 2 <= ny + nh, "connector did not follow the swatch")
+
+    def test_15b_swatch_scrolled_out_of_view_closes_it(self):
+        """The lowest swatch is only reachable scrolled down; opening its
+        picker there and scrolling back to the top carries the swatch out
+        of the pane -- there is nothing left to be attached to."""
+        s = self.s
+        key = "hypr_inactive_border"
+        self.click_swatch(key)
         self.assertTrue(self.picker_open())
+        f = self.flick_of(key)
+        s.ev(f"{f}.contentY = 0"); s.wait(500)
+        y = s.ev(f"(function(){{ const sw = findNamed('swatch_{key}'); return sw.mapToItem({f}, 0, sw.height / 2).y; }})()")
+        h = s.ev(f"{f}.height")
+        self.assertGreater(y, h, "fixture: the swatch is still inside the pane")
+        self.assertFalse(self.picker_open(), "picker stayed attached to a swatch scrolled out of view")
 
     def test_16_no_new_warnings(self):
         self.click_swatch("glass_bg")
