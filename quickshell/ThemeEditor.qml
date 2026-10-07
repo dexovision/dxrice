@@ -125,7 +125,11 @@ PanelWindow {
         id: dismissArea
         anchors.fill: parent
         enabled: !root.closing
-        onClicked: PanelManager.close("theme")
+        // Outside both the panel and the picker: the picker goes first,
+        // the same peel order as Escape (and as the Taskbar's Add
+        // Shortcut branch) -- a stray click while choosing a colour must
+        // not throw away the whole unapplied theme.
+        onClicked: root.pickerOpen ? root.closePicker() : PanelManager.close("theme")
     }
 
     readonly property string repoDir: Quickshell.shellDir + "/.."
@@ -362,24 +366,27 @@ PanelWindow {
     }
 
     function revert() {
+        root.closePicker();
         loadFromTheme(Theme.data);
     }
 
     // ---- shared dialogs ----
     property string editingColorKey: ""
-    function colorToHex(c) {
-        const toHex = (v) => Math.max(0, Math.min(255, Math.round(v * 255))).toString(16).padStart(2, "0");
-        return toHex(c.r) + toHex(c.g) + toHex(c.b);
-    }
-
-    ColorDialog {
-        id: colorDialog
-        onAccepted: {
-            if (root.editingColorKey) {
-                root[root.editingColorKey] = root.colorToHex(colorDialog.selectedColor);
-                root.dirty = true;
-            }
-        }
+    // The colour picker is ColorPopover, a child surface of the panel (see
+    // its own header for why it is no longer a ColorDialog / separate
+    // window). It hangs off the swatch that opened it: the anchor is kept
+    // relative to the drawer and corrected for how far the content pane has
+    // scrolled since, so it follows the panel (open/close settle, height
+    // changes) and the swatch rather than staying at a fixed screen point.
+    property bool pickerOpen: false
+    property string pickerTitle: ""
+    property int pickerSession: 0
+    property point _pickerOffset: Qt.point(0, 0)
+    property real _pickerScrollAtOpen: 0
+    // editingColorKey is deliberately left set: the picker is still
+    // animating closed and keeps showing that colour until it is gone.
+    function closePicker() {
+        root.pickerOpen = false;
     }
     function _rgba(hex, alpha) {
         return Qt.rgba(
@@ -389,11 +396,26 @@ PanelWindow {
             alpha
         );
     }
-    function pickColor(key) {
+    function pickColor(key, swatch, label) {
+        // The same swatch again is an intentional toggle; a different one
+        // retargets the open picker in place.
+        if (root.pickerOpen && root.editingColorKey === key) {
+            root.closePicker();
+            return;
+        }
+        const p = swatch.mapToItem(drawer, swatch.width / 2, swatch.height / 2);
+        root._pickerOffset = Qt.point(p.x, p.y);
+        root._pickerScrollAtOpen = contentFlick.contentY;
         root.editingColorKey = key;
-        colorDialog.selectedColor = "#" + root[key];
-        colorDialog.open();
+        root.pickerTitle = label || "Colour";
+        root.pickerSession += 1;
+        root.pickerOpen = true;
     }
+    // Anything that invalidates what the picker is attached to closes it:
+    // the panel closing, the swatch's category being swapped out, Revert
+    // replacing the value it was opened on.
+    onClosingChanged: if (root.closing) root.closePicker()
+    onCurrentCategoryChanged: root.closePicker()
 
     FileDialog {
         id: wallpaperDialog
@@ -413,11 +435,13 @@ PanelWindow {
                 title: modelData.label
                 subtitle: modelData.sub
                 Rectangle {
+                    id: swatch
+                    objectName: "swatch_" + modelData.key
                     width: 32; height: 24; radius: Theme.roundingXs
                     color: "#" + root[modelData.key]
-                    border.width: Theme.borderWidth
-                    border.color: Theme.borderIdle
-                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.pickColor(modelData.key) }
+                    border.width: root.pickerOpen && root.editingColorKey === modelData.key ? 2 : Theme.borderWidth
+                    border.color: root.pickerOpen && root.editingColorKey === modelData.key ? Theme.accent : Theme.borderIdle
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.pickColor(modelData.key, swatch, modelData.label) }
                 }
             }
         }
@@ -480,7 +504,8 @@ PanelWindow {
     // QuickSettings.qml exactly -- zero gap, square top corners (flush
     // against the bar), large-radius bottom corners only, no decorative
     // seam. Reveal is height + opacity + a small upward settle together. ----
-    Shortcut { sequence: "Escape"; onActivated: PanelManager.close("theme") }
+    // The window's ONE Escape: the colour picker first, then the panel.
+    Shortcut { objectName: "themeEscape"; sequence: "Escape"; onActivated: root.pickerOpen ? root.closePicker() : PanelManager.close("theme") }
 
     Item {
         id: drawer
@@ -533,6 +558,12 @@ PanelWindow {
             bottomRightRadius: Theme.roundingXl
             color: Theme.bg
             clip: true
+
+            // Bare areas of the panel absorb clicks. Without this, a click
+            // on any non-control spot inside the panel fell through to
+            // dismissArea underneath and closed the whole Theme editor --
+            // the same fall-through the island panels were fixed for.
+            MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
 
         Column {
             anchors.fill: parent
@@ -787,6 +818,33 @@ PanelWindow {
             }
         }
         }
+    }
+
+    // A sibling of `drawer`, not a child: the drawer clips to its own
+    // bounds, and the picker hangs BESIDE the panel. It stays inside this
+    // same full-screen window, whose mask already takes input everywhere
+    // while the Theme editor is open, so it needs no input region of its
+    // own -- and when the editor starts closing, the picker closes with
+    // it (onClosingChanged) as the mask empties.
+    ColorPopover {
+        id: colorPopover
+        open: root.pickerOpen
+        title: root.pickerTitle
+        initialHex: root.editingColorKey ? root[root.editingColorKey] : "ffffff"
+        session: root.pickerSession
+        parentRect: Qt.rect(drawer.x, drawer.y, drawer.width, drawer.revealHeight)
+        anchorPoint: Qt.point(drawer.x + root._pickerOffset.x,
+                              drawer.y + root._pickerOffset.y - (contentFlick.contentY - root._pickerScrollAtOpen))
+        screenWidth: root.width
+        screenHeight: root.height
+        onAccepted: (hex) => {
+            if (root.editingColorKey) {
+                root[root.editingColorKey] = hex;
+                root.dirty = true;
+            }
+            root.closePicker();
+        }
+        onDismissed: root.closePicker()
     }
 
     // ==================== shared: a bordered content REGION, not a

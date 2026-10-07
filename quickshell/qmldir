@@ -12,6 +12,7 @@ CloseButton 1.0 CloseButton.qml
 CompactChip 1.0 CompactChip.qml
 DeviceRow 1.0 DeviceRow.qml
 AddShortcutBranch 1.0 AddShortcutBranch.qml
+ColorPopover 1.0 ColorPopover.qml
 Expandable 1.0 Expandable.qml
 SettingRow 1.0 SettingRow.qml
 GlassButton 1.0 GlassButton.qml
