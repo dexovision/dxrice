@@ -9,7 +9,17 @@
 //   anchor  {x, y}        the control the branch grows out of (screen coords)
 //   want    {w, h}        the branch's preferred size
 //   screen  {w, h}
-//   opts    {margin, gap, minW, minH, headerH, footerH}
+//   opts    {margin, gap, minW, minH, headerH, footerH,
+//            preferSide?, alignToAnchor?}
+//
+// Two options, both off unless given (the Add Shortcut branch uses
+// neither): `preferSide` ("right" | "left") tries that side first whenever
+// it fits instead of whichever side has more room; `alignToAnchor` centres
+// a beside-the-parent result vertically on `anchor` -- kept within the
+// parent's own vertical span, so it never rides up over whatever the
+// parent hangs from -- instead of matching the parent's height. That is
+// what a small popover (the Theme editor's colour picker) wants: to sit
+// level with the control that opened it, not be stretched to the parent.
 //
 // Preference order -- each the first that fits:
 //   "right" / "left"  beside the parent, the same height as it and
@@ -35,12 +45,21 @@ function place(parent, anchor, want, screen, opts) {
 
     const roomRight = screen.w - m - (parent.x + parent.w + g);
     const roomLeft = parent.x - g - m;
-    const sides = roomRight >= roomLeft
+    let sides = roomRight >= roomLeft
         ? [["right", roomRight], ["left", roomLeft]]
         : [["left", roomLeft], ["right", roomRight]];
+    if (opts.preferSide === "right") sides = [["right", roomRight], ["left", roomLeft]];
+    else if (opts.preferSide === "left") sides = [["left", roomLeft], ["right", roomRight]];
     for (const [side, room] of sides) {
         if (room < minW) continue;
         const w = Math.min(want.w, room);
+        if (opts.alignToAnchor) {
+            const ah = Math.max(minH, maxH);
+            const lo = parent.y, hi = Math.max(parent.y, parent.y + parent.h - ah);
+            const ay = Math.max(lo, Math.min(anchor.y - ah / 2, hi));
+            const ax = side === "right" ? parent.x + parent.w + g : parent.x - g - w;
+            return { side: side, x: ax, y: clampY(ay, ah), w: w, h: ah };
+        }
         // Matching the parent's height (top AND bottom edges line up) is
         // what makes two surfaces read as one composition; the branch only
         // outgrows its parent when the parent is shorter than the branch's
