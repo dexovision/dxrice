@@ -83,5 +83,49 @@ class MigrateFileTest(unittest.TestCase):
         self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o640)
 
 
+    def make_backup_dirs(self, names):
+        root = os.path.join(self.dir, "data", "dxrice", "backups")
+        for name in names:
+            os.makedirs(os.path.join(root, name, "marker"))
+
+    def test_sddm_backups_cannot_evict_a_fresh_theme_backup(self):
+        """dxrice_sync_sddm_theme.py writes sddm-<timestamp> backups into
+        the same directory. Rotation counted them toward the 10 kept but,
+        sorting after every timestamp, never removed them -- so with ten or
+        more of them the theme backup just made was deleted straight away,
+        before the migration overwrote theme.json."""
+        sddm = [f"sddm-2026-09-{d:02d}_120000" for d in range(1, 13)]
+        self.make_backup_dirs(sddm)
+        self.write({"accent": "123456"})
+        notes = migrate.migrate_file(self.path)
+        theme_backups = [b for b in self.backups() if not b.startswith("sddm-")]
+        self.assertEqual(len(theme_backups), 1, "the pre-migration backup was pruned as soon as it was made")
+        saved = json.load(open(os.path.join(self.dir, "data", "dxrice", "backups", theme_backups[0], "theme.json")))
+        self.assertEqual(saved, {"accent": "123456"})
+        self.assertIn(theme_backups[0], notes[0])
+        self.assertEqual(sorted(b for b in self.backups() if b.startswith("sddm-")), sddm,
+                         "theme rotation removed SDDM backups")
+
+    def test_rotation_keeps_the_newest_ten_theme_backups(self):
+        old = [f"2026-01-{d:02d}_120000" for d in range(1, 13)]
+        self.make_backup_dirs(old + ["sddm-2026-09-17_192237", "sddm-2026-09-17_200239"])
+        self.write({"accent": "123456"})
+        migrate.migrate_file(self.path)
+        theme_backups = [b for b in self.backups() if not b.startswith("sddm-")]
+        self.assertEqual(len(theme_backups), migrate.MAX_BACKUPS)
+        self.assertEqual(theme_backups[:-1], old[-(migrate.MAX_BACKUPS - 1):], "an older backup outlived a newer one")
+        self.assertEqual(len(self.backups()), migrate.MAX_BACKUPS + 2, "SDDM backups were touched")
+
+    def test_existing_state_loses_nothing(self):
+        """The state found on a real install (8 theme + 2 SDDM backups):
+        one more theme backup must not prune anything."""
+        existing = [f"2026-10-12_1404{n:02d}" for n in range(8)] + ["sddm-2026-09-17_192237", "sddm-2026-09-17_200239"]
+        self.make_backup_dirs(existing)
+        self.write({"accent": "123456"})
+        migrate.migrate_file(self.path)
+        self.assertTrue(set(existing) <= set(self.backups()))
+        self.assertEqual(len(self.backups()), 11)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

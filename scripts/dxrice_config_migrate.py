@@ -36,6 +36,7 @@ version (a no-op) so re-running migrate() is always idempotent.
 import datetime
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -87,12 +88,22 @@ def backup_dir_for_run():
     return os.path.join(dxrice_xdg.data_dir(), "backups", ts)
 
 
+# Only this module's own backups (named by backup_dir_for_run) take part in
+# rotation. The directory is shared: dxrice_sync_sddm_theme.py writes
+# sddm-<timestamp> backups into it too. Counting those toward MAX_BACKUPS
+# while never removing them (they sort after every timestamp) let them crowd
+# the theme backups out -- with ten of them, the backup just made was
+# deleted at once, right before the migration overwrote theme.json.
+_THEME_BACKUP_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{6}$")
+
+
 def _prune_old_backups():
     root = os.path.join(dxrice_xdg.data_dir(), "backups")
     if not os.path.isdir(root):
         return
     entries = sorted(
-        (e for e in os.listdir(root) if os.path.isdir(os.path.join(root, e))),
+        e for e in os.listdir(root)
+        if _THEME_BACKUP_NAME.match(e) and os.path.isdir(os.path.join(root, e))
     )
     excess = len(entries) - MAX_BACKUPS
     for name in entries[:max(0, excess)]:
