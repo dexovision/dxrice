@@ -56,7 +56,10 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("mako")
     hl.exec_cmd("nm-applet --indicator")
     hl.exec_cmd("blueman-applet")
-    hl.exec_cmd("/usr/lib/polkit-kde-agent-1")
+    -- Probes for whichever polkit agent is actually installed (see that
+    -- script): a single hard-coded path here pointed at a binary no package
+    -- ships, so no password prompt could ever appear.
+    hl.exec_cmd(repo .. "/scripts/dxrice_polkit_agent.sh")
     hl.exec_cmd("wl-paste --type text --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
 

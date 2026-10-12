@@ -22,9 +22,9 @@
 #                                 Re-run any time you change your
 #                                 wallpaper/colors and want the login
 #                                 screen to match.
-#   ./install.sh uninstall       removes DXrice's own integration (shell
-#                                 functions, recorded repo path, the SDDM
-#                                 theme if you confirm) -- never your
+#   ./install.sh uninstall       removes DXrice's own integration (its
+#                                 services, shell functions, recorded repo
+#                                 path, the SDDM theme if you confirm) -- never your
 #                                 saved theme/config/data, and never your
 #                                 deployed app config files.
 #   ./install.sh uninstall --purge
@@ -105,6 +105,12 @@ GENERAL_PACMAN=(swaybg waybar wofi mako kitty nautilus grim slurp cliphist qt5ct
     python python-evdev jq brightnessctl playerctl
     python-gobject gtk4 libadwaita gtk4-layer-shell)
 AUR_PACKAGES=(nwg-look)
+
+# The systemd user units deploy_systemd_units writes and do_uninstall
+# removes -- one list, so the two can't drift apart (scripts/
+# dxrice_test_config_integrity.py also checks it against hyprland.lua's
+# autostart lines).
+DXRICE_UNITS=(dxrice-quickshell.service dxrice-auto-place-window.service dxrice-infinite-desktop.service)
 
 GENERAL_DNF=(swaybg waybar wofi mako kitty nautilus grim slurp qt5ct qt6ct
     pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol
@@ -1119,6 +1125,59 @@ check_hypr_drift() {
     python3 "$REPO_DIR/scripts/dxrice_check_hypr_drift.py" 2>/dev/null || true
 }
 
+# Same narrow, line-level pattern as migrate_exec_to_systemd_units: an
+# already-deployed hyprland.lua is the user's file (copy-once), so a fixed
+# template never reaches it on its own. Replaces exactly the one line the
+# shipped template used to contain -- a hard-coded polkit agent path no
+# package installs (Arch's polkit-kde-agent ships
+# /usr/lib/polkit-kde-authentication-agent-1), so no password prompt could
+# ever appear -- with the repo helper that probes for the agent actually
+# installed. A line the user has changed is left alone, and a file without
+# the template's `repo` variable is not edited at all (the new line needs
+# it); the user is told what to change by hand instead.
+migrate_polkit_agent_line() {
+    local f="$CONFIG_HOME/hypr/hyprland.lua"
+    [ -f "$f" ] || return 0
+    grep -q "dxrice_polkit_agent.sh" "$f" 2>/dev/null && return 0  # already migrated
+    grep -qF 'hl.exec_cmd("/usr/lib/polkit-kde-agent-1")' "$f" 2>/dev/null || return 0
+
+    if ! grep -q 'local repo = dxrice_repo()' "$f" 2>/dev/null; then
+        warn "Your hyprland.lua starts a polkit agent from a path that doesn't exist"
+        info "(/usr/lib/polkit-kde-agent-1). Replace that line with:"
+        info "  hl.exec_cmd(\"$REPO_DIR/scripts/dxrice_polkit_agent.sh\")"
+        return 0
+    fi
+
+    info "Fixing your polkit agent autostart (the old path didn't exist, so"
+    info "password prompts for system actions could never appear)..."
+    python3 - "$f" <<'PYEOF'
+import os
+import sys
+
+path = sys.argv[1]
+with open(path) as fh:
+    content = fh.read()
+
+content = content.replace(
+    'hl.exec_cmd("/usr/lib/polkit-kde-agent-1")',
+    'hl.exec_cmd(repo .. "/scripts/dxrice_polkit_agent.sh")',
+)
+
+tmp_path = path + f".dxrice.{os.getpid()}.tmp"
+try:
+    existing_mode = os.stat(path).st_mode & 0o777
+except OSError:
+    existing_mode = None
+with open(tmp_path, "w") as fh:
+    fh.write(content)
+    fh.flush()
+    os.fsync(fh.fileno())
+if existing_mode is not None:
+    os.chmod(tmp_path, existing_mode)
+os.replace(tmp_path, path)
+PYEOF
+}
+
 detect_monitor() {
     local target="$CONFIG_HOME/hypr/hyprland.lua"
     command -v hyprctl >/dev/null 2>&1 || { warn "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
@@ -1295,6 +1354,7 @@ do_install() {
     reconcile_copy_once_ownership
     migrate_taskbar_bind
     migrate_exec_to_systemd_units
+    migrate_polkit_agent_line
     check_legacy_rice_checkout
     local hypr_existed=0
     [ -f "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
@@ -1368,11 +1428,59 @@ do_sddm_theme() {
 # $DXRICE_CONFIG_DIR/$DXRICE_DATA_DIR/$STATE_DIR is a separate, explicit
 # --purge flag -- never the default, and it confirms exactly what it's
 # about to delete before doing it.
+# Stops, disables and deletes DXrice's own systemd user units. Before this,
+# uninstall left all three running -- and since hyprland.lua's autostart
+# restarts them by name at every login, they kept coming back (and, with
+# the checkout deleted, fail-looped until systemd's start limit). Once the
+# unit files are gone those autostart lines have nothing left to start.
+#
+# Only touches a unit that is both in DXRICE_UNITS and was written by
+# deploy_systemd_units (every unit it writes has a "Description=DXrice ..."
+# line); a same-named unit someone wrote by hand is reported, not removed.
+# No other unit is ever passed to systemctl.
+remove_systemd_units() {
+    local unit_dir="$CONFIG_HOME/systemd/user" unit path
+    local -a owned=()
+    for unit in "${DXRICE_UNITS[@]}"; do
+        path="$unit_dir/$unit"
+        [ -f "$path" ] || continue
+        if grep -q '^Description=DXrice ' "$path" 2>/dev/null; then
+            owned+=("$unit")
+        else
+            warn "Leaving $path in place -- it wasn't written by DXrice."
+        fi
+    done
+    [ "${#owned[@]}" -gt 0 ] || return 0
+
+    if command -v systemctl >/dev/null 2>&1; then
+        info "Stopping DXrice's services (the bar, dock and window placement stop now)..."
+        systemctl --user stop "${owned[@]}" >/dev/null 2>&1 || true
+        # The units have no [Install] section today, so there is normally
+        # nothing to disable; this covers an older or hand-enabled copy.
+        systemctl --user disable "${owned[@]}" >/dev/null 2>&1 || true
+        systemctl --user reset-failed "${owned[@]}" >/dev/null 2>&1 || true
+    fi
+    for unit in "${owned[@]}"; do
+        rm -f "$unit_dir/$unit"
+    done
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+    fi
+    ok "Stopped and removed DXrice's services: ${owned[*]}"
+
+    local lua="$CONFIG_HOME/hypr/hyprland.lua"
+    if [ -f "$lua" ] && grep -q 'dxrice-[a-z-]*\.service' "$lua" 2>/dev/null; then
+        info "Your hyprland.lua still has DXrice's autostart lines. With the services removed"
+        info "they no longer start anything; delete them yourself if you want them gone."
+    fi
+}
+
 do_uninstall() {
     banner
     local purge="$PURGE"
 
     step "Removing DXrice integration"
+    remove_systemd_units
     remove_shell_alias
 
     if [ -f "$STATE_DIR/repo_path" ]; then
@@ -1595,6 +1703,7 @@ do_update() {
     reconcile_copy_once_ownership
     migrate_taskbar_bind
     migrate_exec_to_systemd_units
+    migrate_polkit_agent_line
     check_legacy_rice_checkout
     local hypr_existed=0
     [ -s "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
@@ -1637,6 +1746,13 @@ do_update() {
         fi
     fi
 }
+
+# Sourcing (rather than running) this file only defines its functions --
+# scripts/dxrice_test_installer_lifecycle.sh uses that to test individual
+# migrations against a throwaway HOME without running an install.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0 2>/dev/null || true
+fi
 
 case "$MODE" in
     install|"")
