@@ -106,9 +106,9 @@ PanelWindow {
     // fix -- there is no state in which this can sit there as a permanent
     // invisible click-blocker.
     mask: Region {
-        Region { item: activityIsland }
-        Region { item: clockIsland }
-        Region { item: statusIsland }
+        Region { item: root.activityYields ? null : activityIsland }
+        Region { item: root.clockYields ? null : clockIsland }
+        Region { item: root.statusYields ? null : statusIsland }
         Region {
             x: 0; y: 0
             width: root.anyIslandOpen ? root.width : 0
@@ -122,6 +122,52 @@ PanelWindow {
         enabled: root.anyIslandOpen
         onClicked: PanelManager.closeCurrent()
     }
+
+    // ---- an island yields while another island's panel needs its space ----
+    // All three islands share one row, and two of them grow into panels. On
+    // a narrow screen an open panel claims space a collapsed island still
+    // occupies: Quick Settings (panelWidthWide, growing leftward from the
+    // right edge) runs straight over the clock at 1366px, and narrower
+    // screens give the same conflict between other pairs. Rather than
+    // shrinking the panel until it no longer works, the covered island
+    // yields: it fades out, stops taking clicks and leaves this window's
+    // input mask -- for exactly as long as the panel would cover it (its
+    // final rect once it is opening) or still does (its live rect while it
+    // retracts), so it reappears only once there is room again. How faded
+    // it is follows the panel's live edge, not a timer: opacity is the
+    // island's remaining clearance from that edge over FADE px, so it is
+    // exactly 0 at contact and comes back as the panel pulls away, locked
+    // to the panel's own animation (a time-based fade lost the race to a
+    // fast-growing panel on a narrow screen and was still faintly visible
+    // under its edge). Quick Settings already shows the time and date
+    // itself. Horizontal spans only: every island sits on one row.
+    function _span(x, w) { return [x, x + w]; }
+    function _overlaps(a, b) { return a[0] < b[1] + root.edgeMargin && b[0] < a[1] + root.edgeMargin; }
+    function _covered(span, island, finalSpan) {
+        const growing = island.expanded && root._overlaps(span, finalSpan);
+        const stillWide = island.width > island.collapsedWidth + 0.5 && root._overlaps(span, root._span(island.x, island.width));
+        return growing || stillWide;
+    }
+    readonly property real _fadeSpan: 48
+    function _fade(span, island, finalSpan) {
+        if (!root._covered(span, island, finalSpan)) return 1;
+        const live = root._span(island.x, island.width);
+        const clearance = Math.max(span[0] - live[1], live[0] - span[1]) - root.edgeMargin;
+        return Math.max(0, Math.min(1, clearance / root._fadeSpan));
+    }
+    readonly property var _activityRest: root._span(root.edgeMargin, activityIsland.collapsedWidth)
+    readonly property var _clockRest: root._span((root.width - clockIsland.collapsedWidth) / 2, clockIsland.collapsedWidth)
+    readonly property var _statusRest: root._span(root.width - root.edgeMargin - statusIsland.collapsedWidth, statusIsland.collapsedWidth)
+    readonly property var _calendarFinal: root._span((root.width - clockIsland.expandedWidth) / 2, clockIsland.expandedWidth)
+    readonly property var _quickSettingsFinal: root._span(root.width - root.edgeMargin - statusIsland.expandedWidth, statusIsland.expandedWidth)
+    readonly property bool activityYields: root._covered(root._activityRest, statusIsland, root._quickSettingsFinal)
+                                           || root._covered(root._activityRest, clockIsland, root._calendarFinal)
+    readonly property bool clockYields: root._covered(root._clockRest, statusIsland, root._quickSettingsFinal)
+    readonly property bool statusYields: root._covered(root._statusRest, clockIsland, root._calendarFinal)
+    readonly property real activityOpacity: Math.min(root._fade(root._activityRest, statusIsland, root._quickSettingsFinal),
+                                                     root._fade(root._activityRest, clockIsland, root._calendarFinal))
+    readonly property real clockOpacity: root._fade(root._clockRest, statusIsland, root._quickSettingsFinal)
+    readonly property real statusOpacity: root._fade(root._statusRest, clockIsland, root._calendarFinal)
 
     Binding { target: ShellSurface; property: "topEdgeHeight"; value: root.exclusiveZone }
     Binding { target: ShellSurface; property: "screenHeight"; value: root.screen ? root.screen.height : 1080 }
@@ -215,6 +261,10 @@ PanelWindow {
 
     ShellIsland {
         id: activityIsland
+        objectName: "activityIsland"
+        // See `activityYields` above.
+        opacity: root.activityOpacity
+        enabled: !root.activityYields
         property string appGlyph: ""
         x: root.edgeMargin
         y: root.edgeMargin
@@ -302,6 +352,10 @@ PanelWindow {
     // ---- centre island: the clock, which IS the calendar ----
     ShellIsland {
         id: clockIsland
+        objectName: "clockIsland"
+        // See `clockYields` above.
+        opacity: root.clockOpacity
+        enabled: !root.clockYields
         anchors.horizontalCenter: parent.horizontalCenter
         y: root.edgeMargin
         pinX: "center"
@@ -352,6 +406,10 @@ PanelWindow {
     // bare wallpaper. ----
     ShellIsland {
         id: statusIsland
+        objectName: "statusIsland"
+        // See `statusYields` above.
+        opacity: root.statusOpacity
+        enabled: !root.statusYields
         anchors.right: parent.right
         anchors.rightMargin: root.edgeMargin
         y: root.edgeMargin
