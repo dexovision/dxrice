@@ -133,7 +133,7 @@ def _lua_string_vars(src):
     in any string form, with or without a trailing comment."""
     out = {}
     pattern = (r"^\s*local\s+(\w+)\s*=\s*(?:os\.getenv\([^)]*\)\s*or\s*)?(" + _LUA_STRING
-               + r")\s*(?:--.*)?$")
+               + r")[ \t]*(?:--[^\n]*)?$")
     for m in re.finditer(pattern, src, re.M | re.S):
         out[m.group(1)] = _lua_literal(m.group(2))
     return out
@@ -368,6 +368,13 @@ class CheckerSelfTest(unittest.TestCase):
         cmds = self.commands('local browser = "nonexistent-app" -- my browser\nhl.exec_cmd(browser)\n')
         self.assertEqual(cmds, ["nonexistent-app"])
         self.assertTrue(any("nonexistent-app: unknown program" in p for p in program_problems(cmds, _read(INSTALL))))
+
+    def test_a_commented_variable_does_not_hide_the_ones_after_it(self):
+        # [[long]] strings need DOTALL, under which a trailing `-- .*`
+        # comment ran on to the end of the file and swallowed every
+        # later `local`.
+        cmds = self.commands('local a = "x" -- c\nlocal b = "mako"\nhl.exec_cmd(b)\n')
+        self.assertEqual(cmds, ["mako"])
 
     def test_unresolvable_program_is_a_problem_not_skipped(self):
         for lua in ("hl.exec_cmd(some_function())\n", 'hl.exec_cmd(home .. "/.local/bin/tool")\n'):
