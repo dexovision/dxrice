@@ -117,10 +117,18 @@ cp "$H/.config/hypr/hyprland.lua" "$LOG/lua-before-uninstall"
 
 run_env bash "$REPO_DIR/install.sh" uninstall < /dev/null > "$LOG/uninstall.out" 2>&1
 assert "uninstall exits 0" "$(yes_if "[ $? = 0 ]")"
-for u in dxrice-quickshell.service dxrice-auto-place-window.service dxrice-infinite-desktop.service; do
+for u in dxrice-auto-place-window.service dxrice-infinite-desktop.service; do
     assert "$u stopped" "$(yes_if "grep -E '^--user stop .*$u' '$LOG/systemctl.log' >/dev/null")"
+done
+for u in dxrice-quickshell.service dxrice-auto-place-window.service dxrice-infinite-desktop.service; do
     assert "$u unit file removed" "$(yes_if "[ ! -e '$UNITS/$u' ]")"
 done
+# Every app opened from the dock/launcher runs inside the Quickshell unit's
+# cgroup, and stopping a unit kills its whole cgroup -- an uninstall must
+# never take the user's browser (or its own terminal) down with the bar.
+assert "Quickshell unit never stopped (would kill every app launched from the shell)" \
+    "$(yes_if "! grep -E '^--user (stop|restart|kill|try-restart|reload-or-restart) .*dxrice-quickshell' '$LOG/systemctl.log' >/dev/null")"
+assert "...and the user is told the bar ends at logout" "$(yes_if "grep -q 'keeps running until you log out' '$LOG/uninstall.out'")"
 assert "units reloaded afterwards" "$(yes_if "grep -q '^--user daemon-reload' '$LOG/systemctl.log'")"
 assert "unrelated unit left in place" "$(yes_if "[ -f '$UNITS/my-sync.service' ]")"
 assert "unrelated unit never passed to systemctl" "$(yes_if "! grep -q 'my-sync' '$LOG/systemctl.log'")"

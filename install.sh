@@ -1428,8 +1428,9 @@ do_sddm_theme() {
 # $DXRICE_CONFIG_DIR/$DXRICE_DATA_DIR/$STATE_DIR is a separate, explicit
 # --purge flag -- never the default, and it confirms exactly what it's
 # about to delete before doing it.
-# Stops, disables and deletes DXrice's own systemd user units. Before this,
-# uninstall left all three running -- and since hyprland.lua's autostart
+# Disables and deletes DXrice's own systemd user units (and stops the ones
+# that can be stopped safely -- see below). Before this,
+# uninstall left all three in place -- and since hyprland.lua's autostart
 # restarts them by name at every login, they kept coming back (and, with
 # the checkout deleted, fail-looped until systemd's start limit). Once the
 # unit files are gone those autostart lines have nothing left to start.
@@ -1452,9 +1453,22 @@ remove_systemd_units() {
     done
     [ "${#owned[@]}" -gt 0 ] || return 0
 
+    # dxrice-quickshell.service is removed but never stopped here. Every app
+    # opened from the shell (dock, launcher, quick settings) is started by
+    # Quickshell, so it lives in that unit's cgroup -- and stopping a unit
+    # kills its whole cgroup: the browser, the chat client, the game, and
+    # the terminal running this uninstall if it came from the dock. With its
+    # file gone it doesn't start again; the running bar ends at logout.
+    local -a stop=()
+    local keeps_shell=0
+    for unit in "${owned[@]}"; do
+        if [ "$unit" = dxrice-quickshell.service ]; then keeps_shell=1; else stop+=("$unit"); fi
+    done
     if command -v systemctl >/dev/null 2>&1; then
-        info "Stopping DXrice's services (the bar, dock and window placement stop now)..."
-        systemctl --user stop "${owned[@]}" >/dev/null 2>&1 || true
+        if [ "${#stop[@]}" -gt 0 ]; then
+            info "Stopping DXrice's background services (window placement stops now)..."
+            systemctl --user stop "${stop[@]}" >/dev/null 2>&1 || true
+        fi
         # The units have no [Install] section today, so there is normally
         # nothing to disable; this covers an older or hand-enabled copy.
         systemctl --user disable "${owned[@]}" >/dev/null 2>&1 || true
@@ -1466,7 +1480,11 @@ remove_systemd_units() {
     if command -v systemctl >/dev/null 2>&1; then
         systemctl --user daemon-reload >/dev/null 2>&1 || true
     fi
-    ok "Stopped and removed DXrice's services: ${owned[*]}"
+    ok "Removed DXrice's services: ${owned[*]}"
+    if [ "$keeps_shell" = 1 ]; then
+        info "The DXrice bar keeps running until you log out -- stopping it now would"
+        info "also close every app you opened from the dock or launcher."
+    fi
 
     local lua="$CONFIG_HOME/hypr/hyprland.lua"
     if [ -f "$lua" ] && grep -q 'dxrice-[a-z-]*\.service' "$lua" 2>/dev/null; then
