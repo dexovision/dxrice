@@ -27,6 +27,7 @@ project's QML has no standalone JS test runner.
 import re
 import subprocess
 import sys
+import time
 import unittest
 
 sys.path.insert(0, "scripts" if __name__ != "__main__" else ".")
@@ -127,8 +128,17 @@ class TestRealShellExecutionEndToEnd(unittest.TestCase):
         open(self.log, "w").close()
 
     def _ran_with(self):
-        with open(self.log) as f:
-            return f.read().strip()
+        # The wrapped on-click ends in `&`: sh returns as soon as it has
+        # backgrounded the app, often before the app has written its line.
+        # Reading straight away raced it (and usually lost on a loaded
+        # machine); wait for the line instead.
+        deadline = time.monotonic() + 5
+        while True:
+            with open(self.log) as f:
+                text = f.read()
+            if text.endswith("\n") or time.monotonic() > deadline:
+                return text.strip()
+            time.sleep(0.01)
 
     def test_waybar_style_direct_execution_preserves_quoted_space_argument(self):
         cmd = "fake_app --title='My Cool App' arg2"
