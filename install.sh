@@ -98,7 +98,7 @@ HYPR_PACKAGES=(hyprland hyprlock hypridle hyprpaper xdg-desktop-portal-hyprland)
 LEGACY_SCRIPT_NAMES=(manage-taskbar.sh reorder-taskbar.sh infinite_desktop_core.py
     theme_gui.py floating_tile_toggle.py)
 
-GENERAL_PACMAN=(swaybg waybar wofi mako kitty nautilus grim slurp cliphist qt5ct qt6ct
+GENERAL_PACMAN=(swaybg waybar wofi mako kitty nautilus grim slurp wl-clipboard cliphist qt5ct qt6ct
     pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol
     networkmanager network-manager-applet bluez bluez-utils blueman
     ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent
@@ -112,14 +112,14 @@ AUR_PACKAGES=(nwg-look)
 # autostart lines).
 DXRICE_UNITS=(dxrice-quickshell.service dxrice-auto-place-window.service dxrice-infinite-desktop.service)
 
-GENERAL_DNF=(swaybg waybar wofi mako kitty nautilus grim slurp qt5ct qt6ct
+GENERAL_DNF=(swaybg waybar wofi mako kitty nautilus grim slurp wl-clipboard qt5ct qt6ct
     pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol
     NetworkManager network-manager-applet bluez blueman
     fontawesome-fonts google-noto-fonts-common polkit-kde
     python3 python3-evdev jq brightnessctl playerctl
     python3-gobject gtk4 libadwaita gtk4-layer-shell)
 
-GENERAL_APT=(swaybg waybar wofi mako-notifier kitty nautilus grim slurp qt5ct qt6ct
+GENERAL_APT=(swaybg waybar wofi mako-notifier kitty nautilus grim slurp wl-clipboard qt5ct qt6ct
     pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol
     network-manager network-manager-gnome bluez bluez-tools blueman
     fonts-font-awesome fonts-noto polkit-kde-agent-1
@@ -128,7 +128,7 @@ GENERAL_APT=(swaybg waybar wofi mako-notifier kitty nautilus grim slurp qt5ct qt
 # cliphist has no apt package as of this writing -- handled as a manual
 # note in check_dependencies instead of guessing a name that doesn't exist.
 
-GENERAL_ZYPPER=(swaybg waybar wofi mako kitty nautilus grim slurp qt5ct qt6ct
+GENERAL_ZYPPER=(swaybg waybar wofi mako kitty nautilus grim slurp wl-clipboard qt5ct qt6ct
     pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol
     NetworkManager NetworkManager-applet bluez blueman
     fontawesome-fonts noto-sans-fonts polkit-kde-authentication-agent-1
