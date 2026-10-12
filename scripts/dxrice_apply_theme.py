@@ -284,7 +284,11 @@ def reload_apps(reload_wallpaper):
         wallpaper = os.path.expanduser(theme_data.get("wallpaper", ""))
         if wallpaper and os.path.exists(wallpaper):
             _run_guarded(["pkill", "-x", "swaybg"])
-            subprocess.Popen(["setsid", "swaybg", "-i", wallpaper, "-m", "fill"],
+            # Through dxrice_launch.sh: Apply runs as a child of the shell, and
+            # a wallpaper started from here otherwise lived in the shell's
+            # cgroup -- the desktop went blank whenever the shell restarted.
+            subprocess.Popen([os.path.join(SCRIPTS_DIR, "dxrice_launch.sh"), "swaybg",
+                              "swaybg", "-i", wallpaper, "-m", "fill"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 

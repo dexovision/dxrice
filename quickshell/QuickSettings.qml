@@ -200,7 +200,7 @@ Item {
             const cmd = screenshotHideTimer.region
                 ? 'mkdir -p ~/Pictures/Screenshots && geom="$(slurp)" && [ -n "$geom" ] && grim -g "$geom" ' + path + ' && wl-copy < ' + path
                 : 'mkdir -p ~/Pictures/Screenshots && grim ' + path + ' && wl-copy < ' + path;
-            Quickshell.execDetached(["sh", "-c", cmd]);
+            Launcher.launch("screenshot", ["sh", "-c", cmd]);
             root.closeRequested();
         }
     }
@@ -1363,7 +1363,7 @@ Item {
                         readonly property real slot: width / 4
                         Item {
                             width: powerRow.slot; height: Theme.iconMd
-                            IconButton { anchors.centerIn: parent; glyph: "\uf023"; size: Theme.iconMd; onClicked: Quickshell.execDetached(["hyprlock"]) }
+                            IconButton { anchors.centerIn: parent; glyph: "\uf023"; size: Theme.iconMd; onClicked: Launcher.launch("hyprlock", ["hyprlock"]) }
                         }
                         Item {
                             width: powerRow.slot; height: Theme.iconMd

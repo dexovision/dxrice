@@ -189,6 +189,7 @@ PanelWindow {
                 delegate: Rectangle {
                     id: shortcutTile
                     required property var modelData
+                    objectName: "dockTile:" + modelData.label
                     // A single icon glyph is narrow enough that this just
                     // reduces to the same fixed square tile as before; a
                     // text-label shortcut (a full app name, e.g. "Visual
@@ -235,7 +236,7 @@ PanelWindow {
                             // shell syntax error instead of running.
                             const m = /^sh -c '(.*) >\/dev\/null 2>&1 &'$/.exec(shortcutTile.modelData.onClick);
                             const cmd = m ? m[1].replace(/'\\''/g, "'") : shortcutTile.modelData.onClick;
-                            if (cmd) Quickshell.execDetached(["sh", "-c", cmd]);
+                            if (cmd) Launcher.launch("dock", ["sh", "-c", cmd]);
                         }
                     }
                 }

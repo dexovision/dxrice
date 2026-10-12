@@ -31,6 +31,8 @@ mkdir -p "$BIN" "$LOG"
 cat > "$BIN/systemctl" <<EOF
 #!/bin/sh
 echo "\$*" >> "$LOG/systemctl.log"
+# \`show -p PROP --value UNIT\` answers from \$LOG/show-PROP when present.
+if [ "\$2" = show ] && [ -f "$LOG/show-\$4" ]; then cat "$LOG/show-\$4"; fi
 exit 0
 EOF
 cat > "$BIN/sudo" <<EOF
@@ -47,11 +49,12 @@ new_home() {
     mkdir -p "$H/.config/hypr" "$H/.config/systemd/user" "$H/.local/share" "$H/.local/state"
     : > "$LOG/systemctl.log"
     : > "$LOG/sudo.log"
+    rm -f "$LOG"/show-*
 }
 run_env() {
     env -i HOME="$H" USER="${USER:-tester}" PATH="$BIN:/usr/bin:/bin" TERM=dumb \
         XDG_CONFIG_HOME="$H/.config" XDG_DATA_HOME="$H/.local/share" XDG_STATE_HOME="$H/.local/state" \
-        DXRICE_LOCATION_CONFIRMED=1 "$@"
+        DXRICE_LOCATION_CONFIRMED=1 DXRICE_CGROUP_ROOT="$SANDBOX/cg" DXRICE_PROC_ROOT="$SANDBOX/proc" "$@"
 }
 # Defines install.sh's functions without running it (see its source guard).
 call() {
@@ -123,17 +126,18 @@ done
 for u in dxrice-quickshell.service dxrice-auto-place-window.service dxrice-infinite-desktop.service; do
     assert "$u unit file removed" "$(yes_if "[ ! -e '$UNITS/$u' ]")"
 done
-# Every app opened from the dock/launcher runs inside the Quickshell unit's
-# cgroup, and stopping a unit kills its whole cgroup -- an uninstall must
-# never take the user's browser (or its own terminal) down with the bar.
-assert "Quickshell unit never stopped (would kill every app launched from the shell)" \
+# Stopping a unit kills its whole cgroup, and an app opened from an older
+# shell may still be in the Quickshell unit's -- when what's in there can't
+# be inspected, an uninstall must not take the user's browser (or its own
+# terminal) down with the bar.
+assert "Quickshell unit not stopped when its cgroup can't be inspected" \
     "$(yes_if "! grep -E '^--user (stop|restart|kill|try-restart|reload-or-restart) .*dxrice-quickshell' '$LOG/systemctl.log' >/dev/null")"
 assert "...and the user is told the bar ends at logout" "$(yes_if "grep -q 'keeps running until you log out' '$LOG/uninstall.out'")"
 assert "units reloaded afterwards" "$(yes_if "grep -q '^--user daemon-reload' '$LOG/systemctl.log'")"
 assert "unrelated unit left in place" "$(yes_if "[ -f '$UNITS/my-sync.service' ]")"
 assert "unrelated unit never passed to systemctl" "$(yes_if "! grep -q 'my-sync' '$LOG/systemctl.log'")"
 assert "systemctl only ever called for DXrice units" \
-    "$(yes_if "! grep -v -E '^--user (daemon-reload|(stop|disable|reset-failed)( dxrice-(quickshell|auto-place-window|infinite-desktop)\.service)+)\$' '$LOG/systemctl.log' | grep -q .")"
+    "$(yes_if "! grep -v -E '^--user (daemon-reload|show -p (ControlGroup|MainPID) --value dxrice-quickshell\.service|(stop|disable|reset-failed)( dxrice-(quickshell|auto-place-window|infinite-desktop)\.service)+)\$' '$LOG/systemctl.log' | grep -q .")"
 assert "theme.json kept" "$(yes_if "grep -q e67878 '$H/.config/dxrice/theme.json'")"
 assert "data/backups kept" "$(yes_if "[ -d '$H/.local/share/dxrice/backups/keep-me' ]")"
 assert "recorded repo path removed" "$(yes_if "[ ! -e '$H/.local/state/dxrice/repo_path' ]")"
@@ -149,6 +153,47 @@ for u in $(grep -o 'dxrice-[a-z-]*\.service' "$H/.config/hypr/hyprland.lua" | so
 done
 assert "no unit left for hyprland.lua's autostart to relaunch" "$(yes_if "[ $relaunchable = 0 ]")"
 assert "sudo shim only (never a real privileged command)" "$(yes_if "[ ! -s '$LOG/sudo.log' ] || ! grep -qv 'rm ' '$LOG/sudo.log'")"
+
+echo "=== the Quickshell unit is stopped only when nothing else lives in it ==="
+
+# A fake cgroup tree and /proc: the unit's cgroup lists PIDs, and each PID's
+# status names its parent. MainPID 100 is Quickshell.
+fake_cgroup() {  # fake_cgroup "pid:ppid" ...
+    local cg="$SANDBOX/cg/user.slice/app.slice/dxrice-quickshell.service" entry
+    rm -rf "$SANDBOX/cg" "$SANDBOX/proc"
+    mkdir -p "$cg"
+    : > "$cg/cgroup.procs"
+    for entry in "$@"; do
+        echo "${entry%%:*}" >> "$cg/cgroup.procs"
+        mkdir -p "$SANDBOX/proc/${entry%%:*}"
+        printf 'Name:\tx\nPPid:\t%s\n' "${entry##*:}" > "$SANDBOX/proc/${entry%%:*}/status"
+    done
+    echo "/user.slice/app.slice/dxrice-quickshell.service" > "$LOG/show-ControlGroup"
+    echo "${MAIN_PID:-100}" > "$LOG/show-MainPID"
+}
+uninstall_with_cgroup() {
+    new_home "cg-$1"; shift
+    call deploy_systemd_units > /dev/null 2>&1
+    fake_cgroup "$@"
+    : > "$LOG/systemctl.log"
+    run_env bash "$REPO_DIR/install.sh" uninstall < /dev/null > "$LOG/cg.out" 2>&1
+}
+qs_stopped() { grep -E '^--user stop .*dxrice-quickshell' "$LOG/systemctl.log" >/dev/null; }
+
+uninstall_with_cgroup own 100:1 101:100 102:101
+assert "only Quickshell and its own helpers inside: the unit is stopped" "$(yes_if "qs_stopped")"
+assert "...and not reported as left running" "$(yes_if "! grep -q 'keeps running until you log out' '$LOG/cg.out'")"
+
+uninstall_with_cgroup foreign 100:1 101:100 200:1
+assert "an app detached from an older shell inside: the unit is not stopped" "$(yes_if "! qs_stopped")"
+assert "...and the user is told the bar ends at logout" "$(yes_if "grep -q 'keeps running until you log out' '$LOG/cg.out'")"
+
+uninstall_with_cgroup vanished 100:1 300:999
+assert "a process whose parent chain can't be read: not stopped" "$(yes_if "! qs_stopped")"
+
+MAIN_PID=0 uninstall_with_cgroup notrunning 100:1
+assert "fixture: the unit file was there to remove" "$(yes_if "grep -q 'Removed DXrice.s services: .*dxrice-quickshell' '$LOG/cg.out'")"
+assert "unit not running (MainPID 0): nothing to stop, not stopped" "$(yes_if "! qs_stopped")"
 
 echo "=== a same-named unit DXrice didn't write is not removed ==="
 

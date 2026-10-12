@@ -1276,6 +1276,7 @@ verify_deploy() {
         "$REPO_DIR/scripts/dxrice_force_close_window.py"
         "$REPO_DIR/scripts/dxrice_gtk_widgets.py"
         "$REPO_DIR/scripts/dxrice_list_desktop_apps.py"
+        "$REPO_DIR/scripts/dxrice_launch.sh"
         "$REPO_DIR/quickshell/shell.qml"
         "$REPO_DIR/quickshell/qmldir"
         "$REPO_DIR/quickshell/Theme.qml"
@@ -1439,6 +1440,33 @@ do_sddm_theme() {
 # deploy_systemd_units (every unit it writes has a "Description=DXrice ..."
 # line); a same-named unit someone wrote by hand is reported, not removed.
 # No other unit is ever passed to systemctl.
+# Whether dxrice-quickshell.service's cgroup holds nothing but Quickshell
+# and processes it started and still parents (its own helpers). Apps the
+# shell launches go into their own scopes (scripts/dxrice_launch.sh), but
+# one started before that, or where scopes weren't available, still sits
+# in this cgroup -- and is not a descendant of Quickshell, since it was
+# started detached. Stopping the unit then would kill it.
+# DXRICE_CGROUP_ROOT / DXRICE_PROC_ROOT: test hooks.
+quickshell_unit_is_self_contained() {
+    local unit=dxrice-quickshell.service cg main pid p depth
+    local cg_root="${DXRICE_CGROUP_ROOT:-/sys/fs/cgroup}" proc_root="${DXRICE_PROC_ROOT:-/proc}"
+    cg=$(systemctl --user show -p ControlGroup --value "$unit" 2>/dev/null)
+    main=$(systemctl --user show -p MainPID --value "$unit" 2>/dev/null)
+    case "$main" in ''|0|*[!0-9]*) return 1 ;; esac
+    [ -n "$cg" ] && [ -r "$cg_root$cg/cgroup.procs" ] || return 1
+    while read -r pid; do
+        [ -n "$pid" ] || continue
+        p=$pid depth=0
+        while [ "$p" != "$main" ]; do
+            p=$(sed -n 's/^PPid:[[:space:]]*//p' "$proc_root/$p/status" 2>/dev/null)
+            depth=$((depth + 1))
+            case "$p" in ''|0|1) return 1 ;; esac
+            [ "$depth" -lt 64 ] || return 1
+        done
+    done < "$cg_root$cg/cgroup.procs"
+    return 0
+}
+
 remove_systemd_units() {
     local unit_dir="$CONFIG_HOME/systemd/user" unit path
     local -a owned=()
@@ -1453,20 +1481,26 @@ remove_systemd_units() {
     done
     [ "${#owned[@]}" -gt 0 ] || return 0
 
-    # dxrice-quickshell.service is removed but never stopped here. Every app
-    # opened from the shell (dock, launcher, quick settings) is started by
-    # Quickshell, so it lives in that unit's cgroup -- and stopping a unit
-    # kills its whole cgroup: the browser, the chat client, the game, and
-    # the terminal running this uninstall if it came from the dock. With its
-    # file gone it doesn't start again; the running bar ends at logout.
+    # dxrice-quickshell.service is only stopped when nothing but Quickshell
+    # itself lives in its cgroup (see quickshell_unit_is_self_contained):
+    # stopping a unit kills its whole cgroup, and an app opened from an
+    # older shell -- the browser, a game, the terminal running this
+    # uninstall -- may still be in there. Otherwise its file is removed so
+    # it doesn't start again, and the running bar ends at logout.
     local -a stop=()
     local keeps_shell=0
     for unit in "${owned[@]}"; do
-        if [ "$unit" = dxrice-quickshell.service ]; then keeps_shell=1; else stop+=("$unit"); fi
+        if [ "$unit" != dxrice-quickshell.service ]; then
+            stop+=("$unit")
+        elif command -v systemctl >/dev/null 2>&1 && quickshell_unit_is_self_contained; then
+            stop+=("$unit")
+        else
+            keeps_shell=1
+        fi
     done
     if command -v systemctl >/dev/null 2>&1; then
         if [ "${#stop[@]}" -gt 0 ]; then
-            info "Stopping DXrice's background services (window placement stops now)..."
+            info "Stopping DXrice's services: ${stop[*]}"
             systemctl --user stop "${stop[@]}" >/dev/null 2>&1 || true
         fi
         # The units have no [Install] section today, so there is normally
