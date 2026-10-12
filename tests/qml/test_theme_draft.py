@@ -119,6 +119,23 @@ class ThemeDraftTest(unittest.TestCase):
         self.assertFalse(self.s.ev(f"{TE}.dirty"))
         self.assertEqual(self.message(), "")
 
+    def test_apply_keeps_keys_the_editor_does_not_model(self):
+        """Saving wrote only the editor's own fields, dropping schema_version
+        (and anything else in theme.json): every Apply then made the apply
+        script "migrate" the file again, with a fresh backup each time."""
+        data = dict(self.original, my_own_setting="keep me")
+        self.assertIn("schema_version", data, "fixture: the shipped theme.json is versioned")
+        self.theme_json.write_text(json.dumps(data, indent=4))
+        self.s.ev("theme.reload()")
+        self.open()
+        self.edit_accent("123456")
+        self.s.ev(f"{TE}.apply()")
+        self.s.wait(300)
+        saved = self.disk_theme()
+        self.assertEqual(saved["accent"], "123456")
+        self.assertEqual(saved.get("schema_version"), data["schema_version"], "Apply dropped schema_version")
+        self.assertEqual(saved.get("my_own_setting"), "keep me", "Apply dropped a key the editor doesn't model")
+
     # ---- Apply outcome ----
     def test_apply_failure_is_reported(self):
         self.s.set_command("dxrice_apply_theme.py",

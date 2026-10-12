@@ -347,7 +347,13 @@ PanelWindow {
     }
 
     function save() {
+        // Starts from the live theme.json and overlays the editor's own
+        // fields: keys the editor doesn't model must survive a save. Writing
+        // only allKeys() dropped schema_version, so every Apply then made
+        // dxrice_apply_theme.py "migrate" the file again -- a fresh backup
+        // per Apply, rotating real pre-migration backups out of the 10 kept.
         const obj = {};
+        for (const key in Theme.data) obj[key] = Theme.data[key];
         for (const key of allKeys()) obj[key] = root[key];
         writer.setText(JSON.stringify(obj, null, 4));
         // Written to theme.json, so there is no longer anything unapplied
