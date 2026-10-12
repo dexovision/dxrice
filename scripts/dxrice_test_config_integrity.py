@@ -14,8 +14,9 @@ and `$(...)`) and checks that:
     machine-specific; resolve them at runtime in a repo helper instead
     (scripts/dxrice_polkit_agent.sh);
   * every program it runs is base system, installed by install.sh (its
-    package arrays, or install_quickshell), or explicitly listed below as
-    an optional personal app;
+    package arrays for EVERY package manager it supports, or
+    install_quickshell), or explicitly listed below as an optional
+    personal app -- and is a name the parser could actually resolve;
   * the systemd units it restarts are exactly the ones install.sh writes
     and uninstall removes;
   * scripts the QML shell runs, and install.sh's verify_deploy list, exist.
@@ -42,8 +43,8 @@ SHELL_WORDS = {"if", "then", "else", "elif", "fi", "for", "in", "do", "done", "w
                "command", "exec", "export", "cd", "echo", "test", "[", "]", "!", "{", "}", ">", ">>", "2>&1",
                ">/dev/null", "&"}
 
-# Program -> the Arch package that provides it (install.sh's pacman list is
-# the reference set; the dnf/apt/zypper lists mirror it).
+# Program -> the Arch package that provides it. The dnf/apt/zypper lists
+# use the same name unless OTHER_DISTRO_NAMES says otherwise.
 PROVIDED_BY = {
     "python3": "python",
     "kitty": "kitty",
@@ -70,6 +71,31 @@ PROVIDED_BY = {
     "hyprlock": "hyprlock",
 }
 
+# Arch package -> its name in another package manager's list, where that
+# differs. None: not packaged there -- install.sh must tell the user so
+# (a `warn` naming it) instead.
+OTHER_DISTRO_NAMES = {
+    "python": {"dnf": "python3", "apt": "python3", "zypper": "python3"},
+    "mako": {"apt": "mako-notifier"},
+    "network-manager-applet": {"apt": "network-manager-gnome", "zypper": "NetworkManager-applet"},
+    "cliphist": {"dnf": None, "apt": None, "zypper": None},
+    "nwg-look": {"dnf": None, "apt": None, "zypper": None},
+}
+
+# Package manager -> install.sh's arrays it installs from. HYPR_PACKAGES is
+# shared: install_hypr_ecosystem resolves it per distro.
+MANAGER_ARRAYS = {
+    "pacman": ("GENERAL_PACMAN", "HYPR_PACKAGES", "AUR_PACKAGES"),
+    "dnf": ("GENERAL_DNF", "HYPR_PACKAGES"),
+    "apt": ("GENERAL_APT", "HYPR_PACKAGES"),
+    "zypper": ("GENERAL_ZYPPER", "HYPR_PACKAGES"),
+}
+
+# Placeholders a program may legitimately start with (see lua_commands).
+# Any other <name> is a variable the parser couldn't resolve -- which used
+# to be skipped, so a program behind it was never checked at all.
+CHECKED_PLACEHOLDERS = ("<REPO>/",)
+
 # Installed by a dedicated installer step rather than a package array.
 INSTALLED_SEPARATELY = {"qs": "install_quickshell"}
 
@@ -86,14 +112,30 @@ def _read(path):
 
 
 def _strip_lua_comments(src):
+    """Drops `--[[ ... ]]` block comments and whole-line `--` comments."""
+    src = re.sub(r"--\[(=*)\[.*?\]\1\]", "", src, flags=re.S)
     return "\n".join(line for line in src.splitlines() if not line.lstrip().startswith("--"))
 
 
+# Every Lua string literal form: "double", 'single' and [[long]] / [==[long]==].
+_LUA_STRING = r"""\"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\[(?P<eq>=*)\[.*?\](?P=eq)\]"""
+_LUA_TOKEN = re.compile(r"(?P<literal>" + _LUA_STRING + r")|(?P<name>[A-Za-z_][\w.]*)", re.S)
+
+
+def _lua_literal(token):
+    if token.startswith("["):
+        return token[token.index("[", 1) + 1:token.rindex("]", 0, -1)]
+    return re.sub(r"\\(.)", r"\1", token[1:-1])
+
+
 def _lua_string_vars(src):
-    """`local name = "literal"` and `local name = os.getenv(...) or "literal"`."""
+    """`local name = <literal>` and `local name = os.getenv(...) or <literal>`,
+    in any string form, with or without a trailing comment."""
     out = {}
-    for name, value in re.findall(r'local\s+(\w+)\s*=\s*(?:os\.getenv\([^)]*\)\s*or\s*)?"([^"]*)"\s*$', src, re.M):
-        out[name] = value
+    pattern = (r"^\s*local\s+(\w+)\s*=\s*(?:os\.getenv\([^)]*\)\s*or\s*)?(" + _LUA_STRING
+               + r")\s*(?:--.*)?$")
+    for m in re.finditer(pattern, src, re.M | re.S):
+        out[m.group(1)] = _lua_literal(m.group(2))
     return out
 
 
@@ -123,19 +165,20 @@ def _call_args(src, func):
 
 
 def _resolve_concat(expr, variables):
-    """Evaluates a Lua `"a" .. var .. "b"` concatenation to one string."""
-    parts = re.findall(r'"((?:\\.|[^"\\])*)"|([A-Za-z_]\w*)', expr)
+    """Evaluates a Lua `"a" .. var .. 'b' .. [[c]]` concatenation to one
+    string; a variable it can't resolve becomes `<name>`."""
     out = []
-    for literal, name in parts:
-        if name:
-            out.append(variables.get(name, "<" + name + ">"))
+    for m in _LUA_TOKEN.finditer(expr):
+        literal, name = m.group("literal"), m.group("name")
+        if literal:
+            out.append(_lua_literal(literal))
         else:
-            out.append(literal.replace('\\"', '"'))
+            out.append(variables.get(name, "<" + name + ">"))
     return "".join(out)
 
 
-def lua_commands():
-    src = _strip_lua_comments(_read(LUA))
+def lua_commands(src=None):
+    src = _strip_lua_comments(_read(LUA) if src is None else src)
     variables = _lua_string_vars(src)
     variables.update({"repo": "<REPO>", "home": "<HOME>", "bg_path": "<WALLPAPER>"})
     cmds = []
@@ -201,14 +244,52 @@ def _simple_commands(script):
     return programs
 
 
-def installer_packages():
-    src = _read(INSTALL)
+def installer_packages(install_src, manager):
     pkgs = set()
-    for name in ("GENERAL_PACMAN", "HYPR_PACKAGES", "AUR_PACKAGES"):
-        m = re.search(name + r"=\(([^)]*)\)", src)
+    for name in MANAGER_ARRAYS[manager]:
+        m = re.search(r"^" + name + r"=\(([^)]*)\)", install_src, re.M)
         assert m, f"install.sh has no {name} array"
         pkgs |= set(m.group(1).split())
     return pkgs
+
+
+def absolute_path_problems(commands):
+    return [f"hyprland.lua runs a hard-coded absolute path {prog!r} ({cmd!r}) -- "
+            "machine-specific; probe for it in a repo helper instead"
+            for cmd in commands for prog in _simple_commands(cmd) if prog.startswith("/")]
+
+
+def program_problems(commands, install_src):
+    """Every program the commands run that isn't accounted for, on any of
+    install.sh's package managers."""
+    installed = {mgr: installer_packages(install_src, mgr) for mgr in MANAGER_ARRAYS}
+    problems = []
+    for cmd in commands:
+        for prog in _simple_commands(cmd):
+            if prog.startswith("<"):
+                if not prog.startswith(CHECKED_PLACEHOLDERS):
+                    problems.append(f"{prog}: runs something the check can't resolve (an unknown variable, "
+                                    f"or a path under the user's home) -- {cmd!r}")
+                continue
+            if prog in BASE_SYSTEM or prog in OPTIONAL_PERSONAL_APPS:
+                continue
+            if prog in INSTALLED_SEPARATELY:
+                if not re.search(r"^" + INSTALLED_SEPARATELY[prog] + r"\(\)", install_src, re.M):
+                    problems.append(f"{prog}: install.sh has no {INSTALLED_SEPARATELY[prog]}()")
+                continue
+            if prog not in PROVIDED_BY:
+                problems.append(f"{prog}: unknown program -- add it to PROVIDED_BY (and install.sh) "
+                                f"or OPTIONAL_PERSONAL_APPS ({cmd!r})")
+                continue
+            arch_pkg = PROVIDED_BY[prog]
+            for mgr, pkgs in installed.items():
+                pkg = arch_pkg if mgr == "pacman" else OTHER_DISTRO_NAMES.get(arch_pkg, {}).get(mgr, arch_pkg)
+                if pkg is None:
+                    if not re.search(r'warn "[^"\n]*' + re.escape(arch_pkg), install_src):
+                        problems.append(f"{prog}: not packaged for {mgr}, and install.sh never tells the user")
+                elif pkg not in pkgs:
+                    problems.append(f"{prog}: needs package {pkg!r}, which install.sh's {mgr} list doesn't install")
+    return sorted(set(problems))
 
 
 class HyprlandConfigIntegrityTest(unittest.TestCase):
@@ -225,30 +306,10 @@ class HyprlandConfigIntegrityTest(unittest.TestCase):
                     self.assertTrue(os.access(path, os.X_OK), f"{rel} is run directly but is not executable")
 
     def test_no_hard_coded_absolute_program_paths(self):
-        for cmd in self.commands:
-            for prog in _simple_commands(cmd):
-                self.assertFalse(prog.startswith("/"),
-                                 f"hyprland.lua runs a hard-coded absolute path {prog!r} ({cmd!r}) -- "
-                                 "machine-specific; probe for it in a repo helper instead")
+        self.assertEqual(absolute_path_problems(self.commands), [])
 
     def test_every_program_it_runs_is_provided(self):
-        installed = installer_packages()
-        install_src = _read(INSTALL)
-        problems = []
-        for cmd in self.commands:
-            for prog in _simple_commands(cmd):
-                if prog.startswith("<") or prog in BASE_SYSTEM or prog in OPTIONAL_PERSONAL_APPS:
-                    continue
-                if prog in INSTALLED_SEPARATELY:
-                    if not re.search(r"^" + INSTALLED_SEPARATELY[prog] + r"\(\)", install_src, re.M):
-                        problems.append(f"{prog}: install.sh has no {INSTALLED_SEPARATELY[prog]}()")
-                    continue
-                if prog not in PROVIDED_BY:
-                    problems.append(f"{prog}: unknown program -- add it to PROVIDED_BY (and install.sh) "
-                                    f"or OPTIONAL_PERSONAL_APPS ({cmd!r})")
-                elif PROVIDED_BY[prog] not in installed:
-                    problems.append(f"{prog}: needs package {PROVIDED_BY[prog]!r}, which install.sh doesn't install")
-        self.assertEqual(problems, [])
+        self.assertEqual(program_problems(self.commands, _read(INSTALL)), [])
 
     def test_systemd_units_agree(self):
         lua_units = set(re.findall(r"dxrice-[a-z-]+\.service", "\n".join(self.commands)))
@@ -280,6 +341,54 @@ class ShellAndInstallerIntegrityTest(unittest.TestCase):
         src = _read(os.path.join(REPO, "scripts", "dxrice_polkit_agent.sh"))
         self.assertIn("/usr/lib/polkit-kde-authentication-agent-1", src)
         self.assertTrue(os.access(os.path.join(REPO, "scripts", "dxrice_polkit_agent.sh"), os.X_OK))
+
+
+class CheckerSelfTest(unittest.TestCase):
+    """The checks above must fail on a broken config, not just pass on the
+    current one. Each case is a way the first version of this test passed a
+    config that was broken."""
+
+    BASE = 'local repo = dxrice_repo()\nlocal home = os.getenv("HOME")\n'
+
+    def commands(self, lua):
+        return lua_commands(self.BASE + lua)
+
+    def test_absolute_path_in_any_lua_string_form_is_caught(self):
+        # The original bug (/usr/lib/polkit-kde-agent-1), quoted the other
+        # two ways Lua allows: both used to resolve to nothing checkable.
+        for lua in ("hl.exec_cmd('/usr/lib/polkit-kde-agent-1')\n",
+                    "hl.exec_cmd([[/usr/lib/polkit-kde-agent-1]])\n",
+                    "hl.exec_cmd([==[/usr/lib/polkit-kde-agent-1]==])\n",
+                    "local agent = '/usr/lib/polkit-kde-agent-1'\nhl.exec_cmd(agent)\n"):
+            with self.subTest(lua=lua):
+                self.assertEqual(self.commands(lua), ["/usr/lib/polkit-kde-agent-1"])
+                self.assertTrue(absolute_path_problems(self.commands(lua)))
+
+    def test_variable_with_trailing_comment_is_resolved(self):
+        cmds = self.commands('local browser = "nonexistent-app" -- my browser\nhl.exec_cmd(browser)\n')
+        self.assertEqual(cmds, ["nonexistent-app"])
+        self.assertTrue(any("nonexistent-app: unknown program" in p for p in program_problems(cmds, _read(INSTALL))))
+
+    def test_unresolvable_program_is_a_problem_not_skipped(self):
+        for lua in ("hl.exec_cmd(some_function())\n", 'hl.exec_cmd(home .. "/.local/bin/tool")\n'):
+            with self.subTest(lua=lua):
+                self.assertTrue(program_problems(self.commands(lua), _read(INSTALL)))
+
+    def test_repo_program_is_left_to_the_repo_file_check(self):
+        cmds = self.commands('hl.exec_cmd(repo .. "/scripts/dxrice_polkit_agent.sh")\n')
+        self.assertEqual(program_problems(cmds, _read(INSTALL)), [])
+
+    def test_package_missing_from_another_distro_is_caught(self):
+        src = _read(INSTALL)
+        broken = re.sub(r"^(GENERAL_DNF=\([^)]*?) wl-clipboard", r"\1", src, flags=re.M)
+        self.assertNotEqual(broken, src, "fixture: wl-clipboard not found in GENERAL_DNF")
+        cmds = self.commands('hl.exec_cmd("wl-paste --watch cliphist store")\n')
+        self.assertEqual(program_problems(cmds, src), [])
+        self.assertEqual(program_problems(cmds, broken),
+                         ["wl-paste: needs package 'wl-clipboard', which install.sh's dnf list doesn't install"])
+
+    def test_block_comment_is_ignored(self):
+        self.assertEqual(self.commands('--[[\nhl.exec_cmd("/usr/lib/old")\n]]\nhl.exec_cmd("mako")\n'), ["mako"])
 
 
 if __name__ == "__main__":
