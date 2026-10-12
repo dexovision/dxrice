@@ -31,9 +31,19 @@ QtObject {
         // Fixture sentinel for "still loading": the process never finishes.
         if (out === "__HANG__") return;
         root._live = false;
+        // "__NOSTART__": the binary could not be started. Quickshell emits
+        // no `exited` then -- only `running` drops (process.cpp
+        // onErrorOccurred(FailedToStart)).
+        if (out === "__NOSTART__") { root.running = false; return; }
+        // "__EXIT__<code>\n<stderr...>": a run that fails with that exit code
+        // and stderr. Streams end before `exited`, as in process.cpp.
+        let code = 0, stdoutText = out, stderrText = "";
+        const m = /^__EXIT__(\d+)\n?([\s\S]*)$/.exec(out);
+        if (m) { code = Number(m[1]); stdoutText = ""; stderrText = m[2]; }
         root.running = false;
-        if (root.stdout) { root.stdout.text = out; root.stdout.streamFinished(); }
-        root.exited(0, 0);
+        if (root.stdout) { root.stdout.text = stdoutText; root.stdout.streamFinished(); }
+        if (root.stderr) { root.stderr.text = stderrText; root.stderr.streamFinished(); }
+        root.exited(code, 0);
         if (root._target && !root.running) { root._target = false; root.running = true; }
     }
 }

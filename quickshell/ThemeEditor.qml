@@ -184,6 +184,12 @@ PanelWindow {
 
     property bool dirty: false
     property bool applying: false
+    // Inline, non-modal feedback in the header (see `header`): why the last
+    // Apply failed, or that a kept draft had to be dropped. Cleared by the
+    // next edit, Apply or Revert.
+    property string applyError: ""
+    property string draftNotice: ""
+    onDirtyChanged: if (root.dirty) { root.applyError = ""; root.draftNotice = ""; }
 
     readonly property var colorFields: [
         { key: "glass_bg", label: "Panel background", sub: "Waybar/wofi/kitty base color" },
@@ -287,9 +293,48 @@ PanelWindow {
             root.wallpaper = Quickshell.env("HOME") + "/Pictures/Wallpapers/default.png";
         }
         root.dirty = false;
+        root._draftBase = JSON.stringify(data);
     }
 
-    Component.onCompleted: loadFromTheme(Theme.data)
+    // ---- unapplied edits survive closing (see ThemeDraft.qml) ----
+    // The theme.json content the current edits are relative to. Follows the
+    // live theme while there is nothing unapplied (an Apply, a change made
+    // elsewhere), and stays put once there is, so a draft is always compared
+    // against the theme it was actually made on.
+    property string _draftBase: ""
+    Connections {
+        target: Theme
+        function onDataChanged() { if (!root.dirty) root._draftBase = JSON.stringify(Theme.data); }
+    }
+    function snapshot() {
+        const out = {};
+        for (const key of allKeys()) out[key] = root[key];
+        return out;
+    }
+
+    Component.onCompleted: {
+        loadFromTheme(Theme.data);
+        if (ThemeDraft.fields) {
+            if (ThemeDraft.base === root._draftBase) {
+                const keys = allKeys();
+                for (const key in ThemeDraft.fields) {
+                    if (keys.indexOf(key) >= 0) root[key] = ThemeDraft.fields[key];
+                }
+                if (ThemeDraft.category) root.currentCategory = ThemeDraft.category;
+                root.dirty = true;
+            } else {
+                root.draftNotice = "Unapplied changes were discarded: the theme changed outside the editor.";
+            }
+            ThemeDraft.clear();
+        }
+    }
+    // Every close path ends here (the LazyLoader destroys this window once
+    // its close animation finishes), so this is the one place a draft is
+    // kept -- or, with nothing unapplied, any older one dropped.
+    Component.onDestruction: {
+        if (root.dirty) ThemeDraft.save(root.snapshot(), root._draftBase, root.currentCategory);
+        else ThemeDraft.clear();
+    }
 
     function applyPreset(colors) {
         for (const key in colors) root[key] = colors[key];
@@ -305,12 +350,44 @@ PanelWindow {
         const obj = {};
         for (const key of allKeys()) obj[key] = root[key];
         writer.setText(JSON.stringify(obj, null, 4));
+        // Written to theme.json, so there is no longer anything unapplied
+        // to keep (even if rendering it fails -- see applyProc).
+        root.dirty = false;
+        root._draftBase = JSON.stringify(obj);
     }
 
+    // Apply's outcome. Before, onExited only cleared `applying`: a script
+    // that failed (a template error, an unreadable theme.json -- it exits
+    // non-zero) looked exactly like one that worked. And Quickshell's
+    // Process emits no `exited` at all when the program cannot start (it
+    // only drops `running`), which left the button on "Applying..." for
+    // good. The start-failure check runs one event-loop turn after
+    // `running` drops, so it sees `exited` first whichever order the two
+    // signals arrive in.
+    property bool _applyExited: false
     Process {
         id: applyProc
         command: ["python3", root.repoDir + "/scripts/dxrice_apply_theme.py"]
-        onExited: { root.applying = false; }
+        stderr: StdioCollector { id: applyStderr }
+        onExited: (exitCode, exitStatus) => {
+            root._applyExited = true;
+            root.applying = false;
+            root.applyError = (exitCode === 0 && exitStatus === 0) ? "" : root._applyFailure(applyStderr.text, exitCode);
+        }
+        onRunningChanged: if (!running && root.applying) Qt.callLater(root._checkApplyStarted)
+    }
+    function _checkApplyStarted() {
+        if (root.applying && !root._applyExited) {
+            root.applying = false;
+            root.applyError = "Apply failed: couldn't run the theme script (is python3 installed?)";
+        }
+    }
+    function _applyFailure(stderrText, exitCode) {
+        // The last non-empty stderr line is the useful one: a Python
+        // traceback ends with the exception, the script's own messages are
+        // single lines.
+        const lines = String(stderrText || "").split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+        return lines.length ? "Apply failed: " + lines[lines.length - 1] : "Apply failed (exit code " + exitCode + ")";
     }
 
     // ---- generate a full color palette from the current wallpaper --
@@ -360,13 +437,20 @@ PanelWindow {
             console.warn("ThemeEditor: refusing to apply -- theme.json was never successfully loaded");
             return;
         }
+        root.applyError = "";
+        root.draftNotice = "";
         root.save();
+        root._applyExited = false;
         root.applying = true;
         applyProc.running = true;
     }
 
+    // Revert means "throw my edits away": that includes a kept draft.
     function revert() {
         root.closePicker();
+        ThemeDraft.clear();
+        root.applyError = "";
+        root.draftNotice = "";
         loadFromTheme(Theme.data);
     }
 
@@ -586,6 +670,7 @@ PanelWindow {
                 height: 56
 
                 Text {
+                    id: headerTitle
                     text: "Theme"
                     color: Theme.textActive
                     font.family: Theme.fontFamily
@@ -594,7 +679,26 @@ PanelWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     x: Theme.padLg
                 }
+                // One quiet line between the title and the buttons: an Apply
+                // failure (danger tint), or a dropped draft (muted). Elided;
+                // feedback, never a dialog.
+                Text {
+                    id: headerMessage
+                    objectName: "themeHeaderMessage"
+                    readonly property bool isError: root.applyError.length > 0
+                    visible: text.length > 0
+                    text: isError ? root.applyError : root.draftNotice
+                    color: isError ? Theme.dangerTint : Theme.text
+                    opacity: isError ? 1 : Theme.opacityMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmaller
+                    elide: Text.ElideRight
+                    anchors.verticalCenter: parent.verticalCenter
+                    x: headerTitle.x + headerTitle.width + Theme.padLg
+                    width: Math.max(0, headerButtons.x - x - Theme.padLg)
+                }
                 Row {
+                    id: headerButtons
                     anchors.verticalCenter: parent.verticalCenter
                     x: header.width - width - Theme.padLg
                     spacing: Theme.padSm
