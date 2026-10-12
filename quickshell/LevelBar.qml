@@ -15,8 +15,11 @@ Rectangle {
         height: parent.height
         radius: parent.radius
         color: Theme.accent
+        // A reading, not a gesture: move straight to the new value. The
+        // expressive curve overshot (control point y = 1.21), so every
+        // 1.5s Performance sample bounced past the new value and back.
         Behavior on width {
-            NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveDefault }
+            NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
         }
     }
 }
