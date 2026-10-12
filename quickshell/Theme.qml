@@ -348,8 +348,31 @@ QtObject {
     readonly property var curveEmphasizedDecel: [0.05, 0.7, 0.1, 1, 1, 1]
     readonly property var curveStandard: [0.2, 0, 0, 1, 1, 1]
     readonly property int durationFast: Math.round(animMs * 1.0)
-    readonly property int durationDefault: Math.round(animMs * 2.2)
-    readonly property int durationEnter: Math.round(animMs * 2.8)
+    readonly property int durationDefault: root.reduceMotion ? 1 : Math.round(animMs * 2.2)
+    readonly property int durationEnter: root.reduceMotion ? 1 : Math.round(animMs * 2.8)
+
+    // ---- the open/close grammar every expanding surface shares (islands,
+    // branches, popovers, accordions) ----
+    // Geometry and content are animated separately, and differently in each
+    // direction. Opening: the surface grows on curveEnter (decelerating,
+    // durationEnter) while its content fades in alongside it
+    // (durationFadeIn). Closing: the content fades out FIRST and fast
+    // (durationFadeOut), while the surface begins its retreat on curveExit
+    // -- an accelerating curve, so it barely moves until the content is
+    // gone, then tucks away quickly (durationExit). Driving both from one
+    // symmetric curve is what left text fully drawn inside a shrinking
+    // surface until the very last frame. Behaviors retarget from wherever
+    // they are, so reversing mid-way never jumps.
+    readonly property int durationExit: root.reduceMotion ? 1 : Math.round(animMs * 2.0)
+    readonly property int durationFadeIn: Math.round(animMs * (root.reduceMotion ? 1.0 : 1.8))
+    readonly property int durationFadeOut: Math.round(animMs * 0.8)
+    readonly property var curveEnter: curveStandard
+    readonly property var curveExit: [0.3, 0, 0.8, 0.15, 1, 1]
+
+    // theme.json "reduce_motion": true. Surfaces then appear and disappear
+    // in place (opacity only) instead of growing and shrinking; short state
+    // fades are kept, since they don't move anything.
+    readonly property bool reduceMotion: root.data.reduce_motion === true
 
     // ---- elevation: ported directly from caelestia-dots/shell's own
     // components/effects/Elevation.qml -- a real Material 3 discrete

@@ -153,6 +153,7 @@ PanelWindow {
 
     ShellIsland {
         id: dockIsland
+        objectName: "dockIsland"
         anchors.horizontalCenter: parent.horizontalCenter
         y: parent.height - root.edgeMargin - height
         pinX: "center"
@@ -255,6 +256,7 @@ PanelWindow {
                 // this session (invisible in the tool transcript either
                 // way, so the loss went unnoticed until a hexdump caught it).
                 glyph: ""
+                objectName: "taskbarToggle"
                 size: ShellSurface.dockTile
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: root.taskbarRequested()

@@ -77,19 +77,62 @@ Item {
         return Math.max(0, Math.min(1, (p - from) / (to - from)));
     }
 
-    // ONE animated value drives the whole transition -- everything else
-    // (size, opacity, shadow) is a plain function of it, so nothing can drift
-    // out of sync with anything else. Height leads, width follows a beat
+    // Two animated values, each with one owner:
+    //   morph       -- the GEOMETRY (size, corner shape, shadow, the close
+    //                  button's and seam's entrance) is a plain function of it;
+    //   contentFade -- the hosted panel's visibility.
+    // They used to be one: a single symmetric morph, with the content shown
+    // or hidden only by the surface's clip. Closing then shrank the surface
+    // around fully drawn content -- rows by the header stayed visible until
+    // the clip edge reached them in the last frames, and the bottom-pinned
+    // Taskbar's content rode down into the dock row and stayed there until
+    // the panel was torn down, then vanished in one frame. Now each direction
+    // has its own motion (Theme's open/close grammar): opening grows the
+    // surface while the content fades in with it; closing fades the content
+    // out first and retracts the surface on an accelerating curve, so it
+    // has barely moved by the time there is nothing left inside it.
+    //
+    // Both are started explicitly from onExpandedChanged -- not bound to
+    // `expanded` behind a Behavior whose duration/curve also depend on
+    // `expanded` (binding order would decide which direction's curve the
+    // animation started with). Each always starts from its current value,
+    // so reversing mid-way never jumps. Height leads, width follows a beat
     // later (pH's range starts at 0.18 not 0), so the surface visibly
-    // drops/rises out of its origin before it widens, rather than inflating
-    // on both axes identically at once.
-    property real morph: expanded ? 1 : 0
-    Behavior on morph {
-        NumberAnimation {
-            duration: Theme.durationEnter
-            easing.type: Theme.easingType
-            easing.bezierCurve: Theme.curveStandard
-        }
+    // drops/rises out of its origin before it widens.
+    // Plain values, not bound to `expanded`: a binding would snap them to
+    // the target the instant `expanded` changes -- before _animateTo reads
+    // where to start from -- so the transition would jump instead of play.
+    property real morph: 0
+    property real contentFade: 0
+    Component.onCompleted: {
+        root.morph = root.expanded ? 1 : 0;
+        root.contentFade = root.expanded ? 1 : 0;
+    }
+    NumberAnimation {
+        id: morphAnim
+        target: root
+        property: "morph"
+        easing.type: Theme.easingType
+    }
+    NumberAnimation {
+        id: fadeAnim
+        target: root
+        property: "contentFade"
+        easing.type: Theme.easingType
+        easing.bezierCurve: Theme.curveStandard
+    }
+    function _animateTo(open) {
+        morphAnim.stop();
+        fadeAnim.stop();
+        morphAnim.from = root.morph;
+        morphAnim.to = open ? 1 : 0;
+        morphAnim.duration = open ? Theme.durationEnter : Theme.durationExit;
+        morphAnim.easing.bezierCurve = open ? Theme.curveEnter : Theme.curveExit;
+        fadeAnim.from = root.contentFade;
+        fadeAnim.to = open ? 1 : 0;
+        fadeAnim.duration = open ? Theme.durationFadeIn : Theme.durationFadeOut;
+        morphAnim.start();
+        fadeAnim.start();
     }
     readonly property real pV: morph
     readonly property real pH: sub(morph, 0.18, 1.0)
@@ -109,6 +152,7 @@ Item {
     // morph, which depended on the panel's own reported content size.
     property bool _keepAlive: false
     onExpandedChanged: {
+        root._animateTo(expanded);
         if (expanded) {
             // Stopped, not left to fire stale: without this, closing then
             // reopening inside the same durationEnter+40 window leaves a
@@ -127,7 +171,7 @@ Item {
     }
     Timer {
         id: collapseTimer
-        interval: Theme.durationEnter + 40
+        interval: Math.max(Theme.durationExit, Theme.durationFadeOut) + 40
         onTriggered: root._keepAlive = false
     }
 
@@ -231,7 +275,7 @@ Item {
             x: surface.pinnedX(width)
             y: root.pinY === "bottom" ? (surface.height - root.collapsedHeight) : root.collapsedHeight
             color: Theme.seam
-            opacity: root.sub(root.morph, 0.5, 0.85)
+            opacity: Math.min(root.contentFade, root.sub(root.morph, 0.5, 0.85))
             visible: opacity > 0.01
         }
 
@@ -249,29 +293,27 @@ Item {
             // fixed offset, which sat 1px low on the 36px capsules and ~10px
             // high against Taskbar's taller header row.
             y: Math.round(root.closeCenterY - height / 2)
-            opacity: root.sub(root.morph, 0.35, 0.7)
+            opacity: Math.min(root.contentFade, root.sub(root.morph, 0.35, 0.7))
             visible: opacity > 0.01
+            enabled: root.expanded
             onClicked: root.closeRequested()
         }
 
         // ---- the panel's own content, laid out in whatever space remains
         // once the persistent header's edge is excluded ----
         //
-        // Deliberately no opacity fade here any more. `surface.clip: true`
-        // already clips this Loader to the surface's OWN live, growing
-        // bounds -- so as the surface expands, more of this fixed-position,
-        // fixed-size, always-fully-opaque content is progressively exposed,
-        // like a blind lifting. A fade layered on top of that was fighting
-        // it: the surface would grow (a shape unfolding) while its content
-        // simultaneously faded in (a cross-dissolve), two different visual
-        // grammars running at once, which is a good part of why this kept
-        // reading as "a window opens and fades in" instead of "the surface
-        // physically unfolds to reveal what was inside it". A pure clip
-        // reveal has no first-frame flash to worry about either -- there is
-        // nothing to draw until the surface has grown enough for the clip
-        // to expose it.
+        // Revealed by the surface's clip as it grows, with contentFade on top
+        // (see `morph`): the clip alone could only ever hide content by
+        // cutting it off, which is exactly what made closing look unfinished.
+        // Takes no input once a close has begun -- a fading button must not
+        // still be clickable.
+        // Also held back until the surface is most of the way open on both
+        // axes: fading in from the very start showed half-transparent text
+        // sliced mid-glyph by the still-growing edge.
         Loader {
             id: panelLoader
+            opacity: Math.min(root.contentFade, root.sub(Math.min(root.pH, root.pV), 0.85, 1.0))
+            enabled: root.expanded
             active: root.expanded || root._keepAlive
             width: root.expandedWidth
             height: root.expandedHeight - root.collapsedHeight

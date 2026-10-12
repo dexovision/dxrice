@@ -83,16 +83,27 @@ Column {
         // + body.y: the body starts padXs down, so clipping at just its
         // implicitHeight cut the last 4px off every expanded list (the
         // bottom of the last row's buttons, visibly).
-        height: root.expanded ? body.y + body.implicitHeight : 0
+        height: root.expanded ? fullHeight : 0
         Behavior on height {
             NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel }
         }
+
+        // Visible only while the fold is mostly open, as a function of how
+        // open it is (like the branch popovers' reveal): collapsing used to
+        // clip fully drawn rows away from the bottom up, so the top rows
+        // stayed crisp until the last frame and then vanished at once. Now
+        // they have faded before the fold is half shut, and fade in over the
+        // last stretch of opening.
+        readonly property real fullHeight: body.y + body.implicitHeight
+        readonly property real openness: fullHeight > 0 ? height / fullHeight : 0
 
         Column {
             id: body
             y: Theme.padXs
             width: parent.width
             spacing: Theme.padXs
+            opacity: Math.max(0, Math.min(1, (clip.openness - 0.55) / 0.4))
+            enabled: root.expanded
         }
     }
 }

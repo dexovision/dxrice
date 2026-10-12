@@ -79,7 +79,7 @@ PanelWindow {
     // Only grab keys while something is actually open, so the bar doesn't hold
     // focus away from the focused application the rest of the time.
     focusable: PanelManager.current !== ""
-    Shortcut { sequence: "Escape"; enabled: root.focusable; onActivated: PanelManager.closeCurrent() }
+    Shortcut { objectName: "topBarEscape"; sequence: "Escape"; enabled: root.focusable; onActivated: PanelManager.closeCurrent() }
 
     // Whether Quick Settings' Wifi-password dialog is open -- a real,
     // separate top-level window (FloatingWindow) that this window's own

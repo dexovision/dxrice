@@ -189,6 +189,8 @@ Item {
             width: root.width
             height: root.height
             opacity: root.sub(root.reveal, 0.6, 1.0)
+            // Fading out is not a state to interact with.
+            enabled: root.open
 
             // Eats clicks on bare branch background so they never fall
             // through to Dock.qml's click-outside catcher underneath.

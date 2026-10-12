@@ -221,6 +221,8 @@ Item {
             width: root.width
             height: root.height
             opacity: root.sub(root.reveal, 0.55, 1.0)
+            // Fading out is not a state to interact with.
+            enabled: root.open
 
             // Bare areas of the picker absorb clicks: they must never fall
             // through to the Theme editor's click-outside catcher.
