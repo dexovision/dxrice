@@ -60,9 +60,30 @@ this specific case BEFORE ever attempting a close or touching a process
 tree: if the root process is Quickshell itself, this asks the shell to
 close whatever panel is actually open (the same thing Escape already
 does) instead of killing anything.
+
+TERMINATION (this pass): the fallback kill is now held to the same
+standard as the per-window close. Before anything is signalled:
+  * the window must still exist under the same address AND the same pid
+    (a window that closed late, or whose address now belongs to another
+    process, is left alone);
+  * the target must be readable and owned by this user, and must not be
+    part of the desktop itself (PROTECTED_EXES: the compositor, the shell,
+    the session bus, audio, portals, the lock screen, polkit agents...)
+    nor an ancestor of this script -- refused with a notification;
+  * any protected process found INSIDE the app's tree (a service the user
+    started from a terminal, say) is left out of it, with its children.
+Every target is pinned with a pidfd (falling back to a start-time check
+where pidfds aren't available), so a pid that is recycled mid-operation
+can never be signalled. It is asked to exit with SIGTERM and given
+TERM_GRACE seconds -- watched through the pidfds, not a fixed sleep --
+and only what is still alive then gets SIGKILL. A window that shares its
+process with another window is still never force-killed; the user is now
+told why instead of SUPER+C silently doing nothing.
 """
 
 import os
+import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -79,6 +100,28 @@ from dxrice_hypr_ipc import hyprctl_json, close_window
 # SUPER+C stays instant for everything except genuine tray-hide apps.
 CLOSE_WAIT_TIMEOUT = 0.5
 CLOSE_WAIT_POLL = 0.05
+
+# After SIGTERM, how long an app gets to exit on its own (save state, flush
+# files) before whatever is left is SIGKILLed.
+TERM_GRACE = 1.5
+KILL_WAIT = 1.0
+
+# Executables that are part of the desktop session itself. SUPER+C never
+# force-terminates one of these, nor anything running under one inside an
+# app's process tree. Quickshell's own panels are handled separately (they
+# are closed through the shell's IPC instead).
+PROTECTED_EXES = frozenset({
+    "Hyprland", "hyprland", "Xwayland", "qs", "quickshell",
+    "systemd", "dbus-daemon", "dbus-broker", "dbus-broker-launch",
+    "pipewire", "pipewire-pulse", "wireplumber", "pulseaudio",
+    "xdg-desktop-portal", "xdg-desktop-portal-hyprland", "xdg-desktop-portal-gtk",
+    "hyprlock", "hypridle", "hyprpaper", "swaybg", "waybar", "mako",
+    "gnome-keyring-daemon", "kwalletd6", "kwalletd5",
+    "polkit-kde-authentication-agent-1", "hyprpolkitagent",
+    "polkit-gnome-authentication-agent-1", "polkit-mate-authentication-agent-1",
+    "lxpolkit", "lxqt-policykit-agent",
+    "sddm", "sddm-helper", "login", "sshd", "Xorg",
+})
 
 
 def _read_ppid(pid):
@@ -135,6 +178,156 @@ def _collect_subtree(root):
     return subtree
 
 
+def _read_starttime(pid):
+    """Process start time (clock ticks since boot): together with the pid it
+    identifies one process, so a recycled pid shows up as a different
+    start time."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            stat = f.read()
+        # The command name (field 2) may itself contain spaces or ')'.
+        return int(stat[stat.rindex(")") + 2:].split()[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _owner_uid(pid):
+    try:
+        return os.stat(f"/proc/{pid}").st_uid
+    except OSError:
+        return None
+
+
+def _own_ancestors():
+    """This script and every process above it (Hyprland, which ran it)."""
+    out, cur = set(), os.getpid()
+    while cur and cur not in out:
+        out.add(cur)
+        cur = _read_ppid(cur)
+    return out
+
+
+def _protection_reason(pid):
+    """Why `pid` must not be force-terminated, or None if it may be."""
+    if not pid or pid <= 1:
+        return "not a real process"
+    exe = _read_exe(pid)
+    if exe is None or _read_starttime(pid) is None:
+        return "its process can't be inspected"
+    if _owner_uid(pid) != os.getuid():
+        return "it belongs to another user"
+    if os.path.basename(exe) in PROTECTED_EXES:
+        return f"{os.path.basename(exe)} is part of the desktop itself"
+    if pid in _own_ancestors():
+        return "it is part of the desktop itself"
+    return None
+
+
+def _notify(summary, body):
+    if shutil.which("notify-send"):
+        try:
+            subprocess.run(["notify-send", "-a", "DXrice", summary, body], timeout=2,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def _kill_targets(subtree, root):
+    """The processes to terminate, as (pid, starttime): the subtree minus
+    anything protected (a service started from a terminal inside the app,
+    say) and everything below such a process."""
+    members = set(subtree)
+    excluded = {p for p in subtree if p != root and _protection_reason(p) is not None}
+    targets = []
+    for p in subtree:
+        cur, skip, seen = p, False, set()
+        while cur in members and cur not in seen:
+            if cur in excluded:
+                skip = True
+                break
+            seen.add(cur)
+            if cur == root:
+                break
+            cur = _read_ppid(cur)
+        if skip:
+            continue
+        start = _read_starttime(p)
+        if start is not None:
+            targets.append((p, start))
+    return targets
+
+
+class _Pinned:
+    """One process, held so that signalling it can never reach a different
+    process that later reuses its pid: a pidfd where the kernel offers one,
+    otherwise a start-time check immediately before each signal."""
+
+    def __init__(self, pid, starttime):
+        self.pid, self.starttime, self.fd = pid, starttime, None
+        try:
+            self.fd = os.pidfd_open(pid)
+        except (AttributeError, OSError):
+            self.fd = None
+        # Opened after the snapshot: confirm it is still the same process.
+        if _read_starttime(pid) != starttime:
+            self.close()
+            self.valid = False
+        else:
+            self.valid = True
+
+    def signal(self, sig):
+        try:
+            if self.fd is not None:
+                signal.pidfd_send_signal(self.fd, sig)
+            elif _read_starttime(self.pid) == self.starttime:
+                os.kill(self.pid, sig)
+        except (ProcessLookupError, OSError):
+            pass
+
+    def alive(self):
+        if self.fd is not None:
+            p = select.poll()
+            p.register(self.fd, select.POLLIN)
+            return not p.poll(0)
+        return _read_starttime(self.pid) == self.starttime
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+
+def _wait_exit(pinned, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        alive = [p for p in pinned if p.alive()]
+        if not alive or time.monotonic() >= deadline:
+            return alive
+        time.sleep(0.02)
+
+
+def _terminate(targets):
+    """SIGTERM, a grace period, then SIGKILL for what is still running."""
+    pinned = [p for p in (_Pinned(pid, start) for pid, start in targets) if p.valid]
+    try:
+        for p in pinned:
+            p.signal(signal.SIGTERM)
+        survivors = _wait_exit(pinned, TERM_GRACE)
+        for p in survivors:
+            p.signal(signal.SIGKILL)
+        _wait_exit(survivors, KILL_WAIT)
+    finally:
+        for p in pinned:
+            p.close()
+
+
+def _client(address):
+    for c in hyprctl_json(["clients"]) or []:
+        if c.get("address") == address:
+            return c
+    return None
+
+
 def _quickshell_repo_dir():
     state_path = os.path.expanduser("~/.local/state/dxrice/repo_path")
     try:
@@ -172,14 +365,14 @@ def _subtree_owns_another_window(subtree, exclude_address):
     with the single resolved pid) is what actually catches the Chromium/
     Electron case, where a window's immediate pid is a renderer, not the
     main process this function climbs to."""
+    return _windows_sharing(subtree, exclude_address) > 0
+
+
+def _windows_sharing(subtree, exclude_address):
+    """How many OTHER windows belong to a process in this subtree."""
     subtree_set = set(subtree)
-    clients = hyprctl_json(["clients"]) or []
-    for c in clients:
-        if c.get("address") == exclude_address:
-            continue
-        if c.get("pid") in subtree_set:
-            return True
-    return False
+    return sum(1 for c in hyprctl_json(["clients"]) or []
+               if c.get("address") != exclude_address and c.get("pid") in subtree_set)
 
 
 def main():
@@ -227,29 +420,38 @@ def main():
     # window the user never targeted.
     if not pid:
         return
+    # Still the same window, still the same process? A window that closed
+    # late needs nothing more; an address that now reports another pid
+    # means the target can no longer be trusted.
+    current = _client(address) if address else None
+    if current is None or current.get("pid") != pid:
+        return
     root = _find_root(pid)
+    reason = _protection_reason(pid) or _protection_reason(root)
+    if reason:
+        _notify("SUPER+C: not force-quitting", f"The window ignored the close request, but {reason}.")
+        return
     subtree = _collect_subtree(root)
-    if _subtree_owns_another_window(subtree, exclude_address=address):
+    others = _windows_sharing(subtree, exclude_address=address)
+    if others:
         # A sibling window shares this process tree -- there is no safe
         # way to force this one specific window closed without risking
         # the sibling, so this deliberately does nothing further rather
         # than guess. The per-window close request above has already
         # been sent; if the app is going to honor it late, that stands.
+        _notify("SUPER+C: not force-quitting",
+                f"This window ignored the close request, and its process also runs {others} other "
+                f"window{'s' if others != 1 else ''}, which force-quitting would close too. "
+                "Quit it from the app, or close its other windows first.")
         return
 
-    for p in subtree:
-        try:
-            os.kill(p, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-
-    time.sleep(0.3)
-
-    for p in subtree:
-        try:
-            os.kill(p, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+    targets = _kill_targets(subtree, root)
+    # Last check, after every target is identified: the window must still
+    # be the one that was asked to close.
+    current = _client(address)
+    if current is None or current.get("pid") != pid:
+        return
+    _terminate(targets)
 
 
 if __name__ == "__main__":

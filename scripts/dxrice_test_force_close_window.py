@@ -29,6 +29,7 @@ Run: python3 scripts/dxrice_test_force_close_window.py [-v]
 import importlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -87,6 +88,11 @@ class TestForceCloseWindow(unittest.TestCase):
         importlib.reload(fcw)
         fcw.CLOSE_WAIT_TIMEOUT = 0.2
         fcw.CLOSE_WAIT_POLL = 0.02
+        fcw.TERM_GRACE = 0.5
+        fcw.KILL_WAIT = 0.5
+        # Never a real notification from a test.
+        self.notes = []
+        fcw._notify = lambda summary, body: self.notes.append((summary, body))
         self._procs = []
 
     def tearDown(self):
@@ -383,6 +389,258 @@ class TestForceCloseWindow(unittest.TestCase):
     def test_no_active_window_is_a_safe_noop(self):
         fcw.hyprctl_json = lambda args: None
         fcw.main()  # must not raise
+
+
+FAKE_APP = r"""
+import os, signal, sys, time
+marker, mode = sys.argv[1], sys.argv[2]
+def on_term(*_):
+    if mode == "ignore-term":
+        with open(marker + ".term", "w") as f:
+            f.write(repr(time.monotonic()))
+        return
+    with open(marker, "w") as f:
+        f.write("clean-exit")
+    sys.exit(0)
+signal.signal(signal.SIGTERM, on_term)
+if mode == "with-child":
+    import subprocess
+    child = subprocess.Popen(["sleep", "300"])
+    with open(marker + ".child", "w") as f:
+        f.write(str(child.pid))
+with open(marker + ".ready", "w") as f:
+    f.write("1")
+while True:
+    time.sleep(0.05)
+"""
+
+
+class TestTermination(unittest.TestCase):
+    """The force-quit fallback itself: graceful first, pid-reuse safe,
+    validated against the live window list, never touching the desktop's
+    own processes. Only fake apps (python/sleep children of this test) are
+    ever signalled."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="dxrice_test_term_")
+        cls.app = os.path.join(cls.tmp, "fake_app.py")
+        with open(cls.app, "w") as f:
+            f.write(FAKE_APP)
+        # Its own executable name: a plain python3 child of this (python3)
+        # test would climb to the test process as its "root", which the
+        # closing script rightly refuses to touch as its own ancestor.
+        cls.interp = os.path.join(cls.tmp, "fakeapp")
+        shutil.copy(os.path.realpath(sys.executable), cls.interp)
+        os.chmod(cls.interp, 0o755)
+        cls.env = dict(os.environ, PYTHONHOME=sys.base_prefix)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def setUp(self):
+        importlib.reload(fcw)
+        fcw.CLOSE_WAIT_TIMEOUT = 0.1
+        fcw.CLOSE_WAIT_POLL = 0.02
+        fcw.TERM_GRACE = 0.6
+        fcw.KILL_WAIT = 0.5
+        self.notes = []
+        fcw._notify = lambda summary, body: self.notes.append((summary, body))
+        self._procs = []
+
+    def tearDown(self):
+        for p in self._procs:
+            if p.poll() is None:
+                p.kill()
+                p.wait(timeout=2)
+            child = getattr(p, "child_pid", None)
+            if child:
+                try:
+                    os.kill(child, 9)
+                except ProcessLookupError:
+                    pass
+
+    def _fake_app(self, mode="normal"):
+        marker = tempfile.mktemp(prefix="m", dir=self.tmp)
+        p = subprocess.Popen([self.interp, self.app, marker, mode], env=self.env)
+        self._procs.append(p)
+        deadline = time.monotonic() + 5
+        while not os.path.exists(marker + ".ready") and time.monotonic() < deadline:
+            time.sleep(0.02)
+        p.marker = marker
+        if mode == "with-child":
+            with open(marker + ".child") as f:
+                p.child_pid = int(f.read())
+        return p
+
+    def _renamed(self, name):
+        path = os.path.join(self.tmp, name)
+        if not os.path.exists(path):
+            shutil.copy(shutil.which("sleep"), path)
+            os.chmod(path, 0o755)
+        p = subprocess.Popen([path, "300"])
+        self._procs.append(p)
+        time.sleep(0.1)
+        return p
+
+    def _ignores_close(self, pid, address="0xA", extra=()):
+        fake = FakeHypr(clients=[{"address": address, "pid": pid}, *extra], focused_address=address,
+                        honors_close=False)
+        fcw.hyprctl_json = fake.hyprctl_json
+        fcw.close_window = fake.close_window
+        return fake
+
+    @staticmethod
+    def _alive(pid):
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                return f.read().split(")")[-1].split()[0] != "Z"
+        except FileNotFoundError:
+            return False
+
+    def test_sigterm_first_and_a_clean_exit_is_allowed(self):
+        app = self._fake_app("normal")
+        self._ignores_close(app.pid)
+        t0 = time.monotonic()
+        fcw.main()
+        app.wait(timeout=3)
+        self.assertEqual(open(app.marker).read(), "clean-exit", "the app never got to handle SIGTERM")
+        self.assertEqual(app.returncode, 0, "exited by a signal instead of on its own")
+        self.assertLess(time.monotonic() - t0, fcw.TERM_GRACE + 0.5, "waited out the grace period for an app that had exited")
+
+    def test_sigkill_only_after_the_grace_period(self):
+        app = self._fake_app("ignore-term")
+        self._ignores_close(app.pid)
+        fcw.main()
+        app.wait(timeout=3)
+        killed_at = time.monotonic()
+        self.assertEqual(app.returncode, -signal.SIGKILL)
+        with open(app.marker + ".term") as f:
+            term_at = float(f.read())
+        # CLOCK_MONOTONIC is system-wide: the app's own SIGTERM timestamp and
+        # this process's clock are comparable.
+        self.assertGreaterEqual(killed_at - term_at, fcw.TERM_GRACE - 0.05,
+                                "SIGKILL came before the grace period ended")
+
+    def test_child_processes_go_with_the_app(self):
+        app = self._fake_app("with-child")
+        self._ignores_close(app.pid)
+        fcw.main()
+        app.wait(timeout=3)
+        deadline = time.monotonic() + 2
+        while self._alive(app.child_pid) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertFalse(self._alive(app.child_pid), "the app's child process was left running")
+
+    def test_recycled_pid_is_never_signalled(self):
+        """The process identified at the start is gone and its pid now
+        names a different process (modelled by a changed start time): the
+        pinned handle must refuse to signal it."""
+        bystander = self._renamed("bystander")
+        real = fcw._read_starttime(bystander.pid)
+        pinned = fcw._Pinned(bystander.pid, real + 12345)
+        self.assertFalse(pinned.valid)
+        fcw._terminate([(bystander.pid, real + 12345)])
+        time.sleep(0.2)
+        self.assertIsNone(bystander.poll(), "a process with a different start time was signalled")
+
+    def test_window_that_changed_process_is_not_killed(self):
+        app = self._fake_app("normal")
+        other = self._fake_app("normal")
+        fake = self._ignores_close(app.pid)
+        real = fake.hyprctl_json
+
+        def swapped(args):
+            out = real(args)
+            if args == ["clients"]:
+                return [dict(c, pid=other.pid) for c in out]
+            return out
+        fcw.hyprctl_json = swapped
+        fcw.main()
+        time.sleep(0.2)
+        self.assertIsNone(app.poll(), "killed although the address now reports another process")
+        self.assertIsNone(other.poll(), "killed the process the address now reports")
+
+    def test_window_that_closed_late_is_left_alone(self):
+        app = self._fake_app("normal")
+        fake = self._ignores_close(app.pid)
+        real_collect = fcw._collect_subtree
+
+        def collect_then_window_closes(root):
+            # The app honours the close just as the fallback is working out
+            # what to kill: by the final check, the window is gone.
+            out = real_collect(root)
+            fake.clients = []
+            return out
+        fcw._collect_subtree = collect_then_window_closes
+        fcw.main()
+        time.sleep(0.2)
+        self.assertIsNone(app.poll(), "killed an app whose window had already closed")
+
+    def test_desktop_components_are_never_force_quit(self):
+        for name in ("Hyprland", "Xwayland", "pipewire", "polkit-kde-authentication-agent-1", "hyprlock"):
+            with self.subTest(name=name):
+                proc = self._renamed(name)
+                self._ignores_close(proc.pid)
+                fcw.main()
+                time.sleep(0.15)
+                self.assertIsNone(proc.poll(), f"{name} was force-quit")
+                self.assertTrue(self.notes and "part of the desktop" in self.notes[-1][1], self.notes)
+
+    def test_protected_process_inside_the_app_tree_is_spared(self):
+        app = self._fake_app("normal")
+        guarded = self._renamed("pipewire")
+        self._ignores_close(app.pid)
+        fcw._collect_subtree = lambda root: [app.pid, guarded.pid]
+        real_ppid = fcw._read_ppid
+        fcw._read_ppid = lambda pid: app.pid if pid == guarded.pid else real_ppid(pid)
+        fcw.main()
+        app.wait(timeout=3)
+        self.assertIsNone(guarded.poll(), "a protected process inside the app's tree was killed")
+
+    def test_another_users_process_is_refused(self):
+        app = self._fake_app("normal")
+        self._ignores_close(app.pid)
+        real_uid = fcw._owner_uid
+        fcw._owner_uid = lambda pid: 0 if pid == app.pid else real_uid(pid)
+        fcw.main()
+        time.sleep(0.15)
+        self.assertIsNone(app.poll())
+        self.assertIn("another user", self.notes[-1][1])
+
+    def test_this_scripts_own_ancestors_are_refused(self):
+        app = self._fake_app("normal")
+        self._ignores_close(app.pid)
+        fcw._own_ancestors = lambda: {os.getpid(), app.pid}
+        fcw.main()
+        time.sleep(0.15)
+        self.assertIsNone(app.poll(), "an ancestor of the closing script was killed")
+
+    def test_shared_process_is_explained_not_killed(self):
+        app = self._fake_app("normal")
+        self._ignores_close(app.pid, extra=[{"address": "0xB", "pid": app.pid}, {"address": "0xC", "pid": app.pid}])
+        fcw.main()
+        time.sleep(0.15)
+        self.assertIsNone(app.poll())
+        self.assertEqual(len(self.notes), 1)
+        self.assertIn("2 other windows", self.notes[0][1])
+
+    def test_never_signals_a_process_group(self):
+        """Every signal goes to one pinned process: no os.killpg, and no
+        negative pid to os.kill (a group)."""
+        app = self._fake_app("ignore-term")
+        self._ignores_close(app.pid)
+        sent = []
+        real_kill = os.kill
+        fcw.os.killpg = lambda *a: sent.append(("killpg", a))
+        fcw.os.kill = lambda pid, sig: (sent.append(("kill", pid)), real_kill(pid, sig))
+        try:
+            fcw.main()
+        finally:
+            fcw.os.kill = real_kill
+        app.wait(timeout=3)
+        self.assertFalse([s for s in sent if s[0] == "killpg" or s[1] <= 0], sent)
 
 
 if __name__ == "__main__":
