@@ -112,7 +112,8 @@ class ThemeDraftTest(unittest.TestCase):
         self.assertFalse(self.s.ev(f"{TE}.applying"))
         self.assertFalse(self.s.ev(f"{TE}.dirty"), "still marked unapplied after a successful Apply")
         self.assertEqual(self.disk_theme()["accent"], "123456")
-        self.assertEqual(self.message(), "")
+        # No error and no draft notice -- only the brief success line.
+        self.assertIn(self.message(), ("", "\u2713  Applied"))
         self.close_via("closeCurrent")
         self.open()
         self.assertEqual(self.s.ev(f"{TE}.accent"), "123456")

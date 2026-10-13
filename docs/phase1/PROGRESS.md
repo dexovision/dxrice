@@ -1,7 +1,8 @@
 # Phase 1 progress (branch `phase1`, worktree `/home/dexo/dxrice-phase1`)
 
 **Reports: [REPORT.md](REPORT.md) (phase 1), [REPORT_CLOUD_UI.md](REPORT_CLOUD_UI.md)
-(cloud auto-placement + UI pass).** This file is the running log.
+(cloud auto-placement + UI pass), [REPORT_PHASE2.md](REPORT_PHASE2.md) (visual
+modernization).** This file is the running log.
 
 Live checkout `~/dxrice` is untouched at `c959d2e`. Nothing pushed.
 Validation is offscreen / sandboxed, plus a throwaway **nested Hyprland**
@@ -25,6 +26,14 @@ user's real session, real Quickshell and real files were never touched.
 | `4539457` | Primary buttons neutral (accent only marks small things); clearer Theme editor copy |
 | `e12c252` | Offscreen gallery tool for every surface |
 | `69836bc` | Lock screen clock 12h -> 24h like the rest of the shell |
+
+## Phase 2: visual modernization (see REPORT_PHASE2.md)
+
+| Commit | What |
+|---|---|
+| `04002d6` | Proportional interface type (Noto Sans default, font_family kept for terminal/bar/icons); one slider, field and card language; Wi-Fi dialog |
+| `a32c88b` | OSD as a click-through pill; lock clock |
+| `49e6247` | Presets mark the current one, round swatches, two-tone clock, hex field |
 
 ## Cloud auto-placement + UI pass (see REPORT_CLOUD_UI.md)
 
