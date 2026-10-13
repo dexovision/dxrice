@@ -53,7 +53,14 @@ Item {
     // every expanded panel, so the corner is literally invariant through a
     // morph rather than easing between two different roundings.
     property real maxRadius: ShellSurface.radius
-    property color surfaceColor: Theme.panel
+    // An island that opens a panel lightens slightly under the pointer
+    // (the host sets `hovered` from its own MouseArea) -- the same state
+    // layer every button uses, so the bar reads as clickable before the
+    // click, not after.
+    property bool hovered: false
+    property bool pressed: false
+    property color surfaceColor: (root.hovered || root.pressed) && !root.expanded
+        ? Theme.stateFill(Theme.panel, root.hovered, root.pressed) : Theme.panel
     property int elevation: 3
 
     // Vertical centre of the close button, in surface coordinates. Defaults
@@ -209,6 +216,7 @@ Item {
         bottomLeftRadius: root.pinY === "bottom" ? originRadius : radius
         bottomRightRadius: root.pinY === "bottom" ? originRadius : radius
         color: root.surfaceColor
+        Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         border.width: 1
         border.color: Theme.borderIdle
         clip: true

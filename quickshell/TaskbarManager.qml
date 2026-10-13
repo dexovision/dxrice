@@ -814,22 +814,20 @@ Item {
                 // Only when the dock config has system modules at all -- with
                 // Quick Settings providing them (the usual setup) this was a
                 // heading and a sentence over nothing.
-                Column {
+                // A card like Options and Shortcuts above: the three groups
+                // are one hierarchy, not two cards and a list loose on the
+                // panel with a heading in a different style.
+                Card {
                     width: body.width
-                    spacing: 2
-                    visible: root.loaded && root.systemModuleIds().length > 0
-                    Text { text: "System Modules"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
-                    Text {
-                        width: parent.width
-                        text: "Click actions for the volume/network/CPU/RAM/clock modules"
-                        color: Theme.text; opacity: Theme.opacityMuted; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
-                        elide: Text.ElideRight
-                    }
-                }
-                Column {
-                    width: body.width
+                    title: "System modules"
                     spacing: Theme.padSm
                     visible: root.loaded && root.systemModuleIds().length > 0
+                    Text {
+                        width: parent.width
+                        text: "What clicking the volume, network, CPU, memory and clock modules does"
+                        color: Theme.text; opacity: Theme.opacityMuted; font.pixelSize: Theme.fontSizeSmaller; font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
                     Repeater {
                         model: root.loaded ? root.systemModuleIds() : []
                         delegate: Column {

@@ -162,5 +162,39 @@ class ContentTransitionTest(unittest.TestCase):
             s.close()
 
 
+DOCK = "surfaces().filter(w => _name(w).indexOf('Dock') === 0)[0]"
+
+
+class HoverAffordanceTest(unittest.TestCase):
+    def test_dock_icon_names_itself_without_taking_clicks(self):
+        s = Scene(width=1920, height=1080)
+        try:
+            tile = s.ev(f"(function(){{ const d = {DOCK}; const t = findNamed('dockTile:Firefox'); d.hoverTile = t; return t.modelData.label; }})()")
+            self.assertFalse(s.ev("findNamed('dockTooltip').active"), "the name appeared on a fly-past")
+            s.wait(700)
+            self.assertTrue(s.ev("findNamed('dockTooltip').active"))
+            self.assertEqual(s.ev("findNamed('dockTooltip').text"), tile)
+            pos = json.loads(s.ev("(function(){ const t = findNamed('dockTooltip'); const p = t.mapToItem(null, t.width / 2, t.height / 2); return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
+            self.assertNotEqual(s.input_owner(*pos), "Dock", "the tooltip intercepts input")
+            # Pressing the icon hides it; leaving resets.
+            s.ev("findNamed('dockTooltip').dismissed = true")
+            self.assertFalse(s.ev("findNamed('dockTooltip').active"))
+            s.ev(f"{DOCK}.hoverTile = null")
+            self.assertFalse(s.ev("findNamed('dockTooltip').dismissed"))
+        finally:
+            s.close()
+
+    def test_bar_islands_brighten_under_the_pointer(self):
+        s = Scene(width=1920, height=1080)
+        try:
+            for name in ("clockIsland", "statusIsland"):
+                rest = s.ev(f"findNamed('{name}').surfaceColor.hslLightness")
+                s.ev(f"findNamed('{name}').hovered = true")
+                self.assertGreater(s.ev(f"findNamed('{name}').surfaceColor.hslLightness"), rest + 0.01, name)
+                s.ev(f"findNamed('{name}').hovered = false")
+        finally:
+            s.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

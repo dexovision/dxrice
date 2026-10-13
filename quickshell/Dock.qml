@@ -224,6 +224,11 @@ PanelWindow {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        onContainsMouseChanged: {
+                            if (containsMouse) root.hoverTile = shortcutTile;
+                            else if (root.hoverTile === shortcutTile) root.hoverTile = null;
+                        }
+                        onPressed: dockTip.dismissed = true
                         onClicked: {
                             // Must mirror TaskbarManager.unwrapShellCmd's
                             // un-escaping exactly -- this regex extracts
@@ -261,6 +266,59 @@ PanelWindow {
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: root.taskbarRequested()
             }
+        }
+    }
+
+    // ---- the hovered icon's name, above the dock ----
+    // Icon-only tiles say nothing about what they launch until clicked.
+    // Shown after the pointer rests a moment (not on a fly-past), then
+    // follows the pointer from icon to icon at once. Not part of `mask`,
+    // so it can never take a click meant for whatever is under it; hidden
+    // while the Taskbar editor is open and once a tile is pressed.
+    property Item hoverTile: null
+    onHoverTileChanged: {
+        if (!root.hoverTile) { tipDelay.stop(); dockTip.dismissed = false; dockTip.shown = false; return; }
+        if (dockTip.shown) dockTip.text = root.hoverTile.modelData.label;
+        else tipDelay.restart();
+    }
+    Timer {
+        id: tipDelay
+        interval: 450
+        onTriggered: if (root.hoverTile) { dockTip.text = root.hoverTile.modelData.label; dockTip.shown = true; }
+    }
+    Rectangle {
+        id: dockTip
+        objectName: "dockTooltip"
+        property bool shown: false
+        property bool dismissed: false
+        property string text: ""
+        readonly property bool active: shown && !dismissed && root.hoverTile !== null && !dockIsland.expanded
+        readonly property point anchorPt: root.hoverTile
+            ? root.hoverTile.mapToItem(root.contentItem, root.hoverTile.width / 2, 0) : Qt.point(0, 0)
+        width: tipLabel.implicitWidth + Theme.padMd * 2
+        height: tipLabel.implicitHeight + Theme.padSm * 2
+        radius: height / 2
+        x: Math.max(root.edgeMargin, Math.min(root.width - width - root.edgeMargin, anchorPt.x - width / 2))
+        y: dockIsland.y - height - Theme.padSm + (active ? 0 : Theme.contentShift / 2)
+        color: Theme.withAlpha(Theme.panelTone, 0.96)
+        border.width: Theme.borderWidth
+        border.color: Theme.border
+        opacity: active ? 1 : 0
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+        Behavior on y { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter } }
+        Behavior on x {
+            enabled: dockTip.opacity > 0.5
+            NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+        }
+        Text {
+            id: tipLabel
+            anchors.centerIn: parent
+            text: dockTip.text
+            color: Theme.textActive
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmaller
+            font.weight: Font.Medium
         }
     }
 

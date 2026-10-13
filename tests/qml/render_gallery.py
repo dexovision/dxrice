@@ -76,7 +76,18 @@ def scenes():
              " it.parent = overlay; it.width = overlay.width; it.height = overlay.height; })()")
         _settle(s, 500)
 
-    out = {"idle": idle, "calendar": panel("calendar"), "taskbar": panel("taskbar"), "add_shortcut": add_shortcut,
+    def dock_tooltip(s):
+        s.ev("(function(){ const d = surfaces().filter(w => _name(w).indexOf('Dock') === 0)[0];"
+             " d.hoverTile = findNamed('dockTile:Firefox'); })()")
+        _settle(s, 900)
+
+    def theme_busy(s):
+        s.ev("panels.open('theme')")
+        _settle(s, 600)
+        s.ev(f"{TE}.applying = true")
+        _settle(s, 300)
+
+    out = {"idle": idle, "dock_tooltip": dock_tooltip, "theme_busy": theme_busy, "calendar": panel("calendar"), "taskbar": panel("taskbar"), "add_shortcut": add_shortcut,
            "qs_overview": qs_tab("overview"), "qs_media": qs_tab("media"), "qs_performance": qs_tab("performance"),
            "picker": picker, "osd": osd, "lock": lock}
     for cat in ("colors", "blur", "layout", "lock", "fonts", "experience", "wallpaper"):

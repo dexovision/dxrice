@@ -384,7 +384,10 @@ PanelWindow {
             interval: 1000; running: true; repeat: true; triggeredOnStart: true
             onTriggered: clockText.text = Qt.formatDateTime(new Date(), "HH:mm   MMM d")
         }
+        hovered: clockArea.containsMouse
+        pressed: clockArea.pressed
         MouseArea {
+            id: clockArea
             anchors.fill: parent
             enabled: !clockIsland.expanded
             hoverEnabled: true
@@ -504,7 +507,10 @@ PanelWindow {
                 }
             }
         }
+        hovered: statusArea.containsMouse
+        pressed: statusArea.pressed
         MouseArea {
+            id: statusArea
             anchors.fill: parent
             enabled: !statusIsland.expanded
             hoverEnabled: true
