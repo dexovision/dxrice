@@ -362,33 +362,17 @@ Item {
                             Rectangle { width: parent.width / 2; height: parent.height; color: root.draft; topRightRadius: Theme.roundingSm - 1; bottomRightRadius: Theme.roundingSm - 1 }
                         }
                     }
-                    Rectangle {
+                    InputField {
                         width: parent.width - 52 - parent.spacing
                         height: parent.height
-                        radius: Theme.roundingSm
-                        color: Theme.inputFill
-                        border.width: Theme.borderWidth
-                        border.color: hexInput.activeFocus ? Theme.withAlpha(Theme.accent, 0.6) : Theme.borderIdle
-                        Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
-                        Text {
-                            id: hashGlyph
-                            anchors.left: parent.left
-                            anchors.leftMargin: Theme.padMd
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "#"
-                            color: Theme.text
-                            opacity: Theme.opacityMuted
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeNormal
-                        }
+                        glyph: "#"
+                        input: hexInput
                         TextInput {
                             id: hexInput
                             objectName: "colorPopoverHex"
-                            anchors.left: hashGlyph.right
-                            anchors.leftMargin: Theme.padXs
-                            anchors.right: parent.right
-                            anchors.rightMargin: Theme.padMd
-                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.fill: parent
+                            verticalAlignment: TextInput.AlignVCenter
+                            clip: true
                             color: Theme.textActive
                             font.family: Theme.fontMono
                             font.pixelSize: Theme.fontSizeNormal

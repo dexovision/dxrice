@@ -377,12 +377,23 @@ PanelWindow {
             anchors.centerIn: parent
             color: Theme.textActive
             font.family: Theme.fontFamily
-            font.weight: Font.DemiBold
             font.pixelSize: Theme.fontSizeNormal
+            font.features: { "tnum": 1 }
+            // The time leads; the date follows, lighter and quieter -- one
+            // string of spaced-out text read as a single undifferentiated
+            // label in a proportional face.
+            textFormat: Text.StyledText
+            property string time: ""
+            property string date: ""
+            text: "<b>" + time + "</b>&nbsp;&nbsp;&nbsp;<font color=\"" + Theme.text + "\">" + date + "</font>"
         }
         Timer {
             interval: 1000; running: true; repeat: true; triggeredOnStart: true
-            onTriggered: clockText.text = Qt.formatDateTime(new Date(), "HH:mm   MMM d")
+            onTriggered: {
+                const now = new Date();
+                clockText.time = Qt.formatDateTime(now, "HH:mm");
+                clockText.date = Qt.formatDateTime(now, "ddd MMM d");
+            }
         }
         hovered: clockArea.containsMouse
         pressed: clockArea.pressed

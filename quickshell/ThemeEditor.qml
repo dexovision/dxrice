@@ -579,7 +579,7 @@ PanelWindow {
                 Rectangle {
                     id: swatch
                     objectName: "swatch_" + modelData.key
-                    width: 32; height: 24; radius: Theme.roundingXs
+                    width: 28; height: 28; radius: 14
                     color: "#" + root[modelData.key]
                     border.width: root.pickerOpen && root.editingColorKey === modelData.key ? 2 : Theme.borderWidth
                     border.color: root.pickerOpen && root.editingColorKey === modelData.key ? Theme.accent : Theme.borderIdle
@@ -1149,13 +1149,32 @@ PanelWindow {
                     delegate: Rectangle {
                         id: presetSwatch
                         readonly property var colors: root.presets[modelData]
+                        // The preset the draft currently matches is marked
+                        // (accent edge + check), the rest are quiet tonal
+                        // chips -- before, nothing said which one you had.
+                        readonly property bool current: ["glass_bg", "glass_bg_active", "glass_text", "glass_text_active", "accent"]
+                            .every((k) => String(root[k]).toLowerCase() === String(presetSwatch.colors[k]).toLowerCase())
+                        objectName: "preset_" + modelData
                         width: 108
                         height: 64
-                        radius: Theme.roundingSm
-                        color: presetArea.containsMouse ? Theme.layer1 : "transparent"
-                        border.width: Theme.borderWidth
-                        border.color: Theme.borderIdle
+                        radius: Theme.roundingMd
+                        color: Theme.stateFill(Theme.cardTone, presetArea.containsMouse, presetArea.pressed)
+                        border.width: presetSwatch.current ? 2 : 0
+                        border.color: Theme.accent
+                        scale: Theme.pressScale(presetArea.pressed)
                         Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                        Behavior on scale { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
+                        Text {
+                            visible: presetSwatch.current
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.margins: 6
+                            text: "\u2713"
+                            color: Theme.accent
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.weight: Font.DemiBold
+                        }
 
                         Column {
                             anchors.centerIn: parent
@@ -1163,16 +1182,17 @@ PanelWindow {
                             Row {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 spacing: 4
-                                Rectangle { width: 16; height: 16; radius: Theme.roundingXs; color: "#" + presetSwatch.colors.glass_bg }
-                                Rectangle { width: 16; height: 16; radius: Theme.roundingXs; color: "#" + presetSwatch.colors.glass_bg_active }
-                                Rectangle { width: 16; height: 16; radius: Theme.roundingFull; color: "#" + presetSwatch.colors.accent }
+                                Rectangle { width: 16; height: 16; radius: 8; color: "#" + presetSwatch.colors.glass_bg; border.width: 1; border.color: Theme.borderIdle }
+                                Rectangle { width: 16; height: 16; radius: 8; color: "#" + presetSwatch.colors.glass_bg_active; border.width: 1; border.color: Theme.borderIdle }
+                                Rectangle { width: 16; height: 16; radius: 8; color: "#" + presetSwatch.colors.accent }
                             }
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: modelData
-                                color: Theme.text
+                                color: presetSwatch.current ? Theme.textActive : Theme.text
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
+                                font.pixelSize: Theme.fontSizeSmaller
+                                font.weight: presetSwatch.current ? Font.Medium : Font.Normal
                             }
                         }
                         MouseArea {
@@ -1629,6 +1649,7 @@ PanelWindow {
 
                 PreviewRegion {
                     width: (parent.width - parent.spacing * 2) / 3
+                    height: 92   // one height for the three demos, so the row reads as a row
                     Column {
                         width: parent.width
                         spacing: Theme.padSm
@@ -1657,6 +1678,7 @@ PanelWindow {
 
                 PreviewRegion {
                     width: (parent.width - parent.spacing * 2) / 3
+                    height: 92   // one height for the three demos, so the row reads as a row
                     Column {
                         width: parent.width
                         spacing: Theme.padSm
@@ -1673,6 +1695,7 @@ PanelWindow {
 
                 PreviewRegion {
                     width: (parent.width - parent.spacing * 2) / 3
+                    height: 92   // one height for the three demos, so the row reads as a row
                     Column {
                         width: parent.width
                         spacing: Theme.padSm
@@ -1696,7 +1719,7 @@ PanelWindow {
             Card {
                 width: parent.width
                 padding: Theme.pad2xl
-                title: "Controls"
+                title: "Motion and spacing"
                 SliderList { width: parent.width; fields: root.experienceFields }
             }
 
