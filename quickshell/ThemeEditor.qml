@@ -906,7 +906,7 @@ PanelWindow {
                         anchors.fill: parent
                         contentHeight: paneLoader.item ? paneLoader.item.implicitHeight + Theme.padLg * 2 : 0
                         clip: true
-                        Behavior on contentY { NumberAnimation { duration: Theme.durationFast } }
+                        Behavior on contentY { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
                         Loader {
                             id: paneLoader
@@ -1056,7 +1056,7 @@ PanelWindow {
                         color: presetArea.containsMouse ? Theme.layer1 : "transparent"
                         border.width: Theme.borderWidth
                         border.color: Theme.borderIdle
-                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                        Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
                         Column {
                             anchors.centerIn: parent
