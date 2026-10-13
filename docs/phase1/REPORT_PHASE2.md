@@ -211,4 +211,4 @@ Verified from this session's actions and logs, not assumed:
 | `04002d6` | Proportional interface type; one slider, field and card language |
 | `a32c88b` | OSD as a click-through pill; lock clock carries the screen |
 | `49e6247` | Refinement pass: presets, swatches, clock, last hand-drawn field |
-| (this) | Report, evidence, theme-draft test updated for the success state |
+| `b989685` | Report, evidence, theme-draft test updated for the success state |
