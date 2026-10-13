@@ -86,7 +86,10 @@ Item {
     // each island sits ShellSurface.gap from the top AND needs the same gap
     // free at the bottom, so this is the real ceiling on how tall the pane
     // below the header can ever be before the panel would run off-screen.
-    readonly property real maxAvailableHeight: ShellSurface.screenHeight - ShellSurface.gap * 2 - ShellSurface.unit
+    // ...and the dock's reserved strip: grown to fit its content on a short
+    // screen it would otherwise reach down over the dock.
+    readonly property real maxAvailableHeight: ShellSurface.screenHeight - ShellSurface.bottomEdgeHeight
+        - ShellSurface.gap * 2 - ShellSurface.unit
     readonly property real viewportHeight: Math.max(120, Math.min(root._paneFit, maxAvailableHeight - headerStackHeight))
     readonly property real contentHeight: headerStackHeight + viewportHeight
     // What a pane can fill without scrolling: the viewport minus the pane

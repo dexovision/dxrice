@@ -137,6 +137,41 @@ class NoScrollingTest(unittest.TestCase):
             s.close()
 
 
+class PanelsStayBetweenTheBarsTest(unittest.TestCase):
+    """Sized to their content, panels must still stop at the other edge's
+    reserved strip (the top bar's and the dock's are both 52px): on a
+    short screen the Taskbar grew up over the clock island."""
+
+    STRIP = 52
+
+    def island_span(self, s, name):
+        return json.loads(s.ev(f"(function(){{ const i = findNamed('{name}'); const p = i.mapToItem(null, 0, 0);"
+                               " return JSON.stringify([p.y, p.y + i.height]); })()"))
+
+    def test_taskbar_stays_below_the_top_bar(self):
+        for w, h in ((1366, 768), (1280, 720), (1024, 768)):
+            with self.subTest(size=f"{w}x{h}"):
+                s = Scene(width=w, height=h, dock_config=ten_shortcut_dock())
+                try:
+                    s.ev("panels.open('taskbar')")
+                    s.wait(1000)
+                    top, _ = self.island_span(s, "dockIsland")
+                    self.assertGreaterEqual(top, self.STRIP, f"Taskbar top at {top}px covers the top bar")
+                finally:
+                    s.close()
+
+    def test_quick_settings_stays_above_the_dock(self):
+        s = Scene(width=1024, height=600)
+        try:
+            s.ev("addAudioDevices()")
+            s.ev("panels.open('quicksettings')")
+            s.wait(1200)
+            _, bottom = self.island_span(s, "statusIsland")
+            self.assertLessEqual(bottom, 600 - self.STRIP, f"Quick Settings bottom at {bottom}px covers the dock")
+        finally:
+            s.close()
+
+
 class ThemeEditorFitTest(unittest.TestCase):
     def test_editor_stays_above_the_dock_on_a_short_screen(self):
         """A taller editor reached over the dock at 1024x768; the colour

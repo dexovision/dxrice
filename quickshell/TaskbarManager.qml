@@ -100,7 +100,10 @@ Item {
     readonly property real addAnchorX: addChip.x + addChip.width / 2
     readonly property int shortcutCount: root.loaded ? (root.cfg["modules-left"] || []).length : 0
 
-    readonly property real maxAvailableBodyHeight: ShellSurface.screenHeight - ShellSurface.gap * 2 - ShellSurface.dockUnit - header.height
+    // Bounded by the top bar's reserved strip as well: sized to its content
+    // on a short screen the panel otherwise grew up over the clock island.
+    readonly property real maxAvailableBodyHeight: ShellSurface.screenHeight - ShellSurface.topEdgeHeight
+        - ShellSurface.gap * 2 - ShellSurface.dockUnit - header.height
     // Sized to its whole content: panels don't scroll. A flat 360px cap cut
     // the shortcut list off mid-row (at the 6th shortcut) on a 1080p screen
     // with most of it still free. Only a screen too short for the content
