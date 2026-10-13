@@ -279,6 +279,41 @@ def chown_tree_to_user(root_path, uid, gid):
                 pass
 
 
+def install_theme_dir(staging_dir, target_dir):
+    """Puts a verified theme in place without a window where the login
+    screen points at a broken one. This used to rmtree the live theme and
+    then copytree the new one over it: a copy that failed half way (full
+    disk, I/O error) left SDDM -- still configured to use it -- with a
+    partial theme. Now the copy goes to a sibling directory first; only a
+    complete copy is swapped in (two renames on the same filesystem), and
+    the old theme is removed after that. A failure at any point leaves the
+    previous theme exactly as it was."""
+    parent = os.path.dirname(target_dir.rstrip("/"))
+    base = os.path.basename(target_dir.rstrip("/"))
+    incoming = os.path.join(parent, f".{base}.incoming-{os.getpid()}")
+    outgoing = os.path.join(parent, f".{base}.outgoing-{os.getpid()}")
+    for leftover in (incoming, outgoing):
+        if os.path.isdir(leftover):
+            shutil.rmtree(leftover)
+    try:
+        shutil.copytree(staging_dir, incoming)
+    except BaseException:
+        shutil.rmtree(incoming, ignore_errors=True)
+        raise
+    had_old = os.path.isdir(target_dir)
+    if had_old:
+        os.rename(target_dir, outgoing)
+    try:
+        os.rename(incoming, target_dir)
+    except BaseException:
+        if had_old:
+            os.rename(outgoing, target_dir)
+        shutil.rmtree(incoming, ignore_errors=True)
+        raise
+    if had_old:
+        shutil.rmtree(outgoing, ignore_errors=True)
+
+
 def backup_current_state(home, uid, gid):
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     backup_root = os.path.join(dxrice_xdg.data_dir(), "backups", f"sddm-{ts}")
@@ -355,9 +390,7 @@ def main():
         print(f"  Backed up to {backup_root}")
 
         print(f"Installing the verified theme to {SDDM_THEME_DIR} ...")
-        if os.path.isdir(SDDM_THEME_DIR):
-            shutil.rmtree(SDDM_THEME_DIR)
-        shutil.copytree(staging_dir, SDDM_THEME_DIR)
+        install_theme_dir(staging_dir, SDDM_THEME_DIR)
 
     os.makedirs(SDDM_CONF_D, exist_ok=True)
     with open(SDDM_DROPIN, "w") as f:
