@@ -184,6 +184,7 @@ PanelWindow {
     property real anim_duration_ms: 150
     property real ui_density: 1.0
     property real shadow_intensity: 1.0
+    property real text_scale: 1.0
 
     property string font_family: "JetBrainsMono Nerd Font"
     property string wallpaper: ""
@@ -221,7 +222,7 @@ PanelWindow {
         { key: "hypr_blur_vibrancy", label: "Window blur vibrancy", min: 0, max: 1, decimals: 2 },
     ]
     readonly property var layoutFields: [
-        { key: "radius", label: "Panel corner radius", min: 0, max: 30, decimals: 0, unit: "px" },
+        { key: "radius", label: "Corner roundness (panels, launcher)", min: 0, max: 30, decimals: 0 },
         { key: "hypr_rounding", label: "Window corner rounding", min: 0, max: 30, decimals: 0, unit: "px" },
         { key: "hypr_gaps_in", label: "Gaps between windows", min: 0, max: 40, decimals: 0, unit: "px" },
         { key: "hypr_gaps_out", label: "Gaps to screen edge", min: 0, max: 60, decimals: 0, unit: "px" },
@@ -236,6 +237,9 @@ PanelWindow {
         { key: "lock_blur_vibrancy", label: "Blur vibrancy", min: 0, max: 1, decimals: 2 },
         { key: "lock_bg_opacity", label: "Input opacity", min: 0, max: 1, decimals: 2 },
     ]
+    readonly property var shellTextFields: [
+        { key: "text_scale", label: "Shell text size (bar, panels, this editor)", min: 0.8, max: 1.4, decimals: 2 },
+    ]
     readonly property var fontSizeFields: [
         { key: "font_size_waybar", label: "Taskbar text size", min: 8, max: 24, decimals: 0 },
         { key: "font_size_waybar_icons", label: "Taskbar app icon size", min: 8, max: 40, decimals: 0 },
@@ -244,7 +248,7 @@ PanelWindow {
     ]
     readonly property var experienceFields: [
         { key: "anim_duration_ms", label: "Animation speed (lower = snappier)", min: 0, max: 500, decimals: 0, unit: "ms" },
-        { key: "ui_density", label: "Settings app spacing", min: 0.5, max: 1.5, decimals: 2 },
+        { key: "ui_density", label: "Spacing inside panels", min: 0.5, max: 1.5, decimals: 2 },
         { key: "shadow_intensity", label: "Panel shadow strength (Quickshell only)", min: 0, max: 1.5, decimals: 2 },
     ]
     readonly property var presets: ({
@@ -280,14 +284,22 @@ PanelWindow {
         for (const f of blurFields) keys.push(f.key);
         for (const f of layoutFields) keys.push(f.key);
         for (const f of lockFields) keys.push(f.key);
+        for (const f of shellTextFields) keys.push(f.key);
         for (const f of fontSizeFields) keys.push(f.key);
         for (const f of experienceFields) keys.push(f.key);
         return keys;
     }
 
+    // Each field's own default, captured before the first load: a key
+    // theme.json doesn't have yet (any setting newer than the user's file)
+    // must go back to it on Revert -- only overwriting keys present in
+    // the file left such an edit in place after Revert.
+    property var _fieldDefaults: null
     function loadFromTheme(data) {
+        if (!root._fieldDefaults) root._fieldDefaults = root.snapshot();
         for (const key of allKeys()) {
             if (data[key] !== undefined) root[key] = data[key];
+            else if (root._fieldDefaults[key] !== undefined) root[key] = root._fieldDefaults[key];
         }
         // theme.json's own wallpaper field can be empty on an install that
         // never used the Theme app's own "Choose..." picker (the real
@@ -1462,8 +1474,9 @@ PanelWindow {
                 width: parent.width
                 padding: Theme.pad2xl
                 title: "Sizes"
-                TypeSizeRow { width: parent.width; label: "Taskbar text"; key: "font_size_waybar"; min: 8; max: 24; sampleText: "12:30 PM   Sep 10" }
-                TypeSizeRow { width: parent.width; label: "Taskbar app icons"; key: "font_size_waybar_icons"; min: 8; max: 40; sampleText: "★ ✎ ⚙" }
+                SliderList { width: parent.width; fields: root.shellTextFields }
+                TypeSizeRow { width: parent.width; label: "Waybar text (fallback bar)"; key: "font_size_waybar"; min: 8; max: 24; sampleText: "12:30 PM   Sep 10" }
+                TypeSizeRow { width: parent.width; label: "Waybar icons (fallback bar)"; key: "font_size_waybar_icons"; min: 8; max: 40; sampleText: "★ ✎ ⚙" }
                 TypeSizeRow { width: parent.width; label: "App launcher"; key: "font_size_wofi"; min: 8; max: 24; sampleText: "Search applications..." }
                 TypeSizeRow { width: parent.width; label: "Notifications"; key: "font_size_mako"; min: 8; max: 24; sampleText: "Battery low -- 12% remaining" }
             }

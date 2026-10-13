@@ -45,7 +45,10 @@ QtObject {
     // substructure that are visibly different scales of the same shape
     // language, not the same number reused.
     readonly property real unit: 36        // collapsed capsule height
-    readonly property real radius: unit / 2  // == 18, the shell's outer arc
+    // The shell's outer arc, from the theme's "Corner roundness" (theme.json
+    // `radius`): the default 12 gives the original 18 (half a capsule). It
+    // used to be a constant, so that setting changed nothing in the shell.
+    readonly property real radius: Math.max(4, Math.min(28, Math.round(Theme.radius * 1.5)))
     readonly property real cardRadius: Math.round(radius * 0.6)  // == 11, inner arc
     readonly property real gap: 8          // screen-edge margin, and between capsules
     readonly property real pad: 12         // horizontal padding inside a capsule

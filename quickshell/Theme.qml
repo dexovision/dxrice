@@ -301,12 +301,17 @@ QtObject {
     // arbitrary rather than designed. "smaller" sits between small and
     // normal (caelestia's own naming) -- it's the single most-reused size
     // for secondary/metadata text.
-    readonly property int fontSizeSmall: 11
-    readonly property int fontSizeSmaller: 12
-    readonly property int fontSizeNormal: 13
-    readonly property int fontSizeLarger: 15
-    readonly property int fontSizeLarge: 18
-    readonly property int fontSizeExtraLarge: 28
+    // theme.json `text_scale` (Theme editor: Fonts > Shell text size)
+    // scales the whole type scale below. Before it, every size here was a
+    // constant and the Fonts page only reached Waybar, wofi and mako.
+    readonly property real textScale: Math.max(0.8, Math.min(1.4, root._num("text_scale", 1.0)))
+    function _ts(px) { return Math.round(px * root.textScale); }
+    readonly property int fontSizeSmall: _ts(11)
+    readonly property int fontSizeSmaller: _ts(12)
+    readonly property int fontSizeNormal: _ts(13)
+    readonly property int fontSizeLarger: _ts(15)
+    readonly property int fontSizeLarge: _ts(18)
+    readonly property int fontSizeExtraLarge: _ts(28)
     // Completes the scale at both ends. `fontSizeMuted` is the one home
     // for what `fontSizeSmall`(11) and `fontSizeSmaller`(12) had quietly
     // become -- the same "secondary/metadata caption" role split near-
@@ -317,16 +322,16 @@ QtObject {
     // tier (a big stat/readout, e.g. Quick Settings' Performance cards) --
     // there was no token above `fontSizeExtraLarge`(28) at all, so every
     // "big number" spot picked its own bare size (40 twice, independently).
-    readonly property int fontSizeMuted: 12
+    readonly property int fontSizeMuted: _ts(12)
     // A pane's own headline (a track title) -- between a card title and
     // a hero readout. 28 (ExtraLarge) in this monospace face fits ~13
     // characters in a third of a panel, which broke real titles mid-word.
-    readonly property int fontSizeHeadline: 22
-    readonly property int fontSizeDisplay: 40
+    readonly property int fontSizeHeadline: _ts(22)
+    readonly property int fontSizeDisplay: _ts(40)
     // The single biggest text in the shell (the lock screen's clock) is a
     // materially different, bigger register than a card's hero stat -- kept
     // as its own named tier rather than forced onto fontSizeDisplay.
-    readonly property int fontSizeHero: 72
+    readonly property int fontSizeHero: _ts(72)
 
     // ---- icon scale: IconButton's glyph derives from `size * 0.45`, and
     // every call site picked its own `size` -- 9 distinct values (24-42)

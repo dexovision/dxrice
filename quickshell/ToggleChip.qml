@@ -60,6 +60,16 @@ Rectangle {
             wrapMode: Text.WordWrap
             maximumLineCount: 2
             elide: Text.ElideRight
+            // A fixed two-line box: wrapping is tried at full size first,
+            // and only a single word too wide for the tile ("Bluetooth" at
+            // a larger shell text size, which elided to "Bluetoo...")
+            // shrinks -- never below 85%. The fixed height also keeps every
+            // tile's icon on the same line whether its label takes one line
+            // or two (a two-line label used to push its icon up).
+            fontSizeMode: Text.Fit
+            minimumPixelSize: Math.round(Theme.fontSizeSmall * 0.85)
+            height: Math.ceil(Theme.fontSizeSmall * 2.7)
+            verticalAlignment: Text.AlignTop
             width: 68
             horizontalAlignment: Text.AlignHCenter
         }
