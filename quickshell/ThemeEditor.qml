@@ -186,6 +186,12 @@ PanelWindow {
     property real shadow_intensity: 1.0
     property real text_scale: 1.0
 
+    // Behaviour switches. Saved in theme.json beside everything else (one
+    // file, one Apply, one Revert), but nothing a preset or "Generate from
+    // wallpaper" touches -- those only carry colour keys.
+    property bool auto_place_windows: true
+    property bool reduce_motion: false
+
     property string font_family: "JetBrainsMono Nerd Font"
     property string wallpaper: ""
 
@@ -246,6 +252,12 @@ PanelWindow {
         { key: "font_size_wofi", label: "App launcher font size", min: 8, max: 24, decimals: 0 },
         { key: "font_size_mako", label: "Notification font size", min: 8, max: 24, decimals: 0 },
     ]
+    readonly property var behaviorFields: [
+        { key: "auto_place_windows", objectName: "autoPlaceSwitch", label: "Automatic window placement",
+          sub: "Newly opened windows join the arrangement on their own, next to what's already open. Nothing else moves. SUPER+G still rearranges everything." },
+        { key: "reduce_motion", objectName: "reduceMotionSwitch", label: "Reduce motion",
+          sub: "Panels appear and disappear without sliding or scaling." },
+    ]
     readonly property var experienceFields: [
         { key: "anim_duration_ms", label: "Animation speed (lower = snappier)", min: 0, max: 500, decimals: 0, unit: "ms" },
         { key: "ui_density", label: "Spacing inside panels", min: 0.5, max: 1.5, decimals: 2 },
@@ -266,7 +278,7 @@ PanelWindow {
         { id: "layout", glyph: "", label: "Layout", sub: "Rounding and gaps" },
         { id: "lock", glyph: "", label: "Lock Screen", sub: "Blur and input field" },
         { id: "fonts", glyph: "", label: "Fonts", sub: "Family and sizes" },
-        { id: "experience", glyph: "", label: "Experience", sub: "Motion and spacing" },
+        { id: "experience", glyph: "", label: "Experience", sub: "Motion, spacing, windows" },
         { id: "wallpaper", glyph: "", label: "Wallpaper", sub: "Background image" },
     ]
     property string currentCategory: "colors"
@@ -287,6 +299,7 @@ PanelWindow {
         for (const f of shellTextFields) keys.push(f.key);
         for (const f of fontSizeFields) keys.push(f.key);
         for (const f of experienceFields) keys.push(f.key);
+        for (const f of behaviorFields) keys.push(f.key);
         return keys;
     }
 
@@ -584,6 +597,56 @@ PanelWindow {
                 from: modelData.min; to: modelData.max; decimals: modelData.decimals
                 value: root[modelData.key]
                 onChanged: (v) => { root[modelData.key] = modelData.decimals === 0 ? Math.round(v) : v; root.dirty = true; }
+            }
+        }
+    }
+
+    // On/off settings: a title, a sentence that says what it does
+    // (wrapped, never elided -- these are the explanations), the switch.
+    component SwitchList: Column {
+        property var fields: []
+        width: parent.width
+        spacing: Theme.padLg
+        Repeater {
+            model: parent.fields
+            delegate: Item {
+                width: parent.width
+                implicitHeight: Math.max(switchText.implicitHeight, fieldSwitch.implicitHeight)
+                Column {
+                    id: switchText
+                    anchors.left: parent.left
+                    anchors.right: fieldSwitch.left
+                    anchors.rightMargin: Theme.padLg
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.padXs
+                    Text {
+                        width: parent.width
+                        text: modelData.label
+                        color: Theme.textActive
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeNormal
+                        font.weight: Font.Medium
+                        wrapMode: Text.WordWrap
+                    }
+                    Text {
+                        width: parent.width
+                        text: modelData.sub
+                        color: Theme.text
+                        opacity: Theme.opacityMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        wrapMode: Text.WordWrap
+                        lineHeight: 1.15
+                    }
+                }
+                Switch {
+                    id: fieldSwitch
+                    objectName: modelData.objectName
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    checked: root[modelData.key] === true
+                    onToggled: (next) => { root[modelData.key] = next; root.dirty = true; }
+                }
             }
         }
     }
@@ -1574,6 +1637,13 @@ PanelWindow {
                 padding: Theme.pad2xl
                 title: "Controls"
                 SliderList { width: parent.width; fields: root.experienceFields }
+            }
+
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Windows and motion"
+                SwitchList { width: parent.width; fields: root.behaviorFields }
             }
         }
     }
