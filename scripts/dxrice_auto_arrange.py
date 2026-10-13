@@ -78,6 +78,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, batch_async, move_window_exact_lua, resize_window_exact_lua
+import dxrice_window_class
 from dxrice_resize_memory import (resize_state_path as _resize_state_path,
                                   load_resize_state as _load_resize_state,
                                   save_resize_state as _save_resize_state,
@@ -611,7 +612,7 @@ def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_s
 
 
 def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cluster_centroid,
-                         cluster_bbox, placed_points, viewport_center, reference_area):
+                         cluster_bbox, placed_points, viewport_center, reference_area, composition_ref=None):
     """Same comprehensive candidate generation as
     dxrice_auto_place_window.find_free_position (every existing obstacle's
     edges crossed in both axes, plus the window's own current position as
@@ -629,6 +630,12 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
     window placed so far in this pass (never the not-yet-placed ones,
     consistent with cluster_bbox's own convention) -- the global
     composition reference this window's candidate is being added to.
+
+    `composition_ref`: the point composition is measured around. None (every
+    SUPER+G step) means the cluster's own mass center -- see score()'s
+    comment for why the rebuild must be translation-invariant. New-window
+    placement (join_composition) passes the viewport center instead, since
+    for it there is no final recenter to bring the result into view.
 
     Returns (pos, score) -- the score is exposed (not just the winning
     position) so a caller evaluating this SAME window at several candidate
@@ -754,7 +761,9 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
     # of the two largest costs in the whole pass (at n=30: ~9k redundant
     # O(n) recomputations). Same value, computed once; nothing about which
     # candidate wins changes.
-    comp_ref = (mass_center(placed_points) or viewport_center) if placed_points else None
+    comp_ref = None
+    if placed_points:
+        comp_ref = composition_ref or mass_center(placed_points) or viewport_center
     placed_rects = [(pcx - pw / 2, pcy - ph / 2, pcx + pw / 2, pcy + ph / 2)
                     for pcx, pcy, pw, ph, _m in placed_points]
 
@@ -1894,6 +1903,56 @@ def _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resiz
     return result_moveonly
 
 
+def join_composition(new_size, layout, obstacles, monitor_bounds, gap):
+    """Where a newly opened window joins the existing cloud: the exact step
+    SUPER+G's rebuild runs to add each window to the cluster built so far
+    (_find_best_position -- same candidates, same organic stagger, same
+    composition / compactness / detachment / dead-gap scoring, same
+    screen-shaped target), with every existing window held where it is.
+
+    That last part is the whole difference from a SUPER+G press, and it is
+    deliberate: opening a window never moves or resizes another one (the
+    previous placer shoved existing windows aside on 594 of 969 simulated
+    opens -- see scripts/dxrice_autoplace_report.py). Rebalancing the whole
+    desktop stays SUPER+G's job.
+
+    `layout`: [(x, y, w, h), ...] the windows the new one should compose
+    WITH -- the visible ones; a cluster panned out of view on this infinite
+    canvas shouldn't drag a new window off-screen to sit beside it.
+    `obstacles`: every rect it must not overlap (layout + fixed/fullscreen
+    + windows out of view). Returns the new window's top-left (x, y),
+    integer, exactly `gap` from whatever it ends up beside.
+
+    Two inputs differ from a rebuild step, both because nothing recenters
+    afterwards: the composition is measured around the viewport center
+    rather than the cluster's own, and "current position" (what the small
+    movement tiebreak measures from) is the viewport center, not wherever
+    the compositor happened to map the window.
+    """
+    global _shape_aspect
+    mx0, my0, mx1, my1 = monitor_bounds
+    viewport_center = ((mx0 + mx1) / 2, (my0 + my1) / 2)
+    nw, nh = new_size
+    previous = _shape_aspect
+    _shape_aspect = ((mx1 - mx0) / (my1 - my0)) ** SHAPE_ASPECT_EXPONENT if my1 > my0 and mx1 > mx0 else 1.0
+    try:
+        reference_area = _typical_area([{"size": [w, h]} for _x, _y, w, h in layout] + [{"size": [nw, nh]}])
+        placed_points = [(x + w / 2, y + h / 2, w, h, window_mass(w, h, reference_area)) for x, y, w, h in layout]
+        cluster_bbox = None
+        for x, y, w, h in layout:
+            r = rect_for(x, y, w, h)
+            cluster_bbox = r if cluster_bbox is None else (
+                min(cluster_bbox[0], r[0]), min(cluster_bbox[1], r[1]),
+                max(cluster_bbox[2], r[2]), max(cluster_bbox[3], r[3]))
+        pos, _score = _find_best_position(
+            (nw, nh), [rect_for(*o) for o in obstacles], gap, viewport_center, (0.0, 0.0), viewport_center,
+            cluster_bbox, placed_points, viewport_center, reference_area,
+            composition_ref=viewport_center if placed_points else None)
+        return (round(pos[0]), round(pos[1]))
+    finally:
+        _shape_aspect = previous
+
+
 def _xywh(w):
     return (w["at"][0], w["at"][1], w["size"][0], w["size"][1])
 
@@ -1946,14 +2005,15 @@ def main():
     workspace_id = ws["id"]
 
     clients = hyprctl_json(["clients"]) or []
-    floating = [w for w in clients
-                if w.get("floating") and w.get("workspace", {}).get("id") == workspace_id]
-    if len(floating) < 2:
+    # Same classification new-window placement uses: a tooltip, menu or
+    # hover card that happens to be open at the moment of the press, or the
+    # shell's own Wi-Fi dialog, is neither arranged nor arranged around.
+    # Pinned windows are fixed, like fullscreen ones.
+    kinds, _x11 = dxrice_window_class.classify_all(clients)
+    eligible, fixed = dxrice_window_class.partition(clients, workspace_id, kinds)
+    if len(eligible) + len(fixed) < 2:
         print("Fewer than 2 floating windows here -- nothing to arrange.")
         return
-
-    eligible = [w for w in floating if not w.get("fullscreen")]
-    fixed = [w for w in floating if w.get("fullscreen")]
 
     if _DEBUG:
         print(f"DEBUG eligible={len(eligible)} fixed(fullscreen)={len(fixed)}", file=sys.stderr)
@@ -2012,7 +2072,7 @@ def main():
         settled = _settle_sizes([a for a, _, _ in resize_exprs], workspace_id)
         if settled:
             settled_eligible = [w for w in settled
-                                if not w.get("fullscreen") and w.get("address") in by_addr]
+                                if not w.get("fullscreen") and not w.get("pinned") and w.get("address") in by_addr]
             settled_by_addr = {w["address"]: w for w in settled_eligible}
             planned = {a: (w, h) for a, _x, _y, w, h in results}
             deviated = any(
@@ -2026,7 +2086,7 @@ def main():
                 by_addr.update(settled_by_addr)
             else:
                 eligible = settled_eligible
-                fixed = [w for w in settled if w.get("fullscreen")]
+                fixed = [w for w in settled if w.get("address") in {f["address"] for f in fixed}]
                 if eligible:
                     results = auto_arrange(eligible, fixed, monitor, gap, allow_resize=False)
                     by_addr = {w["address"]: w for w in eligible}

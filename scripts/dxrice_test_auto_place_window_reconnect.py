@@ -92,6 +92,8 @@ class TestReconnectResetsState(unittest.TestCase):
         self._patches = [
             unittest.mock.patch.object(apw, "socket2_path", return_value=self.fake.path),
             unittest.mock.patch.object(apw, "live_gap", return_value=5),
+            # The listener reads theme.json (gap, on/off switch): never the real one.
+            unittest.mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.fake.path + ".config"}),
             unittest.mock.patch.object(apw, "place_new_window", side_effect=fake_place_new_window),
             unittest.mock.patch.object(apw.dxrice_singleton, "claim_single_instance",
                                         return_value=unittest.mock.MagicMock()),

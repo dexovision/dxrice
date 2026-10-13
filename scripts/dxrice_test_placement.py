@@ -1547,11 +1547,13 @@ class TestSettleDelayDocumentation(unittest.TestCase):
                          "_settle_moves was removed -- see its docstring for "
                          "the real, live-confirmed race it closes")
         src = inspect.getsource(apw.place_new_window)
-        self.assertEqual(src.count("_settle_moves("), 3,
+        moves = src.count("move_window_exact_lua(") + src.count("move_window_exact_async(")
+        self.assertGreaterEqual(moves, 1)
+        self.assertEqual(src.count("_settle_moves("), moves,
                           "place_new_window should call _settle_moves() after "
-                          "each of its three dispatch branches (stage1/stage2/"
-                          "stage3) -- a branch dispatching without settling "
-                          "reopens the overlap race _settle_moves exists to close")
+                          "every move it dispatches -- a dispatch without "
+                          "settling reopens the overlap race _settle_moves "
+                          "exists to close")
 
 
 # ============================================================================
@@ -2578,14 +2580,28 @@ class TestFamilyAnchorPlacement(unittest.TestCase):
         self.assertIsNotNone(anchor)
         self.assertEqual(anchor["address"], "M")
 
-    def test_same_class_different_pid_is_recognized_as_family(self):
-        """The more common case: a toolkit gives a dialog the SAME app-id
-        as its parent, but as a genuinely separate process."""
+    def test_same_class_same_pid_is_recognized_as_family(self):
+        """The common case: a toolkit gives an (in-process) dialog its
+        parent's app-id."""
         main = self._win("M", 500, 300, 900, 700, pid=200, cls="gimp")
-        dialog = {"address": "D", "size": [350, 250], "pid": 201, "class": "gimp", "fullscreen": 0}
+        dialog = {"address": "D", "size": [350, 250], "pid": 200, "class": "gimp", "fullscreen": 0}
         anchor = apw._find_family_anchor(dialog, [main])
         self.assertIsNotNone(anchor)
         self.assertEqual(anchor["address"], "M")
+
+    def test_same_class_different_process_is_another_instance_not_a_dialog(self):
+        """Two terminals of different sizes are two windows. Anchoring the
+        smaller to the larger (the old same-class rule) walked a whole
+        composition of kittys off one side of the screen on the nested
+        compositor."""
+        big = self._win("K1", 500, 300, 811, 481, pid=200, cls="kitty")
+        small = {"address": "K2", "size": [451, 281], "pid": 201, "class": "kitty", "fullscreen": 0}
+        self.assertIsNone(apw._find_family_anchor(small, [big]))
+
+    def test_class_still_decides_when_a_pid_is_unknown(self):
+        main = self._win("M", 500, 300, 900, 700, pid=None, cls="gimp")
+        dialog = {"address": "D", "size": [350, 250], "pid": None, "class": "gimp", "fullscreen": 0}
+        self.assertIsNotNone(apw._find_family_anchor(dialog, [main]))
 
     def test_unrelated_pid_and_class_is_not_family(self):
         other = self._win("O", 500, 300, 900, 700, pid=300, cls="discord")
@@ -3579,17 +3595,15 @@ class TestNewWindowDispatchRounding(unittest.TestCase):
                                      f"after opening {addr}: {rows[i]} and {rows[j]} closer than {GAP}px")
 
 
-class TestResizeMemoryAcrossMechanisms(unittest.TestCase):
-    """New-window placement's Stage 3 trims an EXISTING window to make room;
-    SUPER+G can shrink windows too. Each only ever saw current sizes, so a
-    window Stage 3 had already cut by 25% looked like an untouched window to
-    the next SUPER+G press, which could cut it again. Measured over 400
-    simulated realistic open sequences followed by one SUPER+G press: 4 of
-    the 48 Stage-3-trimmed windows were shrunk again, the worst to 0.56x
-    (two 25% cuts). Both now share dxrice_resize_memory.py."""
+class TestOpeningNeverResizesExistingWindows(unittest.TestCase):
+    """New-window placement used to have a Stage 3 that trimmed an EXISTING
+    window by up to 25% to make room, and SUPER+G could then cut the same
+    window again (fixed with a shared resize memory). Placement now joins
+    the cloud with every existing window held where it is, so opening a
+    window never resizes -- or moves -- anything else. This sequence (seed
+    148) is the one that used to make Stage 3 trim browser2 on the 4th
+    open; the resize memory stays SUPER+G's alone."""
 
-    # A real simulated sequence (seed 148): opening the 4th window makes
-    # Stage 3 trim browser2.
     SEQUENCE = [("0xfiles0", 809, 653, "files", 1000), ("0xpip1", 552, 304, "pip", 1001),
                 ("0xbrowser2", 1754, 1011, "browser", 1002), ("0xbrowser3", 1629, 986, "browser", 1003),
                 ("0xfiles4", 979, 606, "files", 1004), ("0xterminal5", 859, 556, "terminal", 1005)]
@@ -3601,65 +3615,30 @@ class TestResizeMemoryAcrossMechanisms(unittest.TestCase):
         os.environ["XDG_RUNTIME_DIR"] = self._tmp.name
         self._saved_apw = (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
                            apw.get_monitor_bounds, apw.time.sleep)
-        self._saved_arr = (arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds)
 
     def tearDown(self):
         (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
          apw.get_monitor_bounds, apw.time.sleep) = self._saved_apw
-        arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds = self._saved_arr
         if self._env is None:
             os.environ.pop("XDG_RUNTIME_DIR", None)
         else:
             os.environ["XDG_RUNTIME_DIR"] = self._env
         self._tmp.cleanup()
 
-    def _open_all_then_super_g(self, forget_between):
-        import contextlib, io
+    def test_existing_windows_keep_size_and_position(self):
         hypr = _FakeHyprland()
         apw.hyprctl_json, apw.batch_async = hypr.hyprctl_json, hypr.batch_async
         apw.dispatch_async, apw.move_window_exact_async = hypr.dispatch_async, hypr.move_window_exact_async
         apw.get_monitor_bounds = lambda: _FakeHyprland.MON
-        apw.time.sleep = lambda s: None  # the fake settles instantly
-        trimmed = set()
+        apw.time.sleep = lambda s: None
         for addr, w, h, cls, pid in self.SEQUENCE:
             hypr.open(addr, w, h, cls, pid)
-            before = {a: tuple(c["size"]) for a, c in hypr.clients.items() if a != addr}
+            before = {a: (tuple(c["at"]), tuple(c["size"])) for a, c in hypr.clients.items() if a != addr}
             self.assertEqual(apw.place_new_window(addr, 1, GAP), "placed")
-            # Only an EXISTING window changing size while another one is
-            # placed is a Stage 3 trim (the new window's own startup sizing
-            # is not).
-            trimmed |= {a for a, size in before.items() if tuple(hypr.clients[a]["size"]) != size}
-        after_open = {a: tuple(c["size"]) for a, c in hypr.clients.items()}
-        if forget_between:
-            os.remove(arr._resize_state_path())
-        arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
-        arr.live_gap, arr.get_monitor_bounds = (lambda: GAP), (lambda: _FakeHyprland.MON)
-        with contextlib.redirect_stdout(io.StringIO()):
-            arr.main()
-        after_g = {a: tuple(c["size"]) for a, c in hypr.clients.items()}
-        return trimmed, after_open, after_g
-
-    def test_super_g_does_not_shrink_a_window_stage3_already_trimmed(self):
-        trimmed, after_open, after_g = self._open_all_then_super_g(forget_between=False)
-        self.assertEqual(trimmed, {"0xbrowser2"}, "fixture must make Stage 3 trim browser2")
-        self.assertEqual(arr._load_resize_state(arr._resize_state_path()).get("0xbrowser2"),
-                         after_open["0xbrowser2"], "Stage 3 did not record its trim")
-        self.assertEqual(after_g["0xbrowser2"], after_open["0xbrowser2"],
-                         "SUPER+G shrank a window Stage 3 had already trimmed")
-
-    def test_fixture_still_reproduces_the_double_cut_without_memory(self):
-        """Pins that the fixture exercises the bug: with the memory wiped
-        between the opens and the press, browser2 is cut a second time."""
-        trimmed, after_open, after_g = self._open_all_then_super_g(forget_between=True)
-        self.assertNotEqual(after_g["0xbrowser2"], after_open["0xbrowser2"])
-
-    def test_stage3_never_trims_a_locked_window(self):
-        """Same opens with browser2 pre-recorded at its own original size --
-        as if SUPER+G had already resized it to exactly that: Stage 3 must
-        leave it alone (it may trim a different window, or none)."""
-        dxrice_resize_memory.save_resize_state(arr._resize_state_path(), {"0xbrowser2": (1754, 1011)})
-        trimmed, _, _ = self._open_all_then_super_g(forget_between=False)
-        self.assertNotIn("0xbrowser2", trimmed)
+            after = {a: (tuple(c["at"]), tuple(c["size"])) for a, c in hypr.clients.items() if a != addr}
+            self.assertEqual(after, before, f"opening {addr} changed an existing window")
+        self.assertFalse(os.path.exists(arr._resize_state_path()),
+                         "placement wrote SUPER+G's resize memory without resizing anything")
 
 
 if __name__ == "__main__":

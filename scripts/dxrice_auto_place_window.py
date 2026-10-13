@@ -1,99 +1,65 @@
 #!/usr/bin/env python3
-"""Auto-places newly opened windows beside an existing one instead of
-letting them spawn stacked on top of each other -- every window on this
-rice is floating (hyprland.lua's "float-everything" rule), so without this,
-every new app opens at Hyprland's own default floating position and
-overlaps whatever's already there.
+"""Automatic window placement: a newly opened window joins the cloud.
 
-COMPOSITION MODEL: every candidate position is scored primarily by
-composition_cost -- a GLOBAL measure of whether the whole set of windows
-(existing plus the one being placed) reads as a balanced cluster around the
-viewport center, not by how close any single window's own center is to
-that point. The distinction matters: individual-distance-to-center is what
-originally made new windows pile onto whichever axis already had the
-shortest remaining path there (a vertical/horizontal stack minimizes that
-distance just as well as it minimizes bounding-box growth, since both are
-really the same rectangle-packing objective wearing different names).
-composition_cost instead measures the mass-weighted center of the whole
-group (so no single window is rewarded merely for personally sitting near
-center) and how concentrated that mass is along one angular axis through
-it (so a straight run of windows costs more as a THIRD, FOURTH, etc. one
-joins it, however that line happens to be oriented -- never by comparing
-against a hardcoded compass direction). See composition_cost's own
-docstring for the full mechanics. Local terms (composition_penalty's
-sliver/dead-gap/alignment checks, and EXPANSION_WEIGHT's bbox-growth
-tiebreak) remain and stay genuinely secondary -- they decide between
-candidates the global term is otherwise indifferent between, they don't
-override it.
+Every window on this rice floats (hyprland.lua's "float-everything" rule),
+so without this every new app opens at Hyprland's default floating spot,
+on top of whatever is already there.
 
-This only ever runs ONCE, at the moment a window opens -- it picks an
-initial position, nothing more. It never re-positions a window after that,
-so dragging one over another by hand (the normal Super+click drag this rice
-already supports) always still works exactly as before; this script has no
-opinion about anything past the first placement.
+WHAT TRIGGERS IT -- exactly one thing: Hyprland's `openwindow>>` event, a
+window being mapped (see PlacementListener). Not focus changes (with
+follow_mouse that is every time the pointer crosses a window), not title
+changes (a browser retitling itself as links are hovered), not moves --
+including this listener's own -- and not anything the pointer does. Each
+window is handled once per mapping; repeated events for it are ignored.
 
-Algorithm, run against the new window's own REAL size (read back from
-`hyprctl clients` once the window is actually mapped, never assumed or
-fixed, and NEVER changed by this script -- a small dialog and a
-maximized-by-default app get placed correctly relative to their own real
-footprint, not some average guess). Stages 1 and 2 only ever dispatch move
-commands; Stage 3 (see below) is the one exception -- and even there, only
-an EXISTING window is ever resized, never the new one:
+WHAT IT PLACES -- application windows only. A tooltip, context menu or
+link/tab hover card from an XWayland app arrives as an ordinary
+`openwindow>>` too; dxrice_window_class.py asks the X server and filters
+those out, along with splash screens, the shell's own dialogs and tiny
+helper surfaces (measured before this: 300 of 300 simulated popups were
+moved away from what they pointed at, and in 50 of them the windows around
+the popup were moved or resized to make room for it). Fullscreen and tiled
+windows are left alone until they become ordinary floating windows; pinned
+windows are never moved.
 
-STAGE 1 -- direct placement, move nothing else:
-  1. No other floating window on this workspace yet -> leave it wherever
-     Hyprland put it (nothing to avoid).
-  2. Otherwise, this is an infinite canvas, not a bounded screen -- so
-     candidates are generated from every existing window's edges (right/
-     left/above/below, each exactly one gap-width away -- theme.json's own
-     hypr_gaps_in, matching whatever gap size the user already chose for
-     tiled windows) plus the plain center-of-the-current-view spot, with NO
-     requirement to stay inside the visible monitor rectangle. Whichever
-     valid candidate ends up closest to the middle of the current view
-     wins, with a small secondary preference for a candidate that doesn't
-     unnecessarily grow the existing layout's own footprint over one
-     equally close to center that would -- if the winner is still outside
-     the current viewport (reachable by panning, same as any other window
-     on this canvas), that's fine. Fullscreen/maximized windows are always
-     obstacles to avoid but are never counted as part of "the layout" for
-     that secondary preference -- they're fixed furniture, not something
-     new windows are being arranged near.
-  3. If every one of those candidates conflicts with something (a tight
-     cluster of windows), spirals outward from the view's center with no
-     distance limit until it finds free space -- the canvas has no edge, so
-     this always terminates.
+WHERE IT GOES -- the same place SUPER+G would put it. A dialog of an app
+that's already open (WM_TRANSIENT_FOR from the X server, or the PID/class
+family signal -- see _find_family_anchor) goes beside the window it belongs
+to. Anything else joins the existing composition through
+dxrice_auto_arrange.join_composition: SUPER+G's own per-window step --
+same edge-derived and organically staggered candidates, same composition
+cost with the screen-shaped target, same compactness, detachment and
+dead-gap terms -- with every existing window held exactly where it is. The
+new window keeps its size (one exception: startup sizing, below), lands
+exactly one gap from what it sits beside, overlaps nothing, and nothing
+else moves or resizes. Re-balancing the whole desktop stays SUPER+G's job.
 
-STAGE 2 -- make room, only when it's actually worth it (see
-try_make_room's docstring for the exact mechanics): also computes the best
-position the new window could have if every ordinary window were free to
-move out of the way (fixed obstacles still respected), relocates only the
-ones actually blocking that spot (cascading if a relocation creates a new
-conflict, bounded so it can't run away), and compares the TOTAL cost of
-"stage 1's result, nothing else moves" against "stage 2's result, this
-much existing-window movement" -- stage 2 is only used when it's a
-genuine net win. There is no separate hardcoded "close enough to center"
-cutoff deciding this on its own; the two plans are always actually
-computed and compared.
+The previous placer here (now unused: find_free_position's Stage 1 and the
+Stage 2 "make room" / Stage 3 "trim a neighbour" search below) aimed at a
+round target and moved existing windows to make room on 594 of 969
+simulated opens; on the same 200 opening sequences the cloud step moves
+none, comes out screen-shaped (median 1.32:1 against 1.07:1) and is what
+SUPER+G itself already counts as a good arrangement in 199 of 200 (185
+before). See scripts/dxrice_autoplace_report.py.
 
-STAGE 3 -- resize, only when it genuinely helps: evaluated after Stage 1
-and Stage 2 have both already been scored, and its candidates are judged
-against that same score -- the actual whole-composition cost of the
-resulting layout (see composition_cost), not a bare "is the new window
-close to center" check (an earlier version used the latter and, per a
-live sizing audit, missed real improvements a modest resize could
-provide while the new window's own position still looked fine on its
-own). Shrinks exactly ONE existing window (never the new one), bounded by
-both a fraction of that window's own current size and an absolute
-usable-size floor (MIN_USABLE_WIDTH/HEIGHT) that no resize here may ever
-cross, with its own per-pixel cost scaled by how prominent that window is
-relative to the new one. Only applied when the resulting plan's total
-cost genuinely beats the best rearrangement-only plan -- a resize that
-doesn't clearly help the real objective is never used.
+It never re-positions a window after that first placement -- dragging one
+anywhere by hand works exactly as before -- and if the window was moved by
+someone else between being read and being placed (the user grabbed it, the
+app positioned itself), it is left where it is.
+
+STARTUP SIZING (comfortable_startup_size): a main window that maps in the
+"too big for a dialog, too small to be deliberate" band is enlarged along
+its own aspect ratio before it is placed. Never a dialog, never a window of
+an app that's already open.
+
+SWITCH: Settings > Experience > "Automatic window placement" (theme.json
+"auto_place_windows", missing = on). Read on every window open, so it
+applies to the next window without restarting anything; off means nothing
+at all happens on open -- SUPER+G is separate and unaffected.
 
 Reads Hyprland's own event socket (.socket2.sock) directly -- the same
-plain-text openwindow/activewindowv2 protocol `socat`/`hyprctl --instance`
-users read by hand -- rather than polling, so this costs nothing while no
-window is opening.
+plain-text protocol `socat` users read by hand -- rather than polling, so
+this costs nothing while no window is opening.
 """
 import json
 import math
@@ -108,6 +74,7 @@ from dxrice_hypr_ipc import (hyprctl_json, move_window_exact_async, move_window_
 import dxrice_singleton
 import dxrice_xdg
 import dxrice_resize_memory
+import dxrice_window_class
 
 DEFAULT_GAP = 5
 
@@ -1992,6 +1959,10 @@ STARTUP_MAX_DIMENSION_FRACTION = 0.6
 FAMILY_ANCHOR_SIZE_RATIO = 1.5
 
 
+def _known_pid(pid):
+    return isinstance(pid, int) and pid > 0
+
+
 def _find_family_anchor(new_win, siblings):
     """Is this new window a DIALOG/UTILITY of an app that's already open,
     rather than an independent window earning its own place in the
@@ -2001,10 +1972,10 @@ def _find_family_anchor(new_win, siblings):
     app like VirtualBox, which spawns its Settings/disk-picker/notice
     windows from the SAME process under a DIFFERENT window class ("Virtual
     Box Manager" vs "VirtualBox") -- class alone would miss that family
-    relationship entirely. Sharing a class covers the more common case
-    where a toolkit gives a dialog the identical app-id as its parent.
-    Either signal alone is cheap and already available on every window;
-    neither needs any per-application knowledge.
+    relationship entirely -- and the common case of a toolkit dialog with
+    its parent's app-id, which is in-process too. Class only decides when
+    a PID is unknown: with both PIDs known, a same-class window from
+    another process is another instance of the app, not a dialog.
     
     Requiring the candidate to be meaningfully SMALLER (FAMILY_ANCHOR_
     SIZE_RATIO) than the window it would anchor to is what keeps this from
@@ -2035,9 +2006,18 @@ def _find_family_anchor(new_win, siblings):
     for sib in siblings:
         if sib.get("fullscreen"):
             continue  # fixed furniture, not a family relationship
-        same_family = (new_pid is not None and sib.get("pid") == new_pid) or (
-            new_class and (sib.get("class") or sib.get("initialClass") or "").lower() == new_class
-        )
+        sib_pid = sib.get("pid")
+        if _known_pid(new_pid) and _known_pid(sib_pid):
+            # A dialog lives in its parent's process. Same class in a
+            # DIFFERENT process is another instance of the app -- a second,
+            # smaller terminal is a window of its own, not the first one's
+            # dialog (measured on the nested compositor: kitty windows of
+            # different sizes anchored to each other and walked the whole
+            # composition off one side of the screen). Cross-process dialogs
+            # of XWayland apps are still found, by WM_TRANSIENT_FOR.
+            same_family = sib_pid == new_pid
+        else:
+            same_family = bool(new_class) and (sib.get("class") or sib.get("initialClass") or "").lower() == new_class
         if not same_family:
             continue
         sw, sh = sib.get("size", (0, 0))
@@ -2260,6 +2240,26 @@ def place_new_window(address, workspace_id, gap):
     # (poll_elapsed above is relative to this function's 2.0s existence-poll deadline)
     if not new_win:
         return "gone"
+    # Before anything else: is this an application window at all? A
+    # tooltip, a context menu or a browser's link/tab hover card opened by
+    # an XWayland app arrives here exactly like a real window (see
+    # dxrice_window_class.py for the evidence) -- it must be left where the
+    # app put it, and it must never count as part of anyone's layout.
+    kinds, x11 = classify_clients(clients)
+    kind = kinds.get(address, dxrice_window_class.NORMAL)
+    mx0, my0, mx1, my1 = get_monitor_bounds()
+    if kind == dxrice_window_class.UNKNOWN and (
+            new_win["size"][0] * new_win["size"][1] < STARTUP_DIALOG_AREA_FRACTION * (mx1 - mx0) * (my1 - my0)):
+        # XWayland window the X server couldn't be asked about. Big ones are
+        # still placed; a small one may well be a popup, and moving a popup
+        # away from what it points at is the bug this check exists for.
+        kind = dxrice_window_class.TRANSIENT
+    if not dxrice_window_class.is_arrangeable(kind) or new_win.get("pinned"):
+        if _DEBUG:
+            print(f"DEBUG address={address} ignored: kind={kind} pinned={new_win.get('pinned')}",
+                  file=sys.stderr, flush=True)
+        return "ignored"
+
     if not new_win.get("floating"):
         # Tiled right now. It may become floating later (see main()'s
         # changefloatingmode handling) -- say so rather than silently
@@ -2277,13 +2277,11 @@ def place_new_window(address, workspace_id, gap):
             print(f"DEBUG address={address} skipped: fullscreen={new_win.get('fullscreen')}", file=sys.stderr, flush=True)
         return "fullscreen"
 
-    mx0, my0, mx1, my1 = get_monitor_bounds()
-
-    same_ws = [w for w in clients
-               if w.get("floating") and w.get("workspace", {}).get("id") == workspace_id
-               and w.get("address") != address]
+    eligible, fixed = dxrice_window_class.partition(clients, workspace_id, kinds, exclude=address)
+    same_ws = eligible + fixed
     if _DEBUG:
-        print(f"DEBUG same_ws count={len(same_ws)} workspace_id={workspace_id}", file=sys.stderr, flush=True)
+        print(f"DEBUG eligible={len(eligible)} fixed={len(fixed)} workspace_id={workspace_id}",
+              file=sys.stderr, flush=True)
 
     # Startup sizing happens BEFORE any placement maths, and the placement
     # then runs against whatever size the window actually ended up at --
@@ -2292,7 +2290,15 @@ def place_new_window(address, workspace_id, gap):
     # have is a gap or an overlap on screen, and the client is entitled to
     # refuse (size increments, a minimum size). So dispatch, wait for the
     # size to stop moving, re-read, and carry on with the truth.
-    want_w, want_h = comfortable_startup_size(new_win, same_ws, mx1 - mx0, my1 - my0)
+    # The X server's word on a dialog's parent, read now: it is keyed by
+    # the geometry the X server reported, i.e. before anything below moves
+    # or resizes the window.
+    parent_geom = dxrice_window_class.x11_parent_geometry(new_win, x11)
+    # A window the X server says is a dialog is small on purpose.
+    if kind == dxrice_window_class.DIALOG:
+        want_w, want_h = new_win["size"][0], new_win["size"][1]
+    else:
+        want_w, want_h = comfortable_startup_size(new_win, same_ws, mx1 - mx0, my1 - my0)
     if (want_w, want_h) != (new_win["size"][0], new_win["size"][1]):
         if _DEBUG:
             print(f"DEBUG address={address} startup-resize {new_win['size']} -> {(want_w, want_h)}",
@@ -2304,242 +2310,215 @@ def place_new_window(address, workspace_id, gap):
             clients = hyprctl_json(["clients"]) or clients
             probe = find_window(clients, address)
             if not probe:
-                break
+                return "gone"
             new_win = probe
             size_now = tuple(probe.get("size", ()))
             if size_now == stable_since:
                 break
             stable_since = size_now
-        same_ws = [w for w in clients
-                   if w.get("floating") and w.get("workspace", {}).get("id") == workspace_id
-                   and w.get("address") != address]
+        eligible, fixed = dxrice_window_class.partition(clients, workspace_id, kinds, exclude=address)
+        same_ws = eligible + fixed
 
     new_w, new_h = new_win["size"][0], new_win["size"][1]
+    seen_at = tuple(new_win["at"])
 
     if not same_ws:
         return "placed"  # first window on this workspace -- nothing to avoid
 
+    obstacles = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in same_ws]
+    center = ((mx0 + mx1) / 2, (my0 + my1) / 2)
+
     # A dialog/utility of an app that's already open (VirtualBox's
     # Settings, a disk-image picker, a details popup) goes right beside
-    # the window it belongs to, not through the general composition
-    # placement below -- see _find_family_anchor's own docstring for why
-    # PID/class family membership plus a size gap is what identifies this,
-    # with no application names involved. This is a placement decision
-    # made exactly ONCE, at open time, same as everything else in this
-    # file; Hyprland's own window dragging is completely unaffected
-    # afterward, so the user remains free to drag it anywhere they like.
-    family_anchor = _find_family_anchor(new_win, same_ws)
+    # the window it belongs to, not into the general composition -- see
+    # _find_family_anchor's own docstring for why PID/class family
+    # membership plus a size gap is what identifies this, with no
+    # application names involved. For an XWayland dialog the X server can
+    # name the parent outright (WM_TRANSIENT_FOR), which beats any guess.
+    target = None
+    family_anchor = None
+    if parent_geom:
+        family_anchor = next((w for w in same_ws if (w["at"][0], w["at"][1], w["size"][0], w["size"][1])
+                              == parent_geom), None)
+    if family_anchor is None:
+        family_anchor = _find_family_anchor(new_win, same_ws)
     if family_anchor is not None:
-        all_obstacle_rects = [rect_for(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in same_ws]
-        beside_center = ((mx0 + mx1) / 2, (my0 + my1) / 2)
-        beside_pos = _place_beside_anchor(family_anchor, new_w, new_h, all_obstacle_rects, gap, beside_center)
-        if beside_pos is not None:
-            if _DEBUG:
-                print(f"DEBUG address={address} placed beside family anchor "
-                      f"{family_anchor.get('address')} ({family_anchor.get('title','')[:30]!r}) at {beside_pos}",
-                      file=sys.stderr, flush=True)
-            dispatch_async(move_window_exact_lua(int(round(beside_pos[0])), int(round(beside_pos[1])), address))
-            return "placed"
-        # All four sides of the anchor were blocked -- fall through to the
-        # general algorithm below rather than leaving the window wherever
-        # Hyprland's own default floating-spawn position put it.
-
-    # The middle of the current viewport in absolute canvas coordinates --
-    # not a bound, just the point new placements try to land closest to.
-    center = ((mx0 + mx1) / 2, (my0 + my1) / 2)
-    others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in same_ws]
-    # Fullscreen/maximized windows are still hard obstacles (via `others`
-    # above) but aren't part of "the layout" for the expansion tiebreak --
-    # they're fixed furniture to route around, not something the new
-    # window is meaningfully being arranged near.
-    layout_others = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1])
-                      for w in same_ws if not w.get("fullscreen")]
-
-    new_area = new_w * new_h
-
-    # Stage 1: best position without moving anything else.
-    pos1 = find_free_position((new_w, new_h), others, center, gap,
-                               viewport=(mx0, my0, mx1, my1), layout_others=layout_others,
-                               reference_area=new_area)
-    d1 = math.hypot(pos1[0] + new_w / 2 - center[0], pos1[1] + new_h / 2 - center[1])
-
-    # Stage 2: best position if every ordinary window could move out of
-    # the way, and what that would actually cost to carry out. Always
-    # computed so the decision is a real comparison, never a hardcoded
-    # "close enough" cutoff -- see MAKE_ROOM_MOVEMENT_WEIGHT's comment.
-    eligible = [w for w in same_ws if not w.get("fullscreen")]
-    fixed_only = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1])
-                  for w in same_ws if w.get("fullscreen")]
-
-    # Stage 1's own whole-composition cost -- computed UNCONDITIONALLY
-    # (not just when Stage 2 also succeeds) because Stage 3's baseline
-    # (`best_cost` below) needs it either way: a sizing audit found that
-    # comparing Stage 3 against a bare positional distance (no composition
-    # term at all) meant a genuinely bad-looking composition could still
-    # read as "good enough, don't bother resizing" as long as the new
-    # window itself happened to land near center -- see try_resize_room's
-    # own docstring for the concrete case this missed.
-    pos1_mass = window_mass(new_w, new_h, new_area)
-    stage1_points = [(ox + ow / 2, oy + oh / 2, ow, oh, window_mass(ow, oh, new_area))
-                      for ox, oy, ow, oh in layout_others]
-    stage1_points.append((pos1[0] + new_w / 2, pos1[1] + new_h / 2, new_w, new_h, pos1_mass))
-    com_cost1, shape_cost1 = composition_cost_components(stage1_points, center)
-    comp_cost1 = com_cost1 + shape_cost1  # kept for the _DEBUG line below, not the decision itself
-    cost1 = d1 + STAGE_DECISION_COMPOSITION_WEIGHT * com_cost1 + shape_cost1
-
-    use_stage2 = False
-    stage2 = try_make_room((new_w, new_h), eligible, fixed_only, center, gap) if eligible else None
-    cost2_total = None
-    if stage2 is not None:
-        pos2, moved = stage2
-        d2 = math.hypot(pos2[0] + new_w / 2 - center[0], pos2[1] + new_h / 2 - center[1])
-        orig_at = {w["address"]: w["at"] for w in eligible}
-        eligible_by_addr = {w["address"]: w for w in eligible}
-        total_movement = sum(
-            math.hypot(nx - orig_at[addr][0], ny - orig_at[addr][1])
-            * prominence_weight(addr, eligible_by_addr, new_area)
-            for addr, (nx, ny) in moved.items()
-        )
-        # Stage 1 vs Stage 2 keeps the NEW window's own distance to center
-        # (d1/d2) as the primary term, with composition_cost's two
-        # ingredients weighted DIFFERENTLY as a secondary term -- not the
-        # combined composition_cost dampened by one shared factor. That
-        # was tried first (both ingredients at STAGE_DECISION_COMPOSITION_
-        # WEIGHT) and had two DIFFERENT failure modes needing different
-        # fixes, not one:
-        #
-        #   1. Damping the CENTER-OF-MASS ingredient is real and necessary:
-        #      undamped, a small existing window already sitting near
-        #      center pulls the mass-weighted AVERAGE position artificially
-        #      close to center even while a much larger, visually-dominant
-        #      new window sits meaningfully off to one side -- measured
-        #      live, a 1400x900 new window landed 517px off center, flush
-        #      against a tiny 220x140 neighbor, because the average of
-        #      "huge window far off" and "tiny window at center" scored
-        #      better than actually evicting the tiny one.
-        #   2. Damping the SHAPE (anisotropy) ingredient by that SAME
-        #      factor was the actual bug this comment now documents: a
-        #      live benchmark ("Case A" -- two huge windows already
-        #      stacked, a new medium window arrives) found the algorithm
-        #      moved one huge window 460px just to slot the new window
-        #      into the SAME vertical line, because that candidate's much
-        #      lower d2 (the new window's own distance to center) outweighed
-        #      a real, measured WORSENING of the group's shape (anisotropy
-        #      0.18 -> 0.42) once that worsening was dampened down to 30%
-        #      of its true scale. Shape was never implicated in bug #1 --
-        #      it has no "average masks an offender" failure mode, since
-        #      anisotropy measures the group's actual spatial spread, not
-        #      a position that can be pulled toward a point by one member.
-        #      Damping it was simply the wrong call, not a badly-tuned one.
-        #
-        # So: center-of-mass stays secondary (bug #1's fix, unchanged);
-        # shape now counts at its own full, already-validated scale (the
-        # same ANGULAR_PENALTY_SCALE the within-stage candidate SEARCH
-        # already uses, via composition_cost_components) -- both fixes
-        # verified together: the ORIGINAL 1400x900-vs-tiny-220x140 scenario
-        # still correctly evicts the tiny window (that case has only 2
-        # windows, so the shape term is confidence-gated to exactly 0
-        # regardless -- it was never doing any work there to begin with),
-        # while Case A above now correctly leaves the huge window alone.
-        stage2_points = []
-        for w in eligible:
-            addr = w["address"]
-            ow, oh = w["size"]
-            if addr in moved:
-                mx, my = moved[addr]
-                stage2_points.append((mx + ow / 2, my + oh / 2, ow, oh, window_mass(ow, oh, new_area)))
-            else:
-                ox, oy = w["at"]
-                stage2_points.append((ox + ow / 2, oy + oh / 2, ow, oh, window_mass(ow, oh, new_area)))
-        stage2_points.append((pos2[0] + new_w / 2, pos2[1] + new_h / 2, new_w, new_h, pos1_mass))
-        com_cost2, shape_cost2 = composition_cost_components(stage2_points, center)
-        comp_cost2 = com_cost2 + shape_cost2  # kept for the _DEBUG line below, not the decision itself
-
-        cost2_total = (d2 + MAKE_ROOM_MOVEMENT_WEIGHT * total_movement
-                       + STAGE_DECISION_COMPOSITION_WEIGHT * com_cost2 + shape_cost2)
-        if _DEBUG:
-            print(f"DEBUG stage1 d1={d1:.1f} comp={comp_cost1:.1f} cost1={cost1:.1f} | "
-                  f"stage2 d2={d2:.1f} moved={len(moved)} total_movement={total_movement:.1f} "
-                  f"comp={comp_cost2:.1f} cost2={cost2_total:.1f}",
+        target = _place_beside_anchor(family_anchor, new_w, new_h,
+                                      [rect_for(*o) for o in obstacles], gap, center)
+        if _DEBUG and target is not None:
+            print(f"DEBUG address={address} placed beside family anchor "
+                  f"{family_anchor.get('address')} ({family_anchor.get('title','')[:30]!r}) at {target}",
                   file=sys.stderr, flush=True)
-        if cost2_total < cost1:
-            use_stage2 = True
+        # All four sides of the anchor blocked: join the composition below
+        # rather than leave it wherever the compositor mapped it.
 
-    # Stage 3's baseline is now the SAME composition-inclusive cost used to
-    # choose between Stage 1 and Stage 2 (cost1/cost2_total), not a bare
-    # positional distance -- see try_resize_room's own docstring for why
-    # that changed (a live audit found the old positional-only trigger
-    # missed real, measurable composition improvements a modest resize
-    # could provide, purely because the new window's own position looked
-    # "fine" even when the overall layout wasn't).
-    best_cost = cost2_total if use_stage2 else cost1
-    best_direct_distance = d2 if use_stage2 else d1
+    if target is None:
+        # Join the cloud: SUPER+G's own per-window step, every existing
+        # window held where it is (see dxrice_auto_arrange.join_composition).
+        # Composed with what's in view; everything is an obstacle.
+        import dxrice_auto_arrange
+        visible = [(x, y, w, h) for x, y, w, h in
+                   ((e["at"][0], e["at"][1], e["size"][0], e["size"][1]) for e in eligible)
+                   if x < mx1 and x + w > mx0 and y < my1 and y + h > my0]
+        target = dxrice_auto_arrange.join_composition((new_w, new_h), visible, obstacles,
+                                                     (mx0, my0, mx1, my1), gap)
+        if _DEBUG:
+            print(f"DEBUG address={address} joins the composition at {target} "
+                  f"(composed with {len(visible)} visible of {len(eligible)}, {len(fixed)} fixed)",
+                  file=sys.stderr, flush=True)
 
-    # Stage 3: try_resize_room now always evaluates its candidates against
-    # this same objective and only returns a plan that genuinely beats it
-    # -- "only for outcomes that are genuinely bad" is enforced by that
-    # honest comparison, not a separate gate here. Never touches the new
-    # window's own size, never touches more than one existing window, and
-    # never crosses MIN_USABLE_WIDTH/HEIGHT. Also never fires unless it
-    # gets the new window itself meaningfully closer to center than
-    # rearrangement alone -- see try_resize_room's own docstring for the
-    # live case (Case F) this closes: a resize that only reshapes the
-    # EXISTING windows' own composition, without moving the actual new
-    # window any closer to a usable spot, isn't doing Stage 3's job no
-    # matter how the aggregate score reads.
-    memory_path = dxrice_resize_memory.resize_state_path()
-    resize_memory = dxrice_resize_memory.load_resize_state(memory_path)
-    stage3 = (try_resize_room((new_w, new_h), eligible, fixed_only, center, gap, best_cost, best_direct_distance,
-                              resize_locked=dxrice_resize_memory.locked_addresses(resize_memory, eligible))
-              if eligible else None)
+    # Last look before moving it: if the window is gone, or something
+    # other than the compositor's initial mapping moved it in the meantime
+    # (the user already grabbed it, or the app positioned itself), the
+    # user's or app's choice stands.
+    latest = find_window(hyprctl_json(["clients"]) or [], address)
+    if not latest:
+        return "gone"
+    if tuple(latest["at"]) != seen_at:
+        if _DEBUG:
+            print(f"DEBUG address={address} moved by someone else ({seen_at} -> {latest['at']}) -- left alone",
+                  file=sys.stderr, flush=True)
+        return "user-moved"
 
-    if stage3 is not None:
-        pos3, resize_addr, resize_xy, resize_size = stage3
-        if _DEBUG:
-            print(f"DEBUG using STAGE 3: pos={pos3} resizing {resize_addr} to {resize_size} "
-                  f"@ {resize_xy}", file=sys.stderr, flush=True)
-        # Order matters: resize first (Hyprland's own floating-window resize
-        # is center-anchored, confirmed live), THEN move it to the exact
-        # top-left this was actually scored against -- never rely on
-        # Hyprland's own anchor to land where try_resize_room computed.
-        batch_async([
-            resize_window_exact_lua(resize_size[0], resize_size[1], resize_addr),
-            move_window_exact_lua(_px(resize_xy[0]), _px(resize_xy[1]), resize_addr),
-            move_window_exact_lua(_px(pos3[0]), _px(pos3[1]), address),
-        ])
-        _settle_moves({
-            resize_addr: {"at": (_px(resize_xy[0]), _px(resize_xy[1])),
-                          "size": (int(resize_size[0]), int(resize_size[1]))},
-            address: {"at": (_px(pos3[0]), _px(pos3[1]))},
-        })
-        # Remember the trim (at the size the client actually took) so
-        # neither a later arrival's Stage 3 nor a SUPER+G press trims this
-        # window again until the user resizes it -- see
-        # dxrice_resize_memory.py.
-        settled = hyprctl_json(["clients"]) or clients
-        resized_now = find_window(settled, resize_addr)
-        if resized_now:
-            dxrice_resize_memory.save_resize_state(memory_path, dxrice_resize_memory.next_resize_state(
-                resize_memory,
-                alive_addrs={c.get("address") for c in settled},
-                current_sizes={resize_addr: tuple(resized_now["size"])},
-                resized_now=[resize_addr]))
-    elif use_stage2:
-        exprs = [move_window_exact_lua(_px(pos2[0]), _px(pos2[1]), address)]
-        expected = {address: {"at": (_px(pos2[0]), _px(pos2[1]))}}
-        for addr, (mx, my) in moved.items():
-            exprs.append(move_window_exact_lua(_px(mx), _px(my), addr))
-            expected[addr] = {"at": (_px(mx), _px(my))}
-        if _DEBUG:
-            print(f"DEBUG using STAGE 2: pos={pos2} + {len(moved)} window(s) relocated", file=sys.stderr, flush=True)
-        batch_async(exprs)
-        _settle_moves(expected)
-    else:
-        if _DEBUG:
-            print(f"DEBUG using STAGE 1: pos={pos1} new_size=({new_w},{new_h}) center={center}", file=sys.stderr, flush=True)
-        move_window_exact_async(_px(pos1[0]), _px(pos1[1]), address)
-        _settle_moves({address: {"at": (_px(pos1[0]), _px(pos1[1]))}})
+    tx, ty = _px(target[0]), _px(target[1])
+    dispatch_async(move_window_exact_lua(tx, ty, address))
+    _settle_moves({address: {"at": (tx, ty)}})
     return "placed"
+
+
+# The classification seam: tests replace this to say what the X server
+# would answer, without an X server.
+classify_clients = dxrice_window_class.classify_all
+
+
+# theme.json key for Settings > Experience > "Automatic window placement".
+# Missing means on: new windows have always been auto-placed, so an existing
+# theme.json that predates the switch keeps doing exactly that.
+AUTO_PLACE_KEY = "auto_place_windows"
+
+
+class ThemeSettings:
+    """The two theme.json values this listener needs -- the window gap and
+    the on/off switch -- re-read only when the file actually changes (one
+    stat() per event otherwise), so turning the switch off in Settings
+    takes effect on the very next window without restarting anything.
+
+    A file that is missing, mid-write or unparsable keeps the last values
+    that were read (the defaults, before any): a half-written theme.json
+    must neither switch placement off nor reset the gap."""
+
+    def __init__(self, path=None):
+        self.path = path or os.path.join(dxrice_xdg.config_dir(), "theme.json")
+        self._stamp = None
+        self.gap = DEFAULT_GAP
+        self.enabled = True
+
+    def refresh(self):
+        try:
+            st = os.stat(self.path)
+        except OSError:
+            return self
+        stamp = (st.st_mtime_ns, st.st_size, st.st_ino)
+        if stamp == self._stamp:
+            return self
+        try:
+            with open(self.path) as f:
+                data = json.load(f)
+            gap = int(data.get("hypr_gaps_in", DEFAULT_GAP))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return self  # not recorded: retried on the next event
+        self._stamp = stamp
+        self.gap = gap
+        self.enabled = data.get(AUTO_PLACE_KEY, True) is not False
+        return self
+
+
+class PlacementListener:
+    """What happens for each line of Hyprland's event socket.
+
+    Placement is driven by exactly one thing: `openwindow>>`, i.e. a window
+    being mapped. Focus changes (`activewindow>>` -- with follow_mouse that
+    is every time the pointer crosses a window), title changes (a browser
+    retitling itself as a link is hovered), `movewindow>>`, workspace
+    switches and everything else are ignored outright, so neither the
+    pointer nor this listener's own moves can ever start a placement. What
+    `openwindow>>` itself can carry that isn't an application window (an
+    XWayland tooltip/menu/hover card) is filtered by place_new_window.
+
+    Each window is handled at most once per mapping: a repeated
+    `openwindow>>` for an address already handled is ignored until that
+    window's `closewindow>>`. The one exception is a window mapped
+    fullscreen or tiled, which can't be placed yet: it is remembered and
+    retried when a fullscreen/floating state change is reported, and placed
+    at most once when it becomes an ordinary floating window."""
+
+    def __init__(self, settings=None, place=None):
+        self.settings = settings or ThemeSettings()
+        self._place = place or place_new_window
+        self.handled = set()
+        self.deferred = {}  # {address: workspace_id}
+
+    def _attempt(self, addr, ws_id, what="placement"):
+        try:
+            return self._place(addr, ws_id, self.settings.gap)
+        except Exception as e:
+            # One window failing to place must never take the listener
+            # down, but silently swallowing it is how this went unnoticed
+            # before -- say so.
+            print(f"{what} failed for {addr} on ws {ws_id}: {type(e).__name__}: {e}",
+                  file=sys.stderr, flush=True)
+            return None
+
+    def handle_line(self, line):
+        """Returns what was done, for logging and tests."""
+        if line.startswith("openwindow>>"):
+            parts = line[len("openwindow>>"):].split(",", 3)
+            if len(parts) < 2:
+                return None
+            addr = "0x" + parts[0]
+            try:
+                ws_id = int(parts[1])
+            except ValueError:
+                return None
+            if addr in self.handled or addr in self.deferred:
+                return "duplicate"
+            if not self.settings.refresh().enabled:
+                self.handled.add(addr)  # opened while off: not placed later either
+                return "disabled"
+            status = self._attempt(addr, ws_id)
+            if status in ("fullscreen", "not-floating"):
+                self.deferred[addr] = ws_id
+            else:
+                self.handled.add(addr)
+            return status
+        if line.startswith("closewindow>>"):
+            addr = "0x" + line[len("closewindow>>"):].strip()
+            self.handled.discard(addr)
+            self.deferred.pop(addr, None)
+            return "closed"
+        if line.startswith("fullscreen>>") or line.startswith("changefloatingmode>>"):
+            # An application that MAPS fullscreen or tiled and only later
+            # becomes an ordinary floating window used to be lost: it was
+            # judged once, at the one moment it was guaranteed to be
+            # ineligible. That is exactly why a game launcher like Sober --
+            # which comes up fullscreen and is later dropped to a floating
+            # window -- never got placed. fullscreen>> carries no address,
+            # so the deferred set is re-checked rather than the payload
+            # trusted. This cannot feed back on itself: placement only moves
+            # windows, it never changes fullscreen or floating state.
+            if not self.deferred:
+                return None
+            if not self.settings.refresh().enabled:
+                self.handled.update(self.deferred)
+                self.deferred.clear()
+                return "disabled"
+            for addr, ws_id in list(self.deferred.items()):
+                status = self._attempt(addr, ws_id, what="deferred placement")
+                if status is not None and status not in ("fullscreen", "not-floating"):
+                    self.deferred.pop(addr, None)
+                    self.handled.add(addr)
+            return "rechecked"
+        return None
 
 
 def main():
@@ -2556,37 +2535,21 @@ def main():
     print(f"dxrice_auto_place_window: listening on {path} (pid {os.getpid()})",
           file=sys.stderr, flush=True)
 
+    settings = ThemeSettings()
     while True:
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.connect(path)
-                gap = live_gap()
-                last_gap_check = time.time()
-                # Both reset on every (re)connect, not just once at process
-                # start. Found during a full-codebase audit, reasoning
-                # through what a Hyprland restart actually does to this
-                # listener: socket2 only ever drops when Hyprland itself
-                # restarts/crashes, at which point every window address
-                # this process previously knew about is gone along with it.
-                # buf held over from the dead connection: recv() can return
-                # a line fragment with no trailing "\n" yet right as the
-                # socket drops -- carrying that into the fresh stream would
-                # prepend a stale, truncated fragment onto the first real
-                # event after reconnecting, corrupting its parse. _deferred
-                # held over: each stale entry's address no longer resolves
-                # to anything, and place_new_window's own existence poll
-                # takes up to a full 2 seconds to conclude "gone" per
-                # address -- the first fullscreen>>/changefloatingmode>>
-                # event after a restart would replay and block on EVERY
-                # stale entry before processing anything else, stalling
-                # this single-threaded listener for several seconds right
-                # when the user's just-restarted desktop needs it working.
+                # Fresh state on every (re)connect, not just once at process
+                # start: socket2 only ever drops when Hyprland itself
+                # restarts/crashes, at which point every window address this
+                # process knew about is gone along with it. A partial line
+                # held over from the dead connection would corrupt the first
+                # real event's parse, and stale deferred entries would each
+                # spend place_new_window's full 2s existence poll concluding
+                # "gone" right when the restarted desktop needs this working.
+                listener = PlacementListener(settings)
                 buf = ""
-                # Windows seen at openwindow but not placeable at that
-                # instant (mapped fullscreen, or mapped tiled), kept so a
-                # later state change can be acted on exactly once.
-                # {address: workspace_id}.
-                _deferred = {}
                 while True:
                     chunk = s.recv(4096)
                     if not chunk:
@@ -2596,66 +2559,7 @@ def main():
                         line, buf = buf.split("\n", 1)
                         if _DEBUG and line:
                             print(f"DEBUG t={time.time():.3f} line={line!r}", file=sys.stderr, flush=True)
-                        if line.startswith("openwindow>>"):
-                            parts = line[len("openwindow>>"):].split(",", 3)
-                            if len(parts) >= 2:
-                                addr = "0x" + parts[0]
-                                try:
-                                    ws_id = int(parts[1])
-                                except ValueError:
-                                    continue
-                                if time.time() - last_gap_check > 5:
-                                    gap = live_gap()
-                                    last_gap_check = time.time()
-                                try:
-                                    status = place_new_window(addr, ws_id, gap)
-                                except Exception as e:
-                                    # One window failing to place must never take
-                                    # the listener down, but silently swallowing it
-                                    # is how this went unnoticed before -- say so.
-                                    print(f"placement failed for {addr} on ws {ws_id}: "
-                                          f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
-                                    status = None
-                                if status in ("fullscreen", "not-floating"):
-                                    # Not placeable RIGHT NOW, but it may
-                                    # become placeable -- see _deferred below.
-                                    _deferred[addr] = ws_id
-                                elif status == "placed":
-                                    _deferred.pop(addr, None)
-                        elif line.startswith("closewindow>>"):
-                            _deferred.pop("0x" + line[len("closewindow>>"):].strip(), None)
-                        elif line.startswith("fullscreen>>") or line.startswith("changefloatingmode>>"):
-                            # An application that MAPS fullscreen or tiled and
-                            # only later becomes an ordinary floating window
-                            # used to be lost: openwindow was the only event
-                            # this listener ever subscribed to, so the window
-                            # was judged once, at the one moment it was
-                            # guaranteed to be ineligible, and never looked at
-                            # again. That is exactly why a game launcher like
-                            # Sober -- which comes up fullscreen and is later
-                            # dropped to a floating window -- never got placed.
-                            #
-                            # Re-check only the windows actually deferred
-                            # above, and only until one of them is placed
-                            # once. Note Hyprland's fullscreen>> carries no
-                            # address, which is why this re-checks the
-                            # deferred set rather than trusting the payload.
-                            #
-                            # This cannot feed back on itself: nothing in this
-                            # file ever changes a window's fullscreen or
-                            # floating state -- it only moves and resizes --
-                            # so a placement can never emit the events that
-                            # would re-trigger it, and _deferred.pop() makes
-                            # each window placeable exactly once regardless.
-                            for pending_addr, pending_ws in list(_deferred.items()):
-                                try:
-                                    status = place_new_window(pending_addr, pending_ws, gap)
-                                except Exception as e:
-                                    print(f"deferred placement failed for {pending_addr}: "
-                                          f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
-                                    continue
-                                if status in ("placed", "gone"):
-                                    _deferred.pop(pending_addr, None)
+                        listener.handle_line(line)
         except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
             print(f"socket2 unavailable ({type(e).__name__}: {e}) -- retrying in 1s",
                   file=sys.stderr, flush=True)

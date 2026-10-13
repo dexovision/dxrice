@@ -1,8 +1,9 @@
 """Shared memory of the sizes DXrice itself gave windows.
 
-Both automatic resizers -- SUPER+G (dxrice_auto_arrange.py) and new-window
-auto-placement's Stage 3 (dxrice_auto_place_window.py) -- are pure functions
-of the windows' CURRENT geometry. On their own neither can tell "a window the
+Both automatic resizers -- SUPER+G (dxrice_auto_arrange.py) and, until
+new-window placement stopped resizing existing windows, its Stage 3
+(try_resize_room in dxrice_auto_place_window.py, no longer on the live
+path) -- are pure functions of the windows' CURRENT geometry. On their own neither can tell "a window the
 user made this size" from "a window DXrice already shrank", so their
 per-decision guarantees (each window resized at most once, never past
 MAX_SHRINK_FRACTION of its original size) silently reset on every press or
