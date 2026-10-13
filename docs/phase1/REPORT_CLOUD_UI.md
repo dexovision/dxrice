@@ -261,8 +261,20 @@ Updated:
   changes an existing window";
 * the family-anchor tests now require the same process.
 
-Every new test was run against `22a1c9e` and fails there, where the
-feature didn't exist.
+How the old code fares:
+* **The old placement behaviour is shown failing by measurement.** That
+  means the popups it moved, the existing windows it shoved, and its
+  shape: the 300-popup run and the 200-sequence report above, both run
+  against `22a1c9e`.
+* **`dxrice_test_auto_place_cloud.py` doesn't prove that.** Run against
+  `22a1c9e` (with the new classifier module copied in), 29 of its 33 tests
+  *error* in setup, because the new seams don't exist; that is not a
+  behavioural failure. The 4 classifier unit tests pass, since they test
+  the new module itself. The event-noise test is a regression guard the
+  old listener would also pass.
+* **QML tests.** `test_interaction.py` (8) and `test_behavior_settings.py`
+  (5) each fail or error on `22a1c9e` in every case. The features didn't
+  exist there.
 
 Final run at the branch tip: see the table at the end.
 
@@ -300,6 +312,20 @@ Final run at the branch tip: see the table at the end.
   service's environment. Hyprland exports it to the systemd user
   environment (checked on this machine). Without it, small XWayland
   windows are left unplaced rather than risk moving a popup.
+* **Monitor geometry.** The X11 lookup matches X windows to Hyprland
+  windows by exact geometry. That was verified on one monitor at scale 1,
+  which is what your config uses. With fractional scaling plus
+  `xwayland:force_zero_scaling`, or Xwayland coordinates offset on a
+  multi-monitor layout, matches would fail. Every XWayland window would
+  then count as "unknown":
+  * small ones left alone;
+  * a large override-redirect menu (over 5% of the screen) placed again.
+* **Not reviewed.**
+  * The Wi-Fi password dialog (`WifiPasswordDialog.qml`, a separate
+    Quickshell window) was not rendered or redesigned in this pass.
+  * `GlassButton`'s new `danger` variant exists but has no caller yet; the
+    shell's destructive actions are icon buttons, which already had a
+    hover-only red tint.
 * **Parentless Wayland popups.** A Wayland app that makes a *parentless*
   popup as a toplevel would still be placed. Hyprland exposes no parent or
   type for Wayland toplevels; real tooltips and menus are `xdg_popup`s.
@@ -320,7 +346,7 @@ Final run at the branch tip: see the table at the end.
 | `70a0f7a` | One interaction language: press, busy, empty, error, transitions |
 | `645c563` | Dock icons name themselves; bar islands answer the pointer; Taskbar's third group is a card |
 | `c56b3eb` | Slider value mark struck through its label at small values |
-| (this) | Experience category subtitle no longer truncated; report and evidence images |
+| `c7272d8` | Experience category subtitle no longer truncated; report and evidence images |
 
 ## Final test run (branch tip)
 
@@ -332,7 +358,7 @@ calls in the log came from the launch-systemd test's own probe.
 |---|---|
 | Python (13 suites) | **329 tests, all pass**: placement 171, auto-place-cloud 33, force-close 27, copy-once 22, manifest 15, integrity 14, hypr-ipc 13, taskbar-wrap 12, migrate 7, wallpaper-theme 6, apply-theme 5, sddm-install 3, reconnect 1 |
 | Shell (6 suites) | install-cycle, installer-lifecycle, launch, legacy, polkit: all assertions pass. launch-systemd skips in the sandbox by design; run outside it (isolated transient units only), all assertions pass |
-| QML (13 suites) | **118 test cases pass**: add-shortcut 10 (x3 sizes), app-launch 2, behavior-settings 5, branch-geometry 9, customization 5, input-regions 10 (x4 sizes), interaction 8, level-bar 2, panel-fit 9, panel-motion 20, theme-draft 11, theme-palette 18 (x3 sizes), top-bar 4 (x5 sizes; 1 skip that applies only at 1920 wide) |
+| QML (13 suites) | **113 test cases pass**: add-shortcut 10 (x3 sizes), app-launch 2, behavior-settings 5, branch-geometry 9, customization 5, input-regions 10 (x4 sizes), interaction 8, level-bar 2, panel-fit 9, panel-motion 20, theme-draft 11, theme-palette 18 (x3 sizes), top-bar 4 (x5 sizes; 1 skip that applies only at 1920 wide) |
 | Gallery | 19 scenes x 4 sizes render with no QML warnings |
 
 ## Review and merge
@@ -341,6 +367,8 @@ calls in the log came from the launch-systemd test's own probe.
 git -C ~/dxrice log --oneline c959d2e..phase1
 # save your work first: the merge hot-reloads the running shell, and the
 # placement service picks up the new code when it restarts
+# note: ~/dxrice is currently on branch claude/task-kcttpa (at c959d2e),
+# not main -- the merge lands on whichever branch it is on
 git -C ~/dxrice merge --ff-only phase1
 systemctl --user restart dxrice-auto-place-window.service
 ```
