@@ -124,6 +124,7 @@ ShellRoot {
     // Pipewire/backlight state before the first volume/brightness keypress,
     // not spun up on first use like the toggleable panels above.
     OSD {
+        objectName: "osd"
         id: osd
     }
 
