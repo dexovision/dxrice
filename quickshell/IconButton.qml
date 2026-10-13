@@ -26,7 +26,7 @@ Rectangle {
     implicitWidth: size
     implicitHeight: size
     radius: Theme.roundingFull
-    scale: area.pressed ? 0.92 : 1.0
+    scale: Theme.pressScale(area.pressed, 0.92)
     color: {
         if (root.effectiveTint !== null) return Theme.tintBg(root.effectiveTint, root.interacting);
         if (area.pressed) return Theme.layer2Active;
@@ -38,7 +38,7 @@ Rectangle {
         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
     }
     Behavior on scale {
-        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+        NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
     }
 
     Text {

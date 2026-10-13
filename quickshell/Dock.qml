@@ -205,10 +205,10 @@ PanelWindow {
                     height: ShellSurface.dockTile
                     radius: ShellSurface.chipRadius
                     color: tileArea.containsMouse ? Theme.layer1Hover : "transparent"
-                    scale: tileArea.pressed ? 0.9 : 1.0
+                    scale: Theme.pressScale(tileArea.pressed, 0.9)
 
                     Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
-                    Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
+                    Behavior on scale { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
 
                     Text {
                         id: tileLabel

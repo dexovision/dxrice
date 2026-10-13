@@ -273,7 +273,7 @@ Item {
                 y: tabBar.height - height - 4
                 color: Theme.accent
                 Behavior on x {
-                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+                    NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
                 }
             }
 
@@ -359,7 +359,7 @@ Item {
                 anchors.fill: parent
                 contentHeight: paneHeight
                 clip: true
-                Behavior on contentY { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                Behavior on contentY { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
                 Loader {
                     id: paneLoader
@@ -374,13 +374,19 @@ Item {
                     // Content-level motion for a tab switch: the indicator
                     // slides (micro) while the new pane fades up (content),
                     // instead of the pane hard-cutting under a moving mark.
-                    NumberAnimation on opacity {
+                    transform: Translate { id: tabRise }
+                    ParallelAnimation {
                         id: tabFade
-                        running: false
-                        from: 0; to: 1
-                        duration: Theme.durationFast
-                        easing.type: Theme.easingType
-                        easing.bezierCurve: Theme.curveStandard
+                        NumberAnimation {
+                            target: paneLoader; property: "opacity"; from: 0; to: 1
+                            duration: Theme.durationFadeIn
+                            easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard
+                        }
+                        NumberAnimation {
+                            target: tabRise; property: "y"; from: Theme.contentShift; to: 0
+                            duration: Theme.durationEnter
+                            easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter
+                        }
                     }
                     sourceComponent: {
                         switch (root.currentTab) {
@@ -761,8 +767,11 @@ Item {
                             }
                             EmptyLine {
                                 visible: netHeader.tab === "wifi" && (!root.wifiEnabled || !wifiBackend.hasScanned || wifiBackend.networks.length === 0)
+                                fillHeight: netFlick.height
+                                busy: root.wifiEnabled && !wifiBackend.hasScanned
+                                glyph: root.wifiEnabled ? "\u{f05a9}" : "\u{f05aa}"
                                 text: !root.wifiEnabled ? "Wi-Fi is off"
-                                    : (!wifiBackend.hasScanned ? "Scanning\u2026" : "No networks found")
+                                    : (!wifiBackend.hasScanned ? "Looking for networks" : "No networks found")
                             }
 
                             Repeater {
@@ -785,8 +794,11 @@ Item {
                             }
                             EmptyLine {
                                 visible: netHeader.tab === "bt" && (!root.bluetoothEnabled || !btBackend.hasScanned || btBackend.devices.length === 0)
+                                fillHeight: netFlick.height
+                                busy: root.bluetoothEnabled && !btBackend.hasScanned
+                                glyph: root.bluetoothEnabled ? "\u{f00af}" : "\u{f00b2}"
                                 text: !root.bluetoothEnabled ? "Bluetooth is off"
-                                    : (!btBackend.hasScanned ? "Looking for devices\u2026" : "No paired devices")
+                                    : (!btBackend.hasScanned ? "Looking for devices" : "No paired devices")
                             }
                         }
                     }
@@ -869,19 +881,44 @@ Item {
     // The honest "nothing here" line for a list section -- off, loading or
     // empty -- at the same left inset as a row's name, so an empty section
     // still lines up with the populated one above or below it.
-    component EmptyLine: Text {
+    // An empty or still-loading list says so in the middle of the space the
+    // list would fill -- a glyph, one line, and LoadingDots while the
+    // backend is still working -- instead of a lone muted line pinned to
+    // the top of an otherwise blank card ("Scanning..." read as stuck).
+    component EmptyLine: Item {
+        property string text: ""
+        property string glyph: ""
+        property bool busy: false
+        property real fillHeight: 36
         width: parent ? parent.width : 0
-        height: 36
-        leftPadding: Theme.padSm + 20 + Theme.padSm
-        verticalAlignment: Text.AlignVCenter
-        color: Theme.text
-        opacity: Theme.opacityMuted
-        font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontSizeSmaller
-        elide: Text.ElideRight
+        height: visible ? Math.max(72, fillHeight) : 0
+        Column {
+            anchors.centerIn: parent
+            spacing: Theme.padSm
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: parent.parent.glyph.length > 0 && !parent.parent.busy
+                text: parent.parent.glyph
+                color: Theme.text
+                opacity: Theme.opacityMuted * 0.8
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeLarge
+            }
+            LoadingDots {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: parent.parent.busy
+                color: Theme.text
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: parent.parent.text
+                color: Theme.text
+                opacity: Theme.opacityMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmaller
+            }
+        }
     }
-
-
 
     // ==================== MEDIA ====================
     // A real three-region composition (art | title/transport | secondary

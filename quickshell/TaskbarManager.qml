@@ -475,9 +475,9 @@ Item {
                 color: root.addPanelOpen
                     ? Theme.mix(Theme.layer1, Theme.accent, addChipArea.containsMouse ? 0.34 : 0.24)
                     : (addChipArea.pressed ? Theme.layer2Active : (addChipArea.containsMouse ? Theme.layer2Hover : Theme.layer1))
-                scale: addChipArea.pressed ? 0.96 : 1
+                scale: Theme.pressScale(addChipArea.pressed)
                 Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
-                Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
+                Behavior on scale { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
                 Row {
                     id: addChipRow
                     anchors.centerIn: parent

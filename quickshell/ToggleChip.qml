@@ -21,13 +21,13 @@ Rectangle {
         if (root.active) return Theme.mix(Theme.layer1, Theme.accent, area.containsMouse ? 0.22 : 0.14);
         return area.containsMouse ? Theme.layer1Hover : Theme.layer1;
     }
-    scale: area.pressed ? 0.96 : 1.0
+    scale: Theme.pressScale(area.pressed)
 
     Behavior on color {
         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
     }
     Behavior on scale {
-        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+        NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
     }
 
     Column {

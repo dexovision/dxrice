@@ -74,9 +74,17 @@ WlSessionLock {
                 pam.start();
             }
 
+            // Arrival: the clock and the card settle into place as the lock
+            // comes up (fade only under reduce_motion).
+            property real arrive: 0
+            Behavior on arrive {
+                NumberAnimation { duration: Theme.durationEnter * 1.6; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter }
+            }
+
             Column {
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: parent.height * 0.28
+                y: parent.height * 0.28 + (1 - surfaceRoot.arrive) * Theme.contentShift * 3
+                opacity: surfaceRoot.arrive
                 spacing: 4
                 visible: surfaceRoot.isPrimary
 
@@ -216,8 +224,9 @@ WlSessionLock {
                 id: card
                 visible: surfaceRoot.isPrimary
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: parent.height * 0.28 + 160
-                width: 320
+                y: parent.height * 0.28 + 160 + (1 - surfaceRoot.arrive) * Theme.contentShift * 4
+                opacity: surfaceRoot.arrive
+                width: 340
                 height: cardColumn.implicitHeight + Theme.pad2xl * 2
                 x: shakeAnim.running ? shakeAnim.offset : 0
 
@@ -243,6 +252,24 @@ WlSessionLock {
                         width: parent.width - Theme.pad2xl * 2
                         spacing: Theme.padMd
 
+                        // Who is being unlocked: an initial in a quiet disc,
+                        // the name under it -- centred, so the card reads as
+                        // one object rather than a form with a heading.
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 52; height: 52; radius: width / 2
+                            color: Theme.layer2
+                            border.width: Theme.borderWidth
+                            border.color: Theme.cardBorder
+                            Text {
+                                anchors.centerIn: parent
+                                text: (Quickshell.env("USER") || "?").charAt(0).toUpperCase()
+                                color: Theme.textActive
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeLarge
+                                font.weight: Font.DemiBold
+                            }
+                        }
                         Text {
                             text: "Welcome back, " + Quickshell.env("USER")
                             color: Theme.textActive
@@ -250,59 +277,122 @@ WlSessionLock {
                             font.pixelSize: Theme.fontSizeLarger
                             font.weight: Font.DemiBold
                             width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
                             elide: Text.ElideRight
                         }
 
                         Rectangle {
+                            id: field
+                            readonly property bool checking: pam.active
+                            readonly property bool failed: messageText.text.length > 0 && !checking
                             width: parent.width
-                            height: 38
-                            radius: Theme.roundingSm
+                            height: 40
+                            radius: height / 2
                             color: Theme.inputFill
                             border.width: Theme.borderWidth
-                            border.color: passwordField.activeFocus
-                                ? Theme.accent
-                                : Theme.borderIdle
+                            border.color: field.failed ? Theme.withAlpha(Theme.dangerTint, 0.7)
+                                : passwordField.activeFocus ? Theme.accent : Theme.borderIdle
                             Behavior on border.color {
                                 ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
                             }
 
                             TextInput {
                                 id: passwordField
-                                anchors.fill: parent
-                                anchors.margins: 10
+                                anchors.left: parent.left
+                                anchors.right: submit.left
+                                anchors.leftMargin: Theme.padLg
+                                anchors.rightMargin: Theme.padSm
+                                anchors.verticalCenter: parent.verticalCenter
                                 color: Theme.textActive
+                                opacity: field.checking ? 0.5 : 1
                                 font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeNormal
                                 echoMode: TextInput.Password
+                                passwordCharacter: "\u2022"
                                 verticalAlignment: TextInput.AlignVCenter
+                                clip: true
                                 focus: surfaceRoot.isPrimary
                                 onAccepted: surfaceRoot.tryUnlock()
+                                onTextChanged: if (text.length > 0 && !field.checking) messageText.text = ""
                             }
                             Text {
                                 font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeNormal
                                 text: "Password"
                                 color: Theme.text
-                                opacity: passwordField.text.length ? 0 : 0.5
+                                opacity: passwordField.text.length ? 0 : Theme.opacityMuted
                                 anchors.left: parent.left
-                                anchors.leftMargin: 10
+                                anchors.leftMargin: Theme.padLg
                                 anchors.verticalCenter: parent.verticalCenter
+                            }
+                            // Submit: an arrow while there's something to
+                            // send, the shell's LoadingDots while PAM checks.
+                            Rectangle {
+                                id: submit
+                                objectName: "lockSubmit"
+                                anchors.right: parent.right
+                                anchors.rightMargin: 4
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.height - 8; height: width; radius: width / 2
+                                readonly property bool ready: passwordField.text.length > 0 && !field.checking
+                                color: submit.ready ? Theme.stateFill(Theme.textActive, false, submitArea.pressed)
+                                                    : Theme.stateFill(Theme.layer1, submitArea.containsMouse, false)
+                                scale: Theme.pressScale(submitArea.pressed, 0.92)
+                                Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                                Behavior on scale { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: !field.checking
+                                    text: "\u2192"
+                                    color: submit.ready ? Theme.panelTone : Theme.text
+                                    opacity: submit.ready ? 1 : Theme.opacityMuted
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeLarger
+                                    font.weight: Font.DemiBold
+                                }
+                                LoadingDots {
+                                    anchors.centerIn: parent
+                                    visible: field.checking
+                                    dotSize: 4
+                                    color: Theme.text
+                                }
+                                MouseArea {
+                                    id: submitArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: submit.ready ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    onClicked: surfaceRoot.tryUnlock()
+                                }
                             }
                         }
 
                         Text {
                             id: messageText
                             text: ""
-                            color: Theme.accent
+                            color: Theme.mix(Theme.textActive, Theme.dangerTint, 0.6)
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmaller
                             visible: text.length > 0
                             width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            visible: messageText.text.length === 0
+                            text: field.checking ? "Checking\u2026" : "Enter to unlock"
+                            color: Theme.text
+                            opacity: Theme.opacityMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
                         }
                     }
                 }
             }
 
             Component.onCompleted: {
+                surfaceRoot.arrive = 1;
                 if (surfaceRoot.isPrimary) passwordField.forceActiveFocus();
             }
         }

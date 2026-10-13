@@ -162,7 +162,7 @@ PanelWindow {
                         color: Theme.accent
 
                         Behavior on width {
-                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+                            NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
                         }
                     }
                 }

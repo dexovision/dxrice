@@ -793,10 +793,10 @@ PanelWindow {
                     GlassButton { text: "Revert"; variant: "secondary"; onClicked: root.revert() }
                     GlassButton {
                         objectName: "themeApply"
-                        text: root.applying ? "Applying..." : "Apply"
+                        text: "Apply"
                         variant: "primary"
-                        badge: root.dirty && !root.applying
-                        enabled: !root.applying
+                        badge: root.dirty
+                        busy: root.applying
                         onClicked: root.apply()
                     }
                     CloseButton {
@@ -990,13 +990,34 @@ PanelWindow {
                         anchors.fill: parent
                         contentHeight: paneLoader.item ? paneLoader.item.implicitHeight + Theme.padLg * 2 : 0
                         clip: true
-                        Behavior on contentY { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                        Behavior on contentY { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
                         Loader {
                             id: paneLoader
                             x: Theme.padLg
                             y: Theme.padLg
                             width: contentFlick.width - Theme.padLg * 2
+                            // A category switch: the new page fades up into
+                            // place (the same grammar as Quick Settings'
+                            // tabs) and starts from its top.
+                            transform: Translate { id: paneRise }
+                            ParallelAnimation {
+                                id: paneEnter
+                                NumberAnimation {
+                                    target: paneLoader; property: "opacity"; from: 0; to: 1
+                                    duration: Theme.durationFadeIn
+                                    easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard
+                                }
+                                NumberAnimation {
+                                    target: paneRise; property: "y"; from: Theme.contentShift; to: 0
+                                    duration: Theme.durationEnter
+                                    easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter
+                                }
+                            }
+                            Connections {
+                                target: root
+                                function onCurrentCategoryChanged() { contentFlick.contentY = 0; paneEnter.restart(); }
+                            }
                             sourceComponent: {
                                 switch (root.currentCategory) {
                                 case "colors": return colorsPane;
@@ -1585,6 +1606,10 @@ PanelWindow {
                                 width: 14; height: 14; radius: 7
                                 color: Theme.accent
                                 SequentialAnimation on x {
+                                    // A demonstration of the speed setting,
+                                    // so it moves -- but not under reduce
+                                    // motion, and not while nobody sees it.
+                                    running: !Theme.reduceMotion && speedDot.visible
                                     loops: Animation.Infinite
                                     NumberAnimation { to: speedDot.parent.width - 14; duration: Math.max(60, root.anim_duration_ms * 2.8); easing.type: Easing.InOutQuad }
                                     NumberAnimation { to: 0; duration: Math.max(60, root.anim_duration_ms * 2.8); easing.type: Easing.InOutQuad }
@@ -1711,9 +1736,9 @@ PanelWindow {
                         title: "Generate Theme"
                         Text { width: parent.width; text: "Samples the wallpaper for a background tone and accent -- overwrites Colors below (Apply to keep, Revert to undo)."; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; wrapMode: Text.WordWrap }
                         GlassButton {
-                            text: root.generatingFromWallpaper ? "Sampling..." : "Generate"
+                            text: "Generate"
                             variant: "primary"
-                            enabled: !root.generatingFromWallpaper
+                            busy: root.generatingFromWallpaper
                             onClicked: root.generateFromWallpaper()
                         }
                         Text {

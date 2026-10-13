@@ -295,7 +295,7 @@ PanelWindow {
                         anchors.verticalCenter: parent.verticalCenter
                         color: active ? Theme.accent : (wsArea.containsMouse ? Theme.layer2Hover : Theme.borderIdle)
 
-                        Behavior on width { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
+                        Behavior on width { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
                         Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
                         MouseArea {

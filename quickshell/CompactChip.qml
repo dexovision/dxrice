@@ -16,11 +16,11 @@ Rectangle {
     implicitHeight: label.implicitHeight + Theme.padXs * 2
     radius: Theme.roundingSm
     color: area.pressed ? Theme.layer2Active : (area.containsMouse ? Theme.layer2Hover : Theme.layer1)
-    scale: area.pressed ? 0.96 : 1.0
+    scale: Theme.pressScale(area.pressed)
 
     Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
     Behavior on scale {
-        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+        NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
     }
 
     Text {

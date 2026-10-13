@@ -22,22 +22,46 @@ Item {
     width: parent ? parent.width : implicitWidth
 
     readonly property real fraction: root.to > root.from ? Math.max(0, Math.min(1, (root.value - root.from) / (root.to - root.from))) : 0
-    readonly property string valueText: root.decimals > 0 ? root.value.toFixed(root.decimals) : Math.round(root.value) + root.unit
+    readonly property string valueText: (root.decimals > 0 ? root.value.toFixed(root.decimals) : Math.round(root.value)) + root.unit
+    readonly property bool dragging: area.pressed
 
     Rectangle {
         id: track
         anchors.fill: parent
         radius: Theme.roundingMd
-        color: Theme.layer1
+        color: Theme.stateFill(Theme.layer1, area.containsMouse, false)
         clip: true
+        Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
+        // The fill is neutral -- a lighter step of the same surface -- and
+        // the accent is only the thin mark at its edge: the value is the
+        // small thing that's coloured, not the whole slab (a dozen of
+        // these on the Theme editor's pages were a dozen tinted bars).
         Rectangle {
             id: fill
-            width: parent.width * root.fraction
+            width: Math.max(radius * 2, parent.width * root.fraction)
             height: parent.height
             radius: Theme.roundingMd
-            color: Theme.mix(Theme.layer1, Theme.accent, area.pressed ? 0.34 : 0.24)
+            color: Theme.mix(Theme.layer1, Theme.textActive, area.pressed ? 0.16 : (area.containsMouse ? 0.12 : 0.09))
             Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+            // Follows the pointer exactly while dragging; glides when the
+            // value jumps (a click somewhere along the bar, Revert, a preset).
+            Behavior on width {
+                enabled: !root.dragging && !Theme.reduceMotion
+                NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter }
+            }
+
+            Rectangle {
+                anchors.right: parent.right
+                anchors.rightMargin: Theme.padXs
+                anchors.verticalCenter: parent.verticalCenter
+                width: 3
+                height: area.pressed ? parent.height - Theme.padMd : parent.height - Theme.padLg
+                radius: 1.5
+                color: Theme.accent
+                opacity: root.fraction > 0.01 ? 1 : 0
+                Behavior on height { enabled: !Theme.reduceMotion; NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+            }
         }
 
         Text {
@@ -50,23 +74,26 @@ Item {
             font.pixelSize: Theme.fontSizeSmaller
             font.weight: Font.Medium
             elide: Text.ElideRight
-            width: parent.width - 90
+            width: parent.width - valueLabel.implicitWidth - Theme.padMd * 3
         }
         Text {
+            id: valueLabel
             anchors.right: parent.right
             anchors.rightMargin: Theme.padMd
             anchors.verticalCenter: parent.verticalCenter
             text: root.valueText
-            color: Theme.text
-            opacity: 0.8
+            color: area.pressed ? Theme.textActive : Theme.text
+            opacity: area.pressed ? 1 : Theme.opacityFaint
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmaller
+            font.features: { "tnum": 1 }
         }
     }
 
     MouseArea {
         id: area
         anchors.fill: parent
+        hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         function setFromX(x) {
             const frac = Math.max(0, Math.min(1, x / width));

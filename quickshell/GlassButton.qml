@@ -9,11 +9,18 @@ import QtQuick
 // fill -- never the fill of a whole control, so a green or blue wallpaper
 // accent can't turn every dialog's main button into a coloured slab.
 // `badge` adds a small accent dot (e.g. "there is something to apply").
+// variant "danger" is for the one irreversible action on a screen (forget a
+// network, remove something): neutral at rest like every other secondary
+// button, red only in its label and, under the pointer, a red-tinted fill
+// -- the warning arrives as you reach for it. `busy` keeps the button's
+// size, swaps the label for LoadingDots and stops it taking clicks, so
+// "Applying..." can't be pressed twice or make the header jump.
 Rectangle {
     id: root
     property string text: ""
     property string variant: "secondary"
     property bool badge: false
+    property bool busy: false
     // `enabled` is inherited from Item -- disabling it also correctly
     // stops the MouseArea below from receiving input, not just a name we
     // happen to reuse.
@@ -25,14 +32,17 @@ Rectangle {
     // a rounded-rect secondary (Apply / Revert) read as two different kinds
     // of control.
     radius: height / 2
-    opacity: root.enabled ? 1.0 : 0.5
-    scale: area.pressed ? 0.96 : 1.0
+    opacity: root.enabled ? 1.0 : 0.45
+    Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+    scale: Theme.pressScale(area.pressed)
 
     color: {
         if (root.variant === "primary") {
             if (area.pressed) return Theme.mix(Theme.textActive, Theme.panelTone, 0.22);
             return area.containsMouse ? Theme.mix(Theme.textActive, Theme.panelTone, 0.1) : Theme.textActive;
         }
+        if (root.variant === "danger" && (area.containsMouse || area.pressed))
+            return Theme.mix(Theme.layer1, Theme.dangerTint, area.pressed ? 0.34 : 0.24);
         if (area.pressed) return Theme.layer2Active;
         return area.containsMouse ? Theme.layer2Hover : Theme.layer1;
     }
@@ -41,21 +51,30 @@ Rectangle {
         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
     }
     Behavior on scale {
-        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+        NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
     }
 
     Text {
         id: label
         anchors.centerIn: parent
         text: root.text
-        color: root.variant === "primary" ? Theme.panelTone : Theme.text
+        color: root.variant === "primary" ? Theme.panelTone
+             : root.variant === "danger" ? Theme.mix(Theme.textActive, Theme.dangerTint, 0.55) : Theme.text
+        opacity: root.busy ? 0 : 1
+        Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSizeNormal
         font.weight: root.variant === "primary" ? Font.DemiBold : Font.Medium
     }
 
+    LoadingDots {
+        anchors.centerIn: parent
+        visible: root.busy
+        color: root.variant === "primary" ? Theme.panelTone : Theme.text
+    }
+
     Rectangle {
-        visible: root.badge
+        visible: root.badge && !root.busy
         width: 6; height: 6; radius: 3
         color: Theme.accent
         anchors.right: parent.right
@@ -67,7 +86,7 @@ Rectangle {
         id: area
         anchors.fill: parent
         hoverEnabled: true
-        enabled: root.enabled
+        enabled: root.enabled && !root.busy
         cursorShape: Qt.PointingHandCursor
         onClicked: root.clicked()
     }

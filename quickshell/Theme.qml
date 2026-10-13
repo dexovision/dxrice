@@ -353,6 +353,10 @@ QtObject {
     readonly property var curveEmphasizedDecel: [0.05, 0.7, 0.1, 1, 1, 1]
     readonly property var curveStandard: [0.2, 0, 0, 1, 1, 1]
     readonly property int durationFast: Math.round(animMs * 1.0)
+    // durationFast for things that MOVE (an indicator sliding to the new
+    // tab, a pill widening, a scroll glide, a handle growing): instant
+    // under reduce_motion. durationFast itself stays for colour/opacity.
+    readonly property int durationMove: root.reduceMotion ? 1 : durationFast
     readonly property int durationDefault: root.reduceMotion ? 1 : Math.round(animMs * 2.2)
     readonly property int durationEnter: root.reduceMotion ? 1 : Math.round(animMs * 2.8)
 
@@ -374,10 +378,33 @@ QtObject {
     readonly property var curveEnter: curveStandard
     readonly property var curveExit: [0.3, 0, 0.8, 0.15, 1, 1]
 
-    // theme.json "reduce_motion": true. Surfaces then appear and disappear
-    // in place (opacity only) instead of growing and shrinking; short state
-    // fades are kept, since they don't move anything.
+    // theme.json "reduce_motion": true (Settings > Experience > Reduce
+    // motion). Surfaces then appear and disappear in place (opacity only)
+    // instead of growing and shrinking; nothing slides, scales, bounces or
+    // shakes. Short colour/opacity fades are kept -- they don't move
+    // anything, and an instant state flip reads as a glitch.
     readonly property bool reduceMotion: root.data.reduce_motion === true
+
+    // ---- interaction feedback, shared so every control answers the
+    // pointer the same way ----
+    // A pressed control sinks slightly (0.96 for anything text-sized, 0.92
+    // for small round icon buttons), springing back on release. Under
+    // reduce_motion it doesn't move at all -- the press colour still shows.
+    function pressScale(pressed, depth) {
+        return (pressed && !root.reduceMotion) ? (depth === undefined ? 0.96 : depth) : 1.0;
+    }
+    // Hover/press as a "state layer": the control's own resting fill with a
+    // little of the foreground mixed in -- the same proportions everywhere,
+    // so a hovered chip, row and button all brighten by the same amount.
+    readonly property real stateHover: 0.08
+    readonly property real statePress: 0.14
+    function stateFill(base, hovered, pressed) {
+        return root.mix(base, root.textActive, pressed ? root.statePress : (hovered ? root.stateHover : 0));
+    }
+    // Content swapped in place (a tab, a settings category): the new
+    // content rises this far while it fades in. Small on purpose -- it says
+    // "this replaced that", it isn't a page transition.
+    readonly property real contentShift: root.reduceMotion ? 0 : 8
 
     // ---- elevation: ported directly from caelestia-dots/shell's own
     // components/effects/Elevation.qml -- a real Material 3 discrete

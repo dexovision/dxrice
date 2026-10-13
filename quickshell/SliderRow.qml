@@ -51,7 +51,9 @@ Item {
             handle: Rectangle {
                 x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
                 y: slider.topPadding + slider.availableHeight / 2 - height / 2
-                width: slider.pressed ? 20 : 16
+                // Grows under the pointer and while held -- it's the thing
+                // being grabbed -- but only by colour under reduce_motion.
+                width: Theme.reduceMotion ? 16 : (slider.pressed ? 20 : (slider.hovered ? 18 : 16))
                 height: width
                 radius: Theme.roundingFull
                 color: Theme.textActive
@@ -59,10 +61,10 @@ Item {
                 border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.3)
 
                 Behavior on width {
-                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+                    NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
                 }
                 Behavior on border.width {
-                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
+                    NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
                 }
             }
 
