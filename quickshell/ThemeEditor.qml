@@ -89,7 +89,13 @@ PanelWindow {
     // value: "fits its own Rectangle" is not the same claim as "fits on
     // this screen"), and `minPanelHeight` keeps the sidebar's 7 categories
     // legible without needing its own internal scroll on every category.
-    readonly property real maxPanelHeight: Math.min(640, (root.screen ? root.screen.height : 1080) - ShellSurface.topEdgeHeight - ShellSurface.gap)
+    // 800, not 640: at 640 a 1080p screen cut the Colors page off mid-row
+    // with a third of the screen still free. Bounded by the dock's reserved
+    // strip as well as the bar's: the colour picker stays within the
+    // panel's span, so a panel reaching over the dock put the picker's
+    // buttons under the dock, which took their clicks (1024x768).
+    readonly property real maxPanelHeight: Math.min(800, (root.screen ? root.screen.height : 1080)
+        - ShellSurface.topEdgeHeight - ShellSurface.bottomEdgeHeight - ShellSurface.gap)
     readonly property real minPanelHeight: Math.min(root.maxPanelHeight, 480)
     readonly property real contentNaturalHeight: header.height + Theme.padLg * 2 + (paneLoader.item ? paneLoader.item.implicitHeight : 0)
     readonly property real panelHeight: Math.max(root.minPanelHeight, Math.min(root.maxPanelHeight, root.contentNaturalHeight))

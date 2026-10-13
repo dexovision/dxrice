@@ -73,12 +73,21 @@ Item {
     //                           visually allocated, never a mismatched guess
     readonly property real headerStackHeight: Theme.padSm + ShellSurface.navHeight + 1
     readonly property real preferredPaneHeight: 420
+    // The viewport grows to fit the open pane when its content needs more
+    // than preferredPaneHeight -- the Overview does on any machine with more
+    // than one audio device (Output/Input pickers), and was cut off
+    // mid-row at a fixed 420px with half a screen still free. Grow-only and
+    // debounced with a dead band (paneFitSettle), so the per-second ticks
+    // the contract above guards against can never feed back into the
+    // island's size: panes fill max(content, available), so once the
+    // viewport fits, re-measuring returns the same height.
+    property real _paneFit: preferredPaneHeight
     // Matches TopBar.qml's islands: collapsedHeight is ShellSurface.unit and
     // each island sits ShellSurface.gap from the top AND needs the same gap
     // free at the bottom, so this is the real ceiling on how tall the pane
     // below the header can ever be before the panel would run off-screen.
     readonly property real maxAvailableHeight: ShellSurface.screenHeight - ShellSurface.gap * 2 - ShellSurface.unit
-    readonly property real viewportHeight: Math.max(120, Math.min(preferredPaneHeight, maxAvailableHeight - headerStackHeight))
+    readonly property real viewportHeight: Math.max(120, Math.min(root._paneFit, maxAvailableHeight - headerStackHeight))
     readonly property real contentHeight: headerStackHeight + viewportHeight
     // What a pane can fill without scrolling: the viewport minus the pane
     // loader's own top/bottom inset. A per-screen constant, like the rest of
@@ -332,7 +341,18 @@ Item {
 
             Flickable {
                 id: paneFlickable
+                // Panels don't scroll: the viewport grows to fit (_paneFit).
+                // Only a screen too short for the content can still scroll,
+                // as a last resort, and nothing bounces when it fits.
+                interactive: contentHeight > height + 1
+                boundsBehavior: Flickable.StopAtBounds
                 readonly property real paneHeight: (paneLoader.item ? paneLoader.item.implicitHeight : 0) + Theme.padLg * 2
+                onPaneHeightChanged: paneFitSettle.restart()
+                Timer {
+                    id: paneFitSettle
+                    interval: 60
+                    onTriggered: if (paneFlickable.paneHeight > root._paneFit + 6) root._paneFit = Math.ceil(paneFlickable.paneHeight)
+                }
                 anchors.fill: parent
                 contentHeight: paneHeight
                 clip: true
@@ -1268,11 +1288,14 @@ Item {
                             contentHeight: clipList.implicitHeight
                             clip: true
                             boundsBehavior: Flickable.StopAtBounds
+                            // No scrolling in Quick Settings beyond the Wi-Fi
+                            // list: the card shows the newest entries that fit.
+                            interactive: false
                             Column {
                                 id: clipList
                                 width: clipFlick.width
                                 Repeater {
-                                    model: clipboardBackend.entries
+                                    model: clipboardBackend.entries.slice(0, Math.max(0, Math.floor(clipFlick.height / 30)))
                                     delegate: Rectangle {
                                         required property var modelData
                                         width: clipList.width

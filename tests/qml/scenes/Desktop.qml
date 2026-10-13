@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
 
 // A fake monitor: wallpaper, an ordinary application window underneath the
 // shell (the "Discord" from the dead-zone report), and the REAL shell.qml
@@ -100,6 +101,18 @@ Item {
     }
 
     // A fake MPRIS player (null to clear).
+    // A machine with several audio devices (headset + speakers + HDMI ...):
+    // Quick Settings then shows its Output/Input pickers.
+    function addAudioDevices() {
+        const mk = (name, desc, sink) => Qt.createQmlObject(
+            "import QtQuick; QtObject { property string name: '" + name + "'; property string description: '" + desc
+            + "'; property bool isSink: " + sink + "; property bool isStream: false; property int type: 1;"
+            + " property QtObject audio: QtObject { property real volume: 0.5; property bool muted: false } }", root);
+        Pipewire.nodes = { values: [Pipewire.defaultAudioSink, Pipewire.defaultAudioSource,
+            mk("hdmi", "HDMI Audio", true), mk("headset", "HyperX Virtual Surround Sound", true),
+            mk("headset_mic", "HyperX Virtual Surround Sound Mic", false)] };
+    }
+
     function setPlayer(p) {
         if (!p) { Mpris.players = { values: [] }; return; }
         const player = Object.assign({

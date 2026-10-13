@@ -101,7 +101,11 @@ Item {
     readonly property int shortcutCount: root.loaded ? (root.cfg["modules-left"] || []).length : 0
 
     readonly property real maxAvailableBodyHeight: ShellSurface.screenHeight - ShellSurface.gap * 2 - ShellSurface.dockUnit - header.height
-    readonly property real bodyHeight: Math.min(360, maxAvailableBodyHeight, body.implicitHeight + Theme.padXl * 2)
+    // Sized to its whole content: panels don't scroll. A flat 360px cap cut
+    // the shortcut list off mid-row (at the 6th shortcut) on a 1080p screen
+    // with most of it still free. Only a screen too short for the content
+    // still scrolls, as a last resort.
+    readonly property real bodyHeight: Math.min(maxAvailableBodyHeight, body.implicitHeight + Theme.padXl * 2)
     readonly property real contentHeight: header.height + bodyHeight
 
     readonly property string repoDir: Quickshell.shellDir + "/.."
@@ -538,6 +542,8 @@ Item {
                 anchors.fill: parent
                 contentHeight: body.implicitHeight + Theme.padXl * 2
                 clip: true
+                interactive: contentHeight > height + 1
+                boundsBehavior: Flickable.StopAtBounds
 
                 Column {
                     id: body
@@ -802,9 +808,13 @@ Item {
                 // Heading and its explanation are one unit: as two separate
                 // children of `body` they inherited the 24px between-cards
                 // gap, which left the explanation floating on its own.
+                // Only when the dock config has system modules at all -- with
+                // Quick Settings providing them (the usual setup) this was a
+                // heading and a sentence over nothing.
                 Column {
                     width: body.width
                     spacing: 2
+                    visible: root.loaded && root.systemModuleIds().length > 0
                     Text { text: "System Modules"; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; font.letterSpacing: 0.5 }
                     Text {
                         width: parent.width
@@ -816,6 +826,7 @@ Item {
                 Column {
                     width: body.width
                     spacing: Theme.padSm
+                    visible: root.loaded && root.systemModuleIds().length > 0
                     Repeater {
                         model: root.loaded ? root.systemModuleIds() : []
                         delegate: Column {
