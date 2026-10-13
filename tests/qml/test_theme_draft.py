@@ -183,6 +183,22 @@ class ThemeDraftTest(unittest.TestCase):
         bad = [w for w in self.s.warnings if "propertyCache" not in w]
         self.assertEqual(bad, [])
 
+    def test_apply_is_a_neutral_button_with_an_unapplied_badge(self):
+        """The accent marks small things (a selection, a dot), never the fill
+        of a whole button -- Apply was an accent-filled slab. Unapplied
+        edits show as a small accent dot instead of "Apply*"."""
+        self.open()
+        js = """(function(){ const b = findNamed('themeApply'); const dot = b.children.filter(c => c.width === 6)[0];
+            return JSON.stringify({ fill: String(b.color), accent: String(theme.accent), text: b.text, dot: dot ? dot.visible : null }); })()"""
+        st = json.loads(self.s.ev(js))
+        self.assertNotEqual(st["fill"], st["accent"], "Apply is filled with the accent colour")
+        self.assertEqual(st["text"], "Apply")
+        self.assertFalse(st["dot"], "unapplied-changes dot shown with nothing unapplied")
+        self.edit_accent("123456")
+        st = json.loads(self.s.ev(js))
+        self.assertTrue(st["dot"], "no unapplied-changes dot after an edit")
+        self.assertEqual(st["text"], "Apply", "label changed instead of showing the dot")
+
     # Generate from wallpaper fills the draft only, like a preset: the
     # script used to write theme.json itself, so Revert "restored" the
     # generated colours and the shell recoloured before Apply.

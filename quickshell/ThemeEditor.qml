@@ -198,12 +198,12 @@ PanelWindow {
     onDirtyChanged: if (root.dirty) { root.applyError = ""; root.draftNotice = ""; }
 
     readonly property var colorFields: [
-        { key: "glass_bg", label: "Panel background", sub: "Waybar/wofi/kitty base color" },
+        { key: "glass_bg", label: "Panel background", sub: "Panels, launcher and terminal background" },
         { key: "glass_bg_active", label: "Active panel background", sub: "Focused workspace, selected entries" },
         { key: "glass_text", label: "Text", sub: "Base text color" },
         { key: "glass_text_active", label: "Active text", sub: "Text on focused/selected elements" },
         { key: "glass_border", label: "Panel border", sub: "Hairline border around panels" },
-        { key: "accent", label: "Accent", sub: "Critical notifications, mute/destructive actions" },
+        { key: "accent", label: "Accent", sub: "Selection, indicators and progress -- used sparingly" },
     ]
     readonly property var borderColorFields: [
         { key: "hypr_active_border_1", label: "Active border -- color 1", sub: "Focused window gradient start" },
@@ -257,13 +257,13 @@ PanelWindow {
 
     // ---- sidebar categories ----
     readonly property var categories: [
-        { id: "colors", glyph: "", label: "Colors", sub: "Presets, palette, window borders" },
-        { id: "blur", glyph: "", label: "Transparency & Blur", sub: "Panel opacity, window blur" },
-        { id: "layout", glyph: "", label: "Layout", sub: "Rounding, gaps, window borders" },
-        { id: "lock", glyph: "", label: "Lock Screen", sub: "Blur, vibrancy, input field" },
-        { id: "fonts", glyph: "", label: "Fonts", sub: "Sizes and font family" },
-        { id: "experience", glyph: "", label: "Experience", sub: "Animation speed, density, shadows" },
-        { id: "wallpaper", glyph: "", label: "Wallpaper", sub: "Desktop background image" },
+        { id: "colors", glyph: "", label: "Colors", sub: "Presets and palette" },
+        { id: "blur", glyph: "", label: "Transparency & Blur", sub: "Opacity and blur" },
+        { id: "layout", glyph: "", label: "Layout", sub: "Rounding and gaps" },
+        { id: "lock", glyph: "", label: "Lock Screen", sub: "Blur and input field" },
+        { id: "fonts", glyph: "", label: "Fonts", sub: "Family and sizes" },
+        { id: "experience", glyph: "", label: "Experience", sub: "Motion and spacing" },
+        { id: "wallpaper", glyph: "", label: "Wallpaper", sub: "Background image" },
     ]
     property string currentCategory: "colors"
     property string searchText: ""
@@ -717,8 +717,10 @@ PanelWindow {
                     spacing: Theme.padSm
                     GlassButton { text: "Revert"; variant: "secondary"; onClicked: root.revert() }
                     GlassButton {
-                        text: root.applying ? "Applying..." : (root.dirty ? "Apply*" : "Apply")
+                        objectName: "themeApply"
+                        text: root.applying ? "Applying..." : "Apply"
                         variant: "primary"
+                        badge: root.dirty && !root.applying
                         enabled: !root.applying
                         onClicked: root.apply()
                     }
