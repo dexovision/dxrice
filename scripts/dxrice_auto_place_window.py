@@ -799,7 +799,7 @@ def anisotropy(lambda1, lambda2):
     return (lambda1 - lambda2) / total if total > 1e-9 else 0.0
 
 
-def composition_cost(weighted_rects, viewport_center):
+def composition_cost(weighted_rects, viewport_center, aspect=1.0):
     """The GLOBAL (whole-cluster) composition term -- see the module
     comment above for why this exists. `weighted_rects`: [(cx, cy, w, h,
     mass), ...] for EVERY window in the composition, including whatever
@@ -848,11 +848,11 @@ def composition_cost(weighted_rects, viewport_center):
     subset" of points anymore; every window, wherever it sits, is one
     uniform contribution to one matrix.
     """
-    center_of_mass_cost, angular_cost = composition_cost_components(weighted_rects, viewport_center)
+    center_of_mass_cost, angular_cost = composition_cost_components(weighted_rects, viewport_center, aspect)
     return CENTER_OF_MASS_WEIGHT * center_of_mass_cost + angular_cost
 
 
-def composition_cost_components(weighted_rects, viewport_center):
+def composition_cost_components(weighted_rects, viewport_center, aspect=1.0):
     """Same two ingredients composition_cost sums together, returned
     SEPARATELY as (center_of_mass_cost, angular_cost) -- angular_cost
     already includes its own ANGULAR_PENALTY_SCALE multiplication (i.e. it
@@ -890,6 +890,15 @@ def composition_cost_components(weighted_rects, viewport_center):
         return 0.0, 0.0
     center_of_mass_cost = math.hypot(com[0] - vx, com[1] - vy)
 
+    # `aspect` (width/height) is the shape the composition should read as
+    # balanced at: 1.0 (the default, every caller but SUPER+G) is round. The
+    # vertical spread is measured in units stretched by it, so a cluster
+    # with exactly that aspect has zero anisotropy -- SUPER+G passes the
+    # screen's own shape, so a whole-desktop arrangement fills a 16:9 view
+    # instead of being pulled toward a circle (or a tall column) inside it.
+    if aspect != 1.0:
+        weighted_rects = [(cx, cy * aspect, w, h * aspect, m) for cx, cy, w, h, m in weighted_rects]
+        com = (com[0], com[1] * aspect)
     Cxx, Cyy, Cxy = covariance_matrix(weighted_rects, com)
     lambda1, lambda2, _angle = principal_axes(Cxx, Cyy, Cxy)
     aniso = anisotropy(lambda1, lambda2)

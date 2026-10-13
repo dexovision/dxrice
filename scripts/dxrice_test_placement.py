@@ -637,7 +637,79 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
         self.assertEqual(sorted(r1), sorted(r2))
 
 
-class TestSuperGResize(unittest.TestCase):
+class TestSuperGWholeComposition(unittest.TestCase):
+    """Shape of the whole SUPER+G result, at production settings: it fills
+    a widescreen view instead of forming a tall column, and no window is
+    left stranded away from the rest."""
+
+    MON = (0, 0, 1920, 1080)
+    GAP = 5
+
+    @staticmethod
+    def _sep(r, others):
+        return min(max(o[1] - (r[1] + r[3]), r[1] - (o[1] + o[3]), o[2] - (r[2] + r[4]), r[2] - (o[2] + o[4]))
+                   for o in others if o is not r)
+
+    def test_equal_terminals_fill_a_widescreen_view_not_a_tall_column(self):
+        """8 terminals came out as a 2x4 column 1720px tall on a 1080px
+        screen (the shape target was round)."""
+        layout = [{"address": f"t{i}", "at": [100 + (i * 233) % 1500, 60 + (i * 157) % 800], "size": [640, 400]}
+                  for i in range(8)]
+        r = arr.auto_arrange(layout, [], self.MON, self.GAP)
+        w = max(x + ww for _, x, y, ww, hh in r) - min(x for _, x, y, ww, hh in r)
+        h = max(y + hh for _, x, y, ww, hh in r) - min(y for _, x, y, ww, hh in r)
+        self.assertGreater(w, h, f"cluster is {w}x{h}: taller than wide on a 16:9 screen")
+
+    def test_no_window_is_left_scattered_on_benchmark_layouts(self):
+        """No window ends up further from its nearest neighbour than twice
+        its own short side -- the line _shape_is_coherent itself draws
+        between a deliberate standalone dialog and a scattered one. On the
+        first 80 benchmark layouts (seed 20260920) the old scoring left 4
+        windows 575-959px out: moving them cost more than the bounding-
+        box growth they caused, so they never rejoined the cluster."""
+        import dxrice_placement_benchmark as bench
+        rng = random.Random(20260920)
+        scattered = []
+        for i in range(80):
+            lo, hi = rng.choice(bench.SIZE_BUCKETS)
+            n = rng.randint(lo, hi)
+            kind = rng.choice(bench.SHAPE_KINDS)
+            el, fx = bench.gen_layout(rng, n, kind)
+            el = [bench._mk(*r) for r in bench.resolve_overlaps([(w["address"], *w["at"], *w["size"]) for w in el])]
+            r = arr.auto_arrange(el, fx, bench.MONITOR, bench.GAP)
+            for win in r:
+                if len(r) > 1 and self._sep(win, r) > 2 * min(win[3], win[4]):
+                    scattered.append((i, kind, win[0], round(self._sep(win, r))))
+        self.assertEqual(scattered, [])
+
+    def test_no_window_is_stranded_beyond_a_fullscreen_window(self):
+        fixed = [{"address": "video", "at": [0, 0], "size": [1920, 1080]}]
+        layout = [{"address": "a", "at": [200, 1100], "size": [900, 600]},
+                  {"address": "b", "at": [1150, 1100], "size": [700, 500]},
+                  {"address": "dlg", "at": [800, -400], "size": [260, 180]}]
+        r = arr.auto_arrange(layout, fixed, self.MON, self.GAP)
+        for win in r:
+            self.assertLessEqual(self._sep(win, r), self.GAP + 2, f"{win[0]} left detached: {r}")
+
+
+class _RoundShapeFixtures(unittest.TestCase):
+    """For suites whose fixtures were built (before SHAPE_ASPECT_EXPONENT)
+    to make a specific resize, trim or notch-repair happen on press 1. What
+    they pin -- resize memory, notch refinement, how a resize is chosen and
+    dispatched -- doesn't depend on the target shape, but whether a given
+    fixture needs a resize at all does: under the screen-shaped target
+    several of these layouts simply no longer call for one, and the
+    tests' own "fixture must resize something" premises fail. They run
+    against the round target their fixtures were designed for; everything
+    else (the detachment cost included) is production behaviour."""
+
+    def setUp(self):
+        saved = arr.SHAPE_ASPECT_EXPONENT
+        arr.SHAPE_ASPECT_EXPONENT = 0.0
+        self.addCleanup(setattr, arr, "SHAPE_ASPECT_EXPONENT", saved)
+
+
+class TestSuperGResize(_RoundShapeFixtures):
     """SUPER+G's joint position+size capability -- see dxrice_auto_arrange.py's
     own "SUPER+G's resize capability" module section for the architecture
     (resize candidates are additional entries in the SAME per-step search
@@ -2847,7 +2919,7 @@ class TestRealisticLayoutCorpus(unittest.TestCase):
         ])
 
 
-class TestNotchAlignmentRefinement(unittest.TestCase):
+class TestNotchAlignmentRefinement(_RoundShapeFixtures):
     """_refine_notch_alignment: the structural fix for the root cause the
     per-step incremental build cannot see (a window's locally-best choice
     can lock in an offset that forces a much worse notch onto a LATER
@@ -3199,7 +3271,7 @@ class TestNotchAlignmentRefinement(unittest.TestCase):
             layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
 
 
-class TestCrossPressResizeMemory(unittest.TestCase):
+class TestCrossPressResizeMemory(_RoundShapeFixtures):
     """auto_arrange only sees CURRENT sizes, so before the resize memory
     every press treated a window's current size as its original one: the
     once-per-window resize rule and the MAX_SHRINK_FRACTION bound both reset
@@ -3216,10 +3288,18 @@ class TestCrossPressResizeMemory(unittest.TestCase):
                   ("W9", 1165, 1799, 241, 182), ("W14", 1165, 2675, 265, 169), ("W15", 1165, 2849, 283, 187),
                   ("W16", 1165, 3041, 255, 171), ("W17", 1165, 3217, 229, 191), ("W18", 1165, 3413, 216, 219),
                   ("W19", 1165, 3637, 281, 201), ("W20", 1165, 3843, 277, 220)]
-    REFINE_PATH = [("W0", 790, 811, 1504, 154), ("W5", 1181, -173, 1279, 198), ("W6", 1160, 1137, 171, 1380),
-                   ("W12", 73, -51, 173, 1356), ("W13", 468, 2695, 190, 1077), ("W14", 1336, 2145, 1359, 160),
-                   ("W15", 3021, 773, 155, 705), ("W16", 3181, 834, 1563, 216), ("W17", 663, 2694, 203, 1399),
-                   ("W19", 2154, 2310, 1755, 185)]
+    # Benchmark layout #108 (extreme_aspect, seed 20260920): refine trims
+    # W7 on press 1 and, without memory, it is resized again on press 2.
+    # (Replaced the earlier delta-minimized fixture once stray windows
+    # started being pulled into the cluster -- DETACH_WEIGHT -- which
+    # removed the notch that one trimmed.)
+    REFINE_PATH = [("W0", 1403, 211, 1007, 145), ("W1", 228, -111, 123, 1208), ("W2", 356, 715, 1611, 138),
+                   ("W3", 356, 858, 1466, 165), ("W4", 1827, 858, 138, 927), ("W5", 1970, 1028, 194, 1329),
+                   ("W6", 2415, -139, 120, 1352), ("W7", 642, 2362, 1388, 152), ("W8", 2540, 361, 182, 1042),
+                   ("W9", 2169, 557, 136, 959), ("W10", 2727, 504, 147, 909), ("W11", 1473, 2519, 219, 1296),
+                   ("W12", 988, 3820, 975, 190), ("W13", 434, -28, 929, 166), ("W14", 1968, 2519, 162, 1109),
+                   ("W15", 2135, 2657, 1164, 178), ("W16", 2540, -80, 1280, 152), ("W17", -65, 57, 141, 754),
+                   ("W18", 2879, 361, 137, 764), ("W19", 2135, 2840, 220, 1128)]
 
     def _layout(self, rows):
         return [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in rows]
@@ -3259,8 +3339,8 @@ class TestCrossPressResizeMemory(unittest.TestCase):
         self._assert_never_resized_twice(self.BUILD_PATH)
 
     def test_refine_trim_is_not_repeated_on_later_presses(self):
-        """Without memory: refine trims W6's height on press 1 and trims it
-        again on press 2 (1380 -> 1196 -> 1077)."""
+        """Without memory: refine trims W7 on press 1 and it is resized
+        again on press 2."""
         self._assert_never_resized_twice(self.REFINE_PATH)
 
     def test_empty_lock_changes_nothing(self):
@@ -3367,7 +3447,7 @@ class _FakeHyprland:
         return [(a, *c["at"], *c["size"]) for a, c in self.clients.items()]
 
 
-class TestSuperGMainFlow(unittest.TestCase):
+class TestSuperGMainFlow(_RoundShapeFixtures):
     """main() itself, end to end against _FakeHyprland: what actually gets
     dispatched after a resize, and that the resize memory is written and
     honored by the next press."""
@@ -3376,6 +3456,7 @@ class TestSuperGMainFlow(unittest.TestCase):
     GAP = 5
 
     def setUp(self):
+        super().setUp()
         import tempfile
         self._tmp = tempfile.TemporaryDirectory()
         self._env = os.environ.get("XDG_RUNTIME_DIR")

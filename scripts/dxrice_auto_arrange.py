@@ -157,6 +157,16 @@ _DEBUG = os.environ.get("DXRICE_DEBUG") == "1"
 # distribution.
 COMPACTNESS_WEIGHT = 0.25
 MOVEMENT_WEIGHT = 0.3
+
+# Cost per pixel of daylight between a candidate and the nearest window
+# already placed. Without it a window far from everything else could only
+# be pulled in by bounding-box growth (COMPACTNESS_WEIGHT, 0.25/px) -- less
+# than the 0.3/px MOVEMENT_WEIGHT charges for moving it -- so a stray
+# window stayed stranded wherever it started: measured on the 300-layout
+# benchmark, one layout in six kept a window 700-2400px from the rest
+# after SUPER+G. Above MOVEMENT_WEIGHT on purpose, so joining the cluster
+# always beats staying away from it.
+DETACH_WEIGHT = 1.0
 BEARING_WEIGHT = 0.0
 
 # GLOBAL composition (see composition_cost's own docstring in
@@ -234,6 +244,21 @@ NOTCH_REFINE_MAX_TOTAL_SHIFT = 300.0
 # outlier" was already the established bar for "worth resizing" before
 # this shrink extension existed.
 NOTCH_REFINE_SHRINK_MIN_DEPTH = 100.0
+
+# The shape a whole-desktop arrangement should read as balanced at, as an
+# exponent on the viewport's own aspect ratio (see composition_cost's
+# `aspect`). 0 is round -- the previous behaviour, which on a 16:9 screen
+# pulled clusters into circles, crosses and tall columns with the sides
+# left empty (8 terminals came out as a 2x4 column 1720px tall). 1 is
+# exactly the screen's shape -- measured too strong: it broke clean 2x2
+# blocks and 3-window groups apart into staircases just to widen them.
+# 0.5 (about 4:3 on a 16:9 monitor) fixed the tall and cross-shaped cases
+# while leaving every compact one as it was (see
+# scripts/dxrice_arrange_report.py for the fixtures and renders). Set for
+# the duration of one auto_arrange call (_shape_aspect) rather than
+# threaded through every scoring helper.
+SHAPE_ASPECT_EXPONENT = 0.5
+_shape_aspect = 1.0
 
 
 def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_size,
@@ -730,6 +755,8 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
     # O(n) recomputations). Same value, computed once; nothing about which
     # candidate wins changes.
     comp_ref = (mass_center(placed_points) or viewport_center) if placed_points else None
+    placed_rects = [(pcx - pw / 2, pcy - ph / 2, pcx + pw / 2, pcy + ph / 2)
+                    for pcx, pcy, pw, ph, _m in placed_points]
 
     def score(x, y):
         px, py = x + nw / 2, y + nh / 2
@@ -764,7 +791,7 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
         # build; only the final shift may care where the viewport actually
         # is.
         if placed_points:
-            total += composition_cost(placed_points + [(px, py, nw, nh, cand_mass)], comp_ref)
+            total += composition_cost(placed_points + [(px, py, nw, nh, cand_mass)], comp_ref, _shape_aspect)
         if cluster_bbox is not None:
             bx0_, by0_, bx1_, by1_ = cluster_bbox
             new_w = max(bx1_, cand[2]) - min(bx0_, cand[0])
@@ -782,6 +809,13 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
         # already in the cluster over one that only sliver-touches it, and
         # rewards lining up with an existing window's edge even when not
         # directly touching it. See composition_penalty's own docstring.
+        if placed_rects:
+            # Separation from the nearest window already placed (0 when it
+            # sits flush at the gap, on any side or corner).
+            sep = min(max(r[0] - cand[2], cand[0] - r[2], r[1] - cand[3], cand[1] - r[3])
+                      for r in placed_rects)
+            if sep > gap + FLUSH_TOL:
+                total += DETACH_WEIGHT * (sep - gap)
         total += composition_penalty(cand, obstacle_rects, gap)
         return total
 
@@ -1481,6 +1515,19 @@ def _typical_area(eligible):
 
 
 def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize_locked=frozenset()):
+    """See _auto_arrange. Sets the target composition shape (the monitor's
+    aspect, see SHAPE_ASPECT_EXPONENT) for the duration of the pass."""
+    global _shape_aspect
+    mx0, my0, mx1, my1 = monitor_bounds
+    previous = _shape_aspect
+    _shape_aspect = ((mx1 - mx0) / (my1 - my0)) ** SHAPE_ASPECT_EXPONENT if my1 > my0 and mx1 > mx0 else 1.0
+    try:
+        return _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize, resize_locked)
+    finally:
+        _shape_aspect = previous
+
+
+def _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize_locked=frozenset()):
     """eligible / fixed: [{"address":..., "at":[x,y], "size":[w,h]}, ...].
     Returns [(address, new_x, new_y, new_w, new_h), ...] for EVERY eligible
     window (not just ones that changed -- the caller compares against each
@@ -1777,7 +1824,7 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize
     def _final_cost(built):
         by_addr = {a: (x, y, w, h) for a, x, y, w, h in built}
         pts = [(x + w / 2, y + h / 2, w, h, window_mass(w, h, reference_area)) for x, y, w, h in by_addr.values()]
-        comp = composition_cost(pts, viewport_center)
+        comp = composition_cost(pts, viewport_center, _shape_aspect)
         movement = sum(
             math.hypot(x + w / 2 - (orig["at"][0] + orig["size"][0] / 2),
                        y + h / 2 - (orig["at"][1] + orig["size"][1] / 2))
