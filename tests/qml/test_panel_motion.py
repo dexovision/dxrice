@@ -277,6 +277,40 @@ class ExpandableMotionTest(unittest.TestCase):
             s.close()
 
 
+LOCK_JS = """(function(){
+    const lock = findNamed('lockScreen');
+    const find = (root, name) => { const st = [root]; while (st.length) { const o = st.pop(); if (!o) continue;
+        if (o.objectName === name) return o; const k = o.data !== undefined ? o.data : []; for (let i = 0; i < k.length; i++) st.push(k[i]); } return null; };
+    lock.locked = true;
+    const s = lock.surfaceItem;
+    find(s, 'lockPam').completed(1);  // PamResult.Failed
+    return find(s, 'lockShake').running;
+})()"""
+
+
+class LockShakeTest(unittest.TestCase):
+    """A wrong password shakes the lock card -- unless reduce_motion."""
+
+    def _shakes(self, reduce):
+        def setup(bridge):
+            path = Path(bridge.config_home) / "dxrice" / "theme.json"
+            data = json.loads(path.read_text())
+            data["reduce_motion"] = reduce
+            path.write_text(json.dumps(data))
+        s = Scene(width=1280, height=720, setup=setup)
+        try:
+            return s.ev(LOCK_JS)
+        finally:
+            s.ev("findNamed('lockScreen').locked = false")
+            s.close()
+
+    def test_wrong_password_shakes(self):
+        self.assertTrue(self._shakes(False))
+
+    def test_no_shake_under_reduce_motion(self):
+        self.assertFalse(self._shakes(True), "the lock card shook with reduce_motion on")
+
+
 class ReducedMotionTest(unittest.TestCase):
     """theme.json "reduce_motion": true -- panels appear and disappear in
     place: no growing/shrinking geometry, only a short fade of the content."""

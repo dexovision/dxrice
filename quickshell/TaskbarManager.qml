@@ -469,7 +469,7 @@ Item {
                     ? Theme.mix(Theme.layer1, Theme.accent, addChipArea.containsMouse ? 0.34 : 0.24)
                     : (addChipArea.pressed ? Theme.layer2Active : (addChipArea.containsMouse ? Theme.layer2Hover : Theme.layer1))
                 scale: addChipArea.pressed ? 0.96 : 1
-                Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                 Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
                 Row {
                     id: addChipRow
@@ -651,7 +651,7 @@ Item {
                                         color: shortcutRow.dropHighlighted
                                             ? Theme.mix(Theme.layer1, Theme.accent, 0.18)
                                             : (rowHover.hovered ? Theme.layer1 : "transparent")
-                                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                                        Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                                     }
 
                                     Item {
@@ -668,7 +668,7 @@ Item {
                                             text: "⣿"
                                             color: Theme.text
                                             opacity: dragHandleMouse.drag.active ? 0.9 : (rowHover.hovered ? 0.55 : 0.22)
-                                            Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                                            Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                                         }
                                         Drag.active: dragHandleMouse.drag.active
                                         Drag.keys: ["dxrice-shortcut"]
@@ -723,7 +723,7 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         visible: !shortcutRow.pinned
                                         opacity: (rowHover.hovered || shortcutRow.expanded) ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                                        Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                                         IconButton { glyph: shortcutRow.expanded ? "\uf077" : "\uf078"; size: Theme.iconSm; onClicked: shortcutRow.expanded = !shortcutRow.expanded }
                                         IconButton { glyph: "↑"; size: Theme.iconSm; onClicked: root.moveShortcut(shortcutRow.modid, "up") }
                                         IconButton { glyph: "↓"; size: Theme.iconSm; onClicked: root.moveShortcut(shortcutRow.modid, "down") }

@@ -23,7 +23,7 @@ Item {
     width: 3
     opacity: scrollable ? 0.5 : 0
     visible: opacity > 0.01
-    Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+    Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
     Rectangle {
         width: parent.width

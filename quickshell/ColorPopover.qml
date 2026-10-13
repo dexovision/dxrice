@@ -369,7 +369,7 @@ Item {
                         color: Theme.inputFill
                         border.width: Theme.borderWidth
                         border.color: hexInput.activeFocus ? Theme.withAlpha(Theme.accent, 0.6) : Theme.borderIdle
-                        Behavior on border.color { ColorAnimation { duration: Theme.durationFast } }
+                        Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                         Text {
                             id: hashGlyph
                             anchors.left: parent.left

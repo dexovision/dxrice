@@ -42,6 +42,7 @@ WlSessionLock {
 
             PamContext {
                 id: pam
+                objectName: "lockPam"
                 config: "hyprlock"
                 property string pendingPassword: ""
 
@@ -55,7 +56,8 @@ WlSessionLock {
                         passwordField.text = "";
                         passwordField.enabled = true;
                         messageText.text = "Incorrect password";
-                        shakeAnim.start();
+                        // Under reduce_motion the message alone says it.
+                        if (!Theme.reduceMotion) shakeAnim.start();
                     }
                 }
                 onError: (err) => {
@@ -220,6 +222,7 @@ WlSessionLock {
 
                 SequentialAnimation {
                     id: shakeAnim
+                    objectName: "lockShake"
                     property real offset: 0
                     loops: 1
                     NumberAnimation { target: shakeAnim; property: "offset"; from: 0; to: -10; duration: 50 }

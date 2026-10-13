@@ -284,7 +284,7 @@ Item {
                                 font.pixelSize: Theme.fontSizeNormal
                                 color: parent.parent.active ? Theme.textActive : Theme.text
                                 opacity: parent.parent.active ? 1 : 0.6
-                                Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                                Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                             }
                             Text {
                                 text: modelData.label
@@ -293,7 +293,7 @@ Item {
                                 font.weight: parent.parent.active ? Font.DemiBold : Font.Normal
                                 color: parent.parent.active ? Theme.textActive : Theme.text
                                 opacity: parent.parent.active ? 1 : 0.6
-                                Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                                Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                             }
                         }
 
@@ -336,7 +336,7 @@ Item {
                 anchors.fill: parent
                 contentHeight: paneHeight
                 clip: true
-                Behavior on contentY { NumberAnimation { duration: Theme.durationFast } }
+                Behavior on contentY { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
                 Loader {
                     id: paneLoader
@@ -666,7 +666,7 @@ Item {
                                     height: 24
                                     radius: height / 2
                                     color: active ? Theme.layer2Active : (segArea.containsMouse ? Theme.layer2Hover : "transparent")
-                                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                                    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                                     Text {
                                         id: segLabel
                                         anchors.centerIn: parent
@@ -1279,7 +1279,7 @@ Item {
                                         height: 30
                                         radius: Theme.roundingXs
                                         color: clipArea.containsMouse ? Theme.layer2Hover : "transparent"
-                                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                                        Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                                         Text {
                                             anchors.verticalCenter: parent.verticalCenter
                                             x: Theme.padSm

@@ -37,7 +37,7 @@ Item {
             height: parent.height
             radius: Theme.roundingMd
             color: Theme.mix(Theme.layer1, Theme.accent, area.pressed ? 0.34 : 0.24)
-            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+            Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         }
 
         Text {

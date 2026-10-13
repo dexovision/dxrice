@@ -207,7 +207,7 @@ PanelWindow {
                     color: tileArea.containsMouse ? Theme.layer1Hover : "transparent"
                     scale: tileArea.pressed ? 0.9 : 1.0
 
-                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                     Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
 
                     Text {

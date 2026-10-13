@@ -35,7 +35,7 @@ Rectangle {
     height: 44
     radius: Theme.roundingSm
     color: hover.hovered ? Theme.layer2Hover : (root.connected ? Theme.mix(Theme.layer1, Theme.accent, 0.08) : "transparent")
-    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
     HoverHandler { id: hover }
 

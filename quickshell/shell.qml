@@ -113,6 +113,7 @@ ShellRoot {
     // comfortable making it the default.
     LockScreen {
         id: lockScreen
+        objectName: "lockScreen"
     }
     IpcHandler {
         target: "lock"

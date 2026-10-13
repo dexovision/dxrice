@@ -18,7 +18,7 @@ Rectangle {
     color: area.pressed ? Theme.layer2Active : (area.containsMouse ? Theme.layer2Hover : Theme.layer1)
     scale: area.pressed ? 0.96 : 1.0
 
-    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
     Behavior on scale {
         NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast }
     }

@@ -272,7 +272,7 @@ Item {
                                     height: root.rowH
                                     radius: Theme.roundingSm
                                     color: appArea.pressed ? Theme.layer2Active : (appArea.containsMouse ? Theme.layer2Hover : "transparent")
-                                    Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                                    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                                     Column {
                                         anchors.verticalCenter: parent.verticalCenter
                                         x: Theme.padSm
@@ -306,7 +306,7 @@ Item {
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeLarge
                                         opacity: appArea.containsMouse ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                                        Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                                     }
                                     MouseArea {
                                         id: appArea
@@ -426,7 +426,7 @@ Item {
         color: Theme.inputFill
         border.width: Theme.borderWidth
         border.color: field.input && field.input.activeFocus ? Theme.withAlpha(Theme.accent, 0.6) : Theme.borderIdle
-        Behavior on border.color { ColorAnimation { duration: Theme.durationFast } }
+        Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         Text {
             id: glyphText
             visible: field.glyph.length > 0
