@@ -191,6 +191,7 @@ def patch_hyprland_lua(theme):
         return
     with open(path) as f:
         content = f.read()
+    original = content
 
     # [\d.]+ rather than \d+ on the whole-number fields below: a theme.json
     # value that was ever stored as e.g. 12.0 (see dxrice_theme_gui.py) would
@@ -228,8 +229,26 @@ def patch_hyprland_lua(theme):
     content = _sub(content, r"(blur\s*=\s*\{[^}]*?vibrancy\s*=\s*)[\d.]+",
                     lambda m: m.group(1) + str(theme["hypr_blur_vibrancy"]), flags=re.DOTALL)
 
-    with open(path, "w") as f:
-        f.write(content)
+    if content == original:
+        return  # nothing to change: leave the user's file (and its mtime) alone
+    # Atomic: this is the user's own Hyprland config, rewritten on every
+    # Apply. open(path, "w") truncated it first, so a crash or full disk
+    # mid-write left Hyprland with an empty or half-written config.
+    tmp = f"{path}.dxrice.{os.getpid()}.tmp"
+    mode = os.stat(path).st_mode & 0o777
+    try:
+        with open(tmp, "w") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _run_guarded(args, timeout=3):
