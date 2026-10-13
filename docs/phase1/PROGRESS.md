@@ -1,5 +1,7 @@
 # Phase 1 progress (branch `phase1`, worktree `/home/dexo/dxrice-phase1`)
 
+**Final report: [REPORT.md](REPORT.md).** This file is the running log.
+
 Live checkout `~/dxrice` is untouched at `c959d2e`. Nothing pushed.
 Validation is offscreen / sandboxed, plus a throwaway **nested Hyprland**
 (a compositor running in a window, with its own config and its own copy of
@@ -23,7 +25,7 @@ user's real session, real Quickshell and real files were never touched.
 | `e12c252` | Offscreen gallery tool for every surface |
 | `69836bc` | Lock screen clock 12h -> 24h like the rest of the shell |
 
-## In progress
+## Done since (see REPORT.md)
 
 - Customization that reaches the shell: Shell text size (`text_scale`),
   Corner roundness honoured by the islands, Revert restoring settings
