@@ -34,7 +34,7 @@ Item {
         Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
 
         // The fill is neutral -- a lighter step of the same surface -- and
-        // the accent is only the thin mark at its edge: the value is the
+        // the accent is only a thin line along its bottom: the value is the
         // small thing that's coloured, not the whole slab (a dozen of
         // these on the Theme editor's pages were a dozen tinted bars).
         Rectangle {
@@ -51,16 +51,19 @@ Item {
                 NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter }
             }
 
+            // The value line: 2px of accent along the fill's bottom edge,
+            // inset clear of the rounded corners -- never under the label
+            // (a vertical mark at the fill's end struck through the text
+            // whenever the value was small).
             Rectangle {
-                anchors.right: parent.right
-                anchors.rightMargin: Theme.padXs
-                anchors.verticalCenter: parent.verticalCenter
-                width: 3
-                height: area.pressed ? parent.height - Theme.padMd : parent.height - Theme.padLg
-                radius: 1.5
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 3
+                x: Theme.roundingMd / 2
+                width: Math.max(0, parent.width - Theme.roundingMd)
+                height: area.pressed ? 3 : 2
+                radius: height / 2
                 color: Theme.accent
                 opacity: root.fraction > 0.01 ? 1 : 0
-                Behavior on height { enabled: !Theme.reduceMotion; NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
             }
         }
 

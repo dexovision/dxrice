@@ -44,7 +44,7 @@ class MotionTokensTest(unittest.TestCase):
 
 class AccentUseTest(unittest.TestCase):
     """Accent marks small things only: a Theme-editor slider's fill is a
-    neutral step of the surface, the accent is a thin mark at its edge."""
+    neutral step of the surface, the accent a thin line along its bottom."""
 
     def test_fill_slider_fill_is_neutral(self):
         s = Scene(width=1920, height=1080, setup=with_theme(accent="e67878"))
@@ -57,12 +57,12 @@ class AccentUseTest(unittest.TestCase):
                 const sl = find({TE}, o => String(o).indexOf('FillSlider') === 0);
                 const fill = find(sl, o => o.objectName === '' && o.radius !== undefined && o.width > 0 && o.height === sl.height && o !== sl && String(o).indexOf('QQuickRectangle') === 0 && o.parent && o.parent.parent === sl);
                 const mark = fill.children[0];
-                return JSON.stringify({{fill: [fill.color.r, fill.color.g, fill.color.b], mark: [mark.color.r, mark.color.g, mark.color.b], markW: mark.width}}); }})()"""))
+                return JSON.stringify({{fill: [fill.color.r, fill.color.g, fill.color.b], mark: [mark.color.r, mark.color.g, mark.color.b], markH: mark.height}}); }})()"""))
             r, g, b = c["fill"]
             self.assertLess(max(r, g, b) - min(r, g, b), 0.04, f"slider fill is tinted: {c['fill']}")
             mr, mg, mb = c["mark"]
             self.assertGreater(mr - mg, 0.2, "the value mark should carry the accent")
-            self.assertLessEqual(c["markW"], 4)
+            self.assertLessEqual(c["markH"], 3, "the accent should be a thin line, not a fill")
         finally:
             s.close()
 
