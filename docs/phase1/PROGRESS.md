@@ -1,6 +1,7 @@
 # Phase 1 progress (branch `phase1`, worktree `/home/dexo/dxrice-phase1`)
 
-**Final report: [REPORT.md](REPORT.md).** This file is the running log.
+**Reports: [REPORT.md](REPORT.md) (phase 1), [REPORT_CLOUD_UI.md](REPORT_CLOUD_UI.md)
+(cloud auto-placement + UI pass).** This file is the running log.
 
 Live checkout `~/dxrice` is untouched at `c959d2e`. Nothing pushed.
 Validation is offscreen / sandboxed, plus a throwaway **nested Hyprland**
@@ -24,6 +25,16 @@ user's real session, real Quickshell and real files were never touched.
 | `4539457` | Primary buttons neutral (accent only marks small things); clearer Theme editor copy |
 | `e12c252` | Offscreen gallery tool for every surface |
 | `69836bc` | Lock screen clock 12h -> 24h like the rest of the shell |
+
+## Cloud auto-placement + UI pass (see REPORT_CLOUD_UI.md)
+
+| Commit | What |
+|---|---|
+| `4dedd4a` | New windows join the cloud (SUPER+G's own step, nothing else moves); XWayland tooltips/menus/hover cards never placed |
+| `853bd70` | Settings > Experience: "Automatic window placement" (default on) and "Reduce motion" switches |
+| `70a0f7a` | Shared interaction tokens; neutral sliders; busy/empty/error states; lock card; content transitions |
+| `645c563` | Dock tooltips; bar island hover; Taskbar "System modules" card |
+| `c56b3eb` | Slider value line no longer strikes through its label |
 
 ## Done since (see REPORT.md)
 

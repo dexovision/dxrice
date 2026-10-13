@@ -278,7 +278,7 @@ PanelWindow {
         { id: "layout", glyph: "", label: "Layout", sub: "Rounding and gaps" },
         { id: "lock", glyph: "", label: "Lock Screen", sub: "Blur and input field" },
         { id: "fonts", glyph: "", label: "Fonts", sub: "Family and sizes" },
-        { id: "experience", glyph: "", label: "Experience", sub: "Motion, spacing, windows" },
+        { id: "experience", glyph: "", label: "Experience", sub: "Motion and windows" },
         { id: "wallpaper", glyph: "", label: "Wallpaper", sub: "Background image" },
     ]
     property string currentCategory: "colors"
