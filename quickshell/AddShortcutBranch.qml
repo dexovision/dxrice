@@ -378,7 +378,7 @@ Item {
                         id: cmdInput
                         anchors.fill: parent
                         color: Theme.textActive
-                        font.family: Theme.fontFamily
+                        font.family: Theme.fontMono
                         font.pixelSize: Theme.fontSizeNormal
                         verticalAlignment: TextInput.AlignVCenter
                         clip: true
@@ -411,50 +411,5 @@ Item {
         const name = nameInput.text.trim(), cmd = cmdInput.text.trim();
         if (!name.length || !cmd.length) return;
         root.pick(name, cmd);
-    }
-
-    // A text field row: optional leading glyph, placeholder, focus ring.
-    component InputField: Rectangle {
-        id: field
-        property string glyph: ""
-        property string placeholder: ""
-        property Item input: null
-        default property alias inner: inputHolder.data
-        width: parent ? parent.width : 0
-        height: ShellSurface.rowHeight
-        radius: Theme.roundingSm
-        color: Theme.inputFill
-        border.width: Theme.borderWidth
-        border.color: field.input && field.input.activeFocus ? Theme.withAlpha(Theme.accent, 0.6) : Theme.borderIdle
-        Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
-        Text {
-            id: glyphText
-            visible: field.glyph.length > 0
-            anchors.left: parent.left
-            anchors.leftMargin: Theme.padMd
-            anchors.verticalCenter: parent.verticalCenter
-            text: field.glyph
-            color: Theme.text
-            opacity: Theme.opacityMuted
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmaller
-        }
-        Item {
-            id: inputHolder
-            anchors.fill: parent
-            anchors.leftMargin: glyphText.visible ? Theme.padMd + glyphText.width + Theme.padSm : Theme.padMd
-            anchors.rightMargin: Theme.padMd
-        }
-        Text {
-            anchors.fill: inputHolder
-            verticalAlignment: Text.AlignVCenter
-            text: field.placeholder
-            visible: !field.input || field.input.text.length === 0
-            color: Theme.text
-            opacity: Theme.opacityMuted
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeNormal
-            elide: Text.ElideRight
-        }
     }
 }

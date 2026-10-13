@@ -26,6 +26,7 @@ FillSlider 1.0 FillSlider.qml
 LevelBar 1.0 LevelBar.qml
 ScrollHint 1.0 ScrollHint.qml
 LoadingDots 1.0 LoadingDots.qml
+InputField 1.0 InputField.qml
 
 WifiBackend 1.0 WifiBackend.qml
 AudioDeviceBackend 1.0 AudioDeviceBackend.qml

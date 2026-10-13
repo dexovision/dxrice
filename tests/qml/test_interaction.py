@@ -43,10 +43,11 @@ class MotionTokensTest(unittest.TestCase):
 
 
 class AccentUseTest(unittest.TestCase):
-    """Accent marks small things only: a Theme-editor slider's fill is a
-    neutral step of the surface, the accent a thin line along its bottom."""
+    """Accent marks small things only. A Theme-editor slider used to be a
+    full-height accent-tinted slab; it is now the shell's one slider
+    language: a neutral track, the accent only as the thin progress."""
 
-    def test_fill_slider_fill_is_neutral(self):
+    def test_fill_slider_is_a_neutral_track_with_thin_accent_progress(self):
         s = Scene(width=1920, height=1080, setup=with_theme(accent="e67878"))
         try:
             s.ev("panels.open('theme')")
@@ -55,14 +56,16 @@ class AccentUseTest(unittest.TestCase):
             s.wait(700)
             c = json.loads(s.ev(f"""(function(){{ {FIND}
                 const sl = find({TE}, o => String(o).indexOf('FillSlider') === 0);
-                const fill = find(sl, o => o.objectName === '' && o.radius !== undefined && o.width > 0 && o.height === sl.height && o !== sl && String(o).indexOf('QQuickRectangle') === 0 && o.parent && o.parent.parent === sl);
-                const mark = fill.children[0];
-                return JSON.stringify({{fill: [fill.color.r, fill.color.g, fill.color.b], mark: [mark.color.r, mark.color.g, mark.color.b], markH: mark.height}}); }})()"""))
-            r, g, b = c["fill"]
-            self.assertLess(max(r, g, b) - min(r, g, b), 0.04, f"slider fill is tinted: {c['fill']}")
-            mr, mg, mb = c["mark"]
-            self.assertGreater(mr - mg, 0.2, "the value mark should carry the accent")
-            self.assertLessEqual(c["markH"], 3, "the accent should be a thin line, not a fill")
+                const track = find(sl, o => o.objectName === 'fillSliderTrack');
+                const prog = find(sl, o => o.objectName === 'fillSliderProgress');
+                return JSON.stringify({{track: [track.color.r, track.color.g, track.color.b], prog: [prog.color.r, prog.color.g, prog.color.b],
+                                        progH: prog.height, sliderH: sl.height}}); }})()"""))
+            r, g, b = c["track"]
+            self.assertLess(max(r, g, b) - min(r, g, b), 0.04, f"slider track is tinted: {c['track']}")
+            pr, pg, pb = c["prog"]
+            self.assertGreater(pr - pg, 0.2, "the progress should carry the accent")
+            self.assertLessEqual(c["progH"], 6, "the accent should be a thin line, not a slab")
+            self.assertLess(c["progH"] * 4, c["sliderH"])
         finally:
             s.close()
 

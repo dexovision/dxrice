@@ -193,6 +193,9 @@ PanelWindow {
     property bool reduce_motion: false
 
     property string font_family: "JetBrainsMono Nerd Font"
+    // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
+    // is the shipped terminal font, otherwise font_family itself.
+    property string ui_font_family: ""
     property string wallpaper: ""
 
     property bool dirty: false
@@ -202,7 +205,7 @@ PanelWindow {
     // next edit, Apply or Revert.
     property string applyError: ""
     property string draftNotice: ""
-    onDirtyChanged: if (root.dirty) { root.applyError = ""; root.draftNotice = ""; }
+    onDirtyChanged: if (root.dirty) { root.applyError = ""; root.draftNotice = ""; root.justApplied = false; }
 
     readonly property var colorFields: [
         { key: "glass_bg", label: "Panel background", sub: "Panels, launcher and terminal background" },
@@ -290,7 +293,7 @@ PanelWindow {
     }
 
     function allKeys() {
-        const keys = ["font_family", "wallpaper"];
+        const keys = ["font_family", "ui_font_family", "wallpaper"];
         for (const f of colorFields) keys.push(f.key);
         for (const f of borderColorFields) keys.push(f.key);
         for (const f of blurFields) keys.push(f.key);
@@ -402,6 +405,8 @@ PanelWindow {
     // `running` drops, so it sees `exited` first whichever order the two
     // signals arrive in.
     property bool _applyExited: false
+    property bool justApplied: false
+    Timer { id: appliedTimer; interval: 2400; onTriggered: root.justApplied = false }
     Process {
         id: applyProc
         command: ["python3", root.repoDir + "/scripts/dxrice_apply_theme.py"]
@@ -410,6 +415,10 @@ PanelWindow {
             root._applyExited = true;
             root.applying = false;
             root.applyError = (exitCode === 0 && exitStatus === 0) ? "" : root._applyFailure(applyStderr.text, exitCode);
+            // Success says so, briefly -- the Apply dot going away on its
+            // own was easy to miss.
+            root.justApplied = root.applyError.length === 0;
+            if (root.justApplied) appliedTimer.restart();
         }
         onRunningChanged: if (!running && root.applying) Qt.callLater(root._checkApplyStarted)
     }
@@ -587,7 +596,7 @@ PanelWindow {
     component SliderList: Column {
         property var fields: []
         width: parent.width
-        spacing: Theme.padSm
+        spacing: Theme.padLg
         Repeater {
             model: parent.fields
             delegate: FillSlider {
@@ -774,10 +783,13 @@ PanelWindow {
                     id: headerMessage
                     objectName: "themeHeaderMessage"
                     readonly property bool isError: root.applyError.length > 0
-                    visible: text.length > 0
-                    text: isError ? root.applyError : root.draftNotice
-                    color: isError ? Theme.dangerTint : Theme.text
-                    opacity: isError ? 1 : Theme.opacityMuted
+                    readonly property bool isSuccess: !isError && root.justApplied
+                    visible: opacity > 0.01
+                    text: isError ? root.applyError : (isSuccess ? "\u2713  Applied" : root.draftNotice)
+                    color: isError ? Theme.dangerTint : (isSuccess ? Theme.textActive : Theme.text)
+                    opacity: (isError || isSuccess) ? (isSuccess ? Theme.opacitySecondary : 1)
+                           : (root.draftNotice.length > 0 ? Theme.opacityMuted : 0)
+                    Behavior on opacity { NumberAnimation { duration: Theme.durationFadeIn; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmaller
                     elide: Text.ElideRight
@@ -830,41 +842,24 @@ PanelWindow {
                     height: parent.height
                     spacing: Theme.padSm
 
-                    Rectangle {
+                    InputField {
                         x: Theme.padMd
                         width: parent.width - Theme.padMd * 2
-                        height: ShellSurface.rowHeight
-                        radius: Theme.roundingSm
-                        color: Theme.inputFill
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: Theme.padSm
-                            text: ""
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                            color: Theme.text
-                        opacity: Theme.opacitySecondary
-                        }
+                        compact: false
+                        glyph: "\uf002"
+                        placeholder: "Search settings"
+                        input: settingsSearch
                         TextInput {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 26
-                            anchors.right: parent.right
-                            anchors.rightMargin: Theme.padSm
-                            anchors.verticalCenter: parent.verticalCenter
+                            id: settingsSearch
+                            objectName: "themeSearch"
+                            anchors.fill: parent
                             color: Theme.textActive
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmaller
+                            font.pixelSize: Theme.fontSizeNormal
+                            verticalAlignment: TextInput.AlignVCenter
+                            clip: true
                             text: root.searchText
                             onTextChanged: root.searchText = text
-                            Text {
-                                text: "Search settings"
-                                color: Theme.text
-                                opacity: parent.text.length ? 0 : Theme.opacityMuted
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmaller
-                            }
                         }
                     }
 
@@ -918,7 +913,7 @@ PanelWindow {
                                         width: 20
                                         horizontalAlignment: Text.AlignHCenter
                                         text: catRow.modelData.glyph
-                                        font.family: Theme.fontFamily
+                                        font.family: Theme.iconFamily
                                         font.pixelSize: Theme.fontSizeLarger
                                         color: catRow.selected ? Theme.accent : Theme.text
                                     }
@@ -1090,8 +1085,7 @@ PanelWindow {
         property real regionPadding: Theme.padLg
         radius: ShellSurface.cardRadius
         color: Theme.cardTone
-        border.width: Theme.borderWidth
-        border.color: Theme.borderFaint
+        // Same borderless group as Card: tone carries the boundary.
         implicitHeight: inner.implicitHeight + regionPadding * 2
         Item {
             id: inner
@@ -1517,37 +1511,79 @@ PanelWindow {
 
             Text { text: "Fonts"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
 
-            // ---- typography: a live specimen, not a text field in a box.
-            // Typing a new family updates every specimen below immediately,
-            // but only commits to the real theme (and marks the draft
-            // dirty) once you leave the field. Four roles instead of one
-            // "Aa" -- a heading, body copy, a monospace/stat readout, and
-            // this shell's own UI type -- so the family is judged the way
-            // it's actually used, not as one isolated glyph. ----
-            PreviewRegion {
+            // ---- two typefaces, two jobs, each judged by a live specimen:
+            // the interface face (panels, menus, this editor) and the
+            // terminal/bar face (Waybar, wofi, mako, kitty, and the shell's
+            // fixed-width values). Typing updates the specimen at once and
+            // commits to the draft when you leave the field. ----
+            Card {
                 width: parent.width
+                padding: Theme.pad2xl
+                title: "Interface font"
+                spacing: Theme.padMd
+                Text {
+                    width: parent.width
+                    text: "Panels, menus and this editor. Leave empty for the default, " + Theme.defaultUiFamily + "."
+                    color: Theme.text; opacity: Theme.opacitySecondary
+                    font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
+                    wrapMode: Text.WordWrap
+                }
                 Column {
                     width: parent.width
-                    spacing: Theme.padMd
-                    Text { text: previewFamilyInput.text || Theme.fontFamily; color: Theme.textActive; font.family: previewFamilyInput.text || Theme.fontFamily; font.pixelSize: 32; font.weight: Font.DemiBold }
-                    Text { text: "The quick brown fox jumps over the lazy dog"; color: Theme.text; opacity: Theme.opacityFaint; font.family: previewFamilyInput.text || Theme.fontFamily; font.pixelSize: Theme.fontSizeLarger; wrapMode: Text.WordWrap; width: parent.width }
-                    Text { text: "14:32   92%   3.4 GB/s"; color: Theme.textActive; font.family: previewFamilyInput.text || Theme.fontFamily; font.pixelSize: Theme.fontSizeLarge }
-                    Text { text: "Wi-Fi · Bluetooth · Do Not Disturb"; color: Theme.text; opacity: Theme.opacitySecondary; font.family: previewFamilyInput.text || Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller }
+                    spacing: Theme.padXs
+                    readonly property string family: uiFamilyInput.text.trim() || (root.font_family === Theme.shippedMonoFamily ? Theme.defaultUiFamily : root.font_family)
+                    Text { text: "Quick Settings"; color: Theme.textActive; font.family: parent.family; font.pixelSize: 28; font.weight: Font.DemiBold; elide: Text.ElideRight; width: parent.width }
+                    Text { text: "Wi-Fi · Bluetooth · Do Not Disturb · Automatic window placement"; color: Theme.text; opacity: Theme.opacityFaint; font.family: parent.family; font.pixelSize: Theme.fontSizeNormal; wrapMode: Text.WordWrap; width: parent.width }
+                }
+                InputField {
+                    placeholder: Theme.defaultUiFamily + " (default)"
+                    input: uiFamilyInput
+                    TextInput {
+                        id: uiFamilyInput
+                        objectName: "uiFontInput"
+                        anchors.fill: parent
+                        clip: true
+                        text: root.ui_font_family
+                        color: Theme.textActive
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeNormal
+                        verticalAlignment: TextInput.AlignVCenter
+                        onEditingFinished: if (text.trim() !== root.ui_font_family) { root.ui_font_family = text.trim(); root.dirty = true; }
+                    }
+                }
+            }
 
-                    Item {
-                        width: parent.width
-                        height: 30
-                        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: previewFamilyInput.activeFocus ? Theme.accent : Theme.borderIdle }
-                        TextInput {
-                            id: previewFamilyInput
-                            anchors.fill: parent
-                            text: root.font_family
-                            color: Theme.textActive
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeNormal
-                            verticalAlignment: TextInput.AlignVCenter
-                            onEditingFinished: { root.font_family = text; root.dirty = true; }
-                        }
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Terminal and bar font"
+                spacing: Theme.padMd
+                Text {
+                    width: parent.width
+                    text: "Waybar, the launcher, notifications and the terminal, plus commands and codes in the shell. Needs a Nerd Font for icons."
+                    color: Theme.text; opacity: Theme.opacitySecondary
+                    font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
+                    wrapMode: Text.WordWrap
+                }
+                Column {
+                    width: parent.width
+                    spacing: Theme.padXs
+                    Text { text: "~/dxrice $ git log --oneline"; color: Theme.textActive; font.family: previewFamilyInput.text || Theme.fontMono; font.pixelSize: Theme.fontSizeLarger; elide: Text.ElideRight; width: parent.width }
+                    Text { text: "14:32   92%   3.4 GB/s   #e67878"; color: Theme.text; opacity: Theme.opacityFaint; font.family: previewFamilyInput.text || Theme.fontMono; font.pixelSize: Theme.fontSizeNormal }
+                }
+                InputField {
+                    placeholder: Theme.shippedMonoFamily
+                    input: previewFamilyInput
+                    TextInput {
+                        id: previewFamilyInput
+                        anchors.fill: parent
+                        clip: true
+                        text: root.font_family
+                        color: Theme.textActive
+                        font.family: Theme.fontMono
+                        font.pixelSize: Theme.fontSizeNormal
+                        verticalAlignment: TextInput.AlignVCenter
+                        onEditingFinished: if (text !== root.font_family) { root.font_family = text; root.dirty = true; }
                     }
                 }
             }

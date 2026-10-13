@@ -36,7 +36,7 @@ Rectangle {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: root.glyph
-            font.family: Theme.fontFamily
+            font.family: Theme.iconFamily
             font.pixelSize: Theme.fontSizeLarge
             color: root.active ? Theme.accent : Theme.text
             opacity: root.active ? 1 : 0.8

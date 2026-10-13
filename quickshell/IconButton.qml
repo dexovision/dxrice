@@ -45,7 +45,7 @@ Rectangle {
         anchors.centerIn: parent
         text: root.glyph
         color: (root.effectiveTint !== null && root.interacting) ? Theme.mix(Theme.textActive, root.effectiveTint, 0.4) : Theme.text
-        font.family: Theme.fontFamily
+        font.family: Theme.iconFamily
         font.pixelSize: root.size * 0.45
     }
 

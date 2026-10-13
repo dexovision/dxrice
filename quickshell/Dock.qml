@@ -214,7 +214,7 @@ PanelWindow {
                         id: tileLabel
                         anchors.centerIn: parent
                         text: shortcutTile.modelData.glyph
-                        font.family: Theme.fontFamily
+                        font.family: Theme.iconFamily
                         font.pixelSize: Theme.fontSizeLarge
                         color: Theme.textActive
                     }

@@ -292,7 +292,7 @@ Item {
                             spacing: Theme.padSm
                             Text {
                                 text: modelData.glyph
-                                font.family: Theme.fontFamily
+                                font.family: Theme.iconFamily
                                 font.pixelSize: Theme.fontSizeNormal
                                 color: parent.parent.active ? Theme.textActive : Theme.text
                                 opacity: parent.parent.active ? 1 : 0.6
@@ -652,7 +652,7 @@ Item {
                                 horizontalAlignment: Text.AlignHCenter
                                 text: ""
                                 color: Theme.text
-                                font.family: Theme.fontFamily
+                                font.family: Theme.iconFamily
                                 font.pixelSize: Theme.fontSizeNormal
                             }
                             SliderRow {
@@ -866,7 +866,7 @@ Item {
             visible: choice.selected
             text: ""
             color: Theme.accent
-            font.family: Theme.fontFamily
+            font.family: Theme.iconFamily
             font.pixelSize: Theme.fontSizeSmall
         }
         MouseArea {
@@ -901,7 +901,7 @@ Item {
                 text: parent.parent.glyph
                 color: Theme.text
                 opacity: Theme.opacityMuted * 0.8
-                font.family: Theme.fontFamily
+                font.family: Theme.iconFamily
                 font.pixelSize: Theme.fontSizeLarge
             }
             LoadingDots {
@@ -993,7 +993,7 @@ Item {
                         anchors.centerIn: parent
                         visible: mediaBackend.artUrl.length === 0
                         text: "\uf001"
-                        font.family: Theme.fontFamily
+                        font.family: Theme.iconFamily
                         // Large placeholder icon, not body text -- the
                         // Display tier is the right token for a glyph this
                         // size even though it's an icon, not a number.
@@ -1198,7 +1198,7 @@ Item {
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "\uf001"
-                font.family: Theme.fontFamily
+                font.family: Theme.iconFamily
                 font.pixelSize: Theme.fontSizeDisplay
                 color: Theme.text
                 opacity: 0.35

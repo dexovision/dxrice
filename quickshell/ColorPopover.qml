@@ -390,7 +390,7 @@ Item {
                             anchors.rightMargin: Theme.padMd
                             anchors.verticalCenter: parent.verticalCenter
                             color: Theme.textActive
-                            font.family: Theme.fontFamily
+                            font.family: Theme.fontMono
                             font.pixelSize: Theme.fontSizeNormal
                             maximumLength: 7
                             selectByMouse: true

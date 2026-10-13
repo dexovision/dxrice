@@ -852,17 +852,18 @@ Item {
                                 SettingRow {
                                     width: parent.width
                                     title: "Left click"
-                                    Rectangle {
-                                        width: 180; height: 26
-                                        color: "transparent"
-                                        border.width: 0
-                                        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: leftClickInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                                    InputField {
+                                        width: 200
+                                        compact: true
+                                        placeholder: "Command"
+                                        input: leftClickInput
                                         TextInput {
                                             id: leftClickInput
                                             anchors.fill: parent
+                                            clip: true
                                             text: sysRow.meta["on-click"] || ""
                                             color: Theme.textActive
-                                            font.family: Theme.fontFamily
+                                            font.family: Theme.fontMono
                                             font.pixelSize: Theme.fontSizeSmaller
                                             verticalAlignment: TextInput.AlignVCenter
                                             onEditingFinished: root.setModuleClick(sysRow.modid, "on-click", text)
@@ -872,16 +873,18 @@ Item {
                                 SettingRow {
                                     width: parent.width
                                     title: "Right click"
-                                    Rectangle {
-                                        width: 180; height: 26
-                                        color: "transparent"
-                                        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: rightClickInput.activeFocus ? Theme.accent : Theme.borderIdle }
+                                    InputField {
+                                        width: 200
+                                        compact: true
+                                        placeholder: "Command"
+                                        input: rightClickInput
                                         TextInput {
                                             id: rightClickInput
                                             anchors.fill: parent
+                                            clip: true
                                             text: sysRow.meta["on-click-right"] || ""
                                             color: Theme.textActive
-                                            font.family: Theme.fontFamily
+                                            font.family: Theme.fontMono
                                             font.pixelSize: Theme.fontSizeSmaller
                                             verticalAlignment: TextInput.AlignVCenter
                                             onEditingFinished: root.setModuleClick(sysRow.modid, "on-click-right", text)

@@ -48,7 +48,7 @@ Rectangle {
         text: root.glyph
         color: root.connected ? Theme.accent : Theme.text
         opacity: root.connected ? 1 : Theme.opacitySecondary
-        font.family: Theme.fontFamily
+        font.family: Theme.iconFamily
         font.pixelSize: Theme.fontSizeLarger
     }
 
@@ -113,7 +113,7 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
             text: ""
             color: Theme.accent
-            font.family: Theme.fontFamily
+            font.family: Theme.iconFamily
             font.pixelSize: Theme.fontSizeSmaller
         }
     }

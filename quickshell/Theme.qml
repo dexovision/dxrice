@@ -441,6 +441,32 @@ QtObject {
     readonly property color shadowColor: Qt.rgba(
         borderTint.r * 0.4, borderTint.g * 0.4, borderTint.b * 0.4, 0.5)
 
-    readonly property string fontFamily: root._str("font_family", "sans-serif")
+    // ---- typefaces: three jobs, three tokens ----
+    // Interface text is a proportional sans; a monospace face everywhere
+    // (what the shell used to do) is most of what read as "a terminal
+    // rice" rather than a desktop. theme.json `ui_font_family` sets it
+    // (Theme editor: Fonts > Interface font). Without that key:
+    //   * font_family still at the shipped default (JetBrains Mono, the
+    //     terminal/bar font) -> Noto Sans, which the installer ships on
+    //     every supported distro (fontconfig substitutes another sans if
+    //     it's somehow missing);
+    //   * font_family changed by the user -> that font, for the UI too: a
+    //     deliberate choice made before this split is kept.
+    // Nothing is written; an existing theme.json keeps working untouched.
+    readonly property string shippedMonoFamily: "JetBrainsMono Nerd Font"
+    readonly property string defaultUiFamily: "Noto Sans"
+    // font_family: the terminal/bar font (Waybar, wofi, mako, kitty), and
+    // the shell's face for values that read better fixed-width -- commands,
+    // hex codes, kernel strings, clipboard entries.
+    readonly property string fontMono: root._str("font_family", root.shippedMonoFamily)
+    readonly property string fontFamily: {
+        const ui = root.data.ui_font_family;
+        if (ui !== undefined && String(ui).trim().length > 0) return String(ui);
+        return root.fontMono === root.shippedMonoFamily ? root.defaultUiFamily : root.fontMono;
+    }
+    // Glyph-only Text (icon buttons, tiles, the dock) names the Nerd Font
+    // outright so an icon's metrics don't depend on fallback from the UI
+    // face; glyphs inside a UI string still render via font fallback.
+    readonly property string iconFamily: root.fontMono
     readonly property string wallpaper: root._str("wallpaper", "")
 }

@@ -115,7 +115,7 @@ DXRICE_UNITS=(dxrice-quickshell.service dxrice-auto-place-window.service dxrice-
 GENERAL_DNF=(swaybg waybar wofi mako kitty nautilus grim slurp wl-clipboard qt5ct qt6ct
     pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol
     NetworkManager network-manager-applet bluez blueman
-    fontawesome-fonts google-noto-fonts-common polkit-kde
+    fontawesome-fonts google-noto-fonts-common google-noto-sans-fonts polkit-kde
     python3 python3-evdev jq brightnessctl playerctl
     python3-gobject gtk4 libadwaita gtk4-layer-shell)
 

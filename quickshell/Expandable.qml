@@ -58,7 +58,7 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: Theme.padSm
             text: ""
-            font.family: Theme.fontFamily
+            font.family: Theme.iconFamily
             font.pixelSize: Theme.fontSizeSmall
             color: Theme.text
             rotation: root.expanded ? 180 : 0

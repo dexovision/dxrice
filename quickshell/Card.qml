@@ -42,7 +42,7 @@ Item {
     property real padding: ShellSurface.cardPad
     // Height the title strip takes above the content column (0 untitled),
     // for callers that size a fixed viewport inside an explicitly-sized card.
-    readonly property real titleHeight: root.title.length > 0 ? titleLabel.implicitHeight + Theme.padXs : 0
+    readonly property real titleHeight: root.title.length > 0 ? titleLabel.implicitHeight + Theme.padSm : 0
 
     implicitWidth: column.implicitWidth + root.padding * 2
     implicitHeight: root.titleHeight + column.implicitHeight + root.padding * 2
@@ -64,8 +64,11 @@ Item {
         // visual weight. The border below is what still makes a card's
         // boundary legible without needing a loud fill to do it.
         color: Theme.cardTone
-        border.width: root.highlighted ? 2 : Theme.borderWidth
-        border.color: root.highlighted ? Theme.accent : Theme.cardBorder
+        // Tone alone separates a card from its panel; an outline on every
+        // group was the "wireframe of boxes" look. The accent edge remains
+        // only as drag-and-drop feedback (`highlighted`).
+        border.width: root.highlighted ? 2 : 0
+        border.color: root.highlighted ? Theme.accent : "transparent"
         clip: true
 
         Behavior on border.width {
@@ -96,17 +99,19 @@ Item {
             x: root.padding
             y: root.padding
             text: root.title
-            color: Theme.text
-            opacity: Theme.opacityMuted
+            // A section heading, not a whisper: the group's name is the
+            // first thing read in it.
+            color: Theme.textActive
+            opacity: Theme.opacitySecondary
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-            font.letterSpacing: 0.5
+            font.pixelSize: Theme.fontSizeSmaller
+            font.weight: Font.Medium
         }
 
         Column {
             id: column
             x: root.padding
-            y: root.title.length > 0 ? titleLabel.y + titleLabel.implicitHeight + Theme.padXs : root.padding
+            y: root.title.length > 0 ? titleLabel.y + titleLabel.implicitHeight + Theme.padSm : root.padding
             width: parent.width - root.padding * 2
             spacing: Theme.padMd
         }
