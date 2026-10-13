@@ -108,7 +108,8 @@ WlSessionLock {
                 triggeredOnStart: true
                 onTriggered: {
                     const now = new Date();
-                    clockText.text = Qt.formatTime(now, "h:mm AP");
+                    // 24-hour, like the bar and Quick Settings.
+                    clockText.text = Qt.formatTime(now, "HH:mm");
                     dateText.text = Qt.formatDate(now, "dddd, MMMM d");
                 }
             }
