@@ -82,8 +82,9 @@ WlSessionLock {
             }
 
             Column {
+                id: clockColumn
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: parent.height * 0.28 + (1 - surfaceRoot.arrive) * Theme.contentShift * 3
+                y: parent.height * 0.24 + (1 - surfaceRoot.arrive) * Theme.contentShift * 3
                 opacity: surfaceRoot.arrive
                 spacing: 4
                 visible: surfaceRoot.isPrimary
@@ -93,19 +94,20 @@ WlSessionLock {
                     anchors.horizontalCenter: parent.horizontalCenter
                     color: Theme.textActive
                     font.family: Theme.fontFamily
-                    // A lock screen clock is meant to dominate, same as
-                    // every reference rice's own lock screen -- the same
-                    // tier QuickSettings' own dashboard clock uses.
-                    font.pixelSize: Theme.fontSizeHero
+                    // The lock screen's clock dominates the screen: a
+                    // step above Quick Settings' hero clock, in the light
+                    // weight a proportional face carries well at this size.
+                    font.pixelSize: Math.round(Theme.fontSizeHero * 1.4)
                     font.weight: Font.Light
+                    font.features: { "tnum": 1 }
                 }
                 Text {
                     id: dateText
                     anchors.horizontalCenter: parent.horizontalCenter
-                    color: Theme.text
+                    color: Theme.textActive
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeLarger
-                    opacity: 0.85
+                    font.pixelSize: Theme.fontSizeLarge
+                    opacity: Theme.opacityFaint
                 }
             }
 
@@ -224,7 +226,7 @@ WlSessionLock {
                 id: card
                 visible: surfaceRoot.isPrimary
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: parent.height * 0.28 + 160 + (1 - surfaceRoot.arrive) * Theme.contentShift * 4
+                y: parent.height * 0.24 + clockColumn.implicitHeight + Theme.pad3xl * 1.5 + (1 - surfaceRoot.arrive) * Theme.contentShift * 4
                 opacity: surfaceRoot.arrive
                 width: 340
                 height: cardColumn.implicitHeight + Theme.pad2xl * 2

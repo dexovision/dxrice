@@ -67,7 +67,7 @@ def scenes():
         _settle(s)
 
     def osd(s):
-        s.ev("findNamed('osd') ? findNamed('osd').trigger('\\uf028', 0.62, 'Volume') : null")
+        s.ev("findNamed('osd') ? findNamed('osd').trigger('\\uf028', 0.62, '62%') : null")
         _settle(s, 400)
 
     def lock(s):
@@ -87,7 +87,43 @@ def scenes():
         s.ev(f"{TE}.applying = true")
         _settle(s, 300)
 
-    out = {"idle": idle, "dock_tooltip": dock_tooltip, "theme_busy": theme_busy, "calendar": panel("calendar"), "taskbar": panel("taskbar"), "add_shortcut": add_shortcut,
+    def wifi_dialog(s):
+        s.ev("panels.open('quicksettings')")
+        _settle(s, 600)
+        s.ev("(function(){ const qs = findPanel('currentTab');"
+             " const st = [qs]; let wifi = null; while (st.length && !wifi) { const o = st.pop(); if (!o) continue;"
+             "   if (o.hasScanned !== undefined && o.networks !== undefined && o.passwordNeeded) wifi = o;"
+             "   const k = o.data !== undefined ? o.data : []; for (let i = 0; i < k.length; i++) st.push(k[i]); }"
+             " wifi.passwordNeeded('CoffeeShop Guest');"
+             " const d = qs._activeWifiDialog; d.parent = overlay; d.visible = true;"
+             " d.width = d.implicitWidth; d.height = d.implicitHeight;"
+             " d.x = (overlay.width - d.width) / 2; d.y = (overlay.height - d.height) / 2; })()")
+        _settle(s, 500)
+
+    def qs_scanning(s):
+        s.ev("panels.open('quicksettings')")
+        _settle(s, 500)
+        s.ev("(function(){ const qs = findPanel('currentTab');"
+             " const st = [qs]; while (st.length) { const o = st.pop(); if (!o) continue;"
+             "   if (o.hasScanned !== undefined && o.networks !== undefined) { o.hasScanned = false; o.networks = []; }"
+             "   const k = o.data !== undefined ? o.data : []; for (let i = 0; i < k.length; i++) st.push(k[i]); } })()")
+        _settle(s, 400)
+
+    def lock_error(s):
+        lock(s)
+        s.ev("(function(){ const l = findNamed('lockScreen'); const st = [l.surfaceItem]; while (st.length) { const o = st.pop(); if (!o) continue;"
+             " if (o.objectName === 'lockPam') { o.completed(1); return; }"
+             " const k = o.data !== undefined ? o.data : []; for (let i = 0; i < k.length; i++) st.push(k[i]); } })()")
+        _settle(s, 600)
+
+    def panel_closing(s):
+        s.ev("panels.open('quicksettings')")
+        _settle(s, 900)
+        s.ev("panels.close('quicksettings')")
+        s.wait(120)  # mid-close: content already fading, surface retracting
+
+    out = {"idle": idle, "dock_tooltip": dock_tooltip, "theme_busy": theme_busy, "wifi_dialog": wifi_dialog,
+           "qs_scanning": qs_scanning, "lock_error": lock_error, "panel_closing": panel_closing, "calendar": panel("calendar"), "taskbar": panel("taskbar"), "add_shortcut": add_shortcut,
            "qs_overview": qs_tab("overview"), "qs_media": qs_tab("media"), "qs_performance": qs_tab("performance"),
            "picker": picker, "osd": osd, "lock": lock}
     for cat in ("colors", "blur", "layout", "lock", "fonts", "experience", "wallpaper"):

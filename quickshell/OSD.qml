@@ -26,8 +26,9 @@ PanelWindow {
     WlrLayershell.namespace: "dxrice-osd"
     focusable: false
 
-    implicitWidth: 280
-    implicitHeight: 92
+    // A pill, 10px inside the window so its shadow isn't cut off.
+    implicitWidth: 340
+    implicitHeight: 76
 
     // No mask meant this window's FULL rectangle -- 280x92, centered near
     // the top of the screen since this file sets no horizontal anchor --
@@ -41,12 +42,10 @@ PanelWindow {
     // Shrinking the input region to 0x0 whenever the toast isn't visible
     // means this window is only ever clickable while there's actually
     // something on screen to click near.
-    mask: Region {
-        x: 0
-        y: 0
-        width: surface.opacity > 0.01 ? root.implicitWidth : 0
-        height: surface.opacity > 0.01 ? root.implicitHeight : 0
-    }
+    // Now never, visible or not: an OSD is glanced at while doing
+    // something else, and while showing it used to swallow clicks on
+    // whatever was under it for the 1.6s it stayed up.
+    mask: Region {}
 
     PwObjectTracker { objects: [Pipewire.defaultAudioSink, Pipewire.defaultAudioSource] }
     readonly property var sink: Pipewire.defaultAudioSink
@@ -70,7 +69,7 @@ PanelWindow {
     Timer {
         id: hideTimer
         interval: 1600
-        onTriggered: { surface.opacity = 0; surface.scale = 0.92; }
+        onTriggered: { surface.opacity = 0; surface.scale = Theme.reduceMotion ? 1 : 0.92; }
     }
 
     // Guard against firing on the very first read of each value at daemon
@@ -114,7 +113,7 @@ PanelWindow {
         id: surface
         anchors.fill: parent
         opacity: 0
-        scale: 0.92
+        scale: Theme.reduceMotion ? 1 : 0.92
         transformOrigin: Item.Top
 
         Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
@@ -122,38 +121,34 @@ PanelWindow {
 
         ModalSurface {
             id: card
+            objectName: "osdCard"
             anchors.fill: parent
+            anchors.margins: 10
+            radius: height / 2
             elevation: 2
 
-            Column {
-                anchors.centerIn: parent
-                width: parent.width - Theme.pad2xl * 2
-                spacing: Theme.padSm
+            Row {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.padLg
+                anchors.rightMargin: Theme.padLg
+                spacing: Theme.padMd
 
-                Row {
-                    width: parent.width
-                    spacing: Theme.padMd
-                    Text {
-                        text: root.glyph
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeLarge
-                        color: Theme.textActive
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    Text {
-                        text: root.label
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeNormal
-                        color: Theme.text
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
+                Text {
+                    width: 24
+                    horizontalAlignment: Text.AlignHCenter
+                    text: root.glyph
+                    font.family: Theme.iconFamily
+                    font.pixelSize: Theme.fontSizeLarger
+                    color: Theme.textActive
+                    anchors.verticalCenter: parent.verticalCenter
                 }
 
                 Rectangle {
-                    width: parent.width
-                    height: 6
-                    radius: Theme.roundingFull
-                    color: Theme.layer2
+                    width: parent.width - 24 - valueText.width - parent.spacing * 2
+                    height: 8
+                    radius: height / 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Theme.borderFaint
 
                     Rectangle {
                         width: parent.width * Math.max(0, Math.min(1, root.value))
@@ -165,6 +160,20 @@ PanelWindow {
                             NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
                         }
                     }
+                }
+
+                Text {
+                    id: valueText
+                    width: 52
+                    horizontalAlignment: Text.AlignRight
+                    text: root.label
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmaller
+                    font.weight: Font.Medium
+                    font.features: { "tnum": 1 }
+                    color: Theme.textActive
+                    elide: Text.ElideRight
+                    anchors.verticalCenter: parent.verticalCenter
                 }
             }
         }
