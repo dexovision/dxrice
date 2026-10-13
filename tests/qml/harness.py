@@ -113,6 +113,7 @@ class HarnessBridge(QObject):
         self.commands = list(DEFAULT_COMMANDS)
         self.files = dict(DEFAULT_FILES)
         self.exec_log: list[list[str]] = []
+        self.run_log: list[list[str]] = []
         self.env_over = {"HOME": str(Path(config_home).parent), "XDG_CONFIG_HOME": str(config_home),
                          "USER": "dexo", "XDG_SESSION_ID": "2"}
 
@@ -140,6 +141,7 @@ class HarnessBridge(QObject):
 
     @Slot("QVariantList", result=str)
     def run(self, argv):
+        self.run_log.append([str(a) for a in argv])
         joined = " ".join(str(a) for a in argv)
         for key, out in self.commands:
             if key in joined:

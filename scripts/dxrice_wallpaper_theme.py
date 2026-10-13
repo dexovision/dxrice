@@ -20,9 +20,11 @@ Algorithm:
      rarely uniformly saturated (a lantern, a sky, a character's jacket),
      and the average alone would just wash that out into gray.
 
-Usage: dxrice_wallpaper_theme.py [path/to/wallpaper]
-  With no argument, uses whatever wallpaper is already set in the live
-  theme.json. Writes only the color fields into
+Usage: dxrice_wallpaper_theme.py [--print-only] [path/to/wallpaper]
+  With no path, uses whatever wallpaper is already set in the live
+  theme.json. --print-only (what the Theme editor uses) only prints the
+  palette: the editor puts it in its unapplied draft, like a preset, and
+  nothing is written until Apply. Without it, writes only the color fields into
   ~/.config/dxrice/theme.json -- radius, blur, animation speed, fonts, etc.
   are left exactly as they were. Run dxrice_apply_theme.py afterward (the
   Theme app's "Generate from Wallpaper" button does this automatically) to
@@ -54,6 +56,9 @@ def hls_hex(h, l, s):
     return hexc((r * 255, g * 255, b * 255))
 
 
+SAMPLE_TIMEOUT = 30
+
+
 def sample_pixels(image_path):
     proc = subprocess.run(
         [
@@ -62,6 +67,9 @@ def sample_pixels(image_path):
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
         ],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True,
+        # A hung decoder must not leave the Theme editor on "Generating..."
+        # forever; the sample is a 24x24 thumbnail, seconds at most.
+        timeout=SAMPLE_TIMEOUT,
     )
     data = proc.stdout
     return [(data[i], data[i + 1], data[i + 2]) for i in range(0, len(data), 3)]
@@ -121,9 +129,42 @@ def derive_palette(pixels):
     }
 
 
-def main():
-    if len(sys.argv) > 1:
-        wallpaper = os.path.expanduser(sys.argv[1])
+def write_palette(path, palette):
+    """Merges `palette` into the theme.json at `path` -- every other key,
+    unknown ones and schema_version included, kept -- atomically (temp file
+    in the same directory, fsync, rename, original mode kept): a crash or
+    full disk mid-write can no longer leave an empty or half-written theme."""
+    with open(path) as f:
+        theme = json.load(f)
+    theme.update(palette)
+    tmp = f"{path}.dxrice.{os.getpid()}.tmp"
+    try:
+        mode = os.stat(path).st_mode & 0o777
+    except OSError:
+        mode = None
+    try:
+        with open(tmp, "w") as f:
+            json.dump(theme, f, indent=4)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        if mode is not None:
+            os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    print_only = "--print-only" in args
+    args = [a for a in args if a != "--print-only"]
+    if args:
+        wallpaper = os.path.expanduser(args[0])
     else:
         if not os.path.exists(LIVE_THEME_JSON):
             print("No live theme.json found -- run install.sh first.", file=sys.stderr)
@@ -135,10 +176,18 @@ def main():
         print(f"Wallpaper not found: {wallpaper!r}", file=sys.stderr)
         return 1
 
+    # Messages are shown as-is in the Theme editor, so they say what to do.
     try:
         pixels = sample_pixels(wallpaper)
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"Could not sample {wallpaper}: {e}", file=sys.stderr)
+    except FileNotFoundError:
+        print("Generating a palette needs ffmpeg, which isn't installed -- install it with your "
+              "package manager and try again.", file=sys.stderr)
+        return 1
+    except subprocess.TimeoutExpired:
+        print(f"ffmpeg took over {SAMPLE_TIMEOUT}s to read the wallpaper -- try a smaller image.", file=sys.stderr)
+        return 1
+    except subprocess.CalledProcessError:
+        print(f"ffmpeg couldn't read {os.path.basename(wallpaper)} as an image.", file=sys.stderr)
         return 1
     if not pixels:
         print(f"ffmpeg returned no pixel data for {wallpaper}", file=sys.stderr)
@@ -146,16 +195,15 @@ def main():
 
     palette = derive_palette(pixels)
 
-    with open(LIVE_THEME_JSON) as f:
-        theme = json.load(f)
-    theme.update(palette)
-    with open(LIVE_THEME_JSON, "w") as f:
-        json.dump(theme, f, indent=4)
+    # The Theme editor passes --print-only: writing the live theme.json here
+    # recoloured the running shell before Apply, made Revert "restore" the
+    # generated colours (it reloads from theme.json), and made the editor
+    # drop its own unapplied draft as "changed outside the editor".
+    if not print_only:
+        write_palette(LIVE_THEME_JSON, palette)
 
     # Plain JSON on stdout, nothing else -- the Theme app parses this
-    # directly to update its draft fields (matching a preset button) rather
-    # than trusting the live theme.json write alone, since a user hasn't
-    # hit Apply yet at this point and may still Revert.
+    # directly to update its draft fields (matching a preset button).
     print(json.dumps(palette))
     return 0
 

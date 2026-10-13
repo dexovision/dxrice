@@ -183,6 +183,26 @@ class ThemeDraftTest(unittest.TestCase):
         bad = [w for w in self.s.warnings if "propertyCache" not in w]
         self.assertEqual(bad, [])
 
+    # Generate from wallpaper fills the draft only, like a preset: the
+    # script used to write theme.json itself, so Revert "restored" the
+    # generated colours and the shell recoloured before Apply.
+    def test_generate_then_revert_restores_the_draft_and_disk(self):
+        self.s.set_command("dxrice_wallpaper_theme.py",
+                           json.dumps({"accent": "a1b2c3", "glass_bg": "0f0f12"}) + "\n")
+        self.open()
+        before = self.s.ev(f"{TE}.accent")
+        disk = self.theme_json.read_text()
+        self.s.ev(f"{TE}.wallpaper = '/tmp/wall.png'")
+        self.s.ev(f"{TE}.generateFromWallpaper()")
+        self.s.wait(200)
+        argv = [a for a in self.s.bridge.run_log if any("dxrice_wallpaper_theme.py" in x for x in a)]
+        self.assertTrue(argv, "the generate script never ran")
+        self.assertIn("--print-only", argv[-1], "the editor let the script write theme.json")
+        self.assertEqual(self.s.ev(f"{TE}.accent"), "a1b2c3")
+        self.assertTrue(self.s.ev(f"{TE}.dirty"))
+        self.s.ev(f"{TE}.revert()")
+        self.assertEqual(self.s.ev(f"{TE}.accent"), before, "Revert didn't restore the pre-generate accent")
+        self.assertEqual(self.theme_json.read_text(), disk, "theme.json changed without Apply")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

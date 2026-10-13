@@ -406,7 +406,8 @@ PanelWindow {
     property string wallpaperGenerateError: ""
     Process {
         id: generateProc
-        command: ["python3", root.repoDir + "/scripts/dxrice_wallpaper_theme.py", root.wallpaper]
+        // --print-only: the palette lands in this draft, nothing on disk.
+        command: ["python3", root.repoDir + "/scripts/dxrice_wallpaper_theme.py", "--print-only", root.wallpaper]
         stdout: StdioCollector {
             onStreamFinished: {
                 root.generatingFromWallpaper = false;
