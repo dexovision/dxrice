@@ -27,6 +27,22 @@ user's real session, real Quickshell and real files were never touched.
 | `e12c252` | Offscreen gallery tool for every surface |
 | `69836bc` | Lock screen clock 12h -> 24h like the rest of the shell |
 
+## SUPER+G on rigid grids (branch fix/superg-grid)
+
+Report: six windows in a grid, SUPER+G -> "Arranged 6 window(s); 0 moved,
+0 resized, 6 already in place." Root cause: `_shape_is_coherent`
+(scripts/dxrice_auto_arrange.py) accepted any overlap-free, connected,
+not-too-elongated layout as finished, so a rigid grid never reached the
+rebuild -- which, given the grid, does produce a staggered composition. A
+grid is now recognised by its cross junctions (four similar-size windows
+meeting at one gutter intersection) and rebuilt; a rebuild that isn't less
+rigid is discarded (layout kept, recentred only), and one press settles
+the result so the next press moves nothing. Evidence:
+`superg_rigid_grid_before_after.png` (constructed fixtures, not your
+desktop). Activate: `git -C ~/dxrice merge --ff-only fix/superg-grid` (only
+scripts/ and docs/ change; Quickshell does not reload) -- SUPER+G uses it on
+the next press, nothing to restart.
+
 ## Finalization (2026-10-14)
 
 | Commit | What |

@@ -262,6 +262,70 @@ SHAPE_ASPECT_EXPONENT = 0.5
 _shape_aspect = 1.0
 
 
+# ---- rigid grids: the cross junction ----
+#
+# What makes a layout read as a GRID rather than a cloud is one specific,
+# checkable structure: a cross junction -- four windows whose corners all
+# meet at one gutter intersection, so a horizontal and a vertical seam run
+# straight through each other. A staggered composition has only
+# T-junctions; a 2x2 block of equal windows has one cross, a 3x2 grid two.
+#
+# _shape_is_coherent used to accept any overlap-free, connected, not-too-
+# elongated layout as "already good", so a centred 3x2 grid of terminals
+# never reached the rebuild at all and SUPER+G reported "0 moved, 6 already
+# in place". The rebuild itself was never the problem: given the same grid
+# it produces a staggered, junction-free composition (measured on the
+# fixtures in TestRigidGridIsRebuilt). So the fix is only here, in what
+# counts as finished. A per-step junction penalty was tried as well and
+# removed: it changed nothing on the grid fixtures and, by steering the
+# build onto another path, turned the clean, fully packed live-report
+# notch fixture into one with a 161k px^2 dead pocket.
+#
+# Corners count as meeting when they line up within JUNCTION_TOL_FRACTION of
+# the smaller window's short side (never less than JUNCTION_TOL_MIN px): a
+# seam offset by a handful of pixels still reads as one straight line; an
+# offset of a meaningful fraction of a window reads as a stagger.
+JUNCTION_TOL_MIN = 12.0
+JUNCTION_TOL_FRACTION = 0.12
+# ...and only between windows of a similar size (each dimension within this
+# ratio): equal tiles are what read as a grid. Four very different windows
+# whose corners happen to meet in a tightly packed composition are not one
+# -- and treating them as one made SUPER+G unpack the live-report notch
+# fixture (fill 0.99) into a notchier, emptier layout.
+JUNCTION_SIZE_RATIO = 1.35
+
+
+def _short_side(r):
+    return max(min(r[2] - r[0], r[3] - r[1]), 1.0)
+
+
+def _junction_at(px, py, rects, gap):
+    """Is the gutter intersection (px, py) a cross: one window in each of
+    the four quadrants with its corner at that point, all four of a similar
+    size (see JUNCTION_SIZE_RATIO)?"""
+    h = gap / 2.0
+    want = ((px - h, py - h, 2, 3), (px + h, py - h, 0, 3),   # TL: its (x1,y1); TR: its (x0,y1)
+            (px - h, py + h, 2, 1), (px + h, py + h, 0, 1))   # BL: its (x1,y0); BR: its (x0,y0)
+    quad = []
+    for cx, cy, ix, iy in want:
+        hit = next((r for r in rects
+                    if abs(r[ix] - cx) <= max(JUNCTION_TOL_MIN, JUNCTION_TOL_FRACTION * _short_side(r))
+                    and abs(r[iy] - cy) <= max(JUNCTION_TOL_MIN, JUNCTION_TOL_FRACTION * _short_side(r))), None)
+        if hit is None:
+            return False
+        quad.append(hit)
+    ws = [r[2] - r[0] for r in quad]
+    hs = [r[3] - r[1] for r in quad]
+    return max(ws) <= JUNCTION_SIZE_RATIO * min(ws) and max(hs) <= JUNCTION_SIZE_RATIO * min(hs)
+
+
+def _cross_junctions(rects, gap):
+    """Number of cross junctions in a layout (see above). Counted once each,
+    from the window in the top-left quadrant."""
+    h = gap / 2.0
+    return sum(1 for r in rects if _junction_at(r[2] + h, r[3] + h, rects, gap))
+
+
 def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_size,
                              allow_resize=True, max_rounds=NOTCH_REFINE_MAX_ROUNDS,
                              resize_locked=frozenset()):
@@ -1291,7 +1355,7 @@ ALREADY_GOOD_ASPECT_RATIO_MAX = 2.2
 RECENTER_TOLERANCE_FACTOR = 0.15
 
 
-def _shape_is_coherent(eligible, fixed_rects, gap):
+def _shape_is_coherent(eligible, fixed_rects, gap, rigid_is_unfinished=True):
     """Is the composition's own SHAPE already good -- overlap validity,
     adjacency-graph connectivity, per-cluster aspect ratio? Deliberately
     says NOTHING about where that composition sits relative to the
@@ -1407,6 +1471,12 @@ def _shape_is_coherent(eligible, fixed_rects, gap):
             return False  # close enough to a neighbor that it reads as unfinished, not deliberate
         if nearest > own_short * SINGLETON_MAX_RATIO:
             return False  # far enough that it reads as scattered, not a deliberate standalone placement
+
+    # A rigid grid is valid but not finished: see _cross_junctions. Only
+    # asked when deciding whether a press has anything to do;
+    # _refine_notch_alignment's own guard turns it off (see there).
+    if rigid_is_unfinished and _cross_junctions(all_rects, gap) > 0:
+        return False
 
     for component in components:
         if len(component) < 2:
@@ -1531,9 +1601,75 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize
     previous = _shape_aspect
     _shape_aspect = ((mx1 - mx0) / (my1 - my0)) ** SHAPE_ASPECT_EXPONENT if my1 > my0 and mx1 > mx0 else 1.0
     try:
-        return _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize, resize_locked)
+        result = _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize, resize_locked)
+        result = _keep_rigid_unless_improved(eligible, fixed, monitor_bounds, gap, result)
+        return _settle_rigidity(result, eligible, fixed, monitor_bounds, gap, allow_resize, resize_locked)
     finally:
         _shape_aspect = previous
+
+
+# How many extra rebuilds one press may run to finish what the first left
+# rigid (see _settle_rigidity). Each must strictly lower the junction
+# count, so this only ever matters on the rare layout that needs it.
+RIGIDITY_SETTLE_PASSES = 3
+
+
+def _settle_rigidity(result, eligible, fixed, monitor_bounds, gap, allow_resize, resize_locked):
+    """Make one press finish the job. The rebuild can itself leave a cross
+    junction (equal windows fall into a grid easily); the NEXT press then
+    saw a rigid layout, rebuilt it again and moved windows -- measured on
+    the repeated-press sweep: 9 layouts that were stable before the
+    rigidity check started moving on press 2. So rebuild the result again
+    here, while that strictly lowers the junction count, and stop at the
+    first pass that doesn't: the press ends on a layout whose own rebuild
+    is no less rigid, which is exactly what _keep_rigid_unless_improved
+    leaves alone next time. A window resized by an earlier pass is locked
+    for the later ones (same rule as the cross-press resize memory)."""
+    junctions = _cross_junctions([rect_for(x, y, w, h) for _a, x, y, w, h in result], gap)
+    if junctions == 0:
+        return result
+    original = {w["address"]: tuple(w["size"]) for w in eligible}
+    for _ in range(RIGIDITY_SETTLE_PASSES):
+        locked = set(resize_locked) | {a for a, _x, _y, w, h in result if (w, h) != original.get(a)}
+        layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
+        again = _keep_rigid_unless_improved(
+            layout, fixed, monitor_bounds, gap,
+            _auto_arrange(layout, fixed, monitor_bounds, gap, allow_resize, frozenset(locked)))
+        fewer = _cross_junctions([rect_for(x, y, w, h) for _a, x, y, w, h in again], gap)
+        if fewer >= junctions:
+            break
+        result, junctions = again, fewer
+        if junctions == 0:
+            break
+    return result
+
+
+def _keep_rigid_unless_improved(eligible, fixed, monitor_bounds, gap, result):
+    """A layout that is coherent in every way except being rigid (it has
+    cross junctions -- see _cross_junctions) goes through the full rebuild.
+    Keep that rebuild only if it is actually LESS rigid; otherwise the
+    layout is as good as this solver makes it, and is treated exactly like
+    any other finished layout: kept as it is, only recentred.
+
+    Without this, a layout whose best rebuild still has a junction (twelve
+    equal windows, two wide columns) was "unfinished" on every press, so
+    every press rebuilt it -- and since the rebuild may resize, a window
+    could be trimmed again on each one (measured: 900 -> 675 -> ... over
+    five presses). With it, the second press on any result is a no-op."""
+    if not eligible:
+        return result
+    fixed_rects = [rect_for(*_xywh(w)) for w in fixed]
+    if not _shape_is_coherent(eligible, fixed_rects, gap, rigid_is_unfinished=False):
+        return result
+    before = _cross_junctions([rect_for(*_xywh(w)) for w in eligible], gap)
+    if before == 0:
+        return result  # not rigid: the ordinary coherent path already ran
+    after = _cross_junctions([rect_for(x, y, w, h) for _a, x, y, w, h in result], gap)
+    if after < before:
+        return result
+    mx0, my0, mx1, my1 = monitor_bounds
+    dx, dy = _recenter_shift(eligible, fixed_rects, ((mx0 + mx1) / 2, (my0 + my1) / 2), (mx1 - mx0, my1 - my0), gap)
+    return [(w["address"], w["at"][0] + dx, w["at"][1] + dy, w["size"][0], w["size"][1]) for w in eligible]
 
 
 def _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize_locked=frozenset()):
@@ -1767,8 +1903,15 @@ def _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resiz
         # unnecessary, destabilizing rebuild one press later for a notch
         # gain _shape_is_coherent doesn't even measure.
         def _coherent(p):
+            # Junctions don't count here: refine closes notches by aligning
+            # edges, which can complete a cross, and this guard exists to
+            # catch the shape problems refine's own checks can't see -- not
+            # to undo a notch repair because it lined two edges up. Whether
+            # a layout is too rigid is decided at the start of a press
+            # (_shape_is_coherent's default) and by
+            # _keep_rigid_unless_improved.
             as_eligible = [{"address": a, "at": [x, y], "size": [w, h]} for a, (x, y, w, h) in p.items()]
-            return _shape_is_coherent(as_eligible, fixed_rects, gap)
+            return _shape_is_coherent(as_eligible, fixed_rects, gap, rigid_is_unfinished=False)
 
         # Only fires when the layout was ALREADY coherent before refine
         # touched it: a two-variant empirical comparison (full 540-layout

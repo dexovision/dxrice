@@ -32,6 +32,10 @@ def rect(x, y, w, h):
     return (x, y, x + w, y + h)
 
 
+def _xywh_of(w):
+    return (w["at"][0], w["at"][1], w["size"][0], w["size"][1])
+
+
 def overlaps_with_gap(a, b, gap):
     ax0, ay0, ax1, ay1 = a
     inflated = (ax0 - gap, ay0 - gap, ax1 + gap, ay1 + gap)
@@ -1751,44 +1755,30 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
             self.assertLess(abs(nw - ow) + abs(nh - oh), 1.0,
                              f"{addr} resized ({ow}x{oh} -> {nw}x{nh}) on a no-op re-run")
 
-    def test_already_excellent_2x2_grid_stays_put(self):
-        """I: an already-excellent composition -- SUPER+G should do nothing.
-        Live testing found this exact shape (4 identically-sized windows in
-        a tight, already-centered, already-gapped 2x2 grid) broke this
-        requirement: the LAST window placed during the incremental rebuild
-        lost its own perfect slot to a candidate that yanked it far above
-        the group, because that disconnected candidate happened to pull 3
-        of the 4 window centers onto a shared x-coordinate, driving the
-        shared composition_cost's covariance-based anisotropy down to a
-        near-perfect ~0.01 by coincidence -- not because it was a better
-        composition (it had worse compactness, worse edge-alignment, and
-        real movement) -- which then cascaded into the FINAL rigid recenter
-        shift dragging the other 3 (already-correct) windows along with it.
-        Fixed by _find_best_position's stay-put veto: a candidate may not
-        win purely on the (proven exploitable) anisotropy term while also
-        being no better on every independently-verifiable geometric signal
-        (edge-alignment, bbox growth) than simply leaving a window where it
-        already legitimately sits."""
+    def test_rigid_2x2_grid_is_staggered_then_stable(self):
+        """Reverses an earlier decision (this was test_already_excellent_
+        2x2_grid_stays_put): four equal windows in a tight, centred 2x2
+        grid were treated as finished. A grid is valid -- no overlaps,
+        exact gaps -- but it is the opposite of the airy, staggered
+        composition SUPER+G is for, so it is rebuilt: no cross junction
+        left, exact gaps, no resize; and the result is then left alone."""
         w, h = 300, 200
         gap = GAP2
-        left = 657  # exact integers: bbox (657,337)-(1262,742), centered on (960,540)
-        top = 337
+        left, top = 657, 337
         eligible = [
             {"address": "A", "at": [left, top], "size": [w, h]},
             {"address": "B", "at": [left + w + gap, top], "size": [w, h]},
             {"address": "C", "at": [left, top + h + gap], "size": [w, h]},
             {"address": "D", "at": [left + w + gap, top + h + gap], "size": [w, h]},
         ]
-        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
-        by_addr = {a: (x, y, w2, h2) for a, x, y, w2, h2 in result}
-        for w2 in eligible:
-            addr = w2["address"]
-            ox, oy = w2["at"]
-            ow, oh = w2["size"]
-            nx, ny, nw, nh = by_addr[addr]
-            self.assertLess(math.hypot(nx - ox, ny - oy), 1.0,
-                             f"{addr} moved on an already-excellent 2x2 grid (SUPER+G should do nothing)")
-            self.assertEqual((nw, nh), (ow, oh), f"{addr} was resized on an already-excellent 2x2 grid")
+        first = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
+        rects = [apw.rect_for(x, y, w2, h2) for _a, x, y, w2, h2 in first]
+        self.assertEqual(arr._cross_junctions(rects, gap), 0, f"still a grid: {first}")
+        self.assertTrue(all((w2, h2) == (w, h) for _a, _x, _y, w2, h2 in first), "a window was resized")
+        self.assertTrue(_no_overlaps([(x, y, w2, h2) for _a, x, y, w2, h2 in first], gap))
+        again = arr.auto_arrange([{"address": a, "at": [x, y], "size": [w2, h2]} for a, x, y, w2, h2 in first],
+                                 [], (0, 0, 1920, 1080), gap)
+        self.assertEqual(sorted(again), sorted(first), "the second press moved the staggered result")
 
     def test_deterministic_same_input_same_output(self):
         rects0 = [(900, 0, 400, 300), (200, 700, 350, 280), (1500, 300, 300, 500)]
@@ -1868,13 +1858,26 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
             self.assertEqual((nx, ny, nw, nh), (ox, oy, ow, oh),
                               f"{name}: {addr} was touched even though the layout was already coherent")
 
-    def test_3x3_grid_stays_put(self):
+    def test_3x3_grid_becomes_less_rigid_then_stays_put(self):
+        """Reverses an earlier decision (this test used to be
+        test_3x3_grid_stays_put): a rigid grid is overlap-free and connected
+        but not a cloud, and SUPER+G accepting it as finished is the bug
+        behind "0 moved, 6 already in place". It is now rebuilt into a
+        less rigid composition, nothing resized -- and THAT result is
+        stable: the second press touches nothing."""
         w, h, gap = 280, 220, GAP2
         total_w, total_h = 3 * w + 2 * gap, 3 * h + 2 * gap
-        left, top = 960 - total_w / 2, 540 - total_h / 2
+        left, top = 960 - total_w // 2, 540 - total_h // 2
         eligible = [{"address": f"W{r*3+c}", "at": [left + c * (w + gap), top + r * (h + gap)], "size": [w, h]}
                     for r in range(3) for c in range(3)]
-        self._assert_untouched("3x3 grid", eligible)
+        before = arr._cross_junctions([apw.rect_for(*_xywh_of(e)) for e in eligible], gap)
+        first = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
+        after = arr._cross_junctions([apw.rect_for(x, y, w2, h2) for _a, x, y, w2, h2 in first], gap)
+        self.assertEqual(before, 4)
+        self.assertLess(after, before, "the rigid grid was not made less rigid")
+        self.assertTrue(all((w2, h2) == (w, h) for _a, _x, _y, w2, h2 in first), "a window was resized")
+        self._assert_untouched("3x3 grid, second press",
+                               [{"address": a, "at": [x, y], "size": [w2, h2]} for a, x, y, w2, h2 in first])
 
     def test_l_shape_stays_put(self):
         eligible = [
@@ -1940,14 +1943,17 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         w, h, gap = 280, 220, GAP2
 
         def grid(prefix, left, top):
+            # Staggered, not a grid: a rigid grid is now (rightly) rebuilt,
+            # which is not what this test is about.
+            s = (w + gap) // 2
             return [
                 {"address": f"{prefix}0", "at": [left, top], "size": [w, h]},
                 {"address": f"{prefix}1", "at": [left + w + gap, top], "size": [w, h]},
-                {"address": f"{prefix}2", "at": [left, top + h + gap], "size": [w, h]},
-                {"address": f"{prefix}3", "at": [left + w + gap, top + h + gap], "size": [w, h]},
+                {"address": f"{prefix}2", "at": [left + s, top + h + gap], "size": [w, h]},
+                {"address": f"{prefix}3", "at": [left + s + w + gap, top + h + gap], "size": [w, h]},
             ]
 
-        eligible = grid("L", 100, 400) + grid("R", 1400, 400)
+        eligible = grid("L", 100, 330) + grid("R", 1150, 330)   # together centred, as before
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
         by_addr = {a: (x, y) for a, x, y, nw, nh in result}
         for w2 in eligible:
@@ -1960,10 +1966,12 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         pixels past flush-adjacency, but genuinely separate) must not be
         dragged into it."""
         eligible = [
+            # A staggered (finished) cluster -- a rigid 2x2 grid would now
+            # be rebuilt for its own sake, which isn't what this tests.
             {"address": "M0", "at": [700, 400], "size": [280, 220]},
             {"address": "M1", "at": [985, 400], "size": [280, 220]},
-            {"address": "M2", "at": [700, 625], "size": [280, 220]},
-            {"address": "M3", "at": [985, 625], "size": [280, 220]},
+            {"address": "M2", "at": [842, 625], "size": [280, 220]},
+            {"address": "M3", "at": [1127, 625], "size": [280, 220]},
             {"address": "dialog", "at": [100, 100], "size": [300, 200]},
         ]
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
@@ -2246,13 +2254,19 @@ class TestViewportRecenter(unittest.TestCase):
     gap and adjacency survives it untouched. These tests pin that down."""
 
     def _grid(self, ox, oy, w=300, h=200, gap=GAP):
+        """A finished composition: two rows, the second offset by half a
+        window (staggered). It used to be a 2x2 grid -- which SUPER+G now
+        rightly treats as unfinished (see TestRigidGridIsRebuilt) -- but
+        what these tests pin is the viewport behaviour, not grid-ness."""
+        s = (w + gap) // 2
         return [{"address": "A", "at": [ox, oy], "size": [w, h]},
                 {"address": "B", "at": [ox + w + gap, oy], "size": [w, h]},
-                {"address": "C", "at": [ox, oy + h + gap], "size": [w, h]},
-                {"address": "D", "at": [ox + w + gap, oy + h + gap], "size": [w, h]}]
+                {"address": "C", "at": [ox + s, oy + h + gap], "size": [w, h]},
+                {"address": "D", "at": [ox + s + w + gap, oy + h + gap], "size": [w, h]}]
 
     def test_already_centered_composition_is_untouched(self):
-        eligible = self._grid(657, 337)
+        # bbox 757x405, centred on (960, 540)
+        eligible = self._grid(582, 338)
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
         by_addr = {a: (x, y, w, h) for a, x, y, w, h in result}
         for win in eligible:
@@ -3542,6 +3556,143 @@ class TestSuperGMainFlow(_RoundShapeFixtures):
         self.assertEqual(big[3:], (480, 390), "fixture must ask BIG for less than its minimum")
         self._assert_gaps(hypr.rows())
         self.assertEqual(arr._load_resize_state(arr._resize_state_path()).get("BIG"), (480, 390))
+
+
+class TestRigidGridIsRebuilt(unittest.TestCase):
+    """The reported bug: six windows in a rigid grid, SUPER+G pressed, and
+    "Arranged 6 window(s); 0 moved, 0 resized, 6 already in place." The
+    grid was valid (no overlaps, exact gaps, connected, not elongated), and
+    _shape_is_coherent accepted exactly that as finished, so the rebuild
+    never ran. These fixtures are constructed, not read from the user's
+    desktop: six realistic sizes in a centred 3x2 grid with exact 5px gaps.
+    """
+
+    MON = (0, 0, 1920, 1080)
+    GAP = 5
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = self._tmp.name
+        self._saved = (arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds)
+
+    def tearDown(self):
+        arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds = self._saved
+        if self._env is None:
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+        else:
+            os.environ["XDG_RUNTIME_DIR"] = self._env
+        self._tmp.cleanup()
+
+    def grid(self, w, h, cols=3, rows=2):
+        tw, th = cols * w + (cols - 1) * self.GAP, rows * h + (rows - 1) * self.GAP
+        left, top = (1920 - tw) // 2, (1080 - th) // 2
+        return [(f"0x{r}{c}", left + c * (w + self.GAP), top + r * (h + self.GAP), w, h)
+                for r in range(rows) for c in range(cols)]
+
+    def press(self, hypr):
+        import contextlib, io
+        arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
+        arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda: self.MON)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            arr.main()
+        return out.getvalue().strip()
+
+    def junctions(self, rows):
+        return arr._cross_junctions([apw.rect_for(x, y, w, h) for _a, x, y, w, h in rows], self.GAP)
+
+    def assert_clean(self, rows, sizes):
+        rects = [apw.rect_for(x, y, w, h) for _a, x, y, w, h in rows]
+        for i in range(len(rects)):
+            others = rects[:i] + rects[i + 1:]
+            seps = [max(o[0] - rects[i][2], rects[i][0] - o[2], o[1] - rects[i][3], rects[i][1] - o[3]) for o in others]
+            self.assertGreaterEqual(min(seps), self.GAP - 0.5, f"{rows[i]} overlaps or is closer than the gap")
+            self.assertAlmostEqual(min(seps), self.GAP, delta=0.5, msg=f"{rows[i]} is not one gap from a neighbour")
+        for a, _x, _y, w, h in rows:
+            self.assertEqual((w, h), sizes[a], f"{a} was resized")
+
+    def test_the_reported_press_now_rearranges_and_the_next_one_does_not(self):
+        """Through SUPER+G's real main() against an in-memory Hyprland:
+        the literal "6 already in place" repro."""
+        rows = self.grid(640, 480)
+        sizes = {a: (w, h) for a, _x, _y, w, h in rows}
+        self.assertTrue(arr._shape_is_coherent([{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in rows],
+                                               [], self.GAP, rigid_is_unfinished=False),
+                        "fixture: a valid layout by every other measure")
+        hypr = _FakeHyprland(rows)
+        first = self.press(hypr)
+        self.assertNotIn("0 moved", first, f"SUPER+G still left the grid alone: {first}")
+        after = hypr.rows()
+        self.assertEqual(self.junctions(rows), 2)
+        self.assertEqual(self.junctions(after), 0, f"still a grid after the press: {after}")
+        self.assert_clean(after, sizes)
+        second = self.press(hypr)
+        self.assertIn("0 moved, 0 resized, 6 already in place", second)
+        self.assertEqual(sorted(hypr.rows()), sorted(after))
+
+    def test_other_six_window_grids(self):
+        for w, h in ((620, 440), (900, 520), (560, 420)):
+            with self.subTest(size=(w, h)):
+                rows = self.grid(w, h)
+                el = [{"address": a, "at": [x, y], "size": [ww, hh]} for a, x, y, ww, hh in rows]
+                first = arr.auto_arrange(el, [], self.MON, self.GAP)
+                self.assertLess(self.junctions(first), self.junctions(rows))
+                self.assert_clean(first, {a: (ww, hh) for a, _x, _y, ww, hh in rows})
+                again = arr.auto_arrange([{"address": a, "at": [x, y], "size": [ww, hh]} for a, x, y, ww, hh in first],
+                                         [], self.MON, self.GAP)
+                self.assertEqual(sorted(again), sorted(first), "the second press moved the result")
+                self.assertEqual(sorted(arr.auto_arrange(el, [], self.MON, self.GAP)), sorted(first), "not deterministic")
+
+    def test_a_grid_the_solver_cannot_improve_is_left_alone(self):
+        """When the best rebuild is no less rigid than the current layout,
+        the layout is as good as this solver makes it: kept (recentred
+        only), not reshuffled on every press. Twelve equal windows are the
+        case that showed it: without this, every press rebuilt them and
+        re-trimmed the two big ones (900 -> 675 -> ...)."""
+        rows = self.grid(400, 300, cols=4, rows=3)
+        el = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in rows]
+        first = arr.auto_arrange(el, [], self.MON, self.GAP)
+        second = arr.auto_arrange([{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in first],
+                                  [], self.MON, self.GAP)
+        self.assertEqual(sorted(second), sorted(first))
+        self.assertLessEqual(self.junctions(first), self.junctions(rows))
+
+    def test_fullscreen_and_pinned_windows_stay_put(self):
+        rows = self.grid(640, 480)
+        hypr = _FakeHyprland(rows)
+        hypr.clients["0xFS"] = {"address": "0xFS", "at": [0, 0], "size": [1920, 1080], "floating": True,
+                                "fullscreen": 2, "workspace": {"id": 1}, "title": "fs"}
+        hypr.clients["0xPIN"] = {"address": "0xPIN", "at": [3000, 100], "size": [400, 300], "floating": True,
+                                 "fullscreen": 0, "pinned": True, "workspace": {"id": 1}, "title": "pin"}
+        self.press(hypr)
+        self.assertEqual(hypr.clients["0xFS"]["at"], [0, 0])
+        self.assertEqual(hypr.clients["0xPIN"]["at"], [3000, 100])
+        moved = [a for a, x, y, w, h in hypr.rows() if a.startswith("0x") and a not in ("0xFS", "0xPIN")
+                 and (x, y) != next((xx, yy) for aa, xx, yy, _w, _h in rows if aa == a)]
+        self.assertTrue(moved, "the grid was not rebuilt next to fixed windows")
+
+    def test_new_window_next_to_a_grid_leaves_the_grid_alone(self):
+        """Automatic placement is unchanged: the rigidity check only decides
+        whether a SUPER+G press has work to do. Opening a window beside a
+        rigid grid moves nothing that was already there."""
+        saved = (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
+                 apw.get_monitor_bounds, apw.time.sleep)
+        try:
+            hypr = _FakeHyprland(self.grid(560, 420))
+            apw.hyprctl_json, apw.batch_async = hypr.hyprctl_json, hypr.batch_async
+            apw.dispatch_async, apw.move_window_exact_async = hypr.dispatch_async, hypr.move_window_exact_async
+            apw.get_monitor_bounds = lambda: self.MON
+            apw.time.sleep = lambda s: None
+            before = {a: (x, y, w, h) for a, x, y, w, h in hypr.rows()}
+            hypr.open("0xnew", 700, 450, "kitty", 4242)
+            self.assertEqual(apw.place_new_window("0xnew", 1, self.GAP), "placed")
+            after = {a: (x, y, w, h) for a, x, y, w, h in hypr.rows() if a != "0xnew"}
+            self.assertEqual(after, before)
+        finally:
+            (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
+             apw.get_monitor_bounds, apw.time.sleep) = saved
 
 
 class TestNewWindowDispatchRounding(unittest.TestCase):
