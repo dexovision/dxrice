@@ -2293,7 +2293,7 @@ def place_new_window(address, workspace_id, gap):
     # The X server's word on a dialog's parent, read now: it is keyed by
     # the geometry the X server reported, i.e. before anything below moves
     # or resizes the window.
-    parent_geom = dxrice_window_class.x11_parent_geometry(new_win, x11)
+    parent_geom = dxrice_window_class.x11_parent_geometry(new_win, x11, _scales_for_matching())
     # A window the X server says is a dialog is small on purpose.
     if kind == dxrice_window_class.DIALOG:
         want_w, want_h = new_win["size"][0], new_win["size"][1]
@@ -2338,8 +2338,9 @@ def place_new_window(address, workspace_id, gap):
     target = None
     family_anchor = None
     if parent_geom:
-        family_anchor = next((w for w in same_ws if (w["at"][0], w["at"][1], w["size"][0], w["size"][1])
-                              == parent_geom), None)
+        scales = _scales_for_matching()
+        family_anchor = next((w for w in same_ws if dxrice_window_class.same_window(
+            parent_geom, (w["at"][0], w["at"][1], w["size"][0], w["size"][1]), scales)), None)
     if family_anchor is None:
         family_anchor = _find_family_anchor(new_win, same_ws)
     if family_anchor is not None:
@@ -2386,9 +2387,23 @@ def place_new_window(address, workspace_id, gap):
     return "placed"
 
 
+def _scales_for_matching():
+    """Monitor scale factors (see dxrice_window_class.same_window); empty
+    when Hyprland can't be asked, which leaves exact matching only."""
+    try:
+        return dxrice_window_class.monitor_scales(hyprctl_json(["monitors"]))
+    except Exception:
+        return []
+
+
+def _classify_with_scales(clients):
+    scales = _scales_for_matching() if any(c.get("xwayland") for c in clients) else []
+    return dxrice_window_class.classify_all(clients, scales=scales)
+
+
 # The classification seam: tests replace this to say what the X server
 # would answer, without an X server.
-classify_clients = dxrice_window_class.classify_all
+classify_clients = _classify_with_scales
 
 
 # theme.json key for Settings > Experience > "Automatic window placement".

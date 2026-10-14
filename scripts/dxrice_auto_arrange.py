@@ -2009,7 +2009,9 @@ def main():
     # hover card that happens to be open at the moment of the press, or the
     # shell's own Wi-Fi dialog, is neither arranged nor arranged around.
     # Pinned windows are fixed, like fullscreen ones.
-    kinds, _x11 = dxrice_window_class.classify_all(clients)
+    scales = (dxrice_window_class.monitor_scales(hyprctl_json(["monitors"]))
+              if any(c.get("xwayland") for c in clients) else [])
+    kinds, _x11 = dxrice_window_class.classify_all(clients, scales=scales)
     eligible, fixed = dxrice_window_class.partition(clients, workspace_id, kinds)
     if len(eligible) + len(fixed) < 2:
         print("Fewer than 2 floating windows here -- nothing to arrange.")

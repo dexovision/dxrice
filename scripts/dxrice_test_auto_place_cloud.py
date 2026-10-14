@@ -46,6 +46,7 @@ class FakeHypr:
         self.clients = {}
         self.dispatched = []
         self.on_clients_read = None  # hook: called before each `clients` read
+        self.scale = 1.0
 
     def add(self, addr, x, y, w, h, **extra):
         c = {"address": addr, "at": [x, y], "size": [w, h], "floating": True, "fullscreen": 0,
@@ -70,6 +71,8 @@ class FakeHypr:
             return [json.loads(json.dumps(c)) for c in self.clients.values()]
         if args and args[0] == "activeworkspace":
             return {"id": 1}
+        if args and args[0] == "monitors":
+            return [{"x": 0, "y": 0, "width": 1920, "height": 1080, "focused": True, "scale": self.scale}]
         return None
 
     def dispatch_async(self, expr):
@@ -273,6 +276,37 @@ class TestX11Classification(unittest.TestCase):
         self.assertEqual([c["address"] for c in eligible], ["0xe"])
         self.assertEqual(sorted(c["address"] for c in fixed), ["0xfs", "0xpin"])
 
+    def test_fractional_scaling_still_finds_the_popup(self):
+        """With a 1.5x monitor and force_zero_scaling, XWayland's geometry
+        is the layout geometry times the scale, and its origin need not
+        line up -- exact matching found nothing, and a large popup (a
+        menu) was then treated as an ordinary window."""
+        c = {"address": "0x1", "at": [100, 100], "size": [400, 300], "xwayland": True}
+        scaled_or = [_x11((150, 150, 600, 450), override_redirect=True)]
+        self.assertEqual(wc.classify(c, scaled_or), wc.UNKNOWN, "exact matching alone can't see it")
+        self.assertEqual(wc.classify(c, scaled_or, scales=[1.0, 1.5]), wc.TRANSIENT)
+        offset_or = [_x11((2070, 40, 601, 449), override_redirect=True)]   # other monitor's origin, rounding
+        self.assertEqual(wc.classify(c, offset_or, scales=[1.5]), wc.TRANSIENT)
+        normal = [_x11((150, 150, 600, 450), types=["_NET_WM_WINDOW_TYPE_NORMAL"])]
+        self.assertEqual(wc.classify(c, normal, scales=[1.5]), wc.NORMAL)
+
+    def test_ambiguous_scaled_match_prefers_leaving_it_alone(self):
+        c = {"address": "0x1", "at": [0, 0], "size": [400, 300], "xwayland": True}
+        both = [_x11((10, 10, 600, 450), types=["_NET_WM_WINDOW_TYPE_NORMAL"]),
+                _x11((900, 10, 600, 450), override_redirect=True)]
+        self.assertEqual(wc.classify(c, both, scales=[1.5]), wc.TRANSIENT)
+
+    def test_an_exact_match_wins_over_a_scaled_one(self):
+        c = {"address": "0x1", "at": [0, 0], "size": [400, 300], "xwayland": True}
+        x11 = [_x11((0, 0, 400, 300), types=["_NET_WM_WINDOW_TYPE_NORMAL"]),
+               _x11((0, 0, 600, 450), override_redirect=True)]
+        self.assertEqual(wc.classify(c, x11, scales=[1.5]), wc.NORMAL)
+
+    def test_monitor_scales(self):
+        self.assertEqual(wc.monitor_scales([{"scale": 1.0}, {"scale": 1.5}, {"scale": 1.5}, {"scale": "x"}, {}]),
+                         [1.0, 1.5])
+        self.assertEqual(wc.monitor_scales(None), [])
+
     def test_live_query_degrades_without_display(self):
         self.assertIsNone(wc.x11_windows(display=""))
 
@@ -291,6 +325,27 @@ class TestDialogs(_Base):
         self.assertEqual(apw.place_new_window("0xdlg", 1, GAP), "placed")
         self.assertAlmostEqual(_sep(_rect(self.hypr.clients["0xdlg"]), (1200, 640, 1800, 1040)), GAP, delta=0.5)
         self.assert_no_overlap()
+
+    def test_scaled_popup_and_dialog_through_the_real_classification_seam(self):
+        """End to end with the placer's own seam (monitor scales read from
+        Hyprland): on a 1.5x monitor a large XWayland menu is still left
+        alone, and a dialog still finds its parent."""
+        apw.classify_clients = apw._classify_with_scales
+        self.hypr.scale = 1.5
+        self.cluster()
+        self.hypr.add("0xparent", 1200, 640, 600, 400, xwayland=True, pid=7, cls="App")
+        self.hypr.add("0xmenu", 300, 200, 500, 420, xwayland=True, pid=7, cls="App")   # big: > 5% of the screen
+        self.X11 = [_x11((1800, 960, 900, 600)), _x11((450, 300, 750, 630), override_redirect=True)]
+        self.assertEqual(apw.place_new_window("0xmenu", 1, GAP), "ignored")
+        self.assertEqual(self.hypr.dispatched, [])
+        self.hypr.clients.pop("0xmenu")
+        self.hypr.open("0xdlg", 420, 260, xwayland=True, pid=99, cls="Helper")
+        d = self.hypr.clients["0xdlg"]
+        self.X11 = [_x11((1800, 960, 900, 600)),
+                    _x11((d["at"][0] * 1.5, d["at"][1] * 1.5, 630, 390), types=["_NET_WM_WINDOW_TYPE_DIALOG"],
+                         transient_for=(1800, 960, 900, 600))]
+        self.assertEqual(apw.place_new_window("0xdlg", 1, GAP), "placed")
+        self.assertAlmostEqual(_sep(_rect(self.hypr.clients["0xdlg"]), (1200, 640, 1800, 1040)), GAP, delta=0.5)
 
     def test_small_dialog_never_moves_anything_else(self):
         self.cluster()

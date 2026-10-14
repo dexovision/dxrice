@@ -198,9 +198,42 @@ def _geometry(client):
     return (int(at[0]), int(at[1]), int(size[0]), int(size[1]))
 
 
-def classify(client, x11=None):
+# Pixels of slack when comparing a rescaled geometry (fractional scales
+# round differently on each side).
+_SCALE_SLACK = 2
+
+
+def same_window(x_geom, client_geom, scales=()):
+    """Does this X window geometry belong to this Hyprland client?
+
+    Exactly equal at scale 1 (verified on a nested Hyprland). With a
+    fractional monitor scale and `xwayland:force_zero_scaling`, XWayland
+    sees physical pixels: the X geometry is the layout geometry times the
+    scale. Position offsets between the two coordinate spaces differ on
+    multi-monitor layouts, so under a scale only the SIZE has to agree --
+    see classify() for how an ambiguous size match is resolved."""
+    if tuple(x_geom) == tuple(client_geom):
+        return True
+    cw, ch = client_geom[2], client_geom[3]
+    for f in scales:
+        if not f or abs(f - 1.0) < 1e-3:
+            continue
+        if abs(x_geom[2] - cw * f) <= _SCALE_SLACK and abs(x_geom[3] - ch * f) <= _SCALE_SLACK:
+            return True
+    return False
+
+
+def _matches(client, x11, scales):
+    geom = _geometry(client)
+    exact = [e for e in x11 if tuple(e["geometry"]) == geom]
+    return exact if exact else [e for e in x11 if same_window(e["geometry"], geom, scales)]
+
+
+def classify(client, x11=None, scales=()):
     """NORMAL / TRANSIENT / DIALOG / SPLASH / UNKNOWN for one `hyprctl
-    clients` entry. `x11` is x11_windows()'s result (None = unreachable)."""
+    clients` entry. `x11` is x11_windows()'s result (None = unreachable);
+    `scales` the monitors' scale factors, for matching under fractional
+    scaling (see same_window)."""
     w, h = _geometry(client)[2:]
     if w < MIN_WINDOW_SIDE or h < MIN_WINDOW_SIDE:
         return TRANSIENT
@@ -210,11 +243,12 @@ def classify(client, x11=None):
         return NORMAL
     if x11 is None:
         return UNKNOWN
-    matches = [e for e in x11 if e["geometry"] == _geometry(client)]
+    matches = _matches(client, x11, scales)
     if not matches:
         return UNKNOWN
-    # Two X windows with identical geometry are vanishingly rare; if one of
-    # them is a popup, err on the side of not moving anything.
+    # More than one candidate (identical geometry, or several windows of
+    # the same scaled size): if any of them is a popup, err on the side of
+    # not moving anything.
     if any(e["override_redirect"] or e["types"] & _TRANSIENT_TYPES for e in matches):
         return TRANSIENT
     if any("_NET_WM_WINDOW_TYPE_SPLASH" in e["types"] for e in matches):
@@ -224,24 +258,37 @@ def classify(client, x11=None):
     return NORMAL
 
 
-def x11_parent_geometry(client, x11):
-    """The WM_TRANSIENT_FOR parent's geometry for an XWayland dialog, if the
-    X server says it has one."""
+def x11_parent_geometry(client, x11, scales=()):
+    """The WM_TRANSIENT_FOR parent's X geometry for an XWayland dialog, if
+    the X server says it has one (compare it with same_window())."""
     if not x11 or not client.get("xwayland"):
         return None
-    for e in x11:
-        if e["geometry"] == _geometry(client) and e["transient_for"]:
+    for e in _matches(client, x11, scales):
+        if e["transient_for"]:
             return e["transient_for"]
     return None
 
 
-def classify_all(clients, display=None, x11_query=None):
+def classify_all(clients, display=None, x11_query=None, scales=()):
     """{address: kind} for every client, asking the X server at most once
     (and not at all when no client is an XWayland one)."""
     x11 = None
     if any(c.get("xwayland") for c in clients):
         x11 = (x11_query or x11_windows)(display)
-    return {c.get("address"): classify(c, x11) for c in clients}, x11
+    return {c.get("address"): classify(c, x11, scales) for c in clients}, x11
+
+
+def monitor_scales(monitors):
+    """The distinct scale factors in a `hyprctl monitors -j` reply."""
+    out = []
+    for m in monitors or []:
+        try:
+            f = float(m.get("scale", 1.0))
+        except (TypeError, ValueError):
+            continue
+        if f > 0 and f not in out:
+            out.append(f)
+    return out
 
 
 def is_arrangeable(kind):
