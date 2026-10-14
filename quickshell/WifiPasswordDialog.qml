@@ -24,6 +24,10 @@ FloatingWindow {
         id: pwSurface
         objectName: "wifiDialogSurface"
         anchors.fill: parent
+        // A plain toplevel: no blur rule reaches it, so the translucent
+        // panel material would let whatever window is behind show through
+        // the text. Near-opaque instead -- legible on anything.
+        color: Theme.withAlpha(Theme.panelTone, 0.97)
 
         Column {
             id: content

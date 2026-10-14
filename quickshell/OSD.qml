@@ -125,6 +125,9 @@ PanelWindow {
             anchors.fill: parent
             anchors.margins: 10
             radius: height / 2
+            // dxrice-osd has no blur rule (and hyprland.lua is the user's
+            // own file): near-opaque so it stays legible over anything.
+            color: Theme.withAlpha(Theme.panelTone, 0.95)
             elevation: 2
 
             Row {
