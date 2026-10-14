@@ -27,6 +27,36 @@ user's real session, real Quickshell and real files were never touched.
 | `e12c252` | Offscreen gallery tool for every surface |
 | `69836bc` | Lock screen clock 12h -> 24h like the rest of the shell |
 
+## Finalization (2026-10-14)
+
+| Commit | What |
+|---|---|
+| `e5fceca` | Popup detection under fractional scaling: X11 windows matched by size at each monitor's scale when exact geometry fails; ambiguous matches treated as popups (left alone) |
+| `9ce0908` | OSD and Wi-Fi dialog use a near-opaque material (neither gets blur) |
+
+All Python, shell and QML suites pass, run in the sandbox (no compositor,
+no session bus, logging fakes for system commands). launch-systemd is
+skipped: outside the sandbox it creates units on the real user systemd.
+
+**Activating.**
+
+* Run `~/dxrice/install.sh update`.
+  * It fast-forwards the checkout from its upstream, and Quickshell hot-reloads the
+    shell as soon as its files change.
+  * It redeploys the configs, keeping hand edits, and fixes the old polkit line in
+    `hyprland.lua`.
+  * It may ask about the SDDM theme.
+  * It restarts no service.
+* Then run `systemctl --user restart dxrice-auto-place-window.service`: the placement
+  daemon is a long-running Python process still holding the old code.
+* SUPER+G picks up the new code on its next press.
+
+**Still needs your desktop:** blur on your monitor, real XWayland apps' tooltips
+(probes were GTK), real PAM on the lock screen, the dock's launch scopes.
+Also: WifiBackend passes the Wi-Fi password to nmcli on its command line
+(readable in the process list while nmcli runs); fixing it needs a real
+network to verify.
+
 ## Phase 2: visual modernization (see REPORT_PHASE2.md)
 
 | Commit | What |
