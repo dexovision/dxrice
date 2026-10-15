@@ -345,7 +345,15 @@ def next_rect(size, placed, fixed, band):
                     lo = mid
             return rect
         phi, radius = phi + MARCH_STEP, r1
-    return rect  # pragma: no cover - eight turns out nothing is in the way
+    # Eight turns out and still blocked (only something enormous does
+    # that): step straight outward from there until clear -- still never
+    # closer than the gap to anything.
+    theta = theta0 + SPIRAL_TURN * phi
+    while True:
+        ok, rect = place(phi, radius)
+        if ok:
+            return rect
+        radius += 16.0
 
 
 def arrange(sizes, fixed, monitor, band):

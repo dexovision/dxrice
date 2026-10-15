@@ -66,6 +66,14 @@ SUPER+G (`arrange`) both use it.
 
     The brief's tuning ranges were inner 40–48, middle 56–72 and outer
     80–104 px.
+  - **With realistic application windows the widening is modest.** On a
+    1080p screen, 16 windows rarely get past the middle turn. Measured
+    medians are 48 px on the inner turn (range 43–62) and 57 px on the
+    middle one (51–65); the outer turn is barely reached. The breathing room
+    grows visibly at reference proportions, and only by about 43 → 57 px
+    with real apps. Two levers widen it:
+    - `SPACING_GROWTH`: how fast the gap grows per turn;
+    - `SPIRAL_OPENING`: how far apart the turns are.
   - It is one smooth curve, the same for every direction, independent of
     window size. Window size only enters through the footprint.
 
@@ -133,6 +141,23 @@ windows at axis bearings and at diagonal ones (tested; measured 51 vs 50).
 - the spiral radius still never shrinks, and nothing comes closer to the
   obstacle than the gap.
 
+With 300 random *large* fixed windows, up to a whole screen, the largest
+single advance was 224° and the hard minimum held everywhere. The march's
+eight-turn cap was never reached. If it ever were, the window now steps
+straight outward until clear. The previous fallback returned an unchecked
+spot, and a forced test showed it overlapping by 419 px.
+
+**Time with fixed windows.** With a fullscreen window over the screen, 16
+windows take at most 8 ms to arrange, and a single placement takes at most
+2 ms. Bench buckets, p95 of press 1, 957792b → this:
+
+| bucket | 957792b | this |
+|---|---|---|
+| obstacle | 3 ms | 4 ms |
+| fullscreen | 3 ms | 5 ms |
+| wide | 3 ms | 3 ms |
+| tall | 3 ms | 2 ms |
+
 ### Benchmarks against 957792b
 
 **SUPER+G** (`dxrice_spiral_bench.py`, 291 realistic desktops):
@@ -170,10 +195,10 @@ opens):
 
 ## Tests
 
-All 14 Python suites (383 tests) and 6 shell suites pass, run sandboxed.
+All 14 Python suites (384 tests) and 6 shell suites pass, run sandboxed.
 `launch_systemd` skips because there is no user manager in the sandbox.
 
-New in `dxrice_test_spiral_growth.py` (27 → 32 tests):
+New in `dxrice_test_spiral_growth.py` (27 → 33 tests):
 - `test_it_is_an_archimedean_spiral`: the radius grows with the angle, and
   a straight line fits (median R² > 0.99, p10 > 0.97). A ring or appended
   windows would fail.
@@ -185,6 +210,8 @@ New in `dxrice_test_spiral_growth.py` (27 → 32 tests):
   diagonal-bearing gaps agree within 4 px.
 - `test_obstacles_are_gone_round_along_the_spiral`: a bounded detour, the
   radius never shrinks, and the gap to the obstacle is kept.
+- `test_past_the_march_cap_the_gap_is_still_kept`: forces the fallback.
+  It fails on the previous fallback.
 
 Changed tests, with the reason in each docstring:
 - **Spacing helpers.** `spacing_violations`, `assert_composed`, the cloud
@@ -209,6 +236,14 @@ Changed tests, with the reason in each docstring:
 
 ## Limitations
 
+- **A relaxed test and a regression: closing the anchor.**
+  `test_8d` no longer requires the next window to land within reach of a
+  neighbour, because with this geometry it may not. The arm was wound round
+  the closed anchor, and continuing it round the earliest survivor can land
+  the next window in open space: legal (no overlap, the minimum kept) but
+  detached. 957792b's fixed-gap model kept it attached. The next SUPER+G
+  re-winds everything, and the test asserts that. The model only sees
+  rectangles, so it can't tell a closed anchor from a moved one.
 - **Extreme aspect ratios.** Twelve 1300–1700 px wide strips pile into a
   five-high stack where the arm passes the left side. Twelve narrow tall
   windows form a curved row along the bottom. It is still the spiral, but at
@@ -219,18 +254,15 @@ Changed tests, with the reason in each docstring:
 - **A fullscreen window over the whole screen.** Windows can only sit where
   the spiral passes outside it, so they form a sparse cross round it
   (`obstacles.png`).
-- **Closing the anchor.** The arm was wound round the closed anchor, and
-  continuing it round the earliest survivor can land the next window in open
-  space, legal but detached. The next SUPER+G re-winds everything. The
-  model only sees rectangles, so it can't tell a closed anchor from a moved
-  one.
 - **Plain screen distance.** It dips slightly as the arm goes from the
   stretched long side to the short side. Along the spiral itself it never
   does.
 - **The reference's inner turn is airier.** The reference leaves more room
   between the anchor and its first ring than the 42–56 px inner gaps here.
-  Raising `window_spacing_min/max` in theme.json scales every gap
-  proportionally.
+  `window_spacing_min/max` in theme.json scales *every* gap
+  proportionally: 64/112 would double them, so the outer turns would reach
+  about 210 px. That is no longer the "match the picture" setting
+  REPORT_GEOMETRY.md suggested.
 - **Screen coverage.** Coverage is lower and more windows open partly off
   screen, as the expanding gaps intend. The anchor stays visible.
 

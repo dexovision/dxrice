@@ -394,6 +394,23 @@ class TestGeometryModel(unittest.TestCase):
                 (axis if b < 15 or b > 75 else diag).append(min(sp.dist(r, o) for o in rects[:i]))
         self.assertLessEqual(abs(st.median(axis) - st.median(diag)), 4, (st.median(axis), st.median(diag)))
 
+    def test_past_the_march_cap_the_gap_is_still_kept(self):
+        """If the march ever runs out (MARCH_MAX: eight turns, which only an
+        obstacle far bigger than a screen could cause), the window steps
+        straight outward until clear -- the gap is kept even there. Forced
+        here by shrinking the cap to 3 degrees with an obstacle across the
+        start of the curve."""
+        saved = sp.MARCH_MAX
+        sp.MARCH_MAX = math.radians(3)
+        self.addCleanup(setattr, sp, "MARCH_MAX", saved)
+        anchor = sp.first_rect((800, 500), [], USABLE, self.BAND)
+        block = sp._rect(anchor[2] - 100, anchor[1] - 700, 900, 640)  # upper right, where window 2 starts
+        plain = sp.next_rect((700, 450), [anchor], [], self.BAND)
+        self.assertLess(sp.dist(plain, block), sp.target_gap(self.BAND), "the obstacle must block the start")
+        r = sp.next_rect((700, 450), [anchor], [block], self.BAND)
+        self.assertGreaterEqual(sp.dist(r, block), sp.target_gap(self.BAND) - 1)
+        self.assertGreaterEqual(sp.dist(r, anchor), sp.target_gap(self.BAND) - 1)
+
     def test_obstacles_are_gone_round_along_the_spiral(self):
         """A fixed window in the way: the arm advances along the same spiral
         round it -- radius still never shrinking, the detour bounded (under

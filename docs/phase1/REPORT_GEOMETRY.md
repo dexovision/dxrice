@@ -1,5 +1,9 @@
 # Galaxy Spiral geometry: one deterministic model
 
+> **Superseded by [REPORT_EXPANDING.md](REPORT_EXPANDING.md).** The geometry
+> is now an expanding Archimedean spiral with gaps that widen outward. The
+> fixed 42 px gap and the 64/112 spacing suggestion below no longer apply.
+
 Follows [REPORT_GROWTH.md](REPORT_GROWTH.md). The acceptance criterion was
 the visual reference ("Galaxy Spiral Window Layout — Target Behavior for
 DXrice"). Everything was tested offline: unit tests, an in-memory Hyprland,
