@@ -3695,6 +3695,171 @@ class TestRigidGridIsRebuilt(unittest.TestCase):
              apw.get_monitor_bounds, apw.time.sleep) = saved
 
 
+class TestMixedSizeRigidLayouts(unittest.TestCase):
+    """Mixed-size windows lined up into rows and columns: valid by every
+    geometric check, mechanical to look at. c926539 caught only grids of
+    near-equal tiles (cross junctions, JUNCTION_SIZE_RATIO), so a layout
+    like two large windows over three terminals -- T-junctions only -- or a
+    2x2 of a browser, Discord, PrismLauncher and a terminal -- crosses of
+    unequal windows -- was "already in place". Synthetic fixtures with
+    realistic app sizes; not measurements of anyone's desktop."""
+
+    MON = (0, 0, 1920, 1080)
+    GAP = 5
+
+    def _table(self, colw, rowh, names):
+        W = sum(colw) + self.GAP * (len(colw) - 1); H = sum(rowh) + self.GAP * (len(rowh) - 1)
+        x0, y0 = (1920 - W) // 2, (1080 - H) // 2
+        out, y = [], y0
+        for r, h in enumerate(rowh):
+            x = x0
+            for c, w in enumerate(colw):
+                out.append((names[r][c], x, y, w, h)); x += w + self.GAP
+            y += h + self.GAP
+        return out
+
+    def _rows(self, spec):
+        W = max(sum(w for _, w, _ in r) + self.GAP * (len(r) - 1) for r in spec)
+        H = sum(max(h for _, _, h in r) for r in spec) + self.GAP * (len(spec) - 1)
+        x0, y0 = (1920 - W) // 2, (1080 - H) // 2
+        out, y = [], y0
+        for r in spec:
+            x = x0
+            for n, w, h in r:
+                out.append((n, x, y, w, h)); x += w + self.GAP
+            y += max(h for _, _, h in r) + self.GAP
+        return out
+
+    def _columns(self, spec):
+        W = sum(max(w for _, w, _ in c) for c in spec) + self.GAP * (len(spec) - 1)
+        H = max(sum(h for _, _, h in c) + self.GAP * (len(c) - 1) for c in spec)
+        x0, y0 = (1920 - W) // 2, (1080 - H) // 2
+        out, x = [], x0
+        for c in spec:
+            y = y0
+            for n, w, h in c:
+                out.append((n, x, y, w, h)); y += h + self.GAP
+            x += max(w for _, w, _ in c) + self.GAP
+        return out
+
+    def fixtures(self):
+        return {
+            "browser|terminals, 3 cols x 2 rows": self._table([1000, 640, 640], [600, 420],
+                [["brave", "kitty1", "kitty2"], ["discord", "kitty3", "kitty4"]]),
+            "two large over three terminals": self._rows([[("brave", 950, 620), ("prism", 950, 620)],
+                [("kitty1", 630, 380), ("kitty2", 630, 380), ("kitty3", 630, 380)]]),
+            "browser+discord | prism+terminal": self._table([1200, 700], [640, 420],
+                [["brave", "prism"], ["discord", "kitty"]]),
+            "big browser + column of terminals": self._columns([[("brave", 1200, 900)],
+                [("kitty1", 600, 296), ("kitty2", 600, 296), ("kitty3", 600, 298)]]),
+            "3x2 mixed widths and heights": self._table([800, 600, 500], [500, 400],
+                [["brave", "files", "kitty1"], ["discord", "prism", "kitty2"]]),
+            "2x2 mixed + terminal beside": self._columns([[("brave", 1000, 560), ("discord", 1000, 440)],
+                [("prism", 700, 560), ("kitty1", 700, 440)], [("kitty2", 600, 1005)]]),
+        }
+
+    @staticmethod
+    def _el(rows):
+        return [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in rows]
+
+    @staticmethod
+    def _rects(rows):
+        return [apw.rect_for(x, y, w, h) for _a, x, y, w, h in rows]
+
+    def _assert_clean(self, rows):
+        rects = self._rects(rows)
+        for i in range(len(rects)):
+            seps = [max(o[0] - rects[i][2], rects[i][0] - o[2], o[1] - rects[i][3], rects[i][1] - o[3])
+                    for j, o in enumerate(rects) if j != i]
+            self.assertGreaterEqual(min(seps), self.GAP - 0.5, f"{rows[i]} overlaps a neighbour")
+            self.assertAlmostEqual(min(seps), self.GAP, delta=0.5, msg=f"{rows[i]} is not one gap from a neighbour")
+
+    def test_why_they_used_to_pass(self):
+        """The three that c926539 left alone: valid shapes, no cross
+        junction its size rule counted -- but each has a full-span seam."""
+        fx = self.fixtures()
+        for name in ("two large over three terminals", "browser+discord | prism+terminal",
+                     "big browser + column of terminals"):
+            with self.subTest(name):
+                rows = fx[name]
+                self.assertTrue(arr._shape_is_coherent(self._el(rows), [], self.GAP, rigid_is_unfinished=False))
+                self.assertEqual(arr._cross_junctions(self._rects(rows), self.GAP), 0)
+                self.assertGreater(arr._full_span_seams(self._rects(rows), self.GAP), 0)
+
+    def test_each_becomes_unrigid_clean_and_stable(self):
+        for name, rows in self.fixtures().items():
+            with self.subTest(name):
+                sizes = {a: (w, h) for a, _x, _y, w, h in rows}
+                self.assertGreater(arr._rigidity(self._rects(rows), self.GAP), 0)
+                only_rigid = arr._only_rigid(self._el(rows), [], self.GAP)
+                first = arr.auto_arrange(self._el(rows), [], self.MON, self.GAP)
+                self.assertEqual(arr._rigidity(self._rects(first), self.GAP), 0, f"still rigid: {sorted(first)}")
+                self._assert_clean(first)
+                self.assertEqual(arr._dead_gap_total(self._rects(first), self.GAP), 0.0)
+                if only_rigid:
+                    for a, _x, _y, w, h in first:
+                        self.assertEqual((w, h), sizes[a], f"{a} was resized to undo mere rigidity")
+                second = arr.auto_arrange(self._el(first), [], self.MON, self.GAP)
+                self.assertEqual(sorted(second), sorted(first), "the second press moved the result")
+                self.assertEqual(sorted(arr.auto_arrange(self._el(rows), [], self.MON, self.GAP)), sorted(first),
+                                 "same input, different output")
+
+    def test_a_good_mixed_cloud_is_left_alone(self):
+        """Staggered mixed windows: nothing lines up edge to edge across the
+        whole composition, so there is nothing to fix."""
+        G = self.GAP
+        rows = [("brave", 360, 200, 1000, 600), ("kitty1", 1365, 340, 640, 420),
+                ("discord", 560, 805, 900, 400), ("kitty2", 1465, 765, 560, 300)]
+        rows = [(a, x - 200, y - 230, w, h) for a, x, y, w, h in rows]
+        self.assertEqual(arr._rigidity(self._rects(rows), G), 0)
+        self.assertTrue(arr._shape_is_coherent(self._el(rows), [], G))
+        result = arr.auto_arrange(self._el(rows), [], self.MON, G)
+        deltas = {(x - ox, y - oy) for (a, x, y, w, h), (_a, ox, oy, _w, _h) in zip(sorted(result), sorted(rows))}
+        self.assertEqual(len(deltas), 1, "a finished cloud was re-laid-out, not at most recentred")
+
+    def test_seam_metric(self):
+        G = self.GAP
+        two_over_three = self.fixtures()["two large over three terminals"]
+        self.assertEqual(arr._full_span_seams(self._rects(two_over_three), G), 1)
+        # A staggered 2-3-1 composition: the row seams stop part-way.
+        w, h = 640, 480
+        cloud = [(0, 0), (w + G, 0), (-(w + G) // 2, h + G), ((w + G) // 2, h + G), ((w + G) * 3 // 2, h + G),
+                 ((w + G) // 2, 2 * (h + G))]
+        self.assertEqual(arr._full_span_seams([apw.rect_for(x, y, w, h) for x, y in cloud], G), 0)
+        # Fewer than SEAM_MIN_WINDOWS: a block by necessity, never rigid.
+        self.assertEqual(arr._full_span_seams([apw.rect_for(0, 0, 400, 300), apw.rect_for(405, 0, 400, 300),
+                                               apw.rect_for(0, 305, 805, 300)], G), 0)
+
+    def test_two_large_over_three_through_main(self):
+        """The reported symptom through SUPER+G's real main(): press 1
+        rearranges, press 2 reports everything already in place."""
+        import contextlib, io, tempfile
+        tmp = tempfile.TemporaryDirectory()
+        env = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = tmp.name
+        saved = (arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds)
+        try:
+            hypr = _FakeHyprland(self.fixtures()["two large over three terminals"])
+            arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
+            arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda: self.MON)
+            outs = []
+            for _ in range(2):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    arr.main()
+                outs.append(buf.getvalue().strip())
+            self.assertNotIn(" 0 moved", outs[0], outs[0])
+            self.assertIn("0 moved, 0 resized, 5 already in place", outs[1])
+            self.assertEqual(arr._rigidity(self._rects(hypr.rows()), self.GAP), 0)
+        finally:
+            arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds = saved
+            if env is None:
+                os.environ.pop("XDG_RUNTIME_DIR", None)
+            else:
+                os.environ["XDG_RUNTIME_DIR"] = env
+            tmp.cleanup()
+
+
 class TestNewWindowDispatchRounding(unittest.TestCase):
     """place_new_window dispatched computed (often fractional, often
     negative) positions with int(), which truncates toward zero: two windows

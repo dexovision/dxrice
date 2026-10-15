@@ -89,7 +89,8 @@ from dxrice_auto_place_window import (get_monitor_bounds, live_gap, rect_for, ov
                                        composition_penalty, composition_cost, window_mass, mass_center,
                                        MIN_USABLE_WIDTH, MIN_USABLE_HEIGHT, MAX_SHRINK_FRACTION,
                                        _flush_coverage, _nearest_for_candidates, _notch_penalty,
-                                       _axis_gap, FLUSH_TOL, DEAD_GAP_FACING_COVERAGE_THRESHOLD)
+                                       _axis_gap, FLUSH_TOL, DEAD_GAP_FACING_COVERAGE_THRESHOLD,
+                                       _dead_gap_penalty)
 
 _DEBUG = os.environ.get("DXRICE_DEBUG") == "1"
 
@@ -261,6 +262,23 @@ NOTCH_REFINE_SHRINK_MIN_DEPTH = 100.0
 SHAPE_ASPECT_EXPONENT = 0.5
 _shape_aspect = 1.0
 
+# Cost per unit of rigidity (see _rigidity) a candidate adds, used ONLY by
+# the second, rigidity-avoiding rebuild (_rebuild_less_rigid) -- never by
+# an ordinary SUPER+G rebuild or by new-window placement, whose scoring is
+# unchanged. 0 outside that rebuild.
+RIGIDITY_AVOID_WEIGHT = 300.0
+_rigidity_weight = 0.0
+# The rigidity-avoiding rebuild measures the whole cluster for every
+# candidate, which grows quickly with the window count (measured: median
+# press 165 -> 410 ms at 13-20 windows, worst 4 s at 21-30). Above this
+# many windows it is skipped; rigidity is still detected and the ordinary
+# rebuild still runs.
+RIGIDITY_AVOID_MAX_WINDOWS = 12
+
+
+def placed_rects_for_rigidity(placed_points):
+    return [(pcx - pw / 2, pcy - ph / 2, pcx + pw / 2, pcy + ph / 2) for pcx, pcy, pw, ph, _m in placed_points]
+
 
 # ---- rigid grids: the cross junction ----
 #
@@ -324,6 +342,92 @@ def _cross_junctions(rects, gap):
     from the window in the top-left quadrant."""
     h = gap / 2.0
     return sum(1 for r in rects if _junction_at(r[2] + h, r[3] + h, rects, gap))
+
+
+# ---- rigid blocks of mixed sizes: the full-span seam ----
+#
+# Cross junctions only catch grids of near-equal tiles (JUNCTION_SIZE_RATIO).
+# Windows of different sizes become mechanical in a different way: rows and
+# columns that line up into one rectangular block -- two large windows over
+# three terminals, a browser beside a column of terminals, a 2x2 of a
+# browser, Discord, PrismLauncher and a terminal. Their seams meet in
+# T-junctions or in crosses of unequal windows, so the junction check
+# passed them as finished and SUPER+G reported "0 moved" for a layout that
+# is nothing but straight rows and columns.
+#
+# What they share is a FULL-SPAN SEAM: one straight gutter running across
+# the whole composition, edge to edge. In a staggered cloud the seams stop
+# part-way -- a row of two over a row of three shares a gutter only as wide
+# as the shorter row. A seam is the gutter between windows that sit flush
+# across it; collinear pieces within JUNCTION_TOL_MIN of each other read as
+# one straight line, and pieces separated only by the gutter crossing them
+# join up. "Full span" is SEAM_SPAN_FRACTION of the composition's extent.
+# Only with SEAM_MIN_WINDOWS or more windows: two windows side by side, or a
+# window over a pair (the L/T shapes), are a block by necessity, not a grid.
+SEAM_SPAN_FRACTION = 0.9
+SEAM_MIN_WINDOWS = 4
+
+
+def _seam_segments(rects, gap, axis):
+    """[(coordinate, lo, hi), ...] for every flush pair across `axis`
+    (0: a vertical gutter between left/right neighbours, 1: a horizontal one
+    between upper/lower). lo..hi is the shared stretch along the gutter."""
+    a0, a1, b0, b1 = (0, 2, 1, 3) if axis == 0 else (1, 3, 0, 2)
+    out = []
+    for r in rects:
+        for q in rects:
+            if q is r or abs(q[a0] - (r[a1] + gap)) > FLUSH_TOL:
+                continue
+            lo, hi = max(r[b0], q[b0]), min(r[b1], q[b1])
+            if hi > lo:
+                out.append((r[a1] + gap / 2.0, lo, hi))
+    return out
+
+
+def _full_span_seams(rects, gap):
+    """Number of straight gutters (horizontal + vertical) that run across at
+    least SEAM_SPAN_FRACTION of the composition."""
+    if len(rects) < SEAM_MIN_WINDOWS:
+        return 0
+    extent = (max(r[2] for r in rects) - min(r[0] for r in rects),
+              max(r[3] for r in rects) - min(r[1] for r in rects))
+    count = 0
+    for axis in (0, 1):
+        span_total = extent[1 - axis]
+        segs = sorted(_seam_segments(rects, gap, axis))
+        # group collinear gutters (within the junction tolerance)...
+        lines, current = [], []
+        for seg in segs:
+            if current and seg[0] - current[0][0] > JUNCTION_TOL_MIN:
+                lines.append(current)
+                current = []
+            current.append(seg)
+        if current:
+            lines.append(current)
+        # ...and measure each line's longest continuous run.
+        for line in lines:
+            best, run_lo, run_hi = 0.0, None, None
+            for _c, lo, hi in sorted(line, key=lambda t: t[1]):
+                if run_hi is not None and lo <= run_hi + gap + JUNCTION_TOL_MIN:
+                    run_hi = max(run_hi, hi)
+                else:
+                    run_lo, run_hi = lo, hi
+                best = max(best, run_hi - run_lo)
+            if best >= SEAM_SPAN_FRACTION * span_total:
+                count += 1
+    return count
+
+
+def _rigidity(rects, gap):
+    """How mechanical a layout is: cross junctions of near-equal windows plus
+    full-span seams. 0 for a staggered cloud."""
+    return _cross_junctions(rects, gap) + _full_span_seams(rects, gap)
+
+
+def _dead_gap_total(rects, gap):
+    """Unusable strips between near-but-not-flush neighbours, summed (the
+    same _dead_gap_penalty every placement step scores)."""
+    return sum(_dead_gap_penalty(r, rects[:i] + rects[i + 1:], gap) for i, r in enumerate(rects))
 
 
 def _refine_notch_alignment(placed, fixed_rects, gap, reference_area, original_size,
@@ -828,6 +932,10 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
     comp_ref = None
     if placed_points:
         comp_ref = composition_ref or mass_center(placed_points) or viewport_center
+    # Only during a rigidity-avoiding rebuild (see _rebuild_less_rigid):
+    # how much more mechanical would the cluster built so far become with
+    # this window here.
+    rigidity_base = _rigidity(placed_rects_for_rigidity(placed_points), gap) if _rigidity_weight else 0
     placed_rects = [(pcx - pw / 2, pcy - ph / 2, pcx + pw / 2, pcy + ph / 2)
                     for pcx, pcy, pw, ph, _m in placed_points]
 
@@ -890,6 +998,8 @@ def _find_best_position(size, obstacle_rects, gap, current_pos, bearing_unit, cl
             if sep > gap + FLUSH_TOL:
                 total += DETACH_WEIGHT * (sep - gap)
         total += composition_penalty(cand, obstacle_rects, gap)
+        if _rigidity_weight and placed_rects:
+            total += _rigidity_weight * max(0, _rigidity(placed_rects + [cand], gap) - rigidity_base)
         return total
 
     def growth_of(x, y):
@@ -1475,7 +1585,7 @@ def _shape_is_coherent(eligible, fixed_rects, gap, rigid_is_unfinished=True):
     # A rigid grid is valid but not finished: see _cross_junctions. Only
     # asked when deciding whether a press has anything to do;
     # _refine_notch_alignment's own guard turns it off (see there).
-    if rigid_is_unfinished and _cross_junctions(all_rects, gap) > 0:
+    if rigid_is_unfinished and _rigidity(all_rects, gap) > 0:
         return False
 
     for component in components:
@@ -1601,6 +1711,11 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize
     previous = _shape_aspect
     _shape_aspect = ((mx1 - mx0) / (my1 - my0)) ** SHAPE_ASPECT_EXPONENT if my1 > my0 and mx1 > mx0 else 1.0
     try:
+        # A layout that fails nothing but the rigidity check is rearranged,
+        # never resized: stiffness is about where windows sit, not their
+        # sizes. Everything else keeps SUPER+G's usual resize policy.
+        if allow_resize and eligible and _only_rigid(eligible, fixed, gap):
+            allow_resize = False
         result = _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize, resize_locked)
         result = _keep_rigid_unless_improved(eligible, fixed, monitor_bounds, gap, result)
         return _settle_rigidity(result, eligible, fixed, monitor_bounds, gap, allow_resize, resize_locked)
@@ -1614,19 +1729,54 @@ def auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=True, resize
 RIGIDITY_SETTLE_PASSES = 3
 
 
+def _rebuild_less_rigid(eligible, fixed, monitor_bounds, gap):
+    """The ordinary rebuild, positions only, with RIGIDITY_AVOID_WEIGHT
+    charged per unit of rigidity a candidate adds (same candidates, same
+    composition scoring otherwise). Positions only: a rigid layout is
+    about arrangement, so this is never a reason to resize anything."""
+    global _rigidity_weight
+    previous = _rigidity_weight
+    _rigidity_weight = RIGIDITY_AVOID_WEIGHT
+    try:
+        return _auto_arrange(eligible, fixed, monitor_bounds, gap, allow_resize=False)
+    finally:
+        _rigidity_weight = previous
+
+
+def _only_rigid(eligible, fixed, gap):
+    """Coherent in every way except being rigid (see _rigidity)?"""
+    fixed_rects = [rect_for(*_xywh(w)) for w in fixed]
+    return (_shape_is_coherent(eligible, fixed_rects, gap, rigid_is_unfinished=False)
+            and _rigidity([rect_for(*_xywh(w)) for w in eligible], gap) > 0)
+
+
+def _rects_of(rows):
+    return [rect_for(x, y, w, h) for _a, x, y, w, h in rows]
+
+
+def _less_rigid(new_rects, old_rects, gap):
+    """Is `new` a real improvement on `old` as a composition: less rigid
+    (see _rigidity), and without unusable strips `old` didn't have? The
+    second half is what keeps the rigidity check from trading a clean,
+    tightly packed layout for a looser one with awkward gaps in it."""
+    if _rigidity(new_rects, gap) >= _rigidity(old_rects, gap):
+        return False
+    return _dead_gap_total(new_rects, gap) <= _dead_gap_total(old_rects, gap) + 1e-6
+
+
 def _settle_rigidity(result, eligible, fixed, monitor_bounds, gap, allow_resize, resize_locked):
-    """Make one press finish the job. The rebuild can itself leave a cross
-    junction (equal windows fall into a grid easily); the NEXT press then
-    saw a rigid layout, rebuilt it again and moved windows -- measured on
-    the repeated-press sweep: 9 layouts that were stable before the
-    rigidity check started moving on press 2. So rebuild the result again
-    here, while that strictly lowers the junction count, and stop at the
-    first pass that doesn't: the press ends on a layout whose own rebuild
-    is no less rigid, which is exactly what _keep_rigid_unless_improved
-    leaves alone next time. A window resized by an earlier pass is locked
-    for the later ones (same rule as the cross-press resize memory)."""
-    junctions = _cross_junctions([rect_for(x, y, w, h) for _a, x, y, w, h in result], gap)
-    if junctions == 0:
+    """Make one press finish the job. The rebuild can itself leave the
+    composition rigid (equal windows fall into a grid easily; mixed ones
+    into rows); the NEXT press then saw a rigid layout, rebuilt it again
+    and moved windows -- measured on the repeated-press sweep: 9 layouts
+    that were stable before the rigidity check started moving on press 2.
+    So rebuild the result again here while that is a real improvement
+    (_less_rigid), and stop at the first pass that isn't: the press ends on
+    a layout whose own rebuild is no improvement, which is exactly what
+    _keep_rigid_unless_improved leaves alone next time. A window resized by
+    an earlier pass is locked for the later ones (same rule as the
+    cross-press resize memory)."""
+    if _rigidity(_rects_of(result), gap) == 0:
         return result
     original = {w["address"]: tuple(w["size"]) for w in eligible}
     for _ in range(RIGIDITY_SETTLE_PASSES):
@@ -1635,38 +1785,46 @@ def _settle_rigidity(result, eligible, fixed, monitor_bounds, gap, allow_resize,
         again = _keep_rigid_unless_improved(
             layout, fixed, monitor_bounds, gap,
             _auto_arrange(layout, fixed, monitor_bounds, gap, allow_resize, frozenset(locked)))
-        fewer = _cross_junctions([rect_for(x, y, w, h) for _a, x, y, w, h in again], gap)
-        if fewer >= junctions:
+        if not _less_rigid(_rects_of(again), _rects_of(result), gap):
             break
-        result, junctions = again, fewer
-        if junctions == 0:
+        result = again
+        if _rigidity(_rects_of(result), gap) == 0:
             break
     return result
 
 
 def _keep_rigid_unless_improved(eligible, fixed, monitor_bounds, gap, result):
-    """A layout that is coherent in every way except being rigid (it has
-    cross junctions -- see _cross_junctions) goes through the full rebuild.
-    Keep that rebuild only if it is actually LESS rigid; otherwise the
-    layout is as good as this solver makes it, and is treated exactly like
-    any other finished layout: kept as it is, only recentred.
+    """A layout that is coherent in every way except being rigid (see
+    _rigidity: cross junctions of near-equal windows, full-span seams) goes
+    through the full rebuild. Keep that rebuild only if it is a real
+    improvement (_less_rigid); otherwise the layout is as good as this
+    solver makes it, and is treated exactly like any other finished
+    layout: kept as it is, only recentred.
 
-    Without this, a layout whose best rebuild still has a junction (twelve
-    equal windows, two wide columns) was "unfinished" on every press, so
-    every press rebuilt it -- and since the rebuild may resize, a window
-    could be trimmed again on each one (measured: 900 -> 675 -> ... over
-    five presses). With it, the second press on any result is a no-op."""
+    Without this, a layout whose best rebuild is still rigid (twelve equal
+    windows, two wide columns) was "unfinished" on every press, so every
+    press rebuilt it -- and since the rebuild may resize, a window could be
+    trimmed again on each one (measured: 900 -> 675 -> ... over five
+    presses). With it, the second press on any result is a no-op."""
     if not eligible:
         return result
     fixed_rects = [rect_for(*_xywh(w)) for w in fixed]
     if not _shape_is_coherent(eligible, fixed_rects, gap, rigid_is_unfinished=False):
         return result
-    before = _cross_junctions([rect_for(*_xywh(w)) for w in eligible], gap)
-    if before == 0:
+    before = [rect_for(*_xywh(w)) for w in eligible]
+    if _rigidity(before, gap) == 0:
         return result  # not rigid: the ordinary coherent path already ran
-    after = _cross_junctions([rect_for(x, y, w, h) for _a, x, y, w, h in result], gap)
-    if after < before:
+    if _less_rigid(_rects_of(result), before, gap):
         return result
+    # The ordinary rebuild rebuilt the same block: for some window sets
+    # (four mixed windows that pack into a rectangle) compactness and edge
+    # alignment rank the block first. Ask the same solver once more, this
+    # time charging for rigidity, and take that only if it is a real
+    # improvement too.
+    avoiding = (_rebuild_less_rigid(eligible, fixed, monitor_bounds, gap)
+                if len(eligible) <= RIGIDITY_AVOID_MAX_WINDOWS else None)
+    if avoiding is not None and _less_rigid(_rects_of(avoiding), before, gap):
+        return avoiding
     mx0, my0, mx1, my1 = monitor_bounds
     dx, dy = _recenter_shift(eligible, fixed_rects, ((mx0 + mx1) / 2, (my0 + my1) / 2), (mx1 - mx0, my1 - my0), gap)
     return [(w["address"], w["at"][0] + dx, w["at"][1] + dy, w["size"][0], w["size"][1]) for w in eligible]

@@ -27,6 +27,20 @@ user's real session, real Quickshell and real files were never touched.
 | `e12c252` | Offscreen gallery tool for every surface |
 | `69836bc` | Lock screen clock 12h -> 24h like the rest of the shell |
 
+## SUPER+G on rigid layouts of MIXED sizes (branch fix/superg-mixed)
+
+`c926539` only recognised grids of near-equal tiles, so mixed-size blocks --
+two large windows over three terminals, a browser beside a column of
+terminals, a browser/Discord/PrismLauncher/terminal 2x2 -- were still "0
+moved, N already in place". Rigidity now also counts FULL-SPAN SEAMS
+(a straight gutter across the whole composition, 4+ windows); a layout
+that fails only on rigidity is rearranged positions-only; if the ordinary
+rebuild reproduces the block, a second rebuild that charges for rigidity is
+tried; either is kept only if less rigid with no new dead gap. Evidence:
+`superg_mixed_rigid_before_after.png` (synthetic fixtures). Activate:
+`git -C ~/dxrice merge --ff-only fix/superg-mixed` (scripts/ and docs/
+only; SUPER+G uses it on the next press, nothing to restart).
+
 ## SUPER+G on rigid grids (branch fix/superg-grid)
 
 Report: six windows in a grid, SUPER+G -> "Arranged 6 window(s); 0 moved,
