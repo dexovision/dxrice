@@ -9,6 +9,12 @@ panel: rotation / centrality / fill / spacing share / overlaps.
 Needs Pillow. Rendering only -- it computes nothing the benchmark didn't.
 
     python3 scripts/dxrice_spiral_render.py DUMP.json OUT_DIR [--fixtures a,b,...] [--sheet NAME]
+    python3 scripts/dxrice_spiral_render.py --autoplace NAME=SCRIPTS_DIR[,NAME=SCRIPTS_DIR] OUT_DIR [--sequences 0,1,..]
+
+--autoplace opens windows one at a time through the real place_new_window
+against dxrice_autoplace_report's in-memory Hyprland (one column per
+scripts directory, e.g. a baseline checkout and this one) and draws the
+finished sequence, then the same windows after one SUPER+G press.
 """
 import argparse
 import json
@@ -111,13 +117,68 @@ def metrics_line(rows):
            f"fill {m['fill']:.2f}  16-24px {band:.0%}  overlaps {m['overlaps']}"
 
 
+def autoplace_rows(scripts, seq_indices, seed=7):
+    """[(sequence index, rows after opening, rows after one SUPER+G)] from
+    a worker process importing `scripts` (its own module versions)."""
+    import subprocess
+    code = (
+        "import sys, json, random, os, importlib\n"
+        f"sys.path.insert(0, {scripts!r}); sys.path.insert(1, {os.path.dirname(os.path.abspath(__file__))!r})\n"
+        "import dxrice_autoplace_report as R\n"
+        "R.os.environ['XDG_RUNTIME_DIR'] = __import__('tempfile').mkdtemp()\n"
+        "R.os.environ['XDG_CONFIG_HOME'] = __import__('tempfile').mkdtemp()\n"
+        "apw = importlib.import_module('dxrice_auto_place_window'); arr = importlib.import_module('dxrice_auto_arrange')\n"
+        "apw.get_monitor_bounds = lambda: R.MON; apw.time.sleep = lambda s: None\n"
+        f"rng = random.Random({seed}); want = set({list(seq_indices)!r}); out = []\n"
+        f"for k in range(max(want) + 1):\n"
+        "    h = R.Hypr(apw)\n"
+        "    apw.hyprctl_json, apw.batch_async = h.hyprctl_json, h.batch_async\n"
+        "    apw.dispatch_async, apw.move_window_exact_async = h.dispatch_async, h.move_window_exact_async\n"
+        "    for addr, w, hh, cls, pid in R.sequence(rng):\n"
+        "        h.open(addr, w, hh, cls, pid); apw.place_new_window(addr, 1, R.GAP)\n"
+        "    if k in want:\n"
+        "        rows = h.rows(); el = [{'address': a, 'at': [x, y], 'size': [w, hh]} for a, x, y, w, hh in rows]\n"
+        "        out.append([k, rows, [list(r) for r in arr.auto_arrange(el, [], R.MON, R.GAP)]])\n"
+        "print(json.dumps(out))\n")
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    return json.loads(res.stdout.strip().splitlines()[-1])
+
+
+def autoplace_sheet(dirs, out, seqs, sheet):
+    cols = []
+    for spec in dirs:  # NAME=DIR
+        name, d = spec.split("=", 1) if "=" in spec else (os.path.basename(spec.rstrip("/")), spec)
+        cols.append((name, autoplace_rows(d, seqs)))
+    pw, ph = 560, 430
+    img = Image.new("RGB", (2 * len(cols) * pw + 20, len(seqs) * ph + 20), BG)
+    for row in range(len(seqs)):
+        for c, (label, data) in enumerate(cols):
+            k, opened, superg = data[row]
+            opened = [tuple(r) for r in opened]
+            superg = [tuple(r) for r in superg]
+            colors = {r[0]: PAL[i % len(PAL)] for i, r in enumerate(sorted(opened, key=lambda r: (-(r[3] * r[4]), r[0])))}
+            for p, (title, rows) in enumerate(((f"{label}: opened one by one (#{k})", opened),
+                                               (f"{label}: then SUPER+G", superg))):
+                x = 10 + (2 * c + p) * pw
+                panel(img, (x, 10 + row * ph, x + pw - 10, 10 + row * ph + ph - 10), title, rows,
+                      (0, 0, 1920, 1080), colors, metrics_line(rows))
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, sheet + ".png")
+    img.save(path)
+    print(path)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("dump")
+    ap.add_argument("dump", nargs="?")
     ap.add_argument("out")
     ap.add_argument("--fixtures", default="")
     ap.add_argument("--sheet", default="spiral_renders")
+    ap.add_argument("--autoplace")
+    ap.add_argument("--sequences", default="0,1,2,3")
     a = ap.parse_args()
+    if a.autoplace:
+        return autoplace_sheet(a.autoplace.split(","), a.out, [int(x) for x in a.sequences.split(",")], a.sheet)
     data = json.load(open(a.dump))
     fx = data["fixtures"]
     sides = list(data["results"])

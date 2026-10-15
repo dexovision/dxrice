@@ -196,13 +196,14 @@ class Composer:
 
     # -- feasibility --
     def _clear(self, r, placed):
+        """At least the spacing minimum from everything placed and fixed."""
         lo = self.band[0]
-        for q in placed:
-            if _sep(r, q) < lo:
-                return False
-        for q in self.fixed:
-            if _sep(r, q) < lo:
-                return False
+        x0, y0, x1, y1 = r
+        for group in (placed, self.fixed):
+            for q in group:
+                # _sep(r, q) < lo, inlined: the hottest loop of a build
+                if q[0] - x1 < lo and x0 - q[2] < lo and q[1] - y1 < lo and y0 - q[3] < lo:
+                    return False
         return True
 
     # -- candidates beside a neighbour --
@@ -247,7 +248,10 @@ class Composer:
         return out
 
     # -- per-candidate score --
-    def _score(self, r, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect=None):
+    @staticmethod
+    def _bearing_cost(r, hub, theta, r_prev):
+        """The spiral terms alone: bearing, distance from the hub, and
+        falling inside the previous window's radius."""
         cx, cy = _center(r)
         dx, dy = cx - hub[0], cy - hub[1]
         rad = math.hypot(dx, dy)
@@ -255,30 +259,75 @@ class Composer:
         total += RADIUS_WEIGHT * rad
         if rad < r_prev:
             total += INVERSION_WEIGHT * (r_prev - rad)
-        lo, hi = self.band
-        contacts = 0
-        for q in placed:
-            f = _facing(r, q)
-            if f is None:
+        return total
+
+    def _pick(self, cands, extra, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect,
+              obstacles=None):
+        """The lowest-scoring free candidate, ties to the smallest rect.
+        Candidates are tried in order of their spiral terms alone; every
+        other term is >= 0 except the contact bonuses (at most CHAIN_BONUS
+        + NESTLE_BONUS per extra neighbour), so once a candidate's spiral
+        terms minus that bound exceed the best full score, none after it can
+        win -- the same pick as scoring all of them, far fewer scored.
+        `extra(c)` adds caller terms (>= 0); obstacles: what c must clear
+        (default: placed + fixed)."""
+        bound = CHAIN_BONUS + NESTLE_BONUS * max(0, len(placed) - 1)
+        ranked = sorted((self._bearing_cost(c, hub, theta, r_prev), c) for c in set(cands))
+        best, best_s = None, None
+        for cheap, c in ranked:
+            if best_s is not None and cheap - bound > best_s:
+                break
+            if not self._clear(c, placed if obstacles is None else obstacles):
                 continue
-            d, span = f
-            if d <= hi + 1:
-                if span >= MIN_SHARED_FRACTION * min(r[3] - r[1], r[2] - r[0], q[3] - q[1], q[2] - q[0]):
+            s = self._score(c, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect, cheap)
+            if extra is not None:
+                s += extra(c)
+            if best_s is None or s < best_s or (s == best_s and c < best):
+                best, best_s = c, s
+        return best
+
+    def _score(self, r, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect=None, cheap=None):
+        total = self._bearing_cost(r, hub, theta, r_prev) if cheap is None else cheap
+        x0, y0, x1, y1 = r
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        dx, dy = cx - hub[0], cy - hub[1]
+        near = self.band[1] + 1
+        rw, rh = x1 - x0, y1 - y0
+        r_short = rw if rw < rh else rh
+        contacts = seams = 0
+        chained = False
+        # one pass over the neighbours: contacts and slits (facing pairs,
+        # see _facing), the previous window of the sweep, collinear edges
+        for q in placed:
+            qx0, qy0, qx1, qy1 = q
+            if -SEAM_TOL <= x0 - qx0 <= SEAM_TOL:
+                seams += 1
+            if -SEAM_TOL <= y0 - qy0 <= SEAM_TOL:
+                seams += 1
+            if -SEAM_TOL <= x1 - qx1 <= SEAM_TOL:
+                seams += 1
+            if -SEAM_TOL <= y1 - qy1 <= SEAM_TOL:
+                seams += 1
+            oy = (y1 if y1 < qy1 else qy1) - (y0 if y0 > qy0 else qy0)
+            ox = (x1 if x1 < qx1 else qx1) - (x0 if x0 > qx0 else qx0)
+            if oy > 0 and ox <= 0:
+                d, span = (qx0 - x1 if qx0 - x1 > x0 - qx1 else x0 - qx1), oy
+            elif ox > 0 and oy <= 0:
+                d, span = (qy0 - y1 if qy0 - y1 > y0 - qy1 else y0 - qy1), ox
+            else:
+                continue
+            if d <= near:
+                qw, qh = qx1 - qx0, qy1 - qy0
+                if span >= MIN_SHARED_FRACTION * min(r_short, qw, qh):
                     contacts += 1
+                    if q is prev_rect:
+                        chained = True
             elif d <= SLIT_MAX:
                 total += SLIT_WEIGHT * span
         if contacts > 1:
             total -= NESTLE_BONUS * (contacts - 1)
-        if prev_rect is not None:
-            f = _facing(r, prev_rect)
-            if f is not None and f[0] <= hi + 1 and f[1] >= MIN_SHARED_FRACTION * min(
-                    r[3] - r[1], r[2] - r[0], prev_rect[3] - prev_rect[1], prev_rect[2] - prev_rect[0]):
-                total -= CHAIN_BONUS
-        seams = 0
-        for q in placed:
-            for i in (0, 1, 2, 3):
-                if abs(r[i] - q[i]) <= SEAM_TOL:
-                    seams += 1
+        if chained:  # prev_rect, when given, is one of `placed`
+            total -= CHAIN_BONUS
         total += SEAM_WEIGHT * seams
         # cluster shape after adding r
         bx0, by0, bx1, by1 = min(bbox[0], r[0]), min(bbox[1], r[1]), max(bbox[2], r[2]), max(bbox[3], r[3])
@@ -333,22 +382,12 @@ class Composer:
             target = (hub[0] + math.cos(theta) * (r_prev / RADIUS_FLOOR + 300), hub[1] + math.sin(theta) * (r_prev / RADIUS_FLOOR + 300))
             anchors = sorted(range(len(placed)), key=lambda i: (i != len(placed) - 1, math.hypot(
                 _center(placed[i])[0] - target[0], _center(placed[i])[1] - target[1])))
-            best, best_s = None, None
-            for i in anchors[:ANCHOR_CAP]:
-                for c in self._beside(win, placed[i], areas[i], hub, theta):
-                    if not self._clear(c, placed):
-                        continue
-                    s = self._score(c, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect)
-                    if best_s is None or s < best_s or (s == best_s and c < best):
-                        best, best_s = c, s
-            if best is None:
-                for i in anchors[ANCHOR_CAP:]:
-                    for c in self._beside(win, placed[i], areas[i], hub, theta):
-                        if not self._clear(c, placed):
-                            continue
-                        s = self._score(c, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect)
-                        if best_s is None or s < best_s or (s == best_s and c < best):
-                            best, best_s = c, s
+            best = None
+            for group in (anchors[:ANCHOR_CAP], anchors[ANCHOR_CAP:]):
+                cands = [c for i in group for c in self._beside(win, placed[i], areas[i], hub, theta)]
+                best = self._pick(cands, None, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect)
+                if best is not None:
+                    break
             if best is None:
                 return None
             placed.append(best)

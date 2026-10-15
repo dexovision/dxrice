@@ -22,6 +22,9 @@ baseline and a candidate can be compared under identical conditions:
               on press 2 or 3
   settle      layouts still moving on press 2 / press 3
   ms          per-press runtime, p50 / p95 / max per window-count bucket
+  rigid       layouts still a grid/block after press 1 (dxrice_spiral's
+              cross junctions + full-span seams -- a diagnostic, not the
+              objective)
 
 The metric definitions are the audit's (scripts it ran on 2026-10-12),
 unchanged, so baseline numbers are comparable with the ones it reported.
@@ -105,6 +108,15 @@ def fixtures(per_bucket):
                     "monitor": (0, 0, 1080, 1920)})
         out.append({"name": f"obstacle-{k}-{i}", "bucket": "obstacle", "eligible": realistic(rng, k),
                     "fixed": [_w("fixed", 1200, 100, 700, 500)], "monitor": MONITOR})
+    for i in range(6):
+        k = rng.randint(4, 9)
+        out.append({"name": f"fullscreen-{k}-{i}", "bucket": "fullscreen", "eligible": realistic(rng, k),
+                    "fixed": [_w("fixed", 0, 0, 1920, 1080)], "monitor": MONITOR})
+        huge = [_w("huge", rng.randint(-200, 600), rng.randint(-100, 300), rng.randint(1600, 1900), rng.randint(950, 1100))]
+        small = [_w(f"dialog{j}", rng.randint(-300, 1800), rng.randint(-200, 1000), rng.randint(300, 520),
+                    rng.randint(180, 360)) for j in range(k)]
+        out.append({"name": f"asymmetric-{k + 1}-{i}", "bucket": "asymmetric", "eligible": huge + small,
+                    "fixed": [], "monitor": MONITOR})
     out.append({"name": "reported-six", "bucket": "5-6", "eligible": [_w(*r) for r in REPORTED_SIX],
                 "fixed": [], "monitor": MONITOR})
     return out
@@ -247,6 +259,7 @@ def summarize(fx, results):
         p1, p2, p3 = r["presses"]
         m = shape_metrics(p1["rows"])
         m["move"] = movement(f["eligible"], p1["rows"])
+        m["rigid"] = _rigidity(p1["rows"]) > 0
         orig = r["original"]
         m["resized"] = sum(tuple(orig[a]) != (w, h) for a, _x, _y, w, h in p1["rows"])
         s1 = {a: (w, h) for a, _x, _y, w, h in p1["rows"]}
@@ -257,6 +270,13 @@ def summarize(fx, results):
         m["name"] = f["name"]
         by_bucket.setdefault(f["bucket"], []).append(m)
     return by_bucket
+
+
+def _rigidity(rows):
+    """dxrice_spiral's diagnostic (any-size cross junctions + full-span
+    seams), the same yardstick for every side."""
+    import dxrice_spiral
+    return dxrice_spiral.rigidity([(x, y, x + w, y + h) for _a, x, y, w, h in rows])
 
 
 def report(name, by_bucket):
@@ -274,7 +294,8 @@ def report(name, by_bucket):
                      f"<16px {sum(x < 16 for x in g) / len(g):.0%}")
     lines.append(f"  overlaps {sum(m['overlaps'] for m in allm)} | moved on press 2 {sum(m['moved2'] for m in allm)}"
                  f" / press 3 {sum(m['moved3'] for m in allm)} of {len(allm)} | resized {sum(m['resized'] for m in allm)}"
-                 f" | re-shrunk {sum(m['reshrunk'] for m in allm)} | move median {st.median(m['move'] for m in allm):.0f}px")
+                 f" | re-shrunk {sum(m['reshrunk'] for m in allm)} | move median {st.median(m['move'] for m in allm):.0f}px"
+                 f" | rigid after press 1 {sum(m['rigid'] for m in allm)}")
     for b, ms in by_bucket.items():
         r = [m["rotation"] for m in ms if m.get("rotation") is not None]
         g = [x for m in ms for x in m["gaps"]]
