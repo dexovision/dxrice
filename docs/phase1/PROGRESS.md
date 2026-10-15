@@ -27,6 +27,33 @@ user's real session, real Quickshell and real files were never touched.
 | `e12c252` | Offscreen gallery tool for every surface |
 | `69836bc` | Lock screen clock 12h -> 24h like the rest of the shell |
 
+## SUPER+G and auto-placement: the airy spiral (see REPORT_SPIRAL.md)
+
+The audit's Phase 4 (section D), implemented. One composer
+(`scripts/dxrice_spiral.py`) is shared by SUPER+G and new-window placement:
+
+- a composition spacing range (theme.json `window_spacing_min/max`,
+  16/24) separate from `gaps_in`;
+- a soft spiral objective around the most prominent window;
+- a keep-or-rebuild gate so the second press is a no-op;
+- one conservative resize per set of windows.
+
+The packed solver is removed, and the tests that encoded it were
+rewritten deliberately.
+
+Benchmarked against 0af6538 on 291 layouts:
+
+- rotational flow median 0.67 → 0.89 (random: 0.67);
+- 100% of neighbour gaps within 16–24 px;
+- 0 overlaps, 0 re-shrinks, 0 rigid results;
+- p95 faster at every window count.
+
+Renders of actual output are in `spiral/`. Waiting for your visual
+sign-off.
+
+This also settles the open question below: separate clusters and
+standalone dialogs now join the one composition.
+
 ## SUPER+G on rigid layouts of MIXED sizes (branch fix/superg-mixed)
 
 `c926539` only recognised grids of near-equal tiles, so mixed-size blocks --
