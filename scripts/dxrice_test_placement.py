@@ -29,10 +29,12 @@ import dxrice_spiral
 
 def spacing_violations(rows, band=None):
     """Pairs breaking the composition spacing in a finished SUPER+G /
-    placement result: overlapping, closer than the spacing minimum, or
-    facing each other across a slit (further apart than the spacing
-    maximum but not yet open space, dxrice_spiral.SLIT_MAX). Facing =
-    sharing more than 40 px of edge, the benchmark's own definition."""
+    placement result: overlapping, closer than the spacing minimum -- as
+    the true edge-to-edge distance, corner to corner for diagonal pairs
+    (dxrice_spiral.dist), the same rule in every direction -- or facing
+    each other across a slit (further apart than the spacing maximum but
+    not yet open space, dxrice_spiral.SLIT_MAX). Facing = sharing more than
+    40 px of edge, the benchmark's own definition."""
     lo, hi = band or (dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT)
     out = []
     for i in range(len(rows)):
@@ -41,7 +43,7 @@ def spacing_violations(rows, band=None):
             ra = (a[1], a[2], a[1] + a[3], a[2] + a[4])
             rb = (b[1], b[2], b[1] + b[3], b[2] + b[4])
             sep = max(ra[0] - rb[2], rb[0] - ra[2], ra[1] - rb[3], rb[1] - ra[3])
-            if sep < lo - 0.5:
+            if dxrice_spiral.dist(ra, rb) < lo - 0.5:
                 out.append((a[0], b[0], "too close", sep))
                 continue
             oy = min(ra[3], rb[3]) - max(ra[1], rb[1])
@@ -54,18 +56,20 @@ def spacing_violations(rows, band=None):
 
 def assert_composed(tc, rows):
     """A finished composition: no overlap, no dead strip, and every window
-    within the composition spacing of at least one other (nothing left
-    stranded)."""
+    within the spiral's widest gap of at least one other (nothing left
+    stranded) -- the gap widens turn by turn, up to
+    dxrice_spiral.widest_gap."""
     tc.assertEqual(spacing_violations(rows), [], rows)
     if len(rows) < 2:
         return
-    hi = dxrice_spiral.SPACING_MAX_DEFAULT
+    hi = WIDEST
     for r in rows:
-        sep = min(max(o[1] - (r[1] + r[3]), r[1] - (o[1] + o[3]), o[2] - (r[2] + r[4]), r[2] - (o[2] + o[4]))
+        sep = min(dxrice_spiral.dist((r[1], r[2], r[1] + r[3], r[2] + r[4]), (o[1], o[2], o[1] + o[3], o[2] + o[4]))
                   for o in rows if o is not r)
         tc.assertLessEqual(sep, hi + 0.5, f"{r[0]} is not within the spacing of any neighbour: {rows}")
 
 GAP = 5
+WIDEST = dxrice_spiral.widest_gap((dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT))
 
 
 def rect(x, y, w, h):
@@ -694,7 +698,9 @@ class TestSuperGWholeComposition(unittest.TestCase):
 
     @staticmethod
     def _sep(r, others):
-        return min(max(o[1] - (r[1] + r[3]), r[1] - (o[1] + o[3]), o[2] - (r[2] + r[4]), r[2] - (o[2] + o[4]))
+        """Distance to the nearest other window, the same in every direction
+        (dxrice_spiral.dist)."""
+        return min(dxrice_spiral.dist((r[1], r[2], r[1] + r[3], r[2] + r[4]), (o[1], o[2], o[1] + o[3], o[2] + o[4]))
                    for o in others if o is not r)
 
     def test_equal_terminals_fill_a_widescreen_view_not_a_tall_column(self):
@@ -736,7 +742,7 @@ class TestSuperGWholeComposition(unittest.TestCase):
                   {"address": "dlg", "at": [800, -400], "size": [260, 180]}]
         r = arr.auto_arrange(layout, fixed, self.MON, self.GAP)
         for win in r:
-            self.assertLessEqual(self._sep(win, r), dxrice_spiral.SPACING_MAX_DEFAULT + 1, f"{win[0]} left detached: {r}")
+            self.assertLessEqual(self._sep(win, r), WIDEST + 1, f"{win[0]} left detached: {r}")
 
 
 class _RoundShapeFixtures(unittest.TestCase):
@@ -1634,10 +1640,22 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
 
         rects4 = _arrange(rects3)
         self.assertTrue(_no_overlaps(rects4, GAP2))
-        R_arranged, _, _ = _shape_metrics(rects4, CENTER)
-        self.assertLess(R_arranged, R_naive,
-                         f"arranging 4 windows (R={R_arranged:.2f}) is no better than "
-                         f"just extending the stack (R={R_naive:.2f})")
+        # Expanding-spiral geometry: four windows are the anchor and the
+        # spiral's opening arc (upper right, right, lower right -- the
+        # reference's windows 2-4), which the axial-concentration metric
+        # scores about like a stack (0.44 vs 0.40) though it is not one. So
+        # what is asserted is the stack itself being gone: no two windows
+        # share a column, no grid seam, and the arm winds clockwise.
+        xyxy = [(x, y, x + w, y + h) for x, y, w, h in rects4]
+        for i in range(len(xyxy)):
+            for j in range(i + 1, len(xyxy)):
+                a, b = xyxy[i], xyxy[j]
+                self.assertFalse(abs(a[0] - b[0]) <= 12 and abs(a[2] - b[2]) <= 12,
+                                 f"still a column: {rects4}")
+        self.assertEqual(dxrice_spiral.rigidity(xyxy), 0)
+        co = dxrice_spiral.spiral_coords(xyxy)  # _arrange keeps creation order
+        self.assertTrue(all(0 < b[0] - a[0] < math.pi for a, b in zip(co, co[1:])), co)
+        self.assertGreater(R_naive, 0.35, "the baseline isn't the concentrated stack it should be")
 
     def test_existing_horizontal_stack_plus_one_breaks_concentration(self):
         """Horizontal sibling of
@@ -1764,10 +1782,10 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
                 yg = apw._axis_gap(ri[1], ri[3], rj[1], rj[3])
                 if yg == 0.0 and 0 < xg <= dxrice_spiral.SLIT_MAX:
                     found_adjacent = True
-                    self.assertTrue(dxrice_spiral.SPACING_MIN_DEFAULT <= xg <= dxrice_spiral.SPACING_MAX_DEFAULT, xg)
+                    self.assertTrue(dxrice_spiral.SPACING_MIN_DEFAULT <= xg <= WIDEST, xg)
                 if xg == 0.0 and 0 < yg <= dxrice_spiral.SLIT_MAX:
                     found_adjacent = True
-                    self.assertTrue(dxrice_spiral.SPACING_MIN_DEFAULT <= yg <= dxrice_spiral.SPACING_MAX_DEFAULT, yg)
+                    self.assertTrue(dxrice_spiral.SPACING_MIN_DEFAULT <= yg <= WIDEST, yg)
 
     def test_no_overlaps_various_sizes(self):
         rects = _arrange([(900, 0, 700, 200), (900, 205, 150, 600), (900, 810, 900, 250),
@@ -1943,7 +1961,7 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         for win in result:
             sep = min(max(o[1] - (win[1] + win[3]), win[1] - (o[1] + o[3]), o[2] - (win[2] + win[4]), win[2] - (o[2] + o[4]))
                       for o in result if o is not win)
-            self.assertLessEqual(sep, dxrice_spiral.SPACING_MAX_DEFAULT + 1, f"{win[0]} left apart: {result}")
+            self.assertLessEqual(sep, WIDEST + 1, f"{win[0]} left apart: {result}")
         self._assert_untouched("joined clusters, second press",
                                [{"address": a, "at": [x, y], "size": [w2, h2]} for a, x, y, w2, h2 in result])
 
@@ -1966,7 +1984,7 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         d = next(r for r in result if r[0] == "dialog")
         sep = min(max(o[1] - (d[1] + d[3]), d[1] - (o[1] + o[3]), o[2] - (d[2] + d[4]), d[2] - (o[2] + o[4]))
                   for o in result if o is not d)
-        self.assertLessEqual(sep, dxrice_spiral.SPACING_MAX_DEFAULT + 1, f"dialog left apart: {result}")
+        self.assertLessEqual(sep, WIDEST + 1, f"dialog left apart: {result}")
 
     def test_isolated_singleton_too_close_to_cluster_is_not_exempted(self):
         """The flip side: a window that FAILS the strict flush-adjacency
@@ -2797,7 +2815,7 @@ class TestRealisticLayoutCorpus(unittest.TestCase):
 
     @staticmethod
     def _dead(g):
-        lo, hi = dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT
+        lo, hi = dxrice_spiral.SPACING_MIN_DEFAULT, WIDEST
         return g < lo - 0.6 or hi + 0.6 < g <= dxrice_spiral.SLIT_MAX
 
     def _run_and_assert(self, layout):
@@ -3181,7 +3199,7 @@ class TestNotchAlignmentRefinement(_RoundShapeFixtures):
             for i in range(len(rects)):
                 for j in range(i + 1, len(rects)):
                     lo = dxrice_spiral.SPACING_MIN_DEFAULT
-                    self.assertFalse(overlaps_with_gap(rects[i], rects[j], lo - 0.5),
+                    self.assertGreaterEqual(dxrice_spiral.dist(rects[i], rects[j]), lo - 0.5,
                                      f"press {press}: {result[i][0]} and {result[j][0]} closer than "
                                      f"the composition spacing ({lo}px): {rects[i]} vs {rects[j]}")
             layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]

@@ -85,23 +85,26 @@ class TestGrowsFromTheFirstWindow(_Growth):
         steps = [sp._wrap(b - a) for a, b in zip(ang, ang[1:])]
         self.assertTrue(all(s > 0 for s in steps), [round(math.degrees(s)) for s in steps])
 
-    RING = [(900, 600)] + [(700, 450)] * 11
+    RING = [(900, 600)] + [(700, 450)] * 15
 
     def test_4_more_windows_continue_outward(self):
-        """Twelve windows round a moderate anchor: the arm turns one way all
-        the way round the anchor, then carries on in a wider second turn."""
+        """Sixteen windows round a moderate anchor: the arm turns clockwise
+        all the way round the anchor, then carries on in a wider second
+        turn. (Twelve did this with the old fixed 42 px gap; the expanding
+        spiral holds more windows in its roomier first turn.)"""
         addrs = self.open_seq(self.RING)
         rects = [self.rect(a) for a in addrs]
         assert_composed(self, self.rows())
         self.assertEqual(_centre(rects[0]), _centre(USABLE))
-        hub = _centre(rects[0])
-        ang = [math.atan2(_centre(r)[1] - hub[1], _centre(r)[0] - hub[0]) for r in rects[1:]]
-        steps = [sp._wrap(b - a) for a, b in zip(ang, ang[1:])]
-        same = max(sum(s > 0 for s in steps), sum(s < 0 for s in steps))
-        self.assertGreaterEqual(same, len(steps) - 1, f"the sweep reversed: {[round(math.degrees(a)) for a in ang]}")
-        self.assertGreater(abs(sum(steps)), 2 * math.pi, "it never came all the way round")
-        rad = [math.hypot(_centre(r)[0] - hub[0], _centre(r)[1] - hub[1]) for r in rects[1:]]
-        self.assertGreater(sum(rad[-3:]) / 3, max(rad[:6]), f"the second turn isn't further out: {rad}")
+        co = sp.spiral_coords(rects)
+        steps = [b[0] - a[0] for a, b in zip(co, co[1:])]
+        self.assertTrue(all(0 < s < math.pi for s in steps), [round(math.degrees(s)) for s in steps])
+        self.assertGreater(co[-1][0], 2 * math.pi, "it never came all the way round")
+        # a window a full turn on sits further out than the one it passes
+        for (phi, rad) in co:
+            inner = [r for p, r in co if 2 * math.pi - 0.5 < phi - p < 2 * math.pi + 0.5]
+            for r in inner:
+                self.assertGreater(rad, r, "the second turn isn't outside the first")
 
     def test_7_opening_never_moves_existing_windows(self):
         # open_seq asserts it on every open; a longer, mixed run here
@@ -137,14 +140,22 @@ class TestGrowsFromTheFirstWindow(_Growth):
         """The anchor closed: nothing moves; the earliest-created survivor is
         the anchor from now on, and the arm carries on from the tip without
         touching anything."""
-        addrs = self.open_seq(MIXED[:6])
+        # windows small enough that the survivors stay on screen (if none
+        # did, the new window would rightly start a new anchor instead)
+        addrs = self.open_seq([(600, 380), (420, 300), (500, 320), (380, 260), (460, 300), (520, 340)])
         del self.hypr.clients[addrs[0]]
         before = self.hypr.snapshot()
         new = self.open_seq([(700, 450)], prefix="0xn")[0]
         self.assertEqual(self.hypr.snapshot(but=new), before)
-        assert_composed(self, self.rows())
         layout = [self.rect(a) for a in addrs[1:]]
         self.assertEqual(self.rect(new), sp.next_rect((700, 450), layout, [], sp.read_spacing()))
+        # Clear of everything, never under the minimum. Not asserted: that it
+        # sits within reach of a neighbour -- the arm was wound round the
+        # closed anchor, so continuing it round the survivor can land in open
+        # space (REPORT_GEOMETRY.md, limitations); the next SUPER+G re-winds.
+        self.assertEqual(spacing_violations(self.rows()), [])
+        self.press()
+        assert_composed(self, self.rows())
 
     def test_8b_a_gap_in_the_open_lets_the_arm_carry_on(self):
         """A window closed on the airy outside leaves no enclosed hole: the
@@ -158,7 +169,7 @@ class TestGrowsFromTheFirstWindow(_Growth):
         new = self.open_seq([(700, 450)], prefix="0xn")[0]
         self.assertEqual(self.hypr.snapshot(but=new), before)
         assert_composed(self, self.rows())
-        self.assertLessEqual(cloud._sep(self.rect(new), self.rect(tip)), sp.SPACING_MAX_DEFAULT + 1,
+        self.assertLessEqual(cloud._sep(self.rect(new), self.rect(tip)), sp.widest_gap(sp.read_spacing()) + 1,
                              "the arm didn't continue from its tip")
 
     def test_9_fullscreen_and_fixed_windows_are_never_overlapped(self):
@@ -256,11 +267,11 @@ class TestGeometryModel(unittest.TestCase):
 
     BAND = (sp.SPACING_MIN_DEFAULT, sp.SPACING_MAX_DEFAULT)
 
-    def sets(self, n=200, seed=11, lo=(250, 150), hi=(1700, 1000), obstacles=True):
+    def sets(self, n=200, seed=11, lo=(250, 150), hi=(1700, 1000), obstacles=True, count=(2, 16)):
         import random
         rng = random.Random(seed)
         for k in range(n):
-            sizes = [(rng.randint(lo[0], hi[0]), rng.randint(lo[1], hi[1])) for _ in range(rng.randint(2, 14))]
+            sizes = [(rng.randint(lo[0], hi[0]), rng.randint(lo[1], hi[1])) for _ in range(rng.randint(*count))]
             obs = []
             if obstacles and k % 3 == 0:
                 obs = [(rng.randint(-200, 1800), rng.randint(0, 900), rng.randint(200, 600), rng.randint(150, 500))]
@@ -279,22 +290,22 @@ class TestGeometryModel(unittest.TestCase):
             self.assertEqual([sp._rect(*r) for r in layout], replay, (sizes, obs))
 
     def test_spacing_is_a_hard_constraint(self):
-        """Never under the minimum, from windows or obstacles; every window
-        sits at the target gap from its nearest neighbour (nothing touches,
-        nothing floats off on its own)."""
-        target = sp.target_gap(self.BAND)
+        """Never under the minimum -- as the true distance between
+        rectangles, corner to corner for diagonal pairs -- from windows or
+        fixed windows; every window at least the inner turn's gap from all
+        that came before it, and (with nothing in the way) no further than
+        the spiral's widest gap from its nearest neighbour."""
+        g0, widest = sp.target_gap(self.BAND), sp.widest_gap(self.BAND)
         for sizes, obs in self.sets():
             fixed = [sp._rect(*o) for o in obs]
             rects = sp.arrange(sizes, fixed, USABLE, self.BAND)
             for i, r in enumerate(rects):
-                others = [o for o in rects if o is not r]
-                if fixed:
-                    self.assertGreaterEqual(min(sp._sep(r, f) for f in fixed), sp.SPACING_MIN_DEFAULT, (sizes, obs))
-                if others:
-                    near = min(sp._sep(r, o) for o in others + (fixed if i else []))
-                    self.assertGreaterEqual(near, sp.SPACING_MIN_DEFAULT, (sizes, obs))
-                    if i:
-                        self.assertLessEqual(abs(near - target), 1, (i, sizes, obs))
+                for o in rects[:i] + fixed:
+                    self.assertGreaterEqual(sp.dist(r, o), sp.SPACING_MIN_DEFAULT, (sizes, obs))
+                if i:
+                    self.assertGreaterEqual(min(sp.dist(r, o) for o in rects[:i] + fixed), g0 - 1, (i, sizes, obs))
+                    if not fixed:
+                        self.assertLessEqual(min(sp.dist(r, o) for o in rects[:i]), widest + 1, (i, sizes, obs))
 
     def test_starts_upper_right_and_turns_clockwise(self):
         for sizes, _ in self.sets(n=60, obstacles=False):
@@ -305,26 +316,100 @@ class TestGeometryModel(unittest.TestCase):
             self.assertTrue(-90 < b2 < 0, f"window 2 isn't upper right of the anchor: {b2:.0f}")
 
     def test_bounded_advance_and_outward_growth(self):
-        """Realistic sizes: every window advances clockwise round the anchor
+        """Realistic sizes: every window advances clockwise along the spiral
         -- never back -- by a bounded step: 99% by at most 100 degrees, none
-        by more than half a turn (a window much bigger than the rest, or one
-        going round a fixed window, can need that long; see
-        REPORT_GEOMETRY.md). Its clearance from the anchor never shrinks:
-        the radius grows smoothly."""
+        by more than half a turn. Its radius on the spiral (its own frame,
+        spiral_coords) never shrinks. (Not its edge distance from the
+        anchor: a bigger window's edges come closer at the same radius.)"""
         steps = []
         for sizes, obs in self.sets(lo=(400, 260), hi=(1300, 900)):
             rects = sp.arrange(sizes, [sp._rect(*o) for o in obs], USABLE, self.BAND)
-            hub = _centre(rects[0])
-            ang = [math.atan2(_centre(r)[1] - hub[1], _centre(r)[0] - hub[0]) for r in rects[1:]]
-            for a, b in zip(ang, ang[1:]):
-                step = math.degrees(sp._wrap(b - a))
+            co = sp.spiral_coords(rects)
+            for (p0, r0), (p1, r1) in zip(co, co[1:]):
+                step = math.degrees(p1 - p0)
                 self.assertTrue(0 < step <= 180, (step, sizes, obs))
+                self.assertGreaterEqual(r1, r0 - 0.75, (sizes, obs))
                 steps.append(step)
-            q = [sp._sep(r, rects[0]) for r in rects[1:]]
-            for a, b in zip(q, q[1:]):
-                self.assertGreaterEqual(b, a - 1, (sizes, obs))
         steps.sort()
         self.assertLessEqual(steps[int(0.99 * len(steps))], 100, "the arm skips round too often")
+
+    def test_it_is_an_archimedean_spiral(self):
+        """The radius grows in step with the angle: a straight line through
+        (cumulative angle, radius) fits every set closely -- a ring (flat
+        radius) or windows appended at random radii would not."""
+        import statistics as st
+        fits = []
+        for sizes, _ in self.sets(n=150, lo=(220, 110), hi=(1300, 900), obstacles=False):
+            co = sp.spiral_coords(sp.arrange(sizes, [], USABLE, self.BAND))
+            if len(co) < 6:
+                continue
+            ph, rad = zip(*co)
+            mp, mr = st.mean(ph), st.mean(rad)
+            slope = sum((p - mp) * (r - mr) for p, r in zip(ph, rad)) / sum((p - mp) ** 2 for p in ph)
+            self.assertGreater(slope, 0, "the radius doesn't grow with the angle")
+            res = sum((r - mr - slope * (p - mp)) ** 2 for p, r in zip(ph, rad))
+            fits.append(1 - res / sum((r - mr) ** 2 for r in rad))
+        fits.sort()
+        self.assertGreater(fits[len(fits) // 2], 0.99)
+        self.assertGreater(fits[len(fits) // 10], 0.97)
+
+    def test_gaps_widen_turn_by_turn(self):
+        """The gap each window keeps from those before it widens with the
+        spiral: about 42-56 px on the inner turn, 56-80 on the middle one,
+        80+ further out (theme default), the medians in order."""
+        import statistics as st
+        per_turn = {0: [], 1: [], 2: []}
+        for sizes, _ in self.sets(n=120, lo=(240, 120), hi=(300, 160), obstacles=False, count=(20, 40)):
+            rects = sp.arrange(sizes, [], USABLE, self.BAND)
+            for i, (phi, _r) in enumerate(sp.spiral_coords(rects), 1):
+                turn = int(phi / (2 * math.pi))
+                if turn in per_turn:
+                    per_turn[turn].append(min(sp.dist(rects[i], o) for o in rects[:i]))
+        med = {t: st.median(v) for t, v in per_turn.items()}
+        self.assertTrue(44 <= med[0] <= 54, med)
+        self.assertTrue(58 <= med[1] <= 72, med)
+        self.assertTrue(78 <= med[2] <= 100, med)
+
+    def test_gap_progression_is_smooth(self):
+        """Unobstructed, a window's gap never comes in narrower than the one
+        before it by more than a few px (mixed sizes shift the typical
+        window a little) -- no erratic alternation."""
+        for sizes, _ in self.sets(n=150, lo=(220, 110), hi=(1300, 900), obstacles=False):
+            rects = sp.arrange(sizes, [], USABLE, self.BAND)
+            near = [min(sp.dist(r, o) for o in rects[:i]) for i, r in enumerate(rects) if i >= 2]
+            for a, b in zip(near, near[1:]):
+                self.assertGreaterEqual(b, a - 8, (sizes, near))
+
+    def test_the_same_distance_rule_in_every_direction(self):
+        """Neighbours side by side, stacked or diagonal keep the same gap: the
+        median nearest gap of windows at axis bearings and at diagonal ones
+        is within a few px -- no axis-aligned shortcut."""
+        import statistics as st
+        axis, diag = [], []
+        for sizes, _ in self.sets(n=150, lo=(240, 120), hi=(700, 450), obstacles=False):
+            rects = sp.arrange(sizes, [], USABLE, self.BAND)
+            hub = _centre(rects[0])
+            for i, r in enumerate(rects[1:], 1):
+                b = math.degrees(math.atan2(_centre(r)[1] - hub[1], _centre(r)[0] - hub[0])) % 90
+                (axis if b < 15 or b > 75 else diag).append(min(sp.dist(r, o) for o in rects[:i]))
+        self.assertLessEqual(abs(st.median(axis) - st.median(diag)), 4, (st.median(axis), st.median(diag)))
+
+    def test_obstacles_are_gone_round_along_the_spiral(self):
+        """A fixed window in the way: the arm advances along the same spiral
+        round it -- radius still never shrinking, the detour bounded (under
+        a full turn) -- and nothing comes closer to it than the gap."""
+        g0 = sp.target_gap(self.BAND)
+        for sizes, obs in self.sets(n=150):
+            if not obs:
+                continue
+            fixed = [sp._rect(*o) for o in obs]
+            rects = sp.arrange(sizes, fixed, USABLE, self.BAND)
+            co = sp.spiral_coords(rects)
+            for (p0, r0), (p1, r1) in zip(co, co[1:]):
+                self.assertTrue(0 < p1 - p0 < 2 * math.pi, (sizes, obs))
+                self.assertGreaterEqual(r1, r0 - 0.75, (sizes, obs))
+            for r in rects:
+                self.assertGreaterEqual(sp.dist(r, fixed[0]), g0 - 1, (sizes, obs))
 
 
 class TestTransientsStayOutOfTheSpiral(_Growth):

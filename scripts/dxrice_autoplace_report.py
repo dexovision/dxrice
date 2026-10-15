@@ -14,11 +14,13 @@ window, the share of bearing steps from one opened window to the next that
 turn the same way (random bearings give about 0.69).
 
 Per open: did an EXISTING window move or change size; is the new window
-at the composition spacing from something (dxrice_spiral's range; exactly
-Hyprland's 5 px gap for a checkout from before the spiral redesign), and
-clear of everything. Per finished sequence: shape (bounding-box aspect --
-the screen is 16:9), concave pockets (dxrice_arrange_report.measure),
-whether a SUPER+G press keeps it as it is (at most recentred), how far the
+at the composition spacing from something (dxrice_spiral's range -- up to
+its widest_gap, measured with its dist, where the checkout has them;
+exactly Hyprland's 5 px gap for a checkout from before the spiral
+redesign), and clear of everything. Per finished sequence: shape
+(bounding-box aspect -- the screen is 16:9), concave pockets
+(dxrice_arrange_report.measure), whether a SUPER+G press keeps it as it
+is (at most recentred), how far the
 composition's centre sits from the screen's, and how much of the screen
 is covered.
 """
@@ -99,9 +101,15 @@ def run(scripts, n, render_dir=None, seed=7):
     if os.path.exists(os.path.join(scripts, "dxrice_spiral.py")):
         spiral = importlib.import_module("dxrice_spiral")
         lo, hi = spiral.SPACING_MIN_DEFAULT, spiral.SPACING_MAX_DEFAULT
+        if hasattr(spiral, "widest_gap"):  # the expanding spiral: gaps widen outward
+            hi = spiral.widest_gap((lo, hi))
     else:  # a checkout from before the spiral redesign: exact gaps_in
         lo = hi = GAP
         spiral = None
+    sep = _sep
+    if spiral is not None and hasattr(spiral, "dist"):  # corner to corner for diagonal pairs
+        def sep(a, b):
+            return spiral.dist((a[1], a[2], a[1] + a[3], a[2] + a[4]), (b[1], b[2], b[1] + b[3], b[2] + b[4]))
     rigidity_yardstick = spiral is not None and hasattr(spiral, "rigidity")
     apw.get_monitor_bounds = lambda: MON
     apw.time.sleep = lambda s: None
@@ -120,7 +128,7 @@ def run(scripts, n, render_dir=None, seed=7):
             moved += any((tuple(h.clients[a]["at"]), tuple(h.clients[a]["size"])) != v for a, v in before.items())
             rows = h.rows()
             new = next(r for r in rows if r[0] == addr)
-            seps = [_sep(new, r) for r in rows if r[0] != addr]
+            seps = [sep(new, r) for r in rows if r[0] != addr]
             vis = (max(0, min(new[1] + new[3], MON[2]) - max(new[1], MON[0]))
                    * max(0, min(new[2] + new[4], MON[3]) - max(new[2], MON[1])))
             hidden += vis < 0.5 * new[3] * new[4]

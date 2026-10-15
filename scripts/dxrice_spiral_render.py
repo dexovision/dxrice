@@ -18,10 +18,14 @@ Needs Pillow. Rendering only -- it computes nothing the benchmark didn't.
 flow line in opening order -- the spiral as auto-placement grows it.
 
 --geometry SCRIPTS_DIR [--reference PNG] draws the acceptance sheets of
-the Galaxy Spiral geometry: growth at 1-12 windows (reference proportions
-and mixed sizes), closing windows, an oversized composition, fixed and
-fullscreen windows -- all through the real place_new_window / SUPER+G --
-and, given the reference image, the two side by side.
+the Galaxy Spiral geometry in the clean style (windows only -- no labels,
+arrows or gap marks): growth at 2, 4, 6, 8, 12 and 16 windows (reference
+proportions and mixed sizes), very wide and tall windows, fixed and
+fullscreen windows, closing windows, and charts of the radius and gap
+progression -- all through the real place_new_window / SUPER+G -- and,
+given the reference image, the reference beside the spiral at the same
+scale; --compare NAME=DIR adds the same windows through a previous
+checkout, before above after.
 
 --autoplace opens windows one at a time through the real place_new_window
 against dxrice_autoplace_report's in-memory Hyprland (one column per
@@ -253,95 +257,235 @@ def _sheet(panels, out, sheet, cols, pw=560, ph=430, colors=None, header=None):
 
 # Reference proportions: the reference image's anchor (~305x180) and ring
 # windows (~210x100) on a 1536-wide picture, scaled to a 1920-wide screen.
-REF_SIZES = [(381, 225)] + [(262, 125)] * 11
+REF_SIZES = [(381, 225)] + [(262, 125)] * 15
 MIXED = [(1100, 700), (860, 560), (640, 400), (900, 620), (550, 300), (1000, 650), (820, 560),
-         (480, 320), (700, 460), (760, 480), (600, 380), (920, 600)]
-COUNTS = (1, 2, 3, 4, 6, 8, 12)
+         (480, 320), (700, 460), (760, 480), (600, 380), (920, 600), (520, 340), (780, 500),
+         (660, 420), (840, 540)]
+WIDE = [(1500, 420)] + [(1300, 300), (900, 260), (1600, 340), (1100, 280), (1400, 360), (1000, 300),
+                        (1500, 320), (1200, 280), (1700, 380), (950, 260), (1350, 330)]
+TALL = [(700, 900)] + [(380, 900), (300, 760), (420, 1000), (340, 820), (400, 940), (320, 780),
+                       (360, 880), (300, 720), (440, 980), (330, 800), (390, 900)]
+COUNTS = (2, 4, 6, 8, 12, 16)
+# the reference image: its anchor's centre, and image px per screen px
+REF_ANCHOR = (924, 510)
+REF_PX = 210.0 / 262.0
+WIN, WIN_ANCHOR, WIN_EDGE, WIN_NEW = "#2b3140", "#3d4864", "#8fa0c8", "#c9d2e8"
 
 
-def geometry_sheets(scripts, out, reference=None):
-    names = [f"w{i + 1}" for i in range(12)]
-    colors = {a: PAL[i % len(PAL)] for i, a in enumerate(names)}
-    paths = []
-    for label, sizes, sheet in (("reference proportions (381x225 anchor, 262x125 windows)", REF_SIZES, "growth_reference"),
-                                ("mixed application sizes", MIXED, "growth_mixed")):
-        frames = scenario_rows(scripts, [["open", a, w, h] for a, (w, h) in zip(names, sizes)] + [["press"]])
-        panels = [(f"{n} window{'s' if n > 1 else ''}", frames[n - 1], names[:n]) for n in COUNTS]
-        panels.append(("12 windows, then SUPER+G", frames[-1], names))
-        paths.append(_sheet(panels, out, sheet, 4, colors=colors, header=f"Galaxy Spiral growth -- {label}"))
-    # closing windows: middle, tip, anchor; then SUPER+G
-    eight = [["open", a, w, h] for a, (w, h) in zip(names, MIXED[:8])]
-    panels = []
-    for title, closed in (("w4 (middle) closed", "w4"), ("w8 (tip) closed", "w8"), ("w1 (anchor) closed", "w1")):
-        f = scenario_rows(scripts, eight + [["close", closed], ["open", "n9", 700, 460], ["press"]])
-        order = [a for a in names[:8] if a != closed] + ["n9"]
-        panels += [("8 windows", f[7], names[:8]), (f"{title}, n9 opened", f[9], order),
-                   ("then SUPER+G", f[10], order)]
-    paths.append(_sheet(panels, out, "closing", 3, colors=dict(colors, n9="#ffffff"),
-                        header="Closing windows: nothing moves; the arm carries on; SUPER+G rebuilds from creation order"))
-    # oversized, fixed and fullscreen
-    six = [["open", f"t{i + 1}", 826, 493] for i in range(6)]
-    f_big = scenario_rows(scripts, six + [["press"]])
-    f_pin = scenario_rows(scripts, [["fixed", "pinned", 1400, 90, 460, 330, "pinned"]]
-                          + [["open", a, w, h] for a, (w, h) in zip(names, MIXED[:7])])
-    f_fs = scenario_rows(scripts, [["fixed", "fullscreen", 0, 0, 1920, 1080, "fullscreen"]]
-                         + [["open", a, w, h] for a, (w, h) in zip(names, MIXED[:4])])
-    f_huge = scenario_rows(scripts, [["open", "w1", 1900, 1000]] + [["open", a, w, h] for a, (w, h) in zip(names[1:], MIXED[1:6])])
-    panels = [("6 terminals 826x493 (the live test)", f_big[5], [f"t{i + 1}" for i in range(6)]),
-              ("same, then SUPER+G", f_big[6], [f"t{i + 1}" for i in range(6)]),
-              ("a pinned window in the arm's way", f_pin[-1], names[:7]),
-              ("a fullscreen window over the screen", f_fs[-1], names[:4]),
-              ("an anchor as big as the screen", f_huge[-1], names[:6])]
-    paths.append(_sheet(panels, out, "special_cases", 3, colors=dict(colors, **{f"t{i + 1}": PAL[i] for i in range(6)}),
-                        header="Oversized, fixed and fullscreen: never overlapped, anchor kept on screen"))
-    if reference:
-        ref = Image.open(reference).convert("RGB")
-        ref = ref.resize((900, int(900 * ref.height / ref.width)))
-        r12 = scenario_rows(scripts, [["open", a, w, h] for a, (w, h) in zip(names, REF_SIZES)])[-1]
-        m12 = scenario_rows(scripts, [["open", a, w, h] for a, (w, h) in zip(names, MIXED)])[-1]
-        pw, ph = 900, ref.height
-        img = Image.new("RGB", (3 * pw + 40, ph + 70), BG)
-        d = ImageDraw.Draw(img)
-        d.text((16, 14), "Reference (left) vs the model: 12 windows at reference proportions, and mixed sizes",
-               font=_font(22, True), fill=INK)
-        img.paste(ref, (10, 60))
-        for c, (title, rows) in enumerate((("12 windows, reference proportions", r12), ("12 windows, mixed sizes", m12))):
-            x = 20 + (c + 1) * pw
-            panel(img, (x, 60, x + pw - 10, 60 + ph), title, rows, USABLE, colors, metrics_line(rows), order=names)
-        os.makedirs(out, exist_ok=True)
-        path = os.path.join(out, "reference_vs_model.png")
-        img.save(path)
-        print(path)
-        paths.append(path)
-        paths.append(_spacing_sheet(ref, out, colors, names))
-    return paths
+def clean_panel(img, box, title, rows, scale, centre=(960, 532), new=None):
+    """Windows only -- no labels, arrows or gap marks: what the user would
+    see. `scale` output px per screen px, the usable area dashed, fixed
+    windows grey."""
+    x0, y0, x1, y1 = box
+    pan = Image.new("RGB", (x1 - x0, y1 - y0 - 26), CARD)
+    d = ImageDraw.Draw(pan)
+    W, H = pan.size
+
+    def T(x, y):
+        return W / 2 + (x - centre[0]) * scale, H / 2 + (y - centre[1]) * scale
+
+    a, b = T(USABLE[0], USABLE[1]), T(USABLE[2], USABLE[3])
+    for xx in range(int(a[0]), int(b[0]), 10):
+        d.line([xx, a[1], min(xx + 5, b[0]), a[1]], fill="#4a5163")
+        d.line([xx, b[1], min(xx + 5, b[0]), b[1]], fill="#4a5163")
+    for yy in range(int(a[1]), int(b[1]), 10):
+        d.line([a[0], yy, a[0], min(yy + 5, b[1])], fill="#4a5163")
+        d.line([b[0], yy, b[0], min(yy + 5, b[1])], fill="#4a5163")
+    first = next((r[0] for r in rows if r[0] not in FIXED_NAMES), None)
+    for addr, x, y, w, h in rows:
+        p, q = T(x, y), T(x + w, y + h)
+        if addr in FIXED_NAMES:
+            d.rectangle([p[0], p[1], q[0], q[1]], fill="#33363d", outline="#5b606b")
+            for k in range(int(p[0]) - int(q[1] - p[1]), int(q[0]), 12):
+                d.line([max(k, p[0]), p[1] + max(0, p[0] - k), min(k + (q[1] - p[1]), q[0]), q[1] - max(0, k + (q[1] - p[1]) - q[0])],
+                       fill="#44474f")
+            continue
+        fill = WIN_ANCHOR if addr == first else WIN
+        d.rounded_rectangle([p[0], p[1], q[0], q[1]], 3, fill=fill, outline=WIN_NEW if addr == new else WIN_EDGE,
+                            width=2 if addr == new else 1)
+        bar = min(10.0, (q[1] - p[1]) * 0.12)  # a title bar, as on a real window
+        d.line([p[0] + 2, p[1] + bar, q[0] - 2, p[1] + bar], fill="#3a4152")
+    img.paste(pan, (x0, y0))
+    ImageDraw.Draw(img).text((x0 + 4, y1 - 21), title, font=_font(14), fill=MUTED)
 
 
-def _spacing_sheet(ref, out, colors, names, airy=(64, 112)):
-    """The reference beside the model at the default spacing band and at a
-    wider one (theme.json window_spacing_min/max) -- the composer's own
-    arrange, drawn against each band."""
-    global BAND
-    pw, ph = 900, ref.height
-    img = Image.new("RGB", (3 * pw + 40, ph + 70), BG)
-    ImageDraw.Draw(img).text((16, 14), f"Spacing: the default {BAND[0]}-{BAND[1]} px vs window_spacing_min/max "
-                             f"{airy[0]}/{airy[1]} in theme.json", font=_font(22, True), fill=INK)
-    img.paste(ref, (10, 60))
-    default = BAND
-    try:
-        for c, band in enumerate((default, airy)):
-            BAND = band
-            rects = dxrice_spiral.arrange(REF_SIZES, [], USABLE, band)
-            rows = [(n, r[0], r[1], r[2] - r[0], r[3] - r[1]) for n, r in zip(names, rects)]
-            x = 20 + (c + 1) * pw
-            panel(img, (x, 60, x + pw - 10, 60 + ph), f"12 windows, reference proportions, spacing {band[0]}-{band[1]} px",
-                  rows, USABLE, colors, metrics_line(rows), order=names)
-    finally:
-        BAND = default
-    path = os.path.join(out, "spacing_default_vs_airy.png")
+def _fit(frames, pad=0.94, size=(560, 534)):
+    """One scale for a set of frames: the largest frame (and the usable
+    area) fits the panel."""
+    xs, ys = [USABLE[0], USABLE[2]], [USABLE[1], USABLE[3]]
+    for rows in frames:
+        for _a, x, y, w, h in rows:
+            xs += [x, x + w]
+            ys += [y, y + h]
+    cx, cy = 960, 532
+    half_w = max(abs(v - cx) for v in xs)
+    half_h = max(abs(v - cy) for v in ys)
+    return pad * min(size[0] / (2 * half_w), size[1] / (2 * half_h))
+
+
+def _clean_sheet(panels, out, sheet, header, cols, scale, pw=580, ph=580, new=None):
+    rows_n = (len(panels) + cols - 1) // cols
+    img = Image.new("RGB", (cols * pw + 20, rows_n * ph + 70), BG)
+    ImageDraw.Draw(img).text((16, 16), header, font=_font(22, True), fill=INK)
+    for k, (title, rows) in enumerate(panels):
+        x, y = 10 + (k % cols) * pw, 60 + (k // cols) * ph
+        clean_panel(img, (x, y, x + pw - 10, y + ph - 10), title, rows, scale, new=new)
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, sheet + ".png")
     img.save(path)
     print(path)
     return path
+
+
+def _reference_panel(img, box, ref, scale, title):
+    """The reference image cropped to its diagram, scaled to the same output
+    px per screen px as the model panels beside it, anchor centred."""
+    x0, y0, x1, y1 = box
+    pan = Image.new("RGB", (x1 - x0, y1 - y0 - 26), CARD)
+    W, H = pan.size
+    crop = ref.crop((455, 0, ref.width, ref.height))
+    f = scale / REF_PX
+    rr = crop.resize((max(1, int(crop.width * f)), max(1, int(crop.height * f))))
+    pan.paste(rr, (int(W / 2 - (REF_ANCHOR[0] - 455) * f), int(H / 2 - REF_ANCHOR[1] * f)))
+    img.paste(pan, (x0, y0))
+    ImageDraw.Draw(img).text((x0 + 4, y1 - 21), title, font=_font(14), fill=MUTED)
+
+
+def _opens(names, sizes):
+    return [["open", a, w, h] for a, (w, h) in zip(names, sizes)]
+
+
+def measures_sheet(scripts, out):
+    """Charts of what the brief measures, from real placement output: the
+    radius against the cumulative angle (a straight line is an Archimedean
+    spiral), and each window's gap from those before it, by turn."""
+    names = [f"w{i + 1}" for i in range(40)]
+    sets = (("reference proportions, 32 windows", [(381, 225)] + [(262, 125)] * 31),
+            ("mixed application sizes, 16 windows", MIXED))
+    pw, ph = 700, 420
+    img = Image.new("RGB", (2 * pw + 30, 2 * ph + 80), BG)
+    d = ImageDraw.Draw(img)
+    d.text((16, 16), "Measured on the real placement output", font=_font(22, True), fill=INK)
+    turn_col = ["#7fb0ff", "#f0b45a", "#e5707a", "#b58cff"]
+    for c, (label, sizes) in enumerate(sets):
+        rows = scenario_rows(scripts, _opens(names, sizes))[-1]
+        rects = [(x, y, x + w, y + h) for _a, x, y, w, h in rows]
+        co = dxrice_spiral.spiral_coords(rects)
+        gaps = [min(dxrice_spiral.dist(r, o) for o in rects[:i]) for i, r in enumerate(rects) if i]
+        for k, (kind, ys, ylab) in enumerate((("radius", [r for _p, r in co], "radius on the spiral (px)"),
+                                               ("gap", gaps, "gap from earlier windows (px)"))):
+            x0, y0 = 10 + c * (pw + 10), 60 + k * (ph + 10)
+            d.rounded_rectangle([x0, y0, x0 + pw, y0 + ph], 10, fill=CARD)
+            d.text((x0 + 12, y0 + 8), f"{label}: {ylab}", font=_font(14, True), fill=INK)
+            gx0, gy0, gx1, gy1 = x0 + 60, y0 + 40, x0 + pw - 20, y0 + ph - 40
+            phis = [p for p, _r in co]
+            xmax = max(phis) or 1.0
+            ymin = 0.0
+            ymax = max(ys) * 1.1
+            d.line([gx0, gy1, gx1, gy1], fill=MUTED)
+            d.line([gx0, gy0, gx0, gy1], fill=MUTED)
+            for t in range(int(xmax / (2 * math.pi)) + 1):
+                xx = gx0 + (2 * math.pi * t) / xmax * (gx1 - gx0)
+                d.line([xx, gy0, xx, gy1], fill="#2f3440")
+                d.text((xx + 3, gy1 + 4), f"turn {t + 1}", font=_font(12), fill=MUTED)
+            for v in range(0, int(ymax) + 1, 50 if kind == "gap" else 250):
+                yy = gy1 - (v - ymin) / (ymax - ymin) * (gy1 - gy0)
+                d.text((x0 + 12, yy - 7), str(v), font=_font(11), fill=MUTED)
+                d.line([gx0 - 4, yy, gx0, yy], fill=MUTED)
+            pts = [(gx0 + p / xmax * (gx1 - gx0), gy1 - (v - ymin) / (ymax - ymin) * (gy1 - gy0)) for p, v in zip(phis, ys)]
+            if kind == "radius":
+                d.line(pts, fill="#7fb0ff", width=2)
+            for (px, py), p in zip(pts, phis):
+                col = turn_col[min(3, int(p / (2 * math.pi)))]
+                d.ellipse([px - 4, py - 4, px + 4, py + 4], fill=col)
+            if kind == "gap":
+                for v in (dxrice_spiral.SPACING_MIN_DEFAULT,):
+                    yy = gy1 - v / (ymax - ymin) * (gy1 - gy0)
+                    d.line([gx0, yy, gx1, yy], fill=BAD)
+                    d.text((gx1 - 120, yy - 16), f"minimum {v} px", font=_font(11), fill=BAD)
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, "measures.png")
+    img.save(path)
+    print(path)
+    return path
+
+
+def compare_sheet(old_scripts, new_scripts, out, old_label="before", new_label="after"):
+    """The same windows opened one by one through each checkout's real
+    place_new_window, clean style, one scale per row: the previous geometry
+    above, this one below."""
+    names = [f"w{i + 1}" for i in range(16)]
+    cases = (("12 windows, reference proportions", REF_SIZES[:12]), ("16 windows, reference proportions", REF_SIZES),
+             ("16 windows, mixed sizes", MIXED))
+    rows = {lbl: [scenario_rows(d, _opens(names, sz))[-1] for _t, sz in cases]
+            for lbl, d in ((old_label, old_scripts), (new_label, new_scripts))}
+    pw = ph = 580
+    img = Image.new("RGB", (3 * pw + 20, 2 * ph + 70), BG)
+    ImageDraw.Draw(img).text((16, 16), f"{old_label} (top) and {new_label} (bottom): the same windows, "
+                             "opened one by one", font=_font(22, True), fill=INK)
+    for c, (title, _sz) in enumerate(cases):
+        scale = _fit([rows[old_label][c], rows[new_label][c]])
+        for r, lbl in enumerate((old_label, new_label)):
+            x, y = 10 + c * pw, 60 + r * ph
+            clean_panel(img, (x, y, x + pw - 10, y + ph - 10), f"{lbl}: {title}", rows[lbl][c], scale)
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, "before_after.png")
+    img.save(path)
+    print(path)
+    return path
+
+
+def geometry_sheets(scripts, out, reference=None):
+    names = [f"w{i + 1}" for i in range(16)]
+    paths = []
+    # growth, reference proportions: one fixed scale, the reference's own
+    ref_frames = scenario_rows(scripts, _opens(names, REF_SIZES))
+    ref_scale = _fit([ref_frames[-1]], pad=0.9)
+    if reference:
+        ref = Image.open(reference).convert("RGB")
+        img = Image.new("RGB", (3 * 580 + 20, 580 + 70), BG)
+        ImageDraw.Draw(img).text((16, 16), "The reference and the expanding spiral at the same scale "
+                                 "(reference window proportions)", font=_font(22, True), fill=INK)
+        _reference_panel(img, (10, 60, 580, 640), ref, ref_scale, "reference (its diagram, same px per screen px)")
+        clean_panel(img, (590, 60, 1160, 640), "12 windows", ref_frames[11], ref_scale)
+        clean_panel(img, (1170, 60, 1740, 640), "16 windows", ref_frames[15], ref_scale)
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, "reference_vs_spiral.png")
+        img.save(path)
+        print(path)
+        paths.append(path)
+    paths.append(_clean_sheet([(f"{n} windows", ref_frames[n - 1]) for n in COUNTS], out, "growth_uniform",
+                              "Growth, reference window proportions: 2, 4, 6, 8, 12, 16 windows", 3, ref_scale))
+    mix_frames = scenario_rows(scripts, _opens(names, MIXED))
+    paths.append(_clean_sheet([(f"{n} windows", mix_frames[n - 1]) for n in COUNTS], out, "growth_mixed",
+                              "Growth, mixed application sizes: 2, 4, 6, 8, 12, 16 windows", 3,
+                              _fit([mix_frames[-1]])))
+    wide = scenario_rows(scripts, _opens(names, WIDE))
+    tall = scenario_rows(scripts, _opens(names, TALL))
+    paths.append(_clean_sheet([("very wide windows, 6", wide[5]), ("very wide windows, 12", wide[11]),
+                               ("very tall windows, 6", tall[5]), ("very tall windows, 12", tall[11])],
+                              out, "shapes", "Very wide and very tall windows", 2,
+                              _fit([wide[11], tall[11]])))
+    pin = scenario_rows(scripts, [["fixed", "pinned", 1300, 120, 520, 380, "pinned"]] + _opens(names, MIXED[:10]))
+    fs = scenario_rows(scripts, [["fixed", "fullscreen", 0, 0, 1920, 1080, "fullscreen"]] + _opens(names, REF_SIZES[:10]))
+    big = scenario_rows(scripts, _opens(names, [(1900, 1000)] + MIXED[1:8]))
+    six = scenario_rows(scripts, _opens([f"t{i + 1}" for i in range(6)], [(826, 493)] * 6) + [["press"]])
+    paths.append(_clean_sheet([("a pinned window in the arm's way, 10 windows", pin[-1]),
+                               ("a fullscreen window over the screen, 10", fs[-1]),
+                               ("an anchor as big as the screen, 8", big[-1]),
+                               ("six 826x493 terminals, after SUPER+G", six[-1])],
+                              out, "obstacles", "Fixed windows are gone round along the spiral; "
+                              "outsized windows keep the anchor on screen", 2,
+                              _fit([pin[-1], fs[-1], big[-1], six[-1]])))
+    eight = _opens(names, MIXED[:8])
+    panels = []
+    for title, closed in (("w4 (middle) closed", "w4"), ("w8 (the newest) closed", "w8"), ("w1 (the anchor) closed", "w1")):
+        f = scenario_rows(scripts, eight + [["close", closed], ["open", "n9", 700, 450], ["press"]])
+        panels += [("8 windows", f[7]), (f"{title}, a new window opened (outlined)", f[9]), ("then SUPER+G", f[10])]
+    paths.append(_clean_sheet(panels, out, "closing", "Closing windows: nothing moves; the arm carries on; "
+                              "SUPER+G re-winds from creation order", 3, _fit([p[1] for p in panels]), new="n9"))
+    paths.append(measures_sheet(scripts, out))
+    return paths
 
 
 def growth_sheet(scripts, sizes, out, sheet, frames=None, cols=4):
@@ -401,9 +545,15 @@ def main():
     ap.add_argument("--frames", default="")
     ap.add_argument("--geometry", help="SCRIPTS_DIR: the geometry acceptance sheets")
     ap.add_argument("--reference", help="the visual reference image, drawn beside the model")
+    ap.add_argument("--compare", help="NAME=SCRIPTS_DIR of a previous checkout: a before/after sheet "
+                                      "against --geometry's (with --geometry)")
     a = ap.parse_args()
     if a.geometry:
-        return geometry_sheets(a.geometry, a.out, a.reference)
+        paths = geometry_sheets(a.geometry, a.out, a.reference)
+        if a.compare:
+            name, d = a.compare.split("=", 1) if "=" in a.compare else ("before", a.compare)
+            paths.append(compare_sheet(d, a.geometry, a.out, name, "this version"))
+        return paths
     if a.growth:
         sizes = [tuple(int(v) for v in t.split("x")) for t in a.sizes.split(",")]
         return growth_sheet(a.growth, sizes, a.out, a.sheet, [int(f) for f in a.frames.split(",") if f])

@@ -26,12 +26,13 @@ import dxrice_window_class as wc
 
 GAP = 5
 import dxrice_spiral  # noqa: E402
-LO, HI = dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT
+LO = dxrice_spiral.SPACING_MIN_DEFAULT
+HI = dxrice_spiral.widest_gap((dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT))
 
 
 def _in_band(tc, gap, msg=None):
-    """A neighbour at the composition spacing (16-24 px by default; exact
-    5 px before the spiral redesign)."""
+    """A neighbour at the composition spacing: never under the minimum,
+    never further than the spiral's widest gap (its outer turns)."""
     tc.assertTrue(LO - 0.5 <= gap <= HI + 0.5, msg or f"{gap}px is not the composition spacing")
 MON = (0, 0, 1920, 1080)
 
@@ -41,8 +42,10 @@ def _rect(c):
 
 
 def _sep(a, b):
-    """Daylight between two rects (negative = overlap)."""
-    return max(b[0] - a[2], a[0] - b[2], b[1] - a[3], a[1] - b[3])
+    """Daylight between two rects, the same in every direction (corner to
+    corner for diagonal pairs, dxrice_spiral.dist); <= 0 touching or
+    overlapping."""
+    return dxrice_spiral.dist(a, b)
 
 
 class FakeHypr:

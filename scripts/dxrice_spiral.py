@@ -1,34 +1,37 @@
 """The Galaxy Spiral: one geometric model for new-window placement and SUPER+G.
 
-What it builds: individually floating windows on a predictable, widening
-spiral around one anchor, with real breathing room between them -- not a
-packed cloud. The empty space is part of the design and is never optimised
-away.
+What it builds: individually floating windows on one continuous spiral that
+winds clockwise outward round an anchor, its gaps widening turn by turn --
+not a ring, not a packed cloud. The empty space is part of the design and
+is never optimised away.
 
-  * The anchor is the first window. It sits at the centre of the usable
-    area (the monitor minus bars and docks), clear of fixed windows.
-  * Every later window, in the order the windows were created, takes the
-    next place on one spiral around the anchor. The spiral starts at
-    SPIRAL_START (upper right) and always turns SPIRAL_TURN (clockwise on
-    screen). Its parameter is the window's edge-to-edge clearance from the
-    anchor, which grows smoothly with the bearing: SPIRAL_PITCH_FACTOR of a
-    typical window's size per full turn, so each turn clears the one inside
-    it. Window dimensions enter through that clearance -- a wide window and
-    a tall one at the same bearing keep the same distance from the anchor's
-    outline.
-  * Spacing is a hard geometric constraint: a window is never placed
-    closer than the target gap (target_gap, about 42 px, inside the
-    32-56 px range read_spacing gives) to any other window or fixed
-    obstacle. At each bearing a window is pushed outward past anything of
-    an earlier turn or an obstacle; if the window placed just before it is
-    still too close, the next bearing along the spiral is tried. Nothing is
-    ever drawn in to fill space.
+  * The anchor is the first window, centred on the usable area (the monitor
+    minus bars and docks), clear of fixed windows.
+  * Every later window, in creation order, takes the next place along ONE
+    Archimedean spiral of window centres round the anchor's centre --
+    stretched a little along the anchor's longer side (`_stretch`), so the
+    first turn wraps a wide anchor and the whole fits a wide screen: the
+    radius grows continuously with the clockwise angle, by SPIRAL_OPENING
+    typical window depths along that bearing (plus the gap) per turn. The
+    curve is a guide: each window's own footprint is what must clear
+    everything, measured as a true distance between rectangles -- the
+    gutter for facing neighbours, corner to corner for diagonal ones
+    (`dist`), the same rule in every direction.
+  * The gap widens with the spiral: `spacing_at` derives it from the
+    window's radial progress (its radius on the spiral, in turns), from
+    the target gap (target_gap, ~42 px) on the inner turn to
+    SPACING_GROWTH_CAP times it on the outer ones. The minimum of
+    read_spacing's range is the hard floor under all of it.
+  * A window sits exactly on the curve. Where its spot is closer than the
+    gap to another window or a fixed window, it advances along the same
+    curve in small steps to the first clear spot -- it is never pushed off
+    the curve, drawn inward, or put in a convenient hole.
 
 There is no scoring, no search over alternatives and no remembered state:
 the same windows in the same order always give the same layout.
-Auto-placement places one window (`join`): the next step after the
-newest existing window. SUPER+G (`arrange`) replays every step in creation
-order, so on a layout auto-placement built and nobody disturbed, it changes
+Auto-placement places one window (`join`): the next step after the newest
+existing window. SUPER+G (`arrange`) replays every step in creation order,
+so on a layout auto-placement built and nobody disturbed it changes
 nothing, and a second press never changes anything either.
 """
 import json
@@ -41,14 +44,19 @@ except ImportError:  # pragma: no cover - only for standalone use
     dxrice_xdg = None
 
 # ---- spacing (separate from Hyprland's gaps_in) ----
-SPACING_MIN_DEFAULT = 32
+SPACING_MIN_DEFAULT = 32     # the hard floor: no two windows ever closer
 SPACING_MAX_DEFAULT = 56
 SPACING_LIMIT = 200          # sanity cap for values read from theme.json
 SPACING_MIN_KEY = "window_spacing_min"
 SPACING_MAX_KEY = "window_spacing_max"
-# Where in the range a window is placed: the march stops at the first spot
-# this far from everything, so every gap lands at or a little above it.
+# The inner turn's gap: this far into the (min, max) range (~42 px).
 SPACING_TARGET_FRACTION = 0.42
+# How the gap widens outward: target * (1 + GROWTH * p * (1 + p)), p the
+# radial progress in turns (0 where the spiral starts, 1 a turn out, ...),
+# at most CAP * target -- with the default 42 px the gaps run about 42-56 px
+# on the inner turn, 56-80 on the middle one, 80-105 further out.
+SPACING_GROWTH = 0.125
+SPACING_GROWTH_CAP = 2.5
 
 
 def read_spacing(path=None):
@@ -70,14 +78,27 @@ def read_spacing(path=None):
 
 
 def target_gap(band):
-    """The edge-to-edge gap every placement keeps: ~42 px of the default
-    32-56 range."""
+    """The inner turn's edge-to-edge gap: ~42 px of the default 32-56."""
     lo, hi = band
     return int(round(lo + (hi - lo) * SPACING_TARGET_FRACTION))
 
 
+def spacing_at(progress, band):
+    """The gap at `progress` turns out from the anchor: widening smoothly
+    with the spiral, never under the range's minimum."""
+    g0 = target_gap(band)
+    p = max(0.0, progress)
+    return max(float(band[0]), g0 * min(SPACING_GROWTH_CAP, 1.0 + SPACING_GROWTH * p * (1.0 + p)))
+
+
+def widest_gap(band):
+    """The widest gap the spiral ever aims for (its outer turns): the most a
+    window is from its nearest neighbour when nothing is in the way."""
+    return target_gap(band) * SPACING_GROWTH_CAP
+
+
 # Kept for callers that size one pair (a dialog beside its parent): the
-# same gap as everything else.
+# inner turn's gap.
 def pair_spacing(area_a, area_b, band):
     return target_gap(band)
 
@@ -85,22 +106,21 @@ def pair_spacing(area_a, area_b, band):
 # ---- the spiral ----
 SPIRAL_START = math.radians(-55)   # the second window's bearing: upper right
 SPIRAL_TURN = 1                    # +1 clockwise on screen (y grows downward)
-# Clearance from the anchor's outline gained per full turn, as a multiple of
-# the windows' typical short side: each turn sits one window's depth (plus
-# the gap) outside the one before.
-SPIRAL_PITCH_FACTOR = 1.0
-# How far past the spiral's guide a window may be pushed outward at one
-# bearing (to clear an earlier turn), as a fraction of a turn's pitch;
-# beyond that it advances along the spiral instead of leaping outward.
-PUSH_LIMIT_FRACTION = 0.5
-MARCH_STEP = math.radians(1.5)     # bearing step when the previous window is in the way
-MARCH_REFINE = 10                  # bisection steps narrowing it to the first clear bearing
-MARCH_MAX = math.radians(720)      # never more than two turns past the previous window
-FIXED_DETOUR = math.radians(45)    # how far round a fixed window the arm goes rather than be pushed past it
+MARCH_STEP = math.radians(1.0)     # how far along the curve each try advances
+MARCH_REFINE = 12                  # bisection steps narrowing it to the first clear spot
+MARCH_MAX = math.radians(360 * 8)  # cap on how far round one window may go
+# How far apart the turns are: the radius gained per turn, in typical window
+# depths along the bearing (plus the gap). 1 would just clear the turn
+# inside; more opens the spiral so it reads as one, not as stacked rings.
+SPIRAL_OPENING = 1.8
+# How much the spiral is stretched along the anchor's longer side: the
+# anchor's aspect ratio to this power (0 round, 1 the anchor's own shape).
+SPIRAL_STRETCH = 0.75
+SPIRAL_STRETCH_MAX = 1.6           # never flatter than this, however long the anchor
 
 # A slit (a facing gap too wide to read as spacing, too narrow to read as
-# space) does not exist in this design: every placed gap is target_gap or
-# more, and wider ones are the intended negative space.
+# space) does not exist in this design: every placed gap is the gap at its
+# turn or more, and wider ones are the intended negative space.
 SLIT_MAX = SPACING_MAX_DEFAULT
 # Shape exponent of the composition's preferred aspect; unused by the
 # spiral itself, kept for tooling.
@@ -118,9 +138,21 @@ def _center(r):
 
 
 def _sep(a, b):
-    """Separation between two rects: <0 overlapping, else the larger of the
-    horizontal and vertical clearances (the gutter they'd show)."""
+    """Axis separation: <0 overlapping, else the larger of the horizontal and
+    vertical clearances (the gutter they'd show). Diagnostics only; spacing
+    is `dist`."""
     return max(a[0] - b[2], b[0] - a[2], a[1] - b[3], b[1] - a[3])
+
+
+def dist(a, b):
+    """Edge-to-edge distance between two rects, the same in every
+    direction: the gutter for neighbours that face each other, corner to
+    corner for diagonal ones; <= 0 when they touch or overlap."""
+    dx = max(a[0] - b[2], b[0] - a[2], 0)
+    dy = max(a[1] - b[3], b[1] - a[3], 0)
+    if dx == 0 and dy == 0:
+        return _sep(a, b)
+    return math.hypot(dx, dy)
 
 
 def _facing(a, b):
@@ -146,176 +178,174 @@ def _at(center, theta, radius, w, h):
     return _rect(int(round(cx - w / 2.0)), int(round(cy - h / 2.0)), w, h)
 
 
-def _radius_for_clearance(anchor, theta, w, h, clearance):
-    """How far from the anchor's centre, along bearing `theta`, a w x h
-    window's edges are exactly `clearance` from the anchor's (_sep)."""
-    aw, ah = anchor[2] - anchor[0], anchor[3] - anchor[1]
-    c, s = abs(math.cos(theta)), abs(math.sin(theta))
-    out = []
-    if c > 1e-9:
-        out.append((clearance + (aw + w) / 2.0) / c)
-    if s > 1e-9:
-        out.append((clearance + (ah + h) / 2.0) / s)
-    return min(out)
-
-
-def _clearance_of(anchor, theta, r, w, h):
-    """The inverse: edge clearance from the anchor of a w x h window
-    centred r along bearing theta."""
-    aw, ah = anchor[2] - anchor[0], anchor[3] - anchor[1]
-    return max(r * abs(math.cos(theta)) - (aw + w) / 2.0, r * abs(math.sin(theta)) - (ah + h) / 2.0)
-
-
-def _blocked_spans(center, theta, w, h, blockers, gap):
-    """Radii along bearing `theta` where a w x h window centred there would
-    come closer than `gap` to one of `blockers`: [(r_in, r_out)], sorted."""
-    ux, uy = math.cos(theta), math.sin(theta)
-    spans = []
-    for b in blockers:
-        # the window's centre must stay out of b grown by gap + half the window
-        x0, y0 = b[0] - gap - w / 2.0, b[1] - gap - h / 2.0
-        x1, y1 = b[2] + gap + w / 2.0, b[3] + gap + h / 2.0
-        lo, hi = -math.inf, math.inf
-        for p, d, a0, a1 in ((center[0], ux, x0, x1), (center[1], uy, y0, y1)):
-            if abs(d) < 1e-12:
-                if not (a0 < p < a1):
-                    lo, hi = 1.0, 0.0
-                    break
-                continue
-            t0, t1 = (a0 - p) / d, (a1 - p) / d
-            if t0 > t1:
-                t0, t1 = t1, t0
-            lo, hi = max(lo, t0), min(hi, t1)
-        if lo < hi and hi > 0:
-            spans.append((max(lo, 0.0), hi))
-    return sorted(spans)
-
-
-def _push_out(center, theta, r, w, h, blockers, gap):
-    """The smallest radius >= r along bearing `theta` clear of every blocker
-    by `gap` (pushing outward past each in turn)."""
-    for r_in, r_out in _blocked_spans(center, theta, w, h, blockers, gap):
-        if r_in < r + 1e-6 < r_out:
-            r = r_out + 0.5
-    return r
-
-
-def typical_side(rects):
-    """The median short side of the windows: how deep one turn of the spiral
-    is."""
-    sides = sorted(min(r[2] - r[0], r[3] - r[1]) for r in rects)
-    if not sides:
-        return 400.0
-    mid = len(sides) // 2
-    return sides[mid] if len(sides) % 2 else (sides[mid - 1] + sides[mid]) / 2.0
+def _median(v):
+    v = sorted(v)
+    if not v:
+        return 0.0
+    m = len(v) // 2
+    return v[m] if len(v) % 2 else (v[m - 1] + v[m]) / 2.0
 
 
 def first_rect(size, fixed, monitor, band=(SPACING_MIN_DEFAULT, SPACING_MAX_DEFAULT)):
     """Where the anchor goes: centred on the usable area, or -- if a fixed
-    window is within the gap of that spot -- pushed out of it (and every
-    other fixed window) by the gap, along the shortest of eight directions."""
+    window is within the gap of that spot -- moved straight out from the
+    centre, along the shortest of eight directions, until clear of every
+    fixed window by the gap."""
     w, h = int(size[0]), int(size[1])
     gap = target_gap(band)
     mx0, my0, mx1, my1 = monitor
     c = ((mx0 + mx1) / 2.0, (my0 + my1) / 2.0)
     r0 = _rect(int(round(c[0] - w / 2.0)), int(round(c[1] - h / 2.0)), w, h)
-    if not any(_sep(r0, f) < gap for f in fixed):
+    if all(dist(r0, f) >= gap for f in fixed):
         return r0
     best = None
-    for k in range(8):  # the nearest of eight directions out of the obstacles
+    for k in range(8):
         th = -math.pi / 2 + k * math.pi / 4
-        r = _push_out(c, th, 0.0, w, h, fixed, gap)
-        cand = _at(c, th, r, w, h)
-        d = math.hypot(*(a - b for a, b in zip(_center(cand), c)))
-        if best is None or d < best[0]:
-            best = (d, cand)
+        r = 0.0
+        while True:  # step out, then settle on the first clear radius
+            cand = _at(c, th, r, w, h)
+            if all(dist(cand, f) >= gap for f in fixed):
+                break
+            r += 8.0
+        lo = max(0.0, r - 8.0)
+        for _ in range(10):
+            mid = (lo + r) / 2.0
+            if all(dist(_at(c, th, mid, w, h), f) >= gap for f in fixed):
+                r = mid
+            else:
+                lo = mid
+        if best is None or r < best[0]:
+            best = (r, _at(c, th, r, w, h))
     return best[1]
+
+
+def _stretch(anchor):
+    """(ex, ey), ex * ey = 1: how the spiral's radius is scaled along x and
+    y -- the anchor's aspect to SPIRAL_STRETCH, at most SPIRAL_STRETCH_MAX --
+    so the first turn wraps a wide anchor's ends instead of skipping them."""
+    e = ((anchor[2] - anchor[0]) / float(max(1, anchor[3] - anchor[1]))) ** SPIRAL_STRETCH
+    e = min(SPIRAL_STRETCH_MAX, max(1.0 / SPIRAL_STRETCH_MAX, e))
+    return math.sqrt(e), 1.0 / math.sqrt(e)
+
+
+def _polar(anchor, rect):
+    """(angle, radius) of a window's centre in the spiral's own frame."""
+    ex, ey = _stretch(anchor)
+    ac, c = _center(anchor), _center(rect)
+    dx, dy = (c[0] - ac[0]) / ex, (c[1] - ac[1]) / ey
+    return math.atan2(dy, dx), math.hypot(dx, dy)
+
+
+def spiral_coords(rects):
+    """For a layout in creation order (rects[0] the anchor): each later
+    window's (cumulative clockwise angle from window 2 in radians, radius)
+    in the spiral's own frame -- what the model keeps continuous and
+    growing. Diagnostics (tests, the benchmark)."""
+    out, phi, last = [], 0.0, None
+    for r in rects[1:]:
+        a, rad = _polar(rects[0], r)
+        if last is not None:
+            phi += (SPIRAL_TURN * (a - last)) % (2 * math.pi)
+        last = a
+        out.append((phi, rad))
+    return out
 
 
 def next_rect(size, placed, fixed, band):
     """THE spiral step: where a w x h window goes after `placed` (rects in
     creation order; placed[0] is the anchor, placed[-1] the window before
-    it), clear of everything in placed and `fixed` by target_gap."""
+    it -- the tip), clear of everything in placed and `fixed` by the gap at
+    its place on the spiral.
+
+    The window's centre follows an Archimedean spiral round the anchor's
+    centre (stretched a little along the anchor's longer side, `_stretch`):
+    the radius grows continuously with the clockwise angle, by
+    SPIRAL_OPENING typical window depths along that bearing plus the gap
+    per turn. It starts from the tip (from SPIRAL_START, just clear of the
+    anchor, for window 2) and advances in MARCH_STEP increments until the
+    window's footprint is the gap clear of everything, then bisects back to
+    the first clear spot."""
     w, h = int(size[0]), int(size[1])
-    gap = target_gap(band)
+    g0 = target_gap(band)
     anchor = placed[0]
     ac = _center(anchor)
-    pitch = SPIRAL_PITCH_FACTOR * typical_side(placed[1:] + [_rect(0, 0, w, h)]) + gap
-    per_rad = pitch / (2 * math.pi)
+    # a typical window, for the depth of a turn: the medians of the arm's
+    # windows and this one
+    body = placed[1:] + [_rect(0, 0, w, h)]
+    tw = _median([r[2] - r[0] for r in body])
+    th_ = _median([r[3] - r[1] for r in body])
+    ex, ey = _stretch(anchor)
+    # radial progress, in turns (spiral units): 0 where a typical window
+    # clears the anchor along its nearer axis, +1 per turn's depth
+    turn_ref = SPIRAL_OPENING * (tw + th_) / 2.0 + g0
+    base = min(((anchor[2] - anchor[0] + tw) / 2.0 + g0) / ex,
+               ((anchor[3] - anchor[1] + th_) / 2.0 + g0) / ey)
+
+    def gap_at(radius):
+        return spacing_at((radius - base) / turn_ref, band)
+
+    def scale(theta):
+        return math.hypot(ex * math.cos(theta), ey * math.sin(theta))
+
+    def depth(theta):
+        """A typical window's depth along the spiral's normal at theta, in
+        spiral-radius units."""
+        return math.hypot(tw * math.cos(theta), th_ * math.sin(theta)) / scale(theta)
+
+    def rect_at(theta, radius):
+        cx = ac[0] + radius * ex * math.cos(theta)
+        cy = ac[1] + radius * ey * math.sin(theta)
+        return _rect(int(round(cx - w / 2.0)), int(round(cy - h / 2.0)), w, h)
+
     if len(placed) == 1:
-        theta0, q0, prev = SPIRAL_START, float(gap), None
+        prev = None
+        theta0 = SPIRAL_START
+        # window 2 starts where it is just the gap clear of the anchor
+        lo, hi = 0.0, 1.0
+        while dist(rect_at(theta0, hi), anchor) < gap_at(hi):
+            hi *= 2.0
+        for _ in range(30):
+            mid = (lo + hi) / 2.0
+            if dist(rect_at(theta0, mid), anchor) < gap_at(mid):
+                lo = mid
+            else:
+                hi = mid
+        r0 = hi
     else:
         prev = placed[-1]
-        pc = _center(prev)
-        theta0 = math.atan2(pc[1] - ac[1], pc[0] - ac[0])
-        q0 = max(float(gap), _sep(prev, anchor))
-    arm = [p for p in placed[1:] if p is not prev]
-    blockers = placed + list(fixed)
+        theta0, r0 = _polar(anchor, prev)
+    others = placed + list(fixed)
 
-    def place(dtheta, past_fixed):
-        theta = theta0 + SPIRAL_TURN * dtheta
-        q = q0 + per_rad * dtheta
-        r_guide = _radius_for_clearance(anchor, theta, w, h, q)
-        r_arm = _push_out(ac, theta, r_guide, w, h, arm, gap)
-        r = _push_out(ac, theta, r_arm, w, h, arm + list(fixed), gap) if past_fixed else r_arm
-        rect = _at(ac, theta, r, w, h)
-        # a push past an earlier turn is fine; a leap far beyond the guide
-        # is not -- the window goes further round instead
-        ok = (_clear(rect, blockers, gap)
-              and (prev is None or _sep(rect, prev) >= gap)
-              and _clearance_of(anchor, theta, r, w, h) - q <= PUSH_LIMIT_FRACTION * pitch)
-        return ok, rect, r > r_arm + 0.25
+    def place(phi, radius):
+        rect = rect_at(theta0 + SPIRAL_TURN * phi, radius)
+        gap = gap_at(radius)
+        return all(dist(rect, o) >= gap for o in others), rect
 
-    def march(start, limit, past_fixed):
-        """The first clear bearing in [start, limit] (to a fraction of a
-        degree): (dtheta, rect, pushed past a fixed window), or None."""
-        if prev is None and start == 0.0:
-            ok, rect, pushed = place(0.0, past_fixed)
-            if ok:
-                return 0.0, rect, pushed
-        lo, d = start, start + MARCH_STEP
-        while d <= limit:
-            ok, rect, pushed = place(d, past_fixed)
-            if ok:
-                hi = d
-                for _ in range(MARCH_REFINE):
-                    mid = (lo + hi) / 2.0
-                    ok_mid, r_mid, p_mid = place(mid, past_fixed)
-                    if ok_mid:
-                        hi, rect, pushed = mid, r_mid, p_mid
-                    else:
-                        lo = mid
-                return hi, rect, pushed
-            lo, d = d, d + MARCH_STEP
-        return None
+    def grow(phi, radius, dphi):
+        """The radius after advancing dphi along the spiral."""
+        mid = theta0 + SPIRAL_TURN * (phi + dphi / 2.0)
+        return radius + (SPIRAL_OPENING * depth(mid) + gap_at(radius) / scale(mid)) / (2 * math.pi) * dphi
 
-    # Fixed windows (fullscreen, pinned, ...) can push the window outward
-    # like an earlier turn does; but if a short detour along the arm gets
-    # round one without the push, the arm goes round it instead -- a push
-    # past a fixed window leaves this window off the spiral and every later
-    # window inflated, while a long detour would strand it on the far side.
-    found = march(0.0, MARCH_MAX, True)
-    if found is not None:
-        d, rect, pushed = found
-        if pushed:
-            around = march(d, d + FIXED_DETOUR, False)
-            if around is not None:
-                return around[1]
-        return rect
-    # Never reached in practice (two turns out, nothing is in the way any
-    # more); still never closer than the gap to anything.
-    theta = theta0 + SPIRAL_TURN * MARCH_MAX
-    r = _push_out(ac, theta, _radius_for_clearance(anchor, theta, w, h, q0 + per_rad * MARCH_MAX),
-                  w, h, placed + list(fixed), gap)
-    return _at(ac, theta, r, w, h)
-
-
-def _clear(rect, others, gap):
-    x0, y0, x1, y1 = rect
-    for q in others:
-        if q[0] - x1 < gap and x0 - q[2] < gap and q[1] - y1 < gap and y0 - q[3] < gap:
-            return False
-    return True
+    if prev is None:
+        ok, rect = place(0.0, r0)
+        if ok:
+            return rect
+    phi, radius = 0.0, r0
+    while phi < MARCH_MAX:
+        r1 = grow(phi, radius, MARCH_STEP)
+        ok, rect = place(phi + MARCH_STEP, r1)
+        if ok:
+            lo, hi = 0.0, MARCH_STEP
+            for _ in range(MARCH_REFINE):  # the first clear spot, finely
+                mid = (lo + hi) / 2.0
+                ok_mid, r_mid = place(phi + mid, grow(phi, radius, mid))
+                if ok_mid:
+                    hi, rect = mid, r_mid
+                else:
+                    lo = mid
+            return rect
+        phi, radius = phi + MARCH_STEP, r1
+    return rect  # pragma: no cover - eight turns out nothing is in the way
 
 
 def arrange(sizes, fixed, monitor, band):

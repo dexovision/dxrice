@@ -22,12 +22,21 @@ baseline and a candidate can be compared under identical conditions:
               closer to the largest one than the window before (10% slack)
   spacing     every pair 0-60 px apart along a shared span > 40 px; share
               exactly 5 px, share 16-24 px (the old band), share 25-60 px,
-              and share inside the composer's current band (32-56 px)
+              and share inside the composer's (min, max) range (32-56 px)
   nearest     each window's gap to its nearest neighbour: min, and share
               inside the band (the geometry model's hard constraint + target)
   arm         the windows in creation order (the fixture's own order, as
               SUPER+G replays it without stableIds) round the first one:
               share of bearing steps turning clockwise
+  spiral      the same order, in plain screen terms round the first
+              window's centre: R^2 of a straight line through (cumulative
+              clockwise angle, centre distance) -- an Archimedean spiral
+              scores ~1, a ring or a scatter much less -- and the share of
+              steps whose centre distance shrinks
+  turn gaps   each window's distance (corner to corner for diagonal
+              pairs) to the windows created before it, by turn of that
+              cumulative angle: inner / middle / outer medians; "erratic"
+              counts a gap more than 8 px narrower than the one before
   fill        occupied area / bounding-box area (1 - fill = negative space)
   aspect      bounding box, long side / short side
   overlaps    pairs overlapping or closer than 1 px
@@ -283,17 +292,60 @@ def pct(v, q):
 
 def arm_metrics(eligible, rows):
     """(clockwise share of creation-order bearing steps round the first
-    window, nearest-neighbour gaps)."""
+    window, nearest-neighbour gaps -- corner to corner for diagonal pairs)."""
     by = {r[0]: r for r in rows}
     order = [by[w["address"]] for w in eligible if w["address"] in by]
-    near = [min(max(o[1] - (r[1] + r[3]), r[1] - (o[1] + o[3]), o[2] - (r[2] + r[4]), r[2] - (o[2] + o[4]))
-                for o in rows if o is not r) for r in rows] if len(rows) > 1 else []
+    near = [min(_dist(r, o) for o in rows if o is not r) for r in rows] if len(rows) > 1 else []
     if len(order) < 3:
         return None, near
     hx, hy = order[0][1] + order[0][3] / 2, order[0][2] + order[0][4] / 2
     ang = [math.atan2(y + h / 2 - hy, x + w / 2 - hx) for _a, x, y, w, h in order[1:]]
     steps = [((b - a + math.pi) % (2 * math.pi)) - math.pi for a, b in zip(ang, ang[1:])]
     return sum(s > 0 for s in steps) / len(steps), near
+
+
+def _dist(a, b):
+    """Edge-to-edge distance, rows (a, x, y, w, h): corner to corner for
+    diagonal pairs, the gutter otherwise; <= 0 touching/overlapping."""
+    dx = max(b[1] - (a[1] + a[3]), a[1] - (b[1] + b[3]), 0)
+    dy = max(b[2] - (a[2] + a[4]), a[2] - (b[2] + b[4]), 0)
+    if dx == 0 and dy == 0:
+        return max(b[1] - (a[1] + a[3]), a[1] - (b[1] + b[3]), b[2] - (a[2] + a[4]), a[2] - (b[2] + b[4]))
+    return math.hypot(dx, dy)
+
+
+def spiral_metrics(eligible, rows):
+    """(R^2 of centre distance vs cumulative angle, inward steps, steps,
+    {turn: [gap to earlier windows]}, erratic gap drops) for the windows in
+    creation order round the first one."""
+    by = {r[0]: r for r in rows}
+    order = [by[w["address"]] for w in eligible if w["address"] in by]
+    turns, erratic = {}, 0
+    if len(order) < 2:
+        return None, 0, 0, turns, 0
+    hx, hy = order[0][1] + order[0][3] / 2, order[0][2] + order[0][4] / 2
+    phi, last, pts, prev_gap = 0.0, None, [], None
+    for i, r in enumerate(order[1:], 1):
+        a = math.atan2(r[2] + r[4] / 2 - hy, r[1] + r[3] / 2 - hx)
+        if last is not None:
+            phi += (a - last) % (2 * math.pi)
+        last = a
+        pts.append((phi, math.hypot(r[1] + r[3] / 2 - hx, r[2] + r[4] / 2 - hy)))
+        g = min(_dist(r, o) for o in order[:i])
+        turns.setdefault(min(2, int(phi / (2 * math.pi))), []).append(g)
+        if i >= 2 and prev_gap is not None and g < prev_gap - 8:
+            erratic += 1
+        prev_gap = g if i >= 2 else None
+    inward = sum(b[1] < a[1] - 1 for a, b in zip(pts, pts[1:]))
+    r2 = None
+    if len(pts) >= 5:
+        mp, mr = st.mean(p for p, _ in pts), st.mean(r for _, r in pts)
+        sxx = sum((p - mp) ** 2 for p, _ in pts)
+        tot = sum((r - mr) ** 2 for _, r in pts)
+        if sxx > 0 and tot > 0:
+            b = sum((p - mp) * (r - mr) for p, r in pts) / sxx
+            r2 = 1 - sum((r - mr - b * (p - mp)) ** 2 for p, r in pts) / tot
+    return r2, inward, len(pts) - 1, turns, erratic
 
 
 def summarize(fx, results):
@@ -303,6 +355,7 @@ def summarize(fx, results):
         m = shape_metrics(p1["rows"])
         m["move"] = movement(f["eligible"], p1["rows"])
         m["arm"], m["near"] = arm_metrics(f["eligible"], p1["rows"])
+        m["r2"], m["inward"], m["steps"], m["turns"], m["erratic"] = spiral_metrics(f["eligible"], p1["rows"])
         m["rigid"] = _rigidity(p1["rows"]) > 0
         orig = r["original"]
         m["resized"] = sum(tuple(orig[a]) != (w, h) for a, _x, _y, w, h in p1["rows"])
@@ -354,6 +407,13 @@ def report(name, by_bucket):
         lines.append(f"  nearest gap min {min(near):.0f}px median {st.median(near):.0f}px, in {BAND[0]}-{BAND[1]}px "
                      f"{sum(BAND[0] <= x <= BAND[1] for x in near) / len(near):.0%}, under {BAND[0]}px "
                      f"{sum(x < BAND[0] for x in near) / len(near):.1%} | arm clockwise mean {st.mean(arm):.2f}")
+    r2 = sorted(m["r2"] for m in allm if m.get("r2") is not None)
+    if r2:
+        tg = {t: [g for m in allm for g in m["turns"].get(t, [])] for t in (0, 1, 2)}
+        lines.append(f"  spiral fit R^2 median {st.median(r2):.3f} p10 {r2[len(r2) // 10]:.3f} | centre distance "
+                     f"shrinks {sum(m['inward'] for m in allm)}/{sum(m['steps'] for m in allm)} steps | gap by turn "
+                     + " / ".join(f"{('inner', 'middle', 'outer')[t]} {st.median(v):.0f}px (n={len(v)})" for t, v in tg.items() if v)
+                     + f" | erratic drops {sum(m['erratic'] for m in allm)}")
     lines.append(f"  overlaps {sum(m['overlaps'] for m in allm)} | moved on press 2 {sum(m['moved2'] for m in allm)}"
                  f" / press 3 {sum(m['moved3'] for m in allm)} of {len(allm)} | resized {sum(m['resized'] for m in allm)}"
                  f" | re-shrunk {sum(m['reshrunk'] for m in allm)} | move median {st.median(m['move'] for m in allm):.0f}px"

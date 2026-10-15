@@ -4,9 +4,10 @@
 Rearranges the floating windows of the active workspace into the same
 spiral new-window placement grows (dxrice_spiral): the first-created window
 as the anchor at the centre of the usable area, every other window, in the
-order the windows were created, on one widening clockwise spiral around it,
-each at least the composition spacing (~42 px, theme.json's
-window_spacing_min/max, separate from Hyprland's gaps_in) from everything.
+order the windows were created, on one expanding clockwise spiral around
+it, with gaps that widen turn by turn (~42 px on the inner turn, up to
+2.5 times that outward; theme.json's window_spacing_min/max, separate
+from Hyprland's gaps_in) and never under the minimum.
 
   1. Splits the workspace's floating windows into ELIGIBLE (arranged) and
      FIXED (fullscreen/maximized/pinned: never moved, still obstacles) --
