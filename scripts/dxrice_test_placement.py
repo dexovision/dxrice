@@ -758,7 +758,11 @@ class _RoundShapeFixtures(unittest.TestCase):
 
 
 class TestSuperGResize(_RoundShapeFixtures):
-    """SUPER+G's joint position+size capability -- see dxrice_auto_arrange.py's
+    """Geometry model: SUPER+G no longer resizes (dxrice_auto_arrange.auto_arrange
+    keeps every size), so these now pin that nothing is resized, whatever
+    the population. The history below describes the removed capability.
+
+    SUPER+G's joint position+size capability -- see dxrice_auto_arrange.py's
     own "SUPER+G's resize capability" module section for the architecture
     (resize candidates are additional entries in the SAME per-step search
     _find_best_position already scores, never a separate bolt-on pass).
@@ -829,7 +833,7 @@ class TestSuperGResize(_RoundShapeFixtures):
         size class -- its total area (1.6M) still exceeds the 3 mediums'
         combined area (0.6M) -- so it now reads as typical, not oversized,
         and is never offered as a resize candidate. See
-        test_disproportionate_outlier_among_a_real_population_can_resize
+        test_disproportionate_outlier_keeps_its_size
         for the case where resize IS still correctly reachable: a real
         population of enough similarly-sized windows that clearly
         outweighs a genuine outlier by total area."""
@@ -843,7 +847,7 @@ class TestSuperGResize(_RoundShapeFixtures):
         big = next((w, h) for a, x, y, w, h in result if a == "BIG")
         self.assertEqual(big, (1600, 1000), "BIG was resized despite being its own legitimate, dominant size class")
 
-    def test_disproportionate_outlier_among_a_real_population_can_resize(self):
+    def test_disproportionate_outlier_keeps_its_size(self):
         """Geometry model: SUPER+G no longer resizes anything -- the spiral
         is replayed with every window's own size (dxrice_auto_arrange's
         docstring), so even a real, well-outweighed outlier keeps its size,
@@ -1792,7 +1796,12 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
 
 
 class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
-    """Spiral redesign: what counts as finished changed. The packed solver
+    """Geometry model: SUPER+G rebuilds the spiral from creation order and
+    ignores current positions, so any shape not already SUPER+G's own result
+    is rebuilt on the first press; what these pin now is one press to
+    settle, nothing resized, the spacing kept. Earlier history below.
+
+    Spiral redesign: what counts as finished changed. The packed solver
     treated any connected, centred, 5 px-flush shape as finished; the
     spiral composer treats ITS OWN result as finished (the keep-or-rebuild
     gate in dxrice_spiral.compose) and rebuilds rows, columns and aligned
@@ -1875,7 +1884,7 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         ]
         self._assert_settles_in_one_press("T-shape", eligible)
 
-    def test_real_overlapping_staircase_stays_put(self):
+    def test_real_overlapping_staircase_settles_in_one_press(self):
         """Geometry model: SUPER+G rebuilds the one spiral from creation
         order and ignores where windows currently are, so a hand-made
         staircase -- coherent or not -- is rebuilt into the spiral on the
@@ -2002,7 +2011,10 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
 
 
 class TestSuperGEquilibriumChange(unittest.TestCase):
-    """Part 9 of this session's own request: resize eligibility must
+    """Geometry model: nothing is resized any more; these pin that the
+    result depends only on the current window set. Earlier history below.
+
+    Part 9 of this session's own request: resize eligibility must
     recompute fresh from CURRENT state every call (no persistent "never
     resize this again" memory), so a genuine change to the window set can
     re-enable it -- and, in the other direction, existing main windows
@@ -2028,14 +2040,14 @@ class TestSuperGEquilibriumChange(unittest.TestCase):
                     self.assertEqual((w, h), orig_sizes[a], f"{a} was resized after tiny dialogs arrived (round {i})")
             layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
 
-    def test_resize_eligibility_recomputes_fresh_each_call(self):
+    def test_result_does_not_depend_on_earlier_calls(self):
         """No hidden state across calls: the SAME window set produces the
         SAME result no matter what was arranged before it.
 
         Geometry model: nothing is resized any more, so this no longer
         checks a resize decision -- only that the result is a pure function
         of the current window set (and that sizes are kept). Same fixture
-        as test_disproportionate_outlier_among_a_real_population_can_resize."""
+        as test_disproportionate_outlier_keeps_its_size."""
         resizing_layout = [
             {"address": "W0", "at": [1321, 751], "size": [1600, 1000]},
             {"address": "W1", "at": [1066, 903], "size": [700, 500]},
@@ -2198,7 +2210,11 @@ class TestCompositionPenaltyFusedPass(unittest.TestCase):
 
 
 class TestViewportRecenter(unittest.TestCase):
-    """SUPER+G brings the CAMERA home.
+    """Geometry model: SUPER+G replays the spiral with the anchor (the
+    first-created window) at the usable centre, so a panned-away
+    composition comes home bit-identical -- still one rigid translation.
+
+    SUPER+G brings the CAMERA home.
 
     On this compositor there is no camera object: the windows' coordinates
     are the world, and the monitor is a fixed window onto it. So "move the
@@ -3354,7 +3370,10 @@ class _FakeHyprland:
 
 
 class TestSuperGMainFlow(_RoundShapeFixtures):
-    """main() itself, end to end against _FakeHyprland: what actually gets
+    """Geometry model: main() dispatches the planned spiral, never a resize,
+    and records no resize memory. Earlier description below.
+
+    main() itself, end to end against _FakeHyprland: what actually gets
     dispatched after a resize, and that the resize memory is written and
     honored by the next press."""
 
@@ -3390,7 +3409,7 @@ class TestSuperGMainFlow(_RoundShapeFixtures):
             for j in range(i + 1, len(rects)):
                 self.assertFalse(overlaps_with_gap(rects[i], rects[j], self.GAP), f"{rows[i]} vs {rows[j]}")
 
-    def test_dispatches_the_planned_layout_when_clients_take_the_size(self):
+    def test_dispatches_the_planned_layout_and_never_a_resize(self):
         """Geometry model: main() dispatches exactly the planned spiral and,
         since SUPER+G no longer resizes, never sends a resize at all (the
         fixture is the old resize-firing BUILD_PATH)."""
@@ -3402,7 +3421,7 @@ class TestSuperGMainFlow(_RoundShapeFixtures):
         self._press(hypr)
         self.assertEqual(sorted(hypr.rows()), sorted(plan))
         self.assertFalse(any("resize" in e for batch in hypr.batches for e in batch))
-    def test_memory_is_written_and_honored_by_the_next_press(self):
+    def test_no_resize_is_recorded_and_later_presses_dispatch_nothing(self):
         """Geometry model: no resize, so no resize memory is written; and
         the second and third presses dispatch nothing at all -- SUPER+G's
         own result is a fixed point."""
@@ -3415,7 +3434,7 @@ class TestSuperGMainFlow(_RoundShapeFixtures):
             self._press(hypr)
             self.assertEqual(sorted(hypr.rows()), after_first)
         self.assertFalse(any(hypr.batches[sent:]), "a later press dispatched something")
-    def test_client_that_refuses_its_size_gets_positions_recomputed(self):
+    def test_client_with_a_minimum_size_keeps_its_own_size(self):
         """Geometry model: SUPER+G never asks for a size, so a client with a
         minimum size (BIG here, which the old resize asked for less than)
         keeps its own size, the gaps are exact, and nothing is recorded."""

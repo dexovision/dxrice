@@ -29,8 +29,11 @@ New-window placement and SUPER+G both use it:
     back-fills to be compact.
 - **Spacing is a hard constraint.** Every window is at least the target gap
   (42 px, from the 32–56 band) from every other window and every fixed
-  window. Every window is exactly the target gap from its nearest
-  neighbour, so nothing touches and nothing floats.
+  window. Every window is exactly the target gap from its nearest window
+  or fixed window, so nothing touches and nothing floats.
+  - Across the 291 benchmark desktops, 99% of windows have another window
+    in the band as their nearest neighbour.
+  - The remaining 1% sit beside a fixed window only.
 - **Fixed windows.** The arm goes round a fixed window when a detour of up
   to 45° clears it. Otherwise the window is pushed past it, as with a
   fullscreen window over the whole screen. Pushing outward every time would
@@ -220,8 +223,13 @@ sooner.
     its tests.
   - The mixed case, old `dxrice_spiral` cached and new `dxrice_auto_arrange`,
     only calls `join`, which kept its signature.
-- **SUPER+G and SUPER+C** use the new code on their next press.
-- **Auto-placement** uses it once the daemon imports the module for the
-  first time, or after `systemctl --user restart
+- **Not yet live.** The commits are pushed to origin (`main`,
+  `claude/task-kcttpa`). The live checkout `~/dxrice` was deliberately
+  left at 39bddfa, because SUPER+G and SUPER+C run straight from it.
+  Activation is yours:
+  - `git -C ~/dxrice merge --ff-only origin/claude/task-kcttpa`. After
+    that, SUPER+G and SUPER+C use the new code on their next press.
+- **Auto-placement** (after that fast-forward) uses it once the daemon
+  imports the module for the first time, or after `systemctl --user restart
   dxrice-auto-place-window.service`. That restart is yours to run; it was
   not done.
