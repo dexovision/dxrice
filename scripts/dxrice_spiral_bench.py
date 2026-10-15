@@ -21,7 +21,13 @@ baseline and a candidate can be compared under identical conditions:
   radial      share of consecutive prominence-ordered windows that are no
               closer to the largest one than the window before (10% slack)
   spacing     every pair 0-60 px apart along a shared span > 40 px; share
-              exactly 5 px, share 16-24 px, share 25-60 px ("slits")
+              exactly 5 px, share 16-24 px (the old band), share 25-60 px,
+              and share inside the composer's current band (32-56 px)
+  nearest     each window's gap to its nearest neighbour: min, and share
+              inside the band (the geometry model's hard constraint + target)
+  arm         the windows in creation order (the fixture's own order, as
+              SUPER+G replays it without stableIds) round the first one:
+              share of bearing steps turning clockwise
   fill        occupied area / bounding-box area (1 - fill = negative space)
   aspect      bounding box, long side / short side
   overlaps    pairs overlapping or closer than 1 px
@@ -275,12 +281,28 @@ def pct(v, q):
     return v[min(len(v) - 1, int(math.ceil(q * len(v))) - 1)] if v else float("nan")
 
 
+def arm_metrics(eligible, rows):
+    """(clockwise share of creation-order bearing steps round the first
+    window, nearest-neighbour gaps)."""
+    by = {r[0]: r for r in rows}
+    order = [by[w["address"]] for w in eligible if w["address"] in by]
+    near = [min(max(o[1] - (r[1] + r[3]), r[1] - (o[1] + o[3]), o[2] - (r[2] + r[4]), r[2] - (o[2] + o[4]))
+                for o in rows if o is not r) for r in rows] if len(rows) > 1 else []
+    if len(order) < 3:
+        return None, near
+    hx, hy = order[0][1] + order[0][3] / 2, order[0][2] + order[0][4] / 2
+    ang = [math.atan2(y + h / 2 - hy, x + w / 2 - hx) for _a, x, y, w, h in order[1:]]
+    steps = [((b - a + math.pi) % (2 * math.pi)) - math.pi for a, b in zip(ang, ang[1:])]
+    return sum(s > 0 for s in steps) / len(steps), near
+
+
 def summarize(fx, results):
     by_bucket = {}
     for f, r in zip(fx, results):
         p1, p2, p3 = r["presses"]
         m = shape_metrics(p1["rows"])
         m["move"] = movement(f["eligible"], p1["rows"])
+        m["arm"], m["near"] = arm_metrics(f["eligible"], p1["rows"])
         m["rigid"] = _rigidity(p1["rows"]) > 0
         orig = r["original"]
         m["resized"] = sum(tuple(orig[a]) != (w, h) for a, _x, _y, w, h in p1["rows"])
@@ -301,7 +323,15 @@ def _rigidity(rows):
     return dxrice_spiral.rigidity([(x, y, x + w, y + h) for _a, x, y, w, h in rows])
 
 
+def _band():
+    """The composer's spacing band (this directory's dxrice_spiral; the
+    report only -- each worker computes with its own side's modules)."""
+    import dxrice_spiral
+    return dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT
+
+
 def report(name, by_bucket):
+    BAND = _band()
     lines = [f"== {name}"]
     allm = [m for ms in by_bucket.values() for m in ms]
     stat_m = [m for b, ms in by_bucket.items() if b not in ("13-20",) for m in ms]
@@ -316,7 +346,14 @@ def report(name, by_bucket):
     if g:
         lines.append(f"  spacing pairs {len(g)}: exactly 5px {sum(x == 5 for x in g) / len(g):.0%}, 16-24px "
                      f"{sum(16 <= x <= 24 for x in g) / len(g):.0%}, 25-60px {sum(25 <= x <= 60 for x in g) / len(g):.0%}, "
-                     f"<16px {sum(x < 16 for x in g) / len(g):.0%}")
+                     f"<16px {sum(x < 16 for x in g) / len(g):.0%}, {BAND[0]}-{BAND[1]}px "
+                     f"{sum(BAND[0] <= x <= BAND[1] for x in g) / len(g):.0%}")
+    near = [x for m in allm for x in m["near"]]
+    arm = [m["arm"] for m in stat_m if m.get("arm") is not None]
+    if near:
+        lines.append(f"  nearest gap min {min(near):.0f}px median {st.median(near):.0f}px, in {BAND[0]}-{BAND[1]}px "
+                     f"{sum(BAND[0] <= x <= BAND[1] for x in near) / len(near):.0%}, under {BAND[0]}px "
+                     f"{sum(x < BAND[0] for x in near) / len(near):.1%} | arm clockwise mean {st.mean(arm):.2f}")
     lines.append(f"  overlaps {sum(m['overlaps'] for m in allm)} | moved on press 2 {sum(m['moved2'] for m in allm)}"
                  f" / press 3 {sum(m['moved3'] for m in allm)} of {len(allm)} | resized {sum(m['resized'] for m in allm)}"
                  f" | re-shrunk {sum(m['reshrunk'] for m in allm)} | move median {st.median(m['move'] for m in allm):.0f}px"
@@ -329,6 +366,7 @@ def report(name, by_bucket):
                      f" | rotation {st.mean(r) if r else float('nan'):.2f}"
                      f" | sweep {st.mean([m['sweep'] for m in ms if 'sweep' in m] or [float('nan')]):.2f}"
                      f" | 16-24px {sum(16 <= x <= 24 for x in g) / max(1, len(g)):.0%}"
+                     f" | {BAND[0]}-{BAND[1]}px {sum(BAND[0] <= x <= BAND[1] for x in g) / max(1, len(g)):.0%}"
                      f" | fill {st.median(m['fill'] for m in ms):.2f}")
     return "\n".join(lines)
 

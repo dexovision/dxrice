@@ -78,12 +78,12 @@ class TestGrowsFromTheFirstWindow(_Growth):
         assert_composed(self, rows)
         rects = [self.rect(a) for a in addrs]
         self.assertEqual(sp.rigidity(rects), 0, f"rows/columns/grid: {rows}")
-        self.assertEqual(sp.anchor_index(rects, _centre(USABLE)), 0, "the first window stopped being the anchor")
-        # the sweep turns one way round the anchor
+        self.assertEqual(_centre(rects[0]), _centre(USABLE), "the first window stopped being the anchor")
+        # the arm turns clockwise round the anchor, every step
         hub = _centre(rects[0])
         ang = [math.atan2(_centre(r)[1] - hub[1], _centre(r)[0] - hub[0]) for r in rects[1:]]
         steps = [sp._wrap(b - a) for a, b in zip(ang, ang[1:])]
-        self.assertGreaterEqual(max(sum(s > 0 for s in steps), sum(s < 0 for s in steps)), len(steps) - 1, steps)
+        self.assertTrue(all(s > 0 for s in steps), [round(math.degrees(s)) for s in steps])
 
     RING = [(900, 600)] + [(700, 450)] * 11
 
@@ -93,7 +93,7 @@ class TestGrowsFromTheFirstWindow(_Growth):
         addrs = self.open_seq(self.RING)
         rects = [self.rect(a) for a in addrs]
         assert_composed(self, self.rows())
-        self.assertEqual(sp.anchor_index(rects, _centre(USABLE)), 0)
+        self.assertEqual(_centre(rects[0]), _centre(USABLE))
         hub = _centre(rects[0])
         ang = [math.atan2(_centre(r)[1] - hub[1], _centre(r)[0] - hub[0]) for r in rects[1:]]
         steps = [sp._wrap(b - a) for a, b in zip(ang, ang[1:])]
@@ -108,19 +108,43 @@ class TestGrowsFromTheFirstWindow(_Growth):
         self.open_seq(MIXED + MIXED[:4])
 
     def test_8_closing_a_window_leaves_the_rest_and_its_hole_can_be_reused(self):
-        """Closing moves nothing (nothing listens for it). A window closed
-        inside the ring leaves an enclosed hole, and the next window of
-        that size takes it rather than extending the arm."""
+        """Closing moves nothing (nothing listens for it). Geometry model: a
+        hole in the MIDDLE of the arm is not back-filled -- the next window
+        continues the arm from its tip, exactly where it would have gone had
+        nothing closed (the spiral step reads only the anchor, the tip and
+        what it must clear), so the progression stays predictable."""
         addrs = self.open_seq(self.RING)
+        layout = [self.rect(a) for a in addrs]
         gone = addrs[2]
-        hole = self.rect(gone)
         del self.hypr.clients[gone]
         before = self.hypr.snapshot()
         new = self.open_seq([(700, 450)], prefix="0xn")[0]
         self.assertEqual(self.hypr.snapshot(but=new), before)
         assert_composed(self, self.rows())
-        self.assertLess(math.hypot(*(a - b for a, b in zip(_centre(self.rect(new)), _centre(hole)))), 150,
-                        "the enclosed hole wasn't reused")
+        want = sp.next_rect((700, 450), layout, [], sp.read_spacing())
+        self.assertEqual(self.rect(new), want, "the arm didn't continue from its tip as if nothing had closed")
+
+    def test_8c_closing_the_tip_lets_the_next_window_take_its_place(self):
+        """The one hole that fits the progression: the newest window's own.
+        Close it and the next window of that size goes back where it was."""
+        addrs = self.open_seq(MIXED[:7])
+        tip = self.rect(addrs[-1])
+        del self.hypr.clients[addrs[-1]]
+        new = self.open_seq([MIXED[6]], prefix="0xn")[0]
+        self.assertEqual(self.rect(new), tip)
+
+    def test_8d_closing_the_anchor_hands_it_to_the_earliest_survivor(self):
+        """The anchor closed: nothing moves; the earliest-created survivor is
+        the anchor from now on, and the arm carries on from the tip without
+        touching anything."""
+        addrs = self.open_seq(MIXED[:6])
+        del self.hypr.clients[addrs[0]]
+        before = self.hypr.snapshot()
+        new = self.open_seq([(700, 450)], prefix="0xn")[0]
+        self.assertEqual(self.hypr.snapshot(but=new), before)
+        assert_composed(self, self.rows())
+        layout = [self.rect(a) for a in addrs[1:]]
+        self.assertEqual(self.rect(new), sp.next_rect((700, 450), layout, [], sp.read_spacing()))
 
     def test_8b_a_gap_in_the_open_lets_the_arm_carry_on(self):
         """A window closed on the airy outside leaves no enclosed hole: the
@@ -170,33 +194,35 @@ class TestSuperGSameModel(_Growth):
         self.assertIn("0 moved, 0 resized", self.press())
 
     def test_super_g_on_an_auto_grown_spiral_needs_one_press_at_most(self):
+        """One model: auto-placement grew exactly SUPER+G's spiral, so the
+        very first press moves nothing."""
         self.open_seq(MIXED[:7])
-        self.press()
+        self.assertIn("0 moved, 0 resized", self.press())
         self.assertIn("0 moved, 0 resized", self.press())
 
     def test_opening_after_super_g_continues_super_gs_own_arm(self):
-        """One model: after SUPER+G (which winds its sweep in prominence
-        order, largest first), a newly opened window reads THAT arm --
-        prominence order, its smallest window the tip -- and continues the
-        sweep one step past it, without moving anything; a further press
-        keeps what is there."""
+        """One model: after SUPER+G, a newly opened window lands exactly
+        where SUPER+G's replay puts it -- so the next press moves nothing."""
         self.scatter(MIXED[:6])
         self.press()
         before = self.hypr.snapshot()
-        rects = [cloud._rect(c) for c in self.hypr.clients.values()]
-        anchor = sp.anchor_index(rects, _centre(USABLE))
-        arm, tip, bearing, direction, step = sp.sweep_state(rects, anchor, 600 * 400)
-        areas = [(r[2] - r[0]) * (r[3] - r[1]) for r in rects]
-        self.assertEqual(arm, sorted(arm, key=lambda i: -areas[i]), "SUPER+G's arm wasn't read in its own order")
-        want = bearing[tip] + direction * step
         new = self.open_seq([(600, 400)], prefix="0xn")[0]
         self.assertEqual(self.hypr.snapshot(but=new), before)
         assert_composed(self, self.rows())
-        hub = _centre(rects[anchor])
-        got = math.atan2(_centre(self.rect(new))[1] - hub[1], _centre(self.rect(new))[0] - hub[0])
-        self.assertLess(abs(sp._wrap(got - want)), math.radians(45),
-                        f"not the next step of SUPER+G's sweep: {math.degrees(got):.0f} vs {math.degrees(want):.0f}")
+        self.assertIn("0 moved, 0 resized", self.press())
+
+    def test_super_g_after_a_close_rebuilds_only_what_came_after(self):
+        """SUPER+G replays the spiral from creation order, so after a window
+        closes, the windows created before it stay exactly where they are
+        and those after it close up the arm -- the deliberate tidy-up of an
+        explicit press (closing alone moves nothing: test_8)."""
+        addrs = self.open_seq(MIXED[:8])
+        del self.hypr.clients[addrs[3]]
+        before = {a: self.rect(a) for a in addrs if a != addrs[3]}
         self.press()
+        for a in addrs[:3]:
+            self.assertEqual(self.rect(a), before[a], f"{a}, created before the closed window, moved")
+        assert_composed(self, self.rows())
         self.assertIn("0 moved, 0 resized", self.press())
 
     def test_10_an_oversized_composition_keeps_its_anchor_on_screen(self):
@@ -205,8 +231,8 @@ class TestSuperGSameModel(_Growth):
         for i in range(6):
             self.hypr.add(f"0xt{i}", 100 + 140 * i, 80 + 60 * i, 826, 493)
         self.press()
-        rects = [cloud._rect(c) for c in self.hypr.clients.values()]
-        anchor = rects[sp.anchor_index(rects, _centre(USABLE))]
+        anchor = cloud._rect(self.hypr.clients["0xt0"])  # the first created
+        self.assertLessEqual(math.dist(_centre(anchor), _centre(USABLE)), 0.75)
         m = sp.ANCHOR_MARGIN
         self.assertTrue(USABLE[0] + m <= anchor[0] and anchor[2] <= USABLE[2] - m
                         and USABLE[1] + m <= anchor[1] and anchor[3] <= USABLE[3] - m,
@@ -222,6 +248,83 @@ class TestSuperGSameModel(_Growth):
         self.assertEqual(sizes[1], sizes[0])
         self.assertEqual(sizes[2], sizes[0])
         self.assertEqual(spacing_violations(self.rows()), [])
+
+
+class TestGeometryModel(unittest.TestCase):
+    """dxrice_spiral's deterministic model on its own: the properties the
+    visual reference asks for, over random mixed window sets."""
+
+    BAND = (sp.SPACING_MIN_DEFAULT, sp.SPACING_MAX_DEFAULT)
+
+    def sets(self, n=200, seed=11, lo=(250, 150), hi=(1700, 1000), obstacles=True):
+        import random
+        rng = random.Random(seed)
+        for k in range(n):
+            sizes = [(rng.randint(lo[0], hi[0]), rng.randint(lo[1], hi[1])) for _ in range(rng.randint(2, 14))]
+            obs = []
+            if obstacles and k % 3 == 0:
+                obs = [(rng.randint(-200, 1800), rng.randint(0, 900), rng.randint(200, 600), rng.randint(150, 500))]
+            yield sizes, obs
+
+    def test_replay_equals_incremental_growth(self):
+        """SUPER+G (arrange) and new-window placement (join, one window at a
+        time) produce bit-identical layouts, with and without obstacles."""
+        for sizes, obs in self.sets():
+            fixed = [sp._rect(*o) for o in obs]
+            replay = sp.arrange(sizes, fixed, USABLE, self.BAND)
+            layout = []
+            for w, h in sizes:
+                x, y = sp.join((w, h), layout, obs + layout, USABLE, self.BAND)
+                layout.append((x, y, w, h))
+            self.assertEqual([sp._rect(*r) for r in layout], replay, (sizes, obs))
+
+    def test_spacing_is_a_hard_constraint(self):
+        """Never under the minimum, from windows or obstacles; every window
+        sits at the target gap from its nearest neighbour (nothing touches,
+        nothing floats off on its own)."""
+        target = sp.target_gap(self.BAND)
+        for sizes, obs in self.sets():
+            fixed = [sp._rect(*o) for o in obs]
+            rects = sp.arrange(sizes, fixed, USABLE, self.BAND)
+            for i, r in enumerate(rects):
+                others = [o for o in rects if o is not r]
+                if fixed:
+                    self.assertGreaterEqual(min(sp._sep(r, f) for f in fixed), sp.SPACING_MIN_DEFAULT, (sizes, obs))
+                if others:
+                    near = min(sp._sep(r, o) for o in others + (fixed if i else []))
+                    self.assertGreaterEqual(near, sp.SPACING_MIN_DEFAULT, (sizes, obs))
+                    if i:
+                        self.assertLessEqual(abs(near - target), 1, (i, sizes, obs))
+
+    def test_starts_upper_right_and_turns_clockwise(self):
+        for sizes, _ in self.sets(n=60, obstacles=False):
+            rects = sp.arrange(sizes, [], USABLE, self.BAND)
+            hub = _centre(rects[0])
+            self.assertLessEqual(math.dist(hub, _centre(USABLE)), 0.75)  # half a pixel each way
+            b2 = math.degrees(math.atan2(_centre(rects[1])[1] - hub[1], _centre(rects[1])[0] - hub[0]))
+            self.assertTrue(-90 < b2 < 0, f"window 2 isn't upper right of the anchor: {b2:.0f}")
+
+    def test_bounded_advance_and_outward_growth(self):
+        """Realistic sizes: every window advances clockwise round the anchor
+        -- never back -- by a bounded step: 99% by at most 100 degrees, none
+        by more than half a turn (a window much bigger than the rest, or one
+        going round a fixed window, can need that long; see
+        REPORT_GEOMETRY.md). Its clearance from the anchor never shrinks:
+        the radius grows smoothly."""
+        steps = []
+        for sizes, obs in self.sets(lo=(400, 260), hi=(1300, 900)):
+            rects = sp.arrange(sizes, [sp._rect(*o) for o in obs], USABLE, self.BAND)
+            hub = _centre(rects[0])
+            ang = [math.atan2(_centre(r)[1] - hub[1], _centre(r)[0] - hub[0]) for r in rects[1:]]
+            for a, b in zip(ang, ang[1:]):
+                step = math.degrees(sp._wrap(b - a))
+                self.assertTrue(0 < step <= 180, (step, sizes, obs))
+                steps.append(step)
+            q = [sp._sep(r, rects[0]) for r in rects[1:]]
+            for a, b in zip(q, q[1:]):
+                self.assertGreaterEqual(b, a - 1, (sizes, obs))
+        steps.sort()
+        self.assertLessEqual(steps[int(0.99 * len(steps))], 100, "the arm skips round too often")
 
 
 class TestTransientsStayOutOfTheSpiral(_Growth):

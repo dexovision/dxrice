@@ -2392,11 +2392,12 @@ def place_new_window(address, workspace_id, gap):
         # The composition it joins: every application window of the
         # workspace (not dialogs attached to a parent -- those stay
         # obstacles), in creation order, which is how the spiral reads its
-        # own arm (dxrice_spiral.sweep_state) -- including the outer windows
-        # that have grown past the screen edge, or the next window would
-        # lose track of the arm. Only when none of it is on screen (the
-        # user panned away) does a new window start a new anchor at the
-        # centre instead of being pulled off screen to join it.
+        # arm (dxrice_spiral.next_rect: the first is the anchor, the last
+        # the tip) -- including the outer windows that have grown past the
+        # screen edge, or the next window would lose track of the arm.
+        # Only when none of it is on screen (the user panned away) does a
+        # new window start a new anchor at the centre instead of being
+        # pulled off screen to join it.
         members = [(e["at"][0], e["at"][1], e["size"][0], e["size"][1])
                    for e in sorted(eligible, key=_creation_key) if e["address"] not in attached]
         on_screen = any(x < mx1 and x + w > mx0 and y < my1 and y + h > my0 for x, y, w, h in members)

@@ -672,14 +672,17 @@ class TestAutoArrangeAlgorithmB(unittest.TestCase):
             self.assertEqual((w, h), (ow, oh), f"{addr} was resized ({ow}x{oh} -> {w}x{h}) with no need to")
 
     def test_deterministic_ordering_independent_of_input_order(self):
-        a = self._mk("0xA", 0, 0, 400, 300)
-        b = self._mk("0xB", 800, 0, 300, 300)
-        c = self._mk("0xC", 0, 800, 350, 350)
+        """Geometry model: SUPER+G replays the spiral in creation order --
+        Hyprland's stableId -- so the order the client list happens to
+        arrive in doesn't change the result."""
+        a = dict(self._mk("0xA", 0, 0, 400, 300), stableId="1a")
+        b = dict(self._mk("0xB", 800, 0, 300, 300), stableId="1b")
+        c = dict(self._mk("0xC", 0, 800, 350, 350), stableId="1c")
         monitor = (0, 0, 1920, 1080)
         r1 = arr.auto_arrange([a, b, c], [], monitor, GAP)
         r2 = arr.auto_arrange([c, a, b], [], monitor, GAP)
         self.assertEqual(sorted(r1), sorted(r2))
-
+        self.assertEqual(r1[0][0], "0xA", "the first-created window is the anchor")
 
 class TestSuperGWholeComposition(unittest.TestCase):
     """Shape of the whole SUPER+G result, at production settings: it fills
@@ -841,47 +844,12 @@ class TestSuperGResize(_RoundShapeFixtures):
         self.assertEqual(big, (1600, 1000), "BIG was resized despite being its own legitimate, dominant size class")
 
     def test_disproportionate_outlier_among_a_real_population_can_resize(self):
-        """Companion to the test above: resize must still be reachable when
-        there genuinely IS a real, well-populated 'typical' size class that
-        a real outlier clearly and substantially exceeds. This is the
-        harder, more honest bar: not merely 'did a resize fire,' but 'is
-        the reached layout provably better than the real alternative,'
-        which auto_arrange itself now checks (via _final_cost) before ever
-        returning a resized result.
-
-        FOURTH re-pick, three independent algorithm corrections in
-        sequence, each changing which seeds in this shape family land on
-        the "resize genuinely wins" side: (1) _final_cost itself used to
-        be blind to composition_penalty (dead gaps/slivers/alignment),
-        computing only composition_cost + movement -- so it could keep a
-        resize that locally looked justified even when the completed
-        layout left real, unblocked dead gaps a move-only alternative
-        never had. (2) the "facing" test inside composition_penalty/
-        _dead_gap_penalty used to treat ANY positive perpendicular overlap
-        as a real facing relationship, even an 8.7%-of-span sliver -- see
-        DEAD_GAP_FACING_COVERAGE_THRESHOLD's own comment. (3) silhouette-
-        notch awareness (_notch_penalty) was added, folded into the same
-        whole-composition safety check -- see that function's own
-        docstring for the user-reported "skinny side channel" defect it
-        closes. Picking a fixture against only a subset of these, then
-        landing the rest, kept invalidating the previous pick -- the
-        objective working as intended, not a lost capability.
-
-        Re-picked via a fresh sweep of the same shape (1 outlier + 8
-        mediums, randomly scattered) under ALL THREE fixes together,
-        filtered to seeds where resize fires and holds across five
-        consecutive presses. Unlike the prior re-picks, no seed in a
-        1500-seed sweep landed on a fully dead-gap-AND-notch-clean result
-        (composition_penalty alone is clean -- zero dead gaps/slivers
-        everywhere -- but every firing seed leaves some residual notch
-        cost, confirmed via direct inspection: W0's mismatched width
-        against the 700-wide mediums around it is not fully resolvable by
-        resize alone without shrinking well past what's reasonable, which
-        _notch_penalty's own docstring already anticipates -- "not
-        expected to reach zero on every composition"). This is seed 251 of
-        400 checked, chosen for the lowest residual notch cost (1470)
-        among 35 stable-firing seeds; its own composition_penalty (dead-
-        gap/sliver/align) is fully clean at -374."""
+        """Geometry model: SUPER+G no longer resizes anything -- the spiral
+        is replayed with every window's own size (dxrice_auto_arrange's
+        docstring), so even a real, well-outweighed outlier keeps its size,
+        press after press, and the layout is a fixed point from press 1.
+        (The fixture is the old resize-firing one: seed 251 of the fourth
+        re-pick -- 1 outlier + 8 mediums, randomly scattered.)"""
         eligible = [
             self._mk("W0", 1321, 751, 1600, 1000), self._mk("W1", 1066, 903, 700, 500),
             self._mk("W2", 1867, 601, 700, 500), self._mk("W3", 1371, -95, 700, 500),
@@ -889,21 +857,15 @@ class TestSuperGResize(_RoundShapeFixtures):
             self._mk("W6", 574, -186, 700, 500), self._mk("W7", 1366, 224, 700, 500),
             self._mk("W8", 466, 449, 700, 500),
         ]
-        layout = eligible
-        sizes = []
+        sizes = {e["address"]: tuple(e["size"]) for e in eligible}
+        layout, results = eligible, []
         for _ in range(5):
             result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
-            w0 = next(r for r in result if r[0] == "W0")
-            sizes.append((w0[3], w0[4]))
+            for a, _x, _y, w, h in result:
+                self.assertEqual((w, h), sizes[a], f"{a} was resized")
+            results.append(sorted(result))
             layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
-        self.assertNotEqual(sizes[0], (1600, 1000), "W0 was never resized despite a real, well-outweighed outlier")
-        min_w = round(1600 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        min_h = round(1000 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        self.assertGreaterEqual(sizes[0][0], min_w, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
-        self.assertGreaterEqual(sizes[0][1], min_h, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
-        for s in sizes[1:]:
-            self.assertEqual(s, sizes[0], f"W0 kept changing size across repeated runs: {sizes}")
-
+        self.assertTrue(all(r == results[0] for r in results), "SUPER+G didn't settle on press 1")
     def test_oversized_outlier_in_a_tidy_grid_is_the_one_resized(self):
         """A tidy set of ten 500x400 mediums plus one 950x750 outlier. Under
         the packed solver this pinned an exact 10% shrink that closed a
@@ -1914,19 +1876,18 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         self._assert_settles_in_one_press("T-shape", eligible)
 
     def test_real_overlapping_staircase_stays_put(self):
-        """Each step genuinely shares part of an edge with the next -- a
-        pure corner-touching diagonal (no shared edge at all) is NOT
-        adjacency by this or any reasonable definition, so that variant is
-        deliberately not asserted to stay put here. Already staggered, at
-        the composition spacing, centred: left exactly where it is."""
+        """Geometry model: SUPER+G rebuilds the one spiral from creation
+        order and ignores where windows currently are, so a hand-made
+        staircase -- coherent or not -- is rebuilt into the spiral on the
+        first press. What still holds: nothing is resized, the spacing is
+        kept, and the second press touches nothing."""
         w, h, gap = 300, 220, 20
         eligible = [
             {"address": "A", "at": [560, 220], "size": [w, h]},
             {"address": "B", "at": [560 + w // 2 + gap, 220 + h + gap], "size": [w, h]},
             {"address": "C", "at": [560 + w + 2 * gap, 220 + 2 * (h + gap)], "size": [w, h]},
         ]
-        self._assert_untouched("staircase", eligible)
-
+        self._assert_settles_in_one_press("staircase", eligible)
     def test_asymmetric_coherent_cluster_stays_put(self):
         eligible = [
             {"address": "BIG", "at": [660, 300], "size": [500, 400]},
@@ -2068,24 +2029,13 @@ class TestSuperGEquilibriumChange(unittest.TestCase):
             layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
 
     def test_resize_eligibility_recomputes_fresh_each_call(self):
-        """No persistent "already resized, never again" flag exists
-        anywhere -- eligibility is a pure function of the CURRENT window
-        set each call.
+        """No hidden state across calls: the SAME window set produces the
+        SAME result no matter what was arranged before it.
 
-        Asserted as history-independence rather than "adding an outlier to
-        a settled grid resizes it": that older phrasing pinned the guarantee
-        to one scenario's resize outcome, and once better positions became
-        reachable (see ORGANIC_STAGGER_ANCHORS) that particular layout
-        stopped needing a resize at all -- which says nothing either way
-        about hidden state. What actually matters is that the SAME window
-        set produces the SAME decision no matter what was arranged before
-        it, so that is what this checks directly.
-
-        Shares its resize-firing geometry with
-        test_disproportionate_outlier_among_a_real_population_can_resize --
-        see that test's docstring for why this exact fixture (seed 251, the
-        fourth re-pick) was chosen, including why its residual notch cost
-        is nonzero and expected to be."""
+        Geometry model: nothing is resized any more, so this no longer
+        checks a resize decision -- only that the result is a pure function
+        of the current window set (and that sizes are kept). Same fixture
+        as test_disproportionate_outlier_among_a_real_population_can_resize."""
         resizing_layout = [
             {"address": "W0", "at": [1321, 751], "size": [1600, 1000]},
             {"address": "W1", "at": [1066, 903], "size": [700, 500]},
@@ -2099,12 +2049,10 @@ class TestSuperGEquilibriumChange(unittest.TestCase):
         ]
         cold = arr.auto_arrange([dict(w) for w in resizing_layout], [], (0, 0, 1920, 1080), GAP)
         cold_w0 = next(r for r in cold if r[0] == "W0")
-        self.assertNotEqual((cold_w0[3], cold_w0[4]), (1600, 1000),
-                             "fixture no longer exercises a resize at all -- pick one that does")
+        self.assertEqual((cold_w0[3], cold_w0[4]), (1600, 1000), "SUPER+G resized a window")
 
         # Establish as much prior history as the module could possibly be
-        # tempted to remember: a different population, arranged repeatedly
-        # to a settled state, including one that does NOT resize.
+        # tempted to remember: a different population, arranged repeatedly.
         other = [{"address": f"M{i}", "at": [(i % 5) * 510, (i // 5) * 410], "size": [500, 400]}
                  for i in range(10)]
         for _ in range(4):
@@ -2114,8 +2062,7 @@ class TestSuperGEquilibriumChange(unittest.TestCase):
         warm = arr.auto_arrange([dict(w) for w in resizing_layout], [], (0, 0, 1920, 1080), GAP)
         self.assertEqual(sorted(warm), sorted(cold),
                           "the same window set produced a different result depending on what was "
-                          "arranged before it -- eligibility is carrying state across calls")
-
+                          "arranged before it -- SUPER+G is carrying state across calls")
 
 class TestRadialCompositionAlgorithmA(unittest.TestCase):
     """Same principle applied to new-window auto-placement (points D/E/F/G/
@@ -2270,22 +2217,29 @@ class TestViewportRecenter(unittest.TestCase):
         x0, y0 = min(r[1] for r in done), min(r[2] for r in done)
         return [{"address": a, "at": [x - x0 + ox, y - y0 + oy], "size": [ww, hh]} for a, x, y, ww, hh in done]
 
+    def _home(self, w=300, h=200, gap=GAP):
+        """SUPER+G's own result for the same four windows, where it put it."""
+        start = [{"address": a, "at": [i * (w + 40), (i % 2) * 90], "size": [w, h]} for i, a in enumerate("ABCD")]
+        return [{"address": a, "at": [x, y], "size": [ww, hh]}
+                for a, x, y, ww, hh in arr.auto_arrange(start, [], (0, 0, 1920, 1080), gap)]
+
     def test_already_centered_composition_is_untouched(self):
-        # SUPER+G's own result is centred on (960, 540)
-        eligible = self._grid(0, 0)
-        b0, b1 = min(e["at"][0] for e in eligible), max(e["at"][0] + e["size"][0] for e in eligible)
-        c0, c1 = min(e["at"][1] for e in eligible), max(e["at"][1] + e["size"][1] for e in eligible)
-        eligible = self._grid(960 - (b1 - b0) // 2, 540 - (c1 - c0) // 2)
+        """Geometry model: SUPER+G's own result -- anchor at the usable
+        centre -- is a fixed point: pressing again moves nothing."""
+        eligible = self._home()
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
         by_addr = {a: (x, y, w, h) for a, x, y, w, h in result}
         for win in eligible:
             self.assertEqual(by_addr[win["address"]],
                               (win["at"][0], win["at"][1], win["size"][0], win["size"][1]))
-
     def test_far_away_composition_is_brought_home_rigidly(self):
         """The whole point: a GOOD arrangement that the user merely panned
-        away from must not be rebuilt. Every window moves by the SAME
-        delta, so the composition itself is bit-identical afterwards."""
+        away from comes home intact. Geometry model: SUPER+G replays the
+        spiral from creation order with the anchor (the first-created
+        window) at the usable centre, so the composition comes back
+        bit-identical to SUPER+G's own result at home -- every window moved
+        by the SAME delta, nothing resized."""
+        home = {w["address"]: (w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in self._home()}
         for ox, oy in [(-4000, 337), (6000, 337), (657, -3000), (657, 4000)]:
             with self.subTest(origin=(ox, oy)):
                 eligible = self._grid(ox, oy)
@@ -2296,21 +2250,10 @@ class TestViewportRecenter(unittest.TestCase):
                           for win in eligible}
                 self.assertEqual(len(set(deltas.values())), 1,
                                   f"not a rigid translation -- windows moved differently: {deltas}")
-                for win in eligible:
-                    self.assertEqual(by_addr[win["address"]][2:], tuple(win["size"]),
-                                      "a pure viewport move must never resize anything")
-                xs0 = [v[0] for v in by_addr.values()]; ys0 = [v[1] for v in by_addr.values()]
-                xs1 = [v[0] + v[2] for v in by_addr.values()]; ys1 = [v[1] + v[3] for v in by_addr.values()]
-                cx, cy = (min(xs0) + max(xs1)) / 2, (min(ys0) + max(ys1)) / 2
-                # centred as nearly as the anchor allows: the window the
-                # spiral winds round keeps covering the centre point (the
-                # spiral-growth pass), which can cost the outline a few px
-                rects = [(x, y, x + w, y + h) for x, y, w, h in by_addr.values()]
-                a = rects[dxrice_spiral.anchor_index(rects, (960, 540))]
-                self.assertTrue(a[0] <= 960 <= a[2] and a[1] <= 540 <= a[3], f"anchor {a} off the centre")
-                self.assertLess(math.hypot(cx - 960, cy - 540), 64.0,
-                                 "composition did not end up centred on the viewport")
-
+                self.assertEqual(by_addr, home, "not SUPER+G's own result at home")
+                ax, ay, aw, ah = by_addr["A"]
+                self.assertLessEqual(abs(ax + aw / 2 - 960), 1)
+                self.assertLessEqual(abs(ay + ah / 2 - 540), 1, "the anchor isn't at the usable centre")
     def test_recenter_is_idempotent(self):
         layout = self._grid(-4000, 337)
         first = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
@@ -3448,48 +3391,41 @@ class TestSuperGMainFlow(_RoundShapeFixtures):
                 self.assertFalse(overlaps_with_gap(rects[i], rects[j], self.GAP), f"{rows[i]} vs {rows[j]}")
 
     def test_dispatches_the_planned_layout_when_clients_take_the_size(self):
-        """Before: after landing the resizes main() re-ran the whole build
-        from the windows' PRE-press positions, and dispatched that -- a
-        different composition from the one the resize was chosen for (56/58
-        resizing benchmark presses), usually with more dead-gap/notch."""
+        """Geometry model: main() dispatches exactly the planned spiral and,
+        since SUPER+G no longer resizes, never sends a resize at all (the
+        fixture is the old resize-firing BUILD_PATH)."""
         rows = TestCrossPressResizeMemory.BUILD_PATH
         plan = arr.auto_arrange([{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in rows],
                                 [], self.MON, self.GAP)
-        self.assertTrue(any((w, h) != (r[3], r[4]) for (a, x, y, w, h), r in zip(sorted(plan), sorted(rows))),
-                        "fixture must resize something on press 1")
+        self.assertEqual(sorted((a, w, h) for a, _x, _y, w, h in plan), sorted((a, w, h) for a, _x, _y, w, h in rows))
         hypr = _FakeHyprland(rows)
         self._press(hypr)
         self.assertEqual(sorted(hypr.rows()), sorted(plan))
-        # The resize is landed once; the follow-up batch only moves.
-        self.assertFalse(any("resize" in e for e in hypr.batches[-1]))
-
+        self.assertFalse(any("resize" in e for batch in hypr.batches for e in batch))
     def test_memory_is_written_and_honored_by_the_next_press(self):
+        """Geometry model: no resize, so no resize memory is written; and
+        the second and third presses dispatch nothing at all -- SUPER+G's
+        own result is a fixed point."""
         hypr = _FakeHyprland(TestCrossPressResizeMemory.BUILD_PATH)
         self._press(hypr)
-        after_first = {a: (w, h) for a, _x, _y, w, h in hypr.rows()}
-        state = arr._load_resize_state(arr._resize_state_path())
-        self.assertTrue(state, "a resizing press recorded nothing")
-        for addr, size in state.items():
-            self.assertEqual(tuple(after_first[addr]), size)
+        after_first = sorted(hypr.rows())
+        self.assertFalse(arr._load_resize_state(arr._resize_state_path()), "a press recorded a resize")
+        sent = len(hypr.batches)
         for _ in range(2):
             self._press(hypr)
-            for a, _x, _y, w, h in hypr.rows():
-                if a in state:
-                    self.assertEqual((w, h), state[a], f"{a} was resized again on a later press")
-
+            self.assertEqual(sorted(hypr.rows()), after_first)
+        self.assertFalse(any(hypr.batches[sent:]), "a later press dispatched something")
     def test_client_that_refuses_its_size_gets_positions_recomputed(self):
-        """The existing settle-pass guarantee still holds when a client does
-        NOT take the size it was asked for: positions are recomputed against
-        the size it really took (exact gaps, no overlap), and that real size
-        is what the memory records."""
+        """Geometry model: SUPER+G never asks for a size, so a client with a
+        minimum size (BIG here, which the old resize asked for less than)
+        keeps its own size, the gaps are exact, and nothing is recorded."""
         rows = TestCrossPressResizeMemory.BUILD_PATH
         hypr = _FakeHyprland(rows, min_size={"BIG": (480, 390)})
         self._press(hypr)
         big = next(r for r in hypr.rows() if r[0] == "BIG")
-        self.assertEqual(big[3:], (480, 390), "fixture must ask BIG for less than its minimum")
+        self.assertEqual(big[3:], next(r for r in rows if r[0] == "BIG")[3:])
         self._assert_gaps(hypr.rows())
-        self.assertEqual(arr._load_resize_state(arr._resize_state_path()).get("BIG"), (480, 390))
-
+        self.assertIsNone(arr._load_resize_state(arr._resize_state_path()).get("BIG"))
 
 class TestRigidGridIsRebuilt(unittest.TestCase):
     """The reported bug: six windows in a rigid grid, SUPER+G pressed, and

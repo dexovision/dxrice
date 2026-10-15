@@ -2,9 +2,12 @@
 """Draws real SUPER+G output from a dxrice_spiral_bench.py --json dump:
 for each chosen fixture, the layout before, then each side's press-1
 result. Windows are labelled; a line through the window centres in
-prominence order (largest first) shows the spiral flow; gutters are
-coloured by width (green 16-24 px, amber 25-60 px, red < 16 px). Per
-panel: rotation / centrality / fill / spacing share / overlaps.
+creation order (the order the spiral is built in) shows the arm; gutters
+between facing neighbours are thin lines coloured against the composer's
+spacing band (dxrice_spiral.SPACING_MIN/MAX_DEFAULT, 32-56 px): green
+inside it, amber wider (up to twice the maximum), red narrower. Per panel:
+each window's gap to its nearest neighbour (min / median / share inside
+the band) and overlaps.
 
 Needs Pillow. Rendering only -- it computes nothing the benchmark didn't.
 
@@ -13,6 +16,12 @@ Needs Pillow. Rendering only -- it computes nothing the benchmark didn't.
 
 --growth SCRIPTS_DIR draws a frame per window opened (--sizes WxH,...), the
 flow line in opening order -- the spiral as auto-placement grows it.
+
+--geometry SCRIPTS_DIR [--reference PNG] draws the acceptance sheets of
+the Galaxy Spiral geometry: growth at 1-12 windows (reference proportions
+and mixed sizes), closing windows, an oversized composition, fixed and
+fullscreen windows -- all through the real place_new_window / SUPER+G --
+and, given the reference image, the two side by side.
 
 --autoplace opens windows one at a time through the real place_new_window
 against dxrice_autoplace_report's in-memory Hyprland (one column per
@@ -27,6 +36,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_spiral_bench as bench  # noqa: E402
+import dxrice_spiral  # noqa: E402
+
+BAND = (dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT)
+USABLE = (0, 52, 1920, 1012)  # a 1920x1080 screen minus a 52px bar and a 68px dock
 
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
@@ -74,7 +87,7 @@ def panel(img, box, title, rows, monitor, colors, metrics_line, order=None):
     for addr, x, y, w, h in rows:
         p, q = T(x, y), T(x + w, y + h)
         d.rectangle([p[0], p[1], q[0] - 1, q[1] - 1], fill=colors[addr], outline="#0d0f13")
-        d.text((p[0] + 4, p[1] + 3), addr[:10], font=_font(12), fill="#111")
+        d.text((p[0] + 4, p[1] + 3), addr[:10], font=_font(12), fill="#111" if addr not in FIXED_NAMES else INK)
     # gutters between facing neighbours
     for i in range(len(rows)):
         for j in range(i + 1, len(rows)):
@@ -93,12 +106,12 @@ def panel(img, box, title, rows, monitor, colors, metrics_line, order=None):
                 seg = [T(max(ra[0], rb[0]), ym), T(min(ra[2], rb[2]), ym)]
             else:
                 continue
-            if 0 <= dist <= 60:
-                col = GOOD if 16 <= dist <= 24 else (BAD if dist < 16 else WARN)
-                d.line(seg, fill=col, width=3)
-    # flow: centres in prominence order
-    if order is None:  # prominence order (SUPER+G's sweep)
-        order = sorted((r for r in rows if r[0] != "fixed"), key=lambda r: (-(r[3] * r[4]), r[0]))
+            if 0 <= dist <= 2 * BAND[1] and A[0] not in FIXED_NAMES and B[0] not in FIXED_NAMES:
+                col = GOOD if BAND[0] <= dist <= BAND[1] else (BAD if dist < BAND[0] else WARN)
+                d.line(seg, fill=col, width=2)
+    # the arm: centres in creation order
+    if order is None:  # the rows' own order (SUPER+G returns creation order)
+        order = [r for r in rows if r[0] not in FIXED_NAMES]
     else:              # the given order (opening order, for growth frames)
         by = {r[0]: r for r in rows}
         order = [by[a] for a in order if a in by]
@@ -113,15 +126,23 @@ def panel(img, box, title, rows, monitor, colors, metrics_line, order=None):
         d.ellipse([pts[0][0] - 5, pts[0][1] - 5, pts[0][0] + 5, pts[0][1] + 5], fill="#ffffff")
 
 
+FIXED_NAMES = {"fixed", "pinned", "fullscreen"}
+
+
+def _sep(a, b):
+    return max(b[1] - (a[1] + a[3]), a[1] - (b[1] + b[3]), b[2] - (a[2] + a[4]), a[2] - (b[2] + b[4]))
+
+
 def metrics_line(rows):
-    m = bench.shape_metrics(rows)
-    g = m["gaps"]
-    band = sum(16 <= x <= 24 for x in g) / len(g) if g else float("nan")
-    rot = m.get("rotation")
-    cen = m.get("centrality")
-    return (f"rotation {rot:.2f}  " if rot is not None else "rotation n/a  ") + \
-           (f"centrality {cen:+.2f}  " if cen is not None else "") + \
-           f"fill {m['fill']:.2f}  16-24px {band:.0%}  overlaps {m['overlaps']}"
+    """Each window's gap to its nearest neighbour (fixed windows count as
+    neighbours): min / median / share inside the band; overlaps."""
+    near = [min(_sep(r, o) for o in rows if o is not r) for r in rows if r[0] not in FIXED_NAMES] if len(rows) > 1 else []
+    over = sum(_sep(rows[i], rows[j]) < 0 for i in range(len(rows)) for j in range(i + 1, len(rows)))
+    if not near:
+        return f"{len(rows)} window  overlaps {over}"
+    inband = sum(BAND[0] <= g <= BAND[1] for g in near) / len(near)
+    return (f"nearest gap min {min(near):.0f} median {sorted(near)[len(near) // 2]:.0f}px  "
+            f"in {BAND[0]}-{BAND[1]}px {inband:.0%}  overlaps {over}")
 
 
 def autoplace_rows(scripts, seq_indices, seed=7):
@@ -172,6 +193,155 @@ def growth_rows(scripts, sizes):
         "print(json.dumps(frames))\n")
     res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     return json.loads(res.stdout.strip().splitlines()[-1])
+
+
+def scenario_rows(scripts, ops):
+    """Rows after each op, run through the real place_new_window and
+    auto_arrange (in-memory Hyprland, usable area USABLE) in a worker
+    importing `scripts`. ops: ["open", addr, w, h] | ["close", addr] |
+    ["fixed", addr, x, y, w, h, "pinned"|"fullscreen"] | ["press"]."""
+    import subprocess
+    code = (
+        "import sys, json, os, importlib, tempfile\n"
+        f"sys.path.insert(0, {scripts!r}); sys.path.insert(1, {os.path.dirname(os.path.abspath(__file__))!r})\n"
+        "import dxrice_autoplace_report as R\n"
+        "os.environ['XDG_RUNTIME_DIR'] = tempfile.mkdtemp(); os.environ['XDG_CONFIG_HOME'] = tempfile.mkdtemp()\n"
+        "apw = importlib.import_module('dxrice_auto_place_window'); arr = importlib.import_module('dxrice_auto_arrange')\n"
+        f"U = {USABLE!r}\n"
+        "apw.get_monitor_bounds = lambda: U; apw.time.sleep = lambda s: None\n"
+        "h = R.Hypr(apw); apw.hyprctl_json, apw.batch_async = h.hyprctl_json, h.batch_async\n"
+        "apw.dispatch_async, apw.move_window_exact_async = h.dispatch_async, h.move_window_exact_async\n"
+        "frames = []\n"
+        f"for op in {ops!r}:\n"
+        "    if op[0] == 'open':\n"
+        "        h.open(op[1], op[2], op[3], 'app' + op[1], 1000 + len(h.clients)); apw.place_new_window(op[1], 1, R.GAP)\n"
+        "    elif op[0] == 'close':\n"
+        "        del h.clients[op[1]]\n"
+        "    elif op[0] == 'fixed':\n"
+        "        h.open(op[1], op[4], op[5], op[1], 900); c = h.clients[op[1]]; c['at'] = [op[2], op[3]]\n"
+        "        c.update(fullscreen=2) if op[6] == 'fullscreen' else c.update(pinned=True)\n"
+        "    elif op[0] == 'press':\n"
+        "        cl = list(h.clients.values()); fx = [c for c in cl if c.get('fullscreen') or c.get('pinned')]\n"
+        "        el = [c for c in cl if c not in fx]\n"
+        "        for a, x, y, w, hh in arr.auto_arrange(el, fx, U, R.GAP):\n"
+        "            h.clients[a]['at'] = [x, y]\n"
+        "    frames.append(h.rows())\n"
+        "print(json.dumps(frames))\n")
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    return [[tuple(r) for r in f] for f in json.loads(res.stdout.strip().splitlines()[-1])]
+
+
+def _sheet(panels, out, sheet, cols, pw=560, ph=430, colors=None, header=None):
+    """panels: [(title, rows, order)] laid out `cols` per row."""
+    rows_n = (len(panels) + cols - 1) // cols
+    top = 50 if header else 0
+    img = Image.new("RGB", (cols * pw + 20, rows_n * ph + 20 + top), BG)
+    if header:
+        ImageDraw.Draw(img).text((16, 14), header, font=_font(22, True), fill=INK)
+    for k, (title, rows, order) in enumerate(panels):
+        cmap = dict(colors or {})
+        for i, r in enumerate(rows):
+            cmap.setdefault(r[0], "#3a3f4a" if r[0] in FIXED_NAMES else PAL[i % len(PAL)])
+        x, y = 10 + (k % cols) * pw, 10 + top + (k // cols) * ph
+        panel(img, (x, y, x + pw - 10, y + ph - 10), title, rows, USABLE, cmap, metrics_line(rows), order=order)
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, sheet + ".png")
+    img.save(path)
+    print(path)
+    return path
+
+
+# Reference proportions: the reference image's anchor (~305x180) and ring
+# windows (~210x100) on a 1536-wide picture, scaled to a 1920-wide screen.
+REF_SIZES = [(381, 225)] + [(262, 125)] * 11
+MIXED = [(1100, 700), (860, 560), (640, 400), (900, 620), (550, 300), (1000, 650), (820, 560),
+         (480, 320), (700, 460), (760, 480), (600, 380), (920, 600)]
+COUNTS = (1, 2, 3, 4, 6, 8, 12)
+
+
+def geometry_sheets(scripts, out, reference=None):
+    names = [f"w{i + 1}" for i in range(12)]
+    colors = {a: PAL[i % len(PAL)] for i, a in enumerate(names)}
+    paths = []
+    for label, sizes, sheet in (("reference proportions (381x225 anchor, 262x125 windows)", REF_SIZES, "growth_reference"),
+                                ("mixed application sizes", MIXED, "growth_mixed")):
+        frames = scenario_rows(scripts, [["open", a, w, h] for a, (w, h) in zip(names, sizes)] + [["press"]])
+        panels = [(f"{n} window{'s' if n > 1 else ''}", frames[n - 1], names[:n]) for n in COUNTS]
+        panels.append(("12 windows, then SUPER+G", frames[-1], names))
+        paths.append(_sheet(panels, out, sheet, 4, colors=colors, header=f"Galaxy Spiral growth -- {label}"))
+    # closing windows: middle, tip, anchor; then SUPER+G
+    eight = [["open", a, w, h] for a, (w, h) in zip(names, MIXED[:8])]
+    panels = []
+    for title, closed in (("w4 (middle) closed", "w4"), ("w8 (tip) closed", "w8"), ("w1 (anchor) closed", "w1")):
+        f = scenario_rows(scripts, eight + [["close", closed], ["open", "n9", 700, 460], ["press"]])
+        order = [a for a in names[:8] if a != closed] + ["n9"]
+        panels += [("8 windows", f[7], names[:8]), (f"{title}, n9 opened", f[9], order),
+                   ("then SUPER+G", f[10], order)]
+    paths.append(_sheet(panels, out, "closing", 3, colors=dict(colors, n9="#ffffff"),
+                        header="Closing windows: nothing moves; the arm carries on; SUPER+G rebuilds from creation order"))
+    # oversized, fixed and fullscreen
+    six = [["open", f"t{i + 1}", 826, 493] for i in range(6)]
+    f_big = scenario_rows(scripts, six + [["press"]])
+    f_pin = scenario_rows(scripts, [["fixed", "pinned", 1400, 90, 460, 330, "pinned"]]
+                          + [["open", a, w, h] for a, (w, h) in zip(names, MIXED[:7])])
+    f_fs = scenario_rows(scripts, [["fixed", "fullscreen", 0, 0, 1920, 1080, "fullscreen"]]
+                         + [["open", a, w, h] for a, (w, h) in zip(names, MIXED[:4])])
+    f_huge = scenario_rows(scripts, [["open", "w1", 1900, 1000]] + [["open", a, w, h] for a, (w, h) in zip(names[1:], MIXED[1:6])])
+    panels = [("6 terminals 826x493 (the live test)", f_big[5], [f"t{i + 1}" for i in range(6)]),
+              ("same, then SUPER+G", f_big[6], [f"t{i + 1}" for i in range(6)]),
+              ("a pinned window in the arm's way", f_pin[-1], names[:7]),
+              ("a fullscreen window over the screen", f_fs[-1], names[:4]),
+              ("an anchor as big as the screen", f_huge[-1], names[:6])]
+    paths.append(_sheet(panels, out, "special_cases", 3, colors=dict(colors, **{f"t{i + 1}": PAL[i] for i in range(6)}),
+                        header="Oversized, fixed and fullscreen: never overlapped, anchor kept on screen"))
+    if reference:
+        ref = Image.open(reference).convert("RGB")
+        ref = ref.resize((900, int(900 * ref.height / ref.width)))
+        r12 = scenario_rows(scripts, [["open", a, w, h] for a, (w, h) in zip(names, REF_SIZES)])[-1]
+        m12 = scenario_rows(scripts, [["open", a, w, h] for a, (w, h) in zip(names, MIXED)])[-1]
+        pw, ph = 900, ref.height
+        img = Image.new("RGB", (3 * pw + 40, ph + 70), BG)
+        d = ImageDraw.Draw(img)
+        d.text((16, 14), "Reference (left) vs the model: 12 windows at reference proportions, and mixed sizes",
+               font=_font(22, True), fill=INK)
+        img.paste(ref, (10, 60))
+        for c, (title, rows) in enumerate((("12 windows, reference proportions", r12), ("12 windows, mixed sizes", m12))):
+            x = 20 + (c + 1) * pw
+            panel(img, (x, 60, x + pw - 10, 60 + ph), title, rows, USABLE, colors, metrics_line(rows), order=names)
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, "reference_vs_model.png")
+        img.save(path)
+        print(path)
+        paths.append(path)
+        paths.append(_spacing_sheet(ref, out, colors, names))
+    return paths
+
+
+def _spacing_sheet(ref, out, colors, names, airy=(64, 112)):
+    """The reference beside the model at the default spacing band and at a
+    wider one (theme.json window_spacing_min/max) -- the composer's own
+    arrange, drawn against each band."""
+    global BAND
+    pw, ph = 900, ref.height
+    img = Image.new("RGB", (3 * pw + 40, ph + 70), BG)
+    ImageDraw.Draw(img).text((16, 14), f"Spacing: the default {BAND[0]}-{BAND[1]} px vs window_spacing_min/max "
+                             f"{airy[0]}/{airy[1]} in theme.json", font=_font(22, True), fill=INK)
+    img.paste(ref, (10, 60))
+    default = BAND
+    try:
+        for c, band in enumerate((default, airy)):
+            BAND = band
+            rects = dxrice_spiral.arrange(REF_SIZES, [], USABLE, band)
+            rows = [(n, r[0], r[1], r[2] - r[0], r[3] - r[1]) for n, r in zip(names, rects)]
+            x = 20 + (c + 1) * pw
+            panel(img, (x, 60, x + pw - 10, 60 + ph), f"12 windows, reference proportions, spacing {band[0]}-{band[1]} px",
+                  rows, USABLE, colors, metrics_line(rows), order=names)
+    finally:
+        BAND = default
+    path = os.path.join(out, "spacing_default_vs_airy.png")
+    img.save(path)
+    print(path)
+    return path
 
 
 def growth_sheet(scripts, sizes, out, sheet, frames=None, cols=4):
@@ -229,7 +399,11 @@ def main():
     ap.add_argument("--growth", help="SCRIPTS_DIR: frames of windows opened one by one")
     ap.add_argument("--sizes", default="1500x950,860x560,1100x750,640x400,900x620,550x300,1300x850,820x560")
     ap.add_argument("--frames", default="")
+    ap.add_argument("--geometry", help="SCRIPTS_DIR: the geometry acceptance sheets")
+    ap.add_argument("--reference", help="the visual reference image, drawn beside the model")
     a = ap.parse_args()
+    if a.geometry:
+        return geometry_sheets(a.geometry, a.out, a.reference)
     if a.growth:
         sizes = [tuple(int(v) for v in t.split("x")) for t in a.sizes.split(",")]
         return growth_sheet(a.growth, sizes, a.out, a.sheet, [int(f) for f in a.frames.split(",") if f])
