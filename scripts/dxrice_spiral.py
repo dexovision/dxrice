@@ -709,14 +709,29 @@ def _touches(a, b, reach=SPACING_MAX_DEFAULT + 1):
     return f is not None and f[0] <= reach
 
 
-def _consistency(seq, bearing):
-    steps = [_wrap(bearing[b] - bearing[a]) for a, b in zip(seq, seq[1:])]
-    if not steps:
+# A step along an arm advances up to this far round the anchor (SUPER+G
+# spreads a few windows over more than a turn, so steps past 180 degrees
+# are real).
+ARM_STEP_MAX = math.radians(200)
+
+
+def _arm_score(seq, bearing, rad):
+    """How well `seq` reads as one arm round the anchor: the share of steps
+    advancing 0..ARM_STEP_MAX one way round, plus the share of steps that
+    don't move closer to the anchor (a spiral widens; 10% slack). Returns
+    (score, direction)."""
+    if len(seq) < 2:
         return 0.0, 1
-    pos = sum(st > 0 for st in steps)
-    neg = len(steps) - pos
-    sign = 1 if pos > neg else -1 if neg > pos else (1 if steps[-1] >= 0 else -1)
-    return max(pos, neg) / len(steps), sign
+    best = None
+    for d in (1, -1):
+        adv = [(d * (bearing[b] - bearing[a])) % (2 * math.pi) for a, b in zip(seq, seq[1:])]
+        turn = sum(0 < x <= ARM_STEP_MAX for x in adv) / len(adv)
+        if best is None or turn > best[0]:
+            best = (turn, d)
+    out = sum(rad[b] >= 0.9 * rad[a] for a, b in zip(seq, seq[1:])) / (len(seq) - 1)
+    # widening counts double: turning one way within ARM_STEP_MAX is easy
+    # for any order of a few windows to pass, a steadily widening one isn't
+    return best[0] + 2 * out, best[1]
 
 
 def sweep_state(rects, anchor, new_area=None):
@@ -724,10 +739,10 @@ def sweep_state(rects, anchor, new_area=None):
     tip, bearing, direction, step). `rects` must be in the order the
     windows were created (Hyprland's stableId / client list order), so a
     spiral auto-placement grew reads in creation order; one SUPER+G built
-    reads in its own sweep order, prominence. Of the two, the order whose
-    bearing steps round the anchor turn most consistently one way is the
-    arm (creation wins ties): its last window is the tip and its turning
-    sense the direction. A closed window just drops out of both orders.
+    reads in its own sweep order, prominence. Of the two, the order that
+    reads best as one arm (_arm_score: turning one way round the anchor,
+    widening as it goes) is the arm (creation wins ties): its last window
+    is the tip and its turning sense the direction. A closed window just drops out of both orders.
     `step` is the bearing to the next window: the tip's and the new
     window's angular half-widths as seen from the anchor (JOIN_ARC_RANGE),
     so the new window sits beside the tip one window further round.
@@ -747,8 +762,8 @@ def sweep_state(rects, anchor, new_area=None):
     direction = None
     seq = created
     if len(created) >= 2:
-        c_score, c_dir = _consistency(created, bearing)
-        p_score, p_dir = _consistency(prominent, bearing)
+        c_score, c_dir = _arm_score(created, bearing, rad)
+        p_score, p_dir = _arm_score(prominent, bearing, rad)
         seq, direction = (prominent, p_dir) if p_score > c_score else (created, c_dir)
     tip = seq[-1] if seq else anchor
     others = seq

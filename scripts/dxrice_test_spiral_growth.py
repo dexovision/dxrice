@@ -174,6 +174,31 @@ class TestSuperGSameModel(_Growth):
         self.press()
         self.assertIn("0 moved, 0 resized", self.press())
 
+    def test_opening_after_super_g_continues_super_gs_own_arm(self):
+        """One model: after SUPER+G (which winds its sweep in prominence
+        order, largest first), a newly opened window reads THAT arm --
+        prominence order, its smallest window the tip -- and continues the
+        sweep one step past it, without moving anything; a further press
+        keeps what is there."""
+        self.scatter(MIXED[:6])
+        self.press()
+        before = self.hypr.snapshot()
+        rects = [cloud._rect(c) for c in self.hypr.clients.values()]
+        anchor = sp.anchor_index(rects, _centre(USABLE))
+        arm, tip, bearing, direction, step = sp.sweep_state(rects, anchor, 600 * 400)
+        areas = [(r[2] - r[0]) * (r[3] - r[1]) for r in rects]
+        self.assertEqual(arm, sorted(arm, key=lambda i: -areas[i]), "SUPER+G's arm wasn't read in its own order")
+        want = bearing[tip] + direction * step
+        new = self.open_seq([(600, 400)], prefix="0xn")[0]
+        self.assertEqual(self.hypr.snapshot(but=new), before)
+        assert_composed(self, self.rows())
+        hub = _centre(rects[anchor])
+        got = math.atan2(_centre(self.rect(new))[1] - hub[1], _centre(self.rect(new))[0] - hub[0])
+        self.assertLess(abs(sp._wrap(got - want)), math.radians(45),
+                        f"not the next step of SUPER+G's sweep: {math.degrees(got):.0f} vs {math.degrees(want):.0f}")
+        self.press()
+        self.assertIn("0 moved, 0 resized", self.press())
+
     def test_10_an_oversized_composition_keeps_its_anchor_on_screen(self):
         """The live test's case: six 826x493 terminals cover more than the
         screen; centring the whole group cut the anchor off at the top."""

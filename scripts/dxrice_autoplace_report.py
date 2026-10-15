@@ -107,7 +107,7 @@ def run(scripts, n, render_dir=None, seed=7):
     apw.time.sleep = lambda s: None
     rng = random.Random(seed)
     per = []
-    opens = moved = not_flush = overlaps = 0
+    opens = moved = not_flush = overlaps = hidden = 0
     for k in range(n):
         h = Hypr(apw)
         apw.hyprctl_json, apw.batch_async = h.hyprctl_json, h.batch_async
@@ -121,6 +121,9 @@ def run(scripts, n, render_dir=None, seed=7):
             rows = h.rows()
             new = next(r for r in rows if r[0] == addr)
             seps = [_sep(new, r) for r in rows if r[0] != addr]
+            vis = (max(0, min(new[1] + new[3], MON[2]) - max(new[1], MON[0]))
+                   * max(0, min(new[2] + new[4], MON[3]) - max(new[2], MON[1])))
+            hidden += vis < 0.5 * new[3] * new[4]
             if seps:
                 overlaps += min(seps) < lo - 0.5
                 not_flush += not (lo - 0.5 <= min(seps) <= hi + 0.5)
@@ -157,6 +160,7 @@ def run(scripts, n, render_dir=None, seed=7):
         sequences=n, opens=opens,
         opens_that_moved_or_resized_an_existing_window=moved,
         new_window_overlapping=overlaps, new_window_not_at_the_spacing_from_anything=not_flush,
+        new_window_opened_mostly_off_screen=hidden,
         aspect_median=round(statistics.median(p["aspect"] for p in per), 2),
         taller_than_wide=sum(p["aspect"] < 1 for p in per),
         dead_area_mean_px2=round(statistics.mean(p["dead"] for p in per)),

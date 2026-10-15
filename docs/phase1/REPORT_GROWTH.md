@@ -135,17 +135,27 @@ change only moves the group as a whole.
 
 | | Released | This change |
 |---|---|---|
-| Opening-order sweep (random ≈ 0.69) | 0.74 | **0.99** |
+| Opening-order sweep (random ≈ 0.69) | 0.74 | **0.96** |
 | A SUPER+G press keeps it as it is | 90 | **106** |
 | Existing windows moved / overlaps / off the spacing | 0 / 0 / 0 | 0 / 0 / 0 |
 | Rigid after opening | 0 | 0 |
-| Median aspect / taller than wide | 1.29 / 24 | 1.28 / 29 |
-| Group centre to screen centre (median) | 281 px | 355 px |
-| Join time (3 / 12 / 20 windows) | | 0.5–3 ms (unchanged, plus a hole search) |
+| Median aspect / taller than wide | 1.29 / 24 | 1.27 / 30 |
+| Group centre to screen centre (median) | 281 px | 345 px |
+| Screen covered (median) | 0.71 | 0.65 |
+| New window opened mostly (>50%) off screen | 580 of 1002 | **673 of 1002** |
 
-Growing outward from a fixed central anchor spreads the group further
-than re-centring it at every step. That's the cost of the anchor staying
-put.
+Join time, including the hole search: median 2.3 / 4.6 / 9 / 15 ms with
+6 / 12 / 20 / 30 windows open (worst 22 ms). Bursts don't stall.
+
+**Costs, stated plainly:**
+- With these app sizes on a 1080p screen, most new windows already opened
+  more than half off-screen. Growing outward round a fixed, often large,
+  central anchor makes that more common (58% → 67%).
+- Weighting visibility more strongly is exactly what broke the sweep
+  (windows jumped to whichever side had room). Visibility is kept as a
+  tie-breaker, and the infinite desktop pans to the window.
+- The group also sits further from the screen centre, because the anchor
+  stays put instead of the group being re-centred at every step.
 
 ## Renders (actual output, `spiral/growth/`)
 
@@ -155,6 +165,24 @@ put.
 | `growth_mixed_8.png`, `growth_mixed_12.png` | mixed sizes, frame by frame, flow line in opening order |
 | `close_and_reuse.png` | a window closes, nothing moves, the next window takes its hole |
 | `oversized_anchor_visible.png` | your live test's six terminals: released vs this change |
+
+## Also worth knowing
+
+- **SUPER+G on a single window** now centres it in the usable area (it
+  used to do nothing with fewer than two windows). With one window open,
+  the next press moves it to the centre.
+- **One test,** `test_opening_after_super_g_continues_super_gs_own_arm`,
+  pins the shared model. After SUPER+G, a new window reads SUPER+G's arm
+  (prominence order) and continues its sweep without moving anything.
+- **One live-checkout edit, reverted:** at the start, one refactor
+  (byte-identical output on all 291 benchmark layouts) was written into
+  the live `~/dxrice/scripts/dxrice_spiral.py`. It was reverted with
+  `git checkout` within a minute, before any work continued in the
+  worktree. Nothing else touched the live checkout until the final
+  fast-forward.
+- **Commit email:** commits use `dexovisio@gmail.com`, your earlier
+  correction of the `dexovision` in briefs. Tell me if this one is meant
+  differently.
 
 ## Remaining limitations
 
