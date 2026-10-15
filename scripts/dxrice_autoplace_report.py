@@ -9,10 +9,11 @@ compositor, nothing on screen), and measures what a user would see.
 same way (e.g. a worktree of an older commit); the default is this one.
 
 Per open: did an EXISTING window move or change size; is the new window
-exactly one gap from something, and clear of everything. Per finished
-sequence: shape (bounding-box aspect -- the screen is 16:9), dead pockets
-(dxrice_arrange_report.measure), whether SUPER+G's own "this is already a
-good arrangement" test (_shape_is_coherent) accepts it, how far the
+at the composition spacing from something (dxrice_spiral's range; exactly
+Hyprland's 5 px gap for a checkout from before the spiral redesign), and
+clear of everything. Per finished sequence: shape (bounding-box aspect --
+the screen is 16:9), concave pockets (dxrice_arrange_report.measure),
+whether a SUPER+G press keeps it as it is (at most recentred), how far the
 composition's centre sits from the screen's, and how much of the screen
 is covered.
 """
@@ -90,6 +91,11 @@ def run(scripts, n, render_dir=None, seed=7):
     apw = importlib.import_module("dxrice_auto_place_window")
     arr = importlib.import_module("dxrice_auto_arrange")
     report = importlib.import_module("dxrice_arrange_report")
+    if os.path.exists(os.path.join(scripts, "dxrice_spiral.py")):
+        spiral = importlib.import_module("dxrice_spiral")
+        lo, hi = spiral.SPACING_MIN_DEFAULT, spiral.SPACING_MAX_DEFAULT
+    else:  # a checkout from before the spiral redesign: exact gaps_in
+        lo = hi = GAP
     apw.get_monitor_bounds = lambda: MON
     apw.time.sleep = lambda s: None
     rng = random.Random(seed)
@@ -109,8 +115,8 @@ def run(scripts, n, render_dir=None, seed=7):
             new = next(r for r in rows if r[0] == addr)
             seps = [_sep(new, r) for r in rows if r[0] != addr]
             if seps:
-                overlaps += min(seps) < GAP - 0.5
-                not_flush += abs(min(seps) - GAP) > 0.5
+                overlaps += min(seps) < lo - 0.5
+                not_flush += not (lo - 0.5 <= min(seps) <= hi + 0.5)
         rows = h.rows()
         m, dead = report.measure(rows)
         bw, bh = m["bbox"]
@@ -119,7 +125,11 @@ def run(scripts, n, render_dir=None, seed=7):
         cover = sum(max(0, min(x + w, 1920) - max(x, 0)) * max(0, min(y + hh, 1080) - max(y, 0))
                     for _a, x, y, w, hh in rows) / (1920 * 1080)
         el = [{"address": a, "at": [x, y], "size": [w, hh]} for a, x, y, w, hh in rows]
-        per.append(dict(aspect=bw / bh, dead=m["dead_area"], coherent=arr._shape_is_coherent(el, [], GAP),
+        kept = arr.auto_arrange(el, [], MON, GAP)
+        deltas = {(x - e["at"][0], y - e["at"][1], w - e["size"][0], hh2 - e["size"][1])
+                  for (_a, x, y, w, hh2), e in zip(kept, el)}
+        accepted = len(deltas) == 1 and next(iter(deltas))[2:] == (0, 0)
+        per.append(dict(aspect=bw / bh, dead=m["dead_area"], coherent=accepted,
                         off_center=off, cover=min(cover, 1.0), n=len(rows)))
         if render_dir and k < 8:
             os.makedirs(render_dir, exist_ok=True)
@@ -128,7 +138,7 @@ def run(scripts, n, render_dir=None, seed=7):
     return dict(
         sequences=n, opens=opens,
         opens_that_moved_or_resized_an_existing_window=moved,
-        new_window_overlapping=overlaps, new_window_not_exactly_one_gap_from_anything=not_flush,
+        new_window_overlapping=overlaps, new_window_not_at_the_spacing_from_anything=not_flush,
         aspect_median=round(statistics.median(p["aspect"] for p in per), 2),
         taller_than_wide=sum(p["aspect"] < 1 for p in per),
         dead_area_mean_px2=round(statistics.mean(p["dead"] for p in per)),

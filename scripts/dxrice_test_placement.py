@@ -24,6 +24,46 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_auto_place_window as apw
 import dxrice_auto_arrange as arr
 import dxrice_resize_memory
+import dxrice_spiral
+
+
+def spacing_violations(rows, band=None):
+    """Pairs breaking the composition spacing in a finished SUPER+G /
+    placement result: overlapping, closer than the spacing minimum, or
+    facing each other across a slit (further apart than the spacing
+    maximum but not yet open space, dxrice_spiral.SLIT_MAX). Facing =
+    sharing more than 40 px of edge, the benchmark's own definition."""
+    lo, hi = band or (dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT)
+    out = []
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            a, b = rows[i], rows[j]
+            ra = (a[1], a[2], a[1] + a[3], a[2] + a[4])
+            rb = (b[1], b[2], b[1] + b[3], b[2] + b[4])
+            sep = max(ra[0] - rb[2], rb[0] - ra[2], ra[1] - rb[3], rb[1] - ra[3])
+            if sep < lo - 0.5:
+                out.append((a[0], b[0], "too close", sep))
+                continue
+            oy = min(ra[3], rb[3]) - max(ra[1], rb[1])
+            ox = min(ra[2], rb[2]) - max(ra[0], rb[0])
+            facing = (oy > 40 and ox <= 0) or (ox > 40 and oy <= 0)
+            if facing and hi + 0.5 < sep <= dxrice_spiral.SLIT_MAX:
+                out.append((a[0], b[0], "slit", sep))
+    return out
+
+
+def assert_composed(tc, rows):
+    """A finished composition: no overlap, no dead strip, and every window
+    within the composition spacing of at least one other (nothing left
+    stranded)."""
+    tc.assertEqual(spacing_violations(rows), [], rows)
+    if len(rows) < 2:
+        return
+    hi = dxrice_spiral.SPACING_MAX_DEFAULT
+    for r in rows:
+        sep = min(max(o[1] - (r[1] + r[3]), r[1] - (o[1] + o[3]), o[2] - (r[2] + r[4]), r[2] - (o[2] + o[4]))
+                  for o in rows if o is not r)
+        tc.assertLessEqual(sep, hi + 0.5, f"{r[0]} is not within the spacing of any neighbour: {rows}")
 
 GAP = 5
 
@@ -693,7 +733,7 @@ class TestSuperGWholeComposition(unittest.TestCase):
                   {"address": "dlg", "at": [800, -400], "size": [260, 180]}]
         r = arr.auto_arrange(layout, fixed, self.MON, self.GAP)
         for win in r:
-            self.assertLessEqual(self._sep(win, r), self.GAP + 2, f"{win[0]} left detached: {r}")
+            self.assertLessEqual(self._sep(win, r), dxrice_spiral.SPACING_MAX_DEFAULT + 1, f"{win[0]} left detached: {r}")
 
 
 class _RoundShapeFixtures(unittest.TestCase):
@@ -708,9 +748,10 @@ class _RoundShapeFixtures(unittest.TestCase):
     else (the detachment cost included) is production behaviour."""
 
     def setUp(self):
-        saved = arr.SHAPE_ASPECT_EXPONENT
-        arr.SHAPE_ASPECT_EXPONENT = 0.0
-        self.addCleanup(setattr, arr, "SHAPE_ASPECT_EXPONENT", saved)
+        import dxrice_spiral
+        saved = dxrice_spiral.SHAPE_ASPECT_EXPONENT
+        dxrice_spiral.SHAPE_ASPECT_EXPONENT = 0.0
+        self.addCleanup(setattr, dxrice_spiral, "SHAPE_ASPECT_EXPONENT", saved)
 
 
 class TestSuperGResize(_RoundShapeFixtures):
@@ -863,92 +904,56 @@ class TestSuperGResize(_RoundShapeFixtures):
         for s in sizes[1:]:
             self.assertEqual(s, sizes[0], f"W0 kept changing size across repeated runs: {sizes}")
 
-    def test_resize_closes_a_real_notch_against_a_tidy_grid(self):
-        """SECOND re-pick of this fixture's own expectation, this time for
-        a GOOD reason rather than a bug: this used to assert resize must
-        NOT fire here (a tidy pre-arranged grid of 10 mediums, 500x400
-        each, plus a 950x750 outlier) because, before silhouette-notch
-        awareness existed, the per-step resize's composition benefit alone
-        didn't outweigh a real move-only alternative. Once notch awareness
-        landed, the real reason this exact geometry benefits from resize
-        became visible: 950x750 is not a clean multiple of the grid's
-        500x400 cells on either axis, so BIGGER sitting in the grid at its
-        own size leaves a genuine silhouette notch against its neighbours
-        (measured: 8100 total notch cost at full size vs 4836 after a 10%
-        shrink) -- exactly the "shrink 5-10% to eliminate a skinny channel
-        while preserving a useful size" trade-off the resize feature exists
-        for. Confirmed via the whole-composition safety check (not just a
-        per-step local score): the resized composition's _final_cost
-        genuinely beats the true move-only alternative's (9561 vs 11294),
-        and the result is stable (identical size) across five consecutive
-        presses -- a real, reachable, well-behaved win, not noise."""
+    def test_oversized_outlier_in_a_tidy_grid_is_the_one_resized(self):
+        """A tidy set of ten 500x400 mediums plus one 950x750 outlier. Under
+        the packed solver this pinned an exact 10% shrink that closed a
+        silhouette notch (855x675); the spiral composer has no notches to
+        close (neighbours sit 16-24 px apart, open space is allowed), so
+        what is pinned now is the policy itself: if anything is resized it
+        is the outlier, by at most MAX_SHRINK_FRACTION, the mediums keep
+        their size, and the size is identical across five presses."""
         eligible = [self._mk(f"M{i}", (i % 5) * 510, (i // 5) * 410, 500, 400) for i in range(10)]
         eligible.append(self._mk("BIGGER", 2600, 100, 950, 750))
         layout = eligible
         sizes = []
         for _ in range(5):
             result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+            for a, _x, _y, w, h in result:
+                if a != "BIGGER":
+                    self.assertEqual((w, h), (500, 400), f"{a} (a typical window) was resized")
             bigger = next(r for r in result if r[0] == "BIGGER")
             sizes.append((bigger[3], bigger[4]))
             layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
-        self.assertEqual(sizes[0], (855, 675), f"expected a clean 10% shrink closing the notch, got {sizes[0]}")
         min_w = round(950 * (1.0 - apw.MAX_SHRINK_FRACTION))
         min_h = round(750 * (1.0 - apw.MAX_SHRINK_FRACTION))
         self.assertGreaterEqual(sizes[0][0], min_w, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
         self.assertGreaterEqual(sizes[0][1], min_h, "shrunk more than MAX_SHRINK_FRACTION allows in one step")
-        for s in sizes[1:]:
-            self.assertEqual(s, sizes[0], f"BIGGER kept changing size across repeated runs: {sizes}")
+        for sz in sizes[1:]:
+            self.assertEqual(sz, sizes[0], f"BIGGER kept changing size across repeated runs: {sizes}")
 
-    def test_resize_rejected_when_it_introduces_a_real_dead_gap(self):
-        """Root-cause regression: _final_cost used to compute ONLY
-        composition_cost + weighted movement, completely blind to
-        composition_penalty (dead gaps/slivers/alignment) -- so it could
-        keep a resize that measurably improved mass distribution even when
-        the completed layout left a real, unblocked gap a move-only
-        alternative never had at all. Live-reproduced with this exact
-        6-window fixture (from a seeded randomized sweep, n=6 seed=18):
-        before this fix, 0x4_huge_main was resized 1800x1213 -> 1440x970,
-        which measurably improved composition_cost but left a genuine
-        122px unblocked gap against a neighbor. After folding
-        composition_penalty into _final_cost, the same fixture correctly
-        falls back to move-only (0x4_huge_main keeps its original size)
-        because the move-only alternative has zero dead-gap penalty
-        anywhere, which the resize-enabled alternative does not.
-
-        _refine_notch_alignment is stubbed out for this test: it now runs
-        a further, independently-tested pass on top of whichever build
-        wins here (see TestNotchAlignmentRefinement), and on this exact
-        fixture it legitimately shrinks 0x4_huge_main further still (to
-        1614px, matching 0x1_landscape_wide's width). That is real,
-        separately-verified behavior, not this test's concern -- mixing
-        it in here previously forced this test to assert a weaker "not
-        equal to one specific known-bad value" instead of the one value
-        that actually encodes what THIS test exists to check: does
-        _final_cost's own dead-gap term correctly reject the bad resize
-        and fall back to true move-only, on its own, with nothing else
-        layered on top."""
-        orig_refine = arr._refine_notch_alignment
-        arr._refine_notch_alignment = lambda *a, **k: None
-        try:
-            eligible = [
-                self._mk("0x0_portrait", 1830, -131, 323, 1138),
-                self._mk("0x1_landscape_wide", -454, -143, 1614, 520),
-                self._mk("0x2_portrait", 534, -649, 426, 962),
-                self._mk("0x3_ultra_wide", -160, -414, 1982, 309),
-                self._mk("0x4_huge_main", -556, 570, 1800, 1213),
-                self._mk("0x5_ultra_wide", 474, 254, 2147, 389),
-            ]
-            result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
-        finally:
-            arr._refine_notch_alignment = orig_refine
+    def test_resize_never_leaves_a_slit(self):
+        """Root-cause regression from the packed solver: a resize that
+        improved mass distribution was once kept although it left a real
+        122px unblocked gap (n=6 seed=18 of a randomized sweep). The same
+        fixture now: whatever the composer decides about 0x4_huge_main,
+        the result has no slit -- two facing windows further apart than
+        the composition spacing but too close to read as open space
+        (dxrice_spiral.SLIT_MAX) -- and no pair closer than the spacing
+        minimum; the huge window is never cut by more than
+        MAX_SHRINK_FRACTION."""
+        eligible = [
+            self._mk("0x0_portrait", 1830, -131, 323, 1138),
+            self._mk("0x1_landscape_wide", -454, -143, 1614, 520),
+            self._mk("0x2_portrait", 534, -649, 426, 962),
+            self._mk("0x3_ultra_wide", -160, -414, 1982, 309),
+            self._mk("0x4_huge_main", -556, 570, 1800, 1213),
+            self._mk("0x5_ultra_wide", 474, 254, 2147, 389),
+        ]
+        result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
+        self.assertEqual(spacing_violations(result), [], result)
         huge = next(r for r in result if r[0] == "0x4_huge_main")
-        self.assertEqual((huge[3], huge[4]), (1800, 1213),
-                          f"expected fallback to move-only (original size kept), got {huge[3]}x{huge[4]}")
-        rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
-        penalty_total = sum(
-            apw.composition_penalty(r, rects[:i] + rects[i + 1:], GAP) for i, r in enumerate(rects)
-        )
-        self.assertLessEqual(penalty_total, 0.0, f"result should have no net dead-gap penalty: {penalty_total}")
+        self.assertGreaterEqual(huge[3], round(1800 * (1.0 - apw.MAX_SHRINK_FRACTION)))
+        self.assertGreaterEqual(huge[4], round(1213 * (1.0 - apw.MAX_SHRINK_FRACTION)))
 
     def test_position_only_already_good_resizes_nothing(self):
         """6: a composition where move-only already produces a good result
@@ -1074,24 +1079,15 @@ class TestSuperGResize(_RoundShapeFixtures):
         r2 = arr.auto_arrange(round1, [], (0, 0, 1920, 1080), GAP)
         self.assertEqual(sorted(r1), sorted(r2), "5 identically-sized windows did not converge on a repeated run")
 
-    def test_balanced_adjustment_can_resize_more_than_one_window(self):
-        """Size-optimization case D: resize is a per-INCREMENTAL-STEP
-        decision (see _choose_size_and_position), not a single global
-        "pick the one worst offender" choice -- so when a layout genuinely
-        has more than one real outlier against the dominant population,
-        more than one of them may each independently be resized in the
-        SAME auto_arrange call, not just the single most-oversized one.
-        Verified empirically (not assumed): of 1000 seeded scattered
-        layouts of this shape (two differently-sized big windows, 1200x700
-        and 1400x900, among 12 real 500x400 mediums -- close enough in
-        size to each other to both individually exceed
-        RESIZE_ELIGIBLE_RATIO_FLOOR against the mediums' dominant class,
-        but different enough from EACH OTHER that they don't merge into
-        one combined "big" class and mutually exempt each other -- see
-        _typical_area's own docstring), multi-window resize fired in 4 of
-        1000; this is seed 20 of that sweep, confirmed stable (identical
-        sizes) across five consecutive presses and within
-        MAX_SHRINK_FRACTION of each window's own original size."""
+    def test_one_resize_per_set_of_windows(self):
+        """Policy (spiral redesign): SUPER+G resizes at most ONE window of a
+        set -- the most oversized one -- and, once DXrice has resized any
+        window of the set, later presses only move. The packed solver
+        resized per incremental step, and on this fixture (two different
+        big windows, 1200x700 and 1400x900, among twelve 500x400 mediums;
+        seed 20 of a 1000-layout sweep) trimmed both. Conservative now: at
+        most BIG2 (the larger) is cut, within MAX_SHRINK_FRACTION, and the
+        sizes are identical across five presses with resize memory."""
         eligible = [
             self._mk("BIG1", 2560, 805, 1200, 700), self._mk("BIG2", 2822, 969, 1400, 900),
             self._mk("M0", 219, -68, 500, 400), self._mk("M1", 2360, 701, 500, 400),
@@ -1102,22 +1098,22 @@ class TestSuperGResize(_RoundShapeFixtures):
             self._mk("M10", 1287, -173, 500, 400), self._mk("M11", 418, 49, 500, 400),
         ]
         orig = {w["address"]: tuple(w["size"]) for w in eligible}
-        layout = eligible
+        layout, locked = eligible, set()
         resized_sizes = []
         for _ in range(5):
-            result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP)
+            result = arr.auto_arrange(layout, [], (0, 0, 1920, 1080), GAP, resize_locked=frozenset(locked))
             resized = {a: (w, h) for a, x, y, w, h in result if (w, h) != orig[a]}
             resized_sizes.append(resized)
+            locked |= set(resized)
             layout = [self._mk(a, x, y, w, h) for a, x, y, w, h in result]
-        self.assertGreaterEqual(len(resized_sizes[0]), 2,
-                                 f"expected at least 2 distinct windows resized, got {resized_sizes[0]}")
+        self.assertLessEqual(len(resized_sizes[0]), 1, f"more than one window resized: {resized_sizes[0]}")
+        self.assertTrue(set(resized_sizes[0]) <= {"BIG2"}, f"not the most oversized window: {resized_sizes[0]}")
         for addr, (w, h) in resized_sizes[0].items():
             ow, oh = orig[addr]
-            min_w, min_h = round(ow * (1.0 - apw.MAX_SHRINK_FRACTION)), round(oh * (1.0 - apw.MAX_SHRINK_FRACTION))
-            self.assertGreaterEqual(w, min_w, f"{addr} shrunk past MAX_SHRINK_FRACTION")
-            self.assertGreaterEqual(h, min_h, f"{addr} shrunk past MAX_SHRINK_FRACTION")
-        for s in resized_sizes[1:]:
-            self.assertEqual(s, resized_sizes[0], f"resize sizes kept changing across repeated runs: {resized_sizes}")
+            self.assertGreaterEqual(w, round(ow * (1.0 - apw.MAX_SHRINK_FRACTION)), f"{addr} shrunk past MAX_SHRINK_FRACTION")
+            self.assertGreaterEqual(h, round(oh * (1.0 - apw.MAX_SHRINK_FRACTION)), f"{addr} shrunk past MAX_SHRINK_FRACTION")
+        for sz in resized_sizes[1:]:
+            self.assertEqual(sz, resized_sizes[0], f"sizes kept changing across presses: {resized_sizes}")
 
     def test_moderately_oversized_window_never_resizes_among_many_tiny_dialogs(self):
         """Found by dxrice_placement_benchmark.py's random-layout harness,
@@ -1759,9 +1755,9 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
         """Reverses an earlier decision (this was test_already_excellent_
         2x2_grid_stays_put): four equal windows in a tight, centred 2x2
         grid were treated as finished. A grid is valid -- no overlaps,
-        exact gaps -- but it is the opposite of the airy, staggered
-        composition SUPER+G is for, so it is rebuilt: no cross junction
-        left, exact gaps, no resize; and the result is then left alone."""
+        exact gaps -- but it is the opposite of the airy spiral SUPER+G is
+        for, so it is rebuilt: no cross junction left, composition spacing,
+        no resize; and the result is then left alone."""
         w, h = 300, 200
         gap = GAP2
         left, top = 657, 337
@@ -1773,7 +1769,7 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
         ]
         first = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
         rects = [apw.rect_for(x, y, w2, h2) for _a, x, y, w2, h2 in first]
-        self.assertEqual(arr._cross_junctions(rects, gap), 0, f"still a grid: {first}")
+        self.assertEqual(dxrice_spiral.cross_junctions(rects), 0, f"still a grid: {first}")
         self.assertTrue(all((w2, h2) == (w, h) for _a, _x, _y, w2, h2 in first), "a window was resized")
         self.assertTrue(_no_overlaps([(x, y, w2, h2) for _a, x, y, w2, h2 in first], gap))
         again = arr.auto_arrange([{"address": a, "at": [x, y], "size": [w2, h2]} for a, x, y, w2, h2 in first],
@@ -1788,6 +1784,9 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
         self.assertEqual(len(results), 1, "same input produced different layouts across runs")
 
     def test_gap_exact_where_adjacent(self):
+        """Neighbours sit the composition spacing apart (16-24 px by
+        default), not Hyprland's gaps_in: the packed solver's exact 5 px
+        became the spiral's spacing range."""
         rects = _arrange([(900, 0, 400, 300), (900, 305, 400, 300), (900, 610, 400, 300)])
         found_adjacent = False
         for i in range(len(rects)):
@@ -1797,12 +1796,12 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
                 ri, rj = rect(*rects[i]), rect(*rects[j])
                 xg = apw._axis_gap(ri[0], ri[2], rj[0], rj[2])
                 yg = apw._axis_gap(ri[1], ri[3], rj[1], rj[3])
-                if yg == 0.0 and xg > 0:
+                if yg == 0.0 and 0 < xg <= dxrice_spiral.SLIT_MAX:
                     found_adjacent = True
-                    self.assertAlmostEqual(xg, GAP2, delta=1.5)
-                if xg == 0.0 and yg > 0:
+                    self.assertTrue(dxrice_spiral.SPACING_MIN_DEFAULT <= xg <= dxrice_spiral.SPACING_MAX_DEFAULT, xg)
+                if xg == 0.0 and 0 < yg <= dxrice_spiral.SLIT_MAX:
                     found_adjacent = True
-                    self.assertAlmostEqual(yg, GAP2, delta=1.5)
+                    self.assertTrue(dxrice_spiral.SPACING_MIN_DEFAULT <= yg <= dxrice_spiral.SPACING_MAX_DEFAULT, yg)
 
     def test_no_overlaps_various_sizes(self):
         rects = _arrange([(900, 0, 700, 200), (900, 205, 150, 600), (900, 810, 900, 250),
@@ -1831,7 +1830,17 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
 
 
 class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
-    """A structural (not shape-metric) fix for a real bug: composition_cost's
+    """Spiral redesign: what counts as finished changed. The packed solver
+    treated any connected, centred, 5 px-flush shape as finished; the
+    spiral composer treats ITS OWN result as finished (the keep-or-rebuild
+    gate in dxrice_spiral.compose) and rebuilds rows, columns and aligned
+    L/T blocks into a staggered composition. So these tests now pin: a
+    shape is rebuilt at most once -- the second press touches nothing --
+    nothing is resized, and an already staggered shape at the composition
+    spacing is left exactly where it is. The packed-solver history below
+    is kept for context.
+
+    History: a structural (not shape-metric) fix for a real bug: composition_cost's
     covariance-based anisotropy can be won by a candidate that is actually a
     worse composition to a human eye (see the stay-put veto's own comment in
     dxrice_auto_arrange.py -- a correctly-centered 2x2 grid initially got
@@ -1847,6 +1856,14 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
     asymmetric cluster), not just the 2x2 grid the bug was found on, while
     still allowing genuinely bad layouts (an axis-concentrated stack) to be
     rearranged."""
+
+    def _assert_settles_in_one_press(self, name, eligible):
+        first = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
+        sizes = {e["address"]: tuple(e["size"]) for e in eligible}
+        self.assertTrue(all((w, h) == sizes[a] for a, _x, _y, w, h in first), f"{name}: a window was resized")
+        self.assertEqual(spacing_violations(first), [], f"{name}: {first}")
+        self._assert_untouched(f"{name}, second press",
+                               [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in first])
 
     def _assert_untouched(self, name, eligible, gap=GAP2):
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
@@ -1870,9 +1887,9 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         left, top = 960 - total_w // 2, 540 - total_h // 2
         eligible = [{"address": f"W{r*3+c}", "at": [left + c * (w + gap), top + r * (h + gap)], "size": [w, h]}
                     for r in range(3) for c in range(3)]
-        before = arr._cross_junctions([apw.rect_for(*_xywh_of(e)) for e in eligible], gap)
+        before = dxrice_spiral.cross_junctions([apw.rect_for(*_xywh_of(e)) for e in eligible])
         first = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
-        after = arr._cross_junctions([apw.rect_for(x, y, w2, h2) for _a, x, y, w2, h2 in first], gap)
+        after = dxrice_spiral.cross_junctions([apw.rect_for(x, y, w2, h2) for _a, x, y, w2, h2 in first])
         self.assertEqual(before, 4)
         self.assertLess(after, before, "the rigid grid was not made less rigid")
         self.assertTrue(all((w2, h2) == (w, h) for _a, _x, _y, w2, h2 in first), "a window was resized")
@@ -1880,12 +1897,13 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
                                [{"address": a, "at": [x, y], "size": [w2, h2]} for a, x, y, w2, h2 in first])
 
     def test_l_shape_stays_put(self):
+        """An aligned L (two shared edges) is staggered once, then final."""
         eligible = [
             {"address": "A", "at": [660, 240], "size": [400, 300]},
             {"address": "B", "at": [660, 545], "size": [400, 300]},
             {"address": "C", "at": [1065, 545], "size": [400, 300]},
         ]
-        self._assert_untouched("L-shape", eligible)
+        self._assert_settles_in_one_press("L-shape", eligible)
 
     def test_t_shape_stays_put(self):
         eligible = [
@@ -1893,14 +1911,15 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
             {"address": "B", "at": [660, 495], "size": [295, 250]},
             {"address": "C", "at": [960, 495], "size": [295, 250]},
         ]
-        self._assert_untouched("T-shape", eligible)
+        self._assert_settles_in_one_press("T-shape", eligible)
 
     def test_real_overlapping_staircase_stays_put(self):
         """Each step genuinely shares part of an edge with the next -- a
         pure corner-touching diagonal (no shared edge at all) is NOT
         adjacency by this or any reasonable definition, so that variant is
-        deliberately not asserted to stay put here."""
-        w, h, gap = 300, 220, GAP2
+        deliberately not asserted to stay put here. Already staggered, at
+        the composition spacing, centred: left exactly where it is."""
+        w, h, gap = 300, 220, 20
         eligible = [
             {"address": "A", "at": [560, 220], "size": [w, h]},
             {"address": "B", "at": [560 + w // 2 + gap, 220 + h + gap], "size": [w, h]},
@@ -1914,7 +1933,7 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
             {"address": "s1", "at": [1165, 300], "size": [250, 195]},
             {"address": "s2", "at": [1165, 500], "size": [250, 195]},
         ]
-        self._assert_untouched("asymmetric cluster", eligible)
+        self._assert_settles_in_one_press("asymmetric cluster", eligible)
 
     def test_bad_vertical_stack_is_not_exempted(self):
         """The structural check must not accidentally make a genuinely bad
@@ -1930,21 +1949,17 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
         )
         self.assertGreater(total_move, 100, "a genuinely bad vertical stack was left untouched")
 
-    def test_two_separate_coherent_clusters_stay_separate(self):
-        """Live-verified false negative (this session's own re-investigation):
-        requiring ALL eligible windows to share ONE connected component
-        conflated "coherent" with "connected to everything else" -- two
-        individually-perfect, already-centered 2x2 grids sitting apart
-        (e.g. one app's windows grouped left, an unrelated app's grouped
-        right -- a deliberate, sensible arrangement) got merged into one
-        supercluster, moving every window thousands of pixels. Multiple
-        components are now allowed provided each non-trivial one is
-        itself a reasonable shape."""
+    def test_two_separate_clusters_become_one_composition(self):
+        """Decision reversed by the spiral redesign (this was
+        test_two_separate_coherent_clusters_stay_separate): two staggered
+        groups sitting apart were each accepted as finished and left
+        separate. SUPER+G now composes every eligible window on the
+        workspace into ONE spiral -- that is what the galaxy is -- so the
+        groups are joined: every window ends within the composition
+        spacing of another, and the result is final on the next press."""
         w, h, gap = 280, 220, GAP2
 
         def grid(prefix, left, top):
-            # Staggered, not a grid: a rigid grid is now (rightly) rebuilt,
-            # which is not what this test is about.
             s = (w + gap) // 2
             return [
                 {"address": f"{prefix}0", "at": [left, top], "size": [w, h]},
@@ -1953,21 +1968,23 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
                 {"address": f"{prefix}3", "at": [left + s + w + gap, top + h + gap], "size": [w, h]},
             ]
 
-        eligible = grid("L", 100, 330) + grid("R", 1150, 330)   # together centred, as before
+        eligible = grid("L", 100, 330) + grid("R", 1150, 330)
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), gap)
-        by_addr = {a: (x, y) for a, x, y, nw, nh in result}
-        for w2 in eligible:
-            addr = w2["address"]
-            self.assertEqual(by_addr[addr], tuple(w2["at"]), f"{addr} moved despite two already-good clusters")
+        for win in result:
+            sep = min(max(o[1] - (win[1] + win[3]), win[1] - (o[1] + o[3]), o[2] - (win[2] + win[4]), win[2] - (o[2] + o[4]))
+                      for o in result if o is not win)
+            self.assertLessEqual(sep, dxrice_spiral.SPACING_MAX_DEFAULT + 1, f"{win[0]} left apart: {result}")
+        self._assert_untouched("joined clusters, second press",
+                               [{"address": a, "at": [x, y], "size": [w2, h2]} for a, x, y, w2, h2 in result])
 
-    def test_isolated_dialog_far_from_a_coherent_cluster_is_left_alone(self):
-        """Companion to the two-clusters test: a single window sitting
-        clearly apart from the main cluster (not merely a few dozen
-        pixels past flush-adjacency, but genuinely separate) must not be
-        dragged into it."""
+    def test_isolated_dialog_far_from_a_cluster_joins_it(self):
+        """Decision reversed by the spiral redesign (this was
+        test_isolated_dialog_far_from_a_coherent_cluster_is_left_alone, and
+        PROGRESS.md listed the "deliberate standalone dialog" exemption as an
+        open question because it contradicts one composed cluster): the
+        dialog becomes part of the composition, as the small window it is
+        -- on the outer part of the sweep, not at the hub."""
         eligible = [
-            # A staggered (finished) cluster -- a rigid 2x2 grid would now
-            # be rebuilt for its own sake, which isn't what this tests.
             {"address": "M0", "at": [700, 400], "size": [280, 220]},
             {"address": "M1", "at": [985, 400], "size": [280, 220]},
             {"address": "M2", "at": [842, 625], "size": [280, 220]},
@@ -1975,21 +1992,11 @@ class TestAlreadyCoherentLayoutsAlgorithmB(unittest.TestCase):
             {"address": "dialog", "at": [100, 100], "size": [300, 200]},
         ]
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP2)
-        by_addr = {a: (x, y) for a, x, y, w2, h2 in result}
-        # This composition's center sits ~286px off the viewport center,
-        # past RECENTER_TOLERANCE_FACTOR, so SUPER+G moves the CAMERA onto
-        # it -- which on a compositor with no camera means translating
-        # every window by one shared delta. That is not the thing this
-        # test is guarding against, so the assertion is on the property
-        # that actually encodes "left alone": one identical delta for
-        # everything, i.e. the dialog's separation from the cluster comes
-        # through untouched. A re-layout that dragged the dialog in would
-        # give it a different delta from the cluster's, and still fails.
-        deltas = {w2["address"]: (by_addr[w2["address"]][0] - w2["at"][0],
-                                  by_addr[w2["address"]][1] - w2["at"][1])
-                  for w2 in eligible}
-        self.assertEqual(len(set(deltas.values())), 1,
-                          f"the dialog was re-laid-out, not merely translated: {deltas}")
+        self.assertEqual(spacing_violations(result), [], result)
+        d = next(r for r in result if r[0] == "dialog")
+        sep = min(max(o[1] - (d[1] + d[3]), d[1] - (o[1] + o[3]), o[2] - (d[2] + d[4]), d[2] - (o[2] + o[4]))
+                  for o in result if o is not d)
+        self.assertLessEqual(sep, dxrice_spiral.SPACING_MAX_DEFAULT + 1, f"dialog left apart: {result}")
 
     def test_isolated_singleton_too_close_to_cluster_is_not_exempted(self):
         """The flip side: a window that FAILS the strict flush-adjacency
@@ -2254,19 +2261,21 @@ class TestViewportRecenter(unittest.TestCase):
     gap and adjacency survives it untouched. These tests pin that down."""
 
     def _grid(self, ox, oy, w=300, h=200, gap=GAP):
-        """A finished composition: two rows, the second offset by half a
-        window (staggered). It used to be a 2x2 grid -- which SUPER+G now
-        rightly treats as unfinished (see TestRigidGridIsRebuilt) -- but
-        what these tests pin is the viewport behaviour, not grid-ness."""
-        s = (w + gap) // 2
-        return [{"address": "A", "at": [ox, oy], "size": [w, h]},
-                {"address": "B", "at": [ox + w + gap, oy], "size": [w, h]},
-                {"address": "C", "at": [ox + s, oy + h + gap], "size": [w, h]},
-                {"address": "D", "at": [ox + s + w + gap, oy + h + gap], "size": [w, h]}]
+        """A finished composition -- SUPER+G's own result for four windows
+        (the spiral redesign's notion of finished; a hand-made 5 px block
+        would now rightly be rebuilt) -- with its bounding box's top-left
+        moved to (ox, oy). What these tests pin is the viewport behaviour."""
+        start = [{"address": a, "at": [i * (w + 40), (i % 2) * 90], "size": [w, h]} for i, a in enumerate("ABCD")]
+        done = arr.auto_arrange(start, [], (0, 0, 1920, 1080), gap)
+        x0, y0 = min(r[1] for r in done), min(r[2] for r in done)
+        return [{"address": a, "at": [x - x0 + ox, y - y0 + oy], "size": [ww, hh]} for a, x, y, ww, hh in done]
 
     def test_already_centered_composition_is_untouched(self):
-        # bbox 757x405, centred on (960, 540)
-        eligible = self._grid(582, 338)
+        # SUPER+G's own result is centred on (960, 540)
+        eligible = self._grid(0, 0)
+        b0, b1 = min(e["at"][0] for e in eligible), max(e["at"][0] + e["size"][0] for e in eligible)
+        c0, c1 = min(e["at"][1] for e in eligible), max(e["at"][1] + e["size"][1] for e in eligible)
+        eligible = self._grid(960 - (b1 - b0) // 2, 540 - (c1 - c0) // 2)
         result = arr.auto_arrange(eligible, [], (0, 0, 1920, 1080), GAP)
         by_addr = {a: (x, y, w, h) for a, x, y, w, h in result}
         for win in eligible:
@@ -2520,8 +2529,9 @@ class TestResizeSettleGapCorrection(unittest.TestCase):
     def test_gaps_are_exact_against_the_size_the_client_actually_took(self):
         """The bug, reproduced as state: a window whose real size is NOT
         the one the layout maths originally assumed. Recomputing positions
-        against the real size must still produce exact gaps and no
-        overlaps -- that is what closes the dead strip."""
+        against the real size must still produce the composition spacing
+        (exact 5 px before the spiral redesign) and no overlaps -- that is
+        what closes the dead strip."""
         layout = self._seeded()
         # W0 was asked for 1200x750 by a resize pass; pretend the client
         # quantised itself to 1187x743 instead, as a cell-sized client would.
@@ -2536,16 +2546,9 @@ class TestResizeSettleGapCorrection(unittest.TestCase):
                 oy = min(ay1, by1) - max(ay0, by0)
                 self.assertFalse(ox > 0 and oy > 0,
                                   "positions computed against the real size still overlap")
-                xg = apw._axis_gap(ax0, ax1, bx0, bx1)
-                yg = apw._axis_gap(ay0, ay1, by0, by1)
-                # Where two windows are genuinely touching (flush on one
-                # axis, overlapping on the other) the gap must be exact --
-                # that is the dead strip this whole mechanism exists to
-                # prevent.
-                if yg == 0.0 and 0 < xg < 200:
-                    self.assertAlmostEqual(xg, GAP, delta=1.5)
-                if xg == 0.0 and 0 < yg < 200:
-                    self.assertAlmostEqual(yg, GAP, delta=1.5)
+        # Where two windows face each other the gutter must be the
+        # composition spacing or open space, never a dead strip.
+        self.assertEqual(spacing_violations(result), [], result)
 
     def test_settle_sizes_returns_promptly_when_a_client_refuses(self):
         """_settle_sizes waits for STABILITY, never for a requested size --
@@ -2754,12 +2757,15 @@ class TestFamilyAnchorPlacement(unittest.TestCase):
         mx1, my1 = 1660, 1156
         fx0, fy0 = final["at"]
         fx1, fy1 = fx0 + 840, fy0 + 489
-        touches_right = abs(fx0 - mx1 - GAP) < 1.0
-        touches_left = abs(mx0 - fx1 - GAP) < 1.0
-        touches_below = abs(fy0 - my1 - GAP) < 1.0
-        touches_above = abs(my0 - fy1 - GAP) < 1.0
+        # beside its parent at the composition spacing for that pair (5 px
+        # gaps_in before the spiral redesign)
+        want = dxrice_spiral.pair_spacing(840 * 489, 960 * 756, dxrice_spiral.read_spacing())
+        touches_right = abs(fx0 - mx1 - want) < 1.0
+        touches_left = abs(mx0 - fx1 - want) < 1.0
+        touches_below = abs(fy0 - my1 - want) < 1.0
+        touches_above = abs(my0 - fy1 - want) < 1.0
         self.assertTrue(touches_right or touches_left or touches_below or touches_above,
-                         f"dialog not placed flush against its family anchor: manager=({mx0},{my0},{mx1},{my1}) "
+                         f"dialog not placed beside its family anchor: manager=({mx0},{my0},{mx1},{my1}) "
                          f"dialog=({fx0},{fy0},{fx1},{fy1})")
 
 
@@ -2771,11 +2777,16 @@ class TestRealisticLayoutCorpus(unittest.TestCase):
     scattered/mixed-aspect layouts, and deliberately adversarial inputs
     designed to stay technically connected while containing large empty
     regions. Each case requires, in ONE SUPER+G invocation: zero overlaps,
-    zero unblocked facing-gap deviations from the configured gap (the
-    same blocking-aware check validated live this session -- a facing gap
-    is only acceptable if nothing could occupy it OR something actually
-    does), and zero movement on a second press (one-pass convergence, not
-    a slow multi-press settle)."""
+    zero unblocked facing gaps that are dead strips, and zero movement on a
+    second press (one-pass convergence, not a slow multi-press settle).
+
+    Spiral redesign: a facing gap is fine at the composition spacing
+    (16-24 px) and fine as open space (beyond dxrice_spiral.SLIT_MAX --
+    the airy composition keeps negative space on purpose); a dead strip is
+    one closer than the spacing minimum or a slit between the spacing
+    maximum and SLIT_MAX. The packed solver demanded exactly 5 px for
+    every facing pair, which made all negative space a defect.
+    Blocking-aware as before: a gap something actually occupies is fine."""
 
     GAP = 5
     MON = (0, 0, 1920, 1080)
@@ -2799,7 +2810,7 @@ class TestRealisticLayoutCorpus(unittest.TestCase):
                     continue
                 if min(y1, Y1) - max(y0, Y0) > 0.6:
                     g = X0 - x1 if x1 <= X0 else (x0 - X1 if X1 <= x0 else None)
-                    if g is not None and abs(g - self.GAP) > 0.6:
+                    if g is not None and self._dead(g):
                         blocked = any(
                             k != i and k != j
                             and R[k][3] > min(x1, X0) + 0.6 and R[k][1] < max(x1, X0) + g - 0.6
@@ -2809,7 +2820,7 @@ class TestRealisticLayoutCorpus(unittest.TestCase):
                             bad_gaps.append((t1, t2, "x", round(g, 1)))
                 if min(x1, X1) - max(x0, X0) > 0.6:
                     g = Y0 - y1 if y1 <= Y0 else (y0 - Y1 if Y1 <= y0 else None)
-                    if g is not None and abs(g - self.GAP) > 0.6:
+                    if g is not None and self._dead(g):
                         blocked = any(
                             k != i and k != j
                             and R[k][4] > min(y1, Y0) + 0.6 and R[k][2] < max(y1, Y0) + g - 0.6
@@ -2819,12 +2830,17 @@ class TestRealisticLayoutCorpus(unittest.TestCase):
                             bad_gaps.append((t1, t2, "y", round(g, 1)))
         return overlaps, bad_gaps
 
+    @staticmethod
+    def _dead(g):
+        lo, hi = dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT
+        return g < lo - 0.6 or hi + 0.6 < g <= dxrice_spiral.SLIT_MAX
+
     def _run_and_assert(self, layout):
         c1 = [dict(w, at=list(w["at"]), size=list(w["size"])) for w in layout]
         r1 = arr.auto_arrange(c1, [], self.MON, self.GAP)
         overlaps, bad_gaps = self._check(r1)
         self.assertEqual(overlaps, [], f"overlaps: {overlaps}")
-        self.assertEqual(bad_gaps, [], f"unblocked facing gaps not at the configured gap: {bad_gaps}")
+        self.assertEqual(bad_gaps, [], f"unblocked facing gaps that are dead strips: {bad_gaps}")
 
         l2 = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in r1]
         r2 = arr.auto_arrange(l2, [], self.MON, self.GAP)
@@ -2950,7 +2966,16 @@ class TestRealisticLayoutCorpus(unittest.TestCase):
 
 
 class TestNotchAlignmentRefinement(_RoundShapeFixtures):
-    """_refine_notch_alignment: the structural fix for the root cause the
+    """Spiral redesign: the packed solver's notch-refinement pass is gone --
+    notches (a window not flush with the edge of the block it sits in) are
+    a property of tightly packed blocks; the spiral composition staggers
+    on purpose and keeps negative space. The fixtures below are the live
+    reports and regressions that pass was built on, and what they protect
+    is still pinned against the spiral composer: no overlaps, no dead
+    strips (spacing_violations), no unjustified or repeated shrink, no
+    drift on later presses.
+
+    History: _refine_notch_alignment, the structural fix for the root cause the
     per-step incremental build cannot see (a window's locally-best choice
     can lock in an offset that forces a much worse notch onto a LATER
     window it has no way to anticipate). These pin down, with permanent
@@ -2964,53 +2989,24 @@ class TestNotchAlignmentRefinement(_RoundShapeFixtures):
     GAP = 5
 
     def test_mismatched_column_heights_notch_strictly_improves(self):
-        """Realistic fixture (three windows, a column split unevenly,
-        including a genuine 500px width mismatch between the top and
-        bottom window that NO repositioning can fully eliminate -- 'c' is
-        1200px wide against 'a's 1700px, so at least one side of that
-        pair always shows some mismatch; only a resize could truly zero
-        it out, which is a separate, existing mechanism this post-hoc
-        pass deliberately does not duplicate). What refinement CAN and
-        does do here: close the genuinely fixable part. Compares directly
-        against the unrefined incremental-build output -- the real,
-        verifiable claim is "strictly better, never worse," not an
-        unreachable zero."""
+        """The uneven-column fixture (a 500px width mismatch no
+        repositioning could remove from a packed column): the composition
+        is clean -- no overlaps, no dead strips -- and final on press 2."""
         eligible = [
             {"address": "a", "at": [0, 0], "size": [1700, 1100]},
             {"address": "b", "at": [1705, 0], "size": [1700, 650]},
             {"address": "c", "at": [1705, 655], "size": [1200, 700]},
         ]
-
-        def total_notch(result):
-            rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
-            return sum(apw._notch_penalty(r, rects[:i] + rects[i + 1:], self.GAP) for i, r in enumerate(rects))
-
-        refined = arr.auto_arrange(eligible, [], self.MON, self.GAP)
-        rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in refined]
-        for i in range(len(rects)):
-            for j in range(i + 1, len(rects)):
-                self.assertFalse(apw.overlaps(rects[i], rects[j]), f"overlap: {refined}")
-
-        orig_refine = arr._refine_notch_alignment
-        arr._refine_notch_alignment = lambda *a, **k: None
-        try:
-            unrefined = arr.auto_arrange(eligible, [], self.MON, self.GAP)
-        finally:
-            arr._refine_notch_alignment = orig_refine
-
-        self.assertLess(total_notch(refined), total_notch(unrefined),
-                         f"refinement did not improve this fixture: refined={refined} unrefined={unrefined}")
+        first = arr.auto_arrange(eligible, [], self.MON, self.GAP)
+        self.assertEqual(spacing_violations(first), [], first)
+        again = arr.auto_arrange([{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in first],
+                                 [], self.MON, self.GAP)
+        self.assertEqual(sorted(again), sorted(first))
 
     def test_refinement_never_introduces_a_dead_gap(self):
-        """LIVE REGRESSION: a first version of the refinement pass
-        compared one blended (composition_penalty + notch) sum, which let
-        a shift that improved notch enough "pay for" a newly-introduced,
-        genuinely unblocked 55px dead gap elsewhere -- a strictly worse
-        trade, not a repair. This exact adversarial hub/satellite fixture
-        (from TestRealisticLayoutCorpus's own case 13 shape family)
-        reproduced it; composition_penalty (dead-gap/sliver/align) summed
-        across the whole result must never be worse than before
-        refinement ran."""
+        """LIVE REGRESSION (packed solver): a notch shift once paid for a
+        new, unblocked 55px dead gap. On the same adversarial
+        hub/satellite fixture the composition has no dead strip at all."""
         eligible = [
             {"address": "hub", "at": [0, 0], "size": [1700, 1000]},
             {"address": "sideA", "at": [-600, 50], "size": [590, 400]},
@@ -3019,68 +3015,30 @@ class TestNotchAlignmentRefinement(_RoundShapeFixtures):
             {"address": "far_but_linked", "at": [-1250, 50], "size": [640, 400]},
         ]
         result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
-        rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
-        for i, r in enumerate(rects):
-            others = rects[:i] + rects[i + 1:]
-            self.assertLessEqual(apw._dead_gap_penalty(r, others, self.GAP), 0.0 + 1e-6,
-                                  f"refinement introduced a dead gap: {result}")
+        self.assertEqual(spacing_violations(result), [], result)
 
     def test_refinement_never_produces_unbounded_drift(self):
-        """LIVE REGRESSION: a chain of individually-"improving" alignment
-        shifts (round 1 fixes a notch against one neighbor, round 2 then
-        finds a DIFFERENT improving shift against another from that new
-        position) compounded into a window ending up 718px from its
-        incremental-build position -- each step locally justified, the
-        whole trajectory never re-examined, and an independent notch
-        measurement of the final result came back WORSE overall despite
-        every individual step claiming improvement. This exact pre-
-        refinement geometry (captured live from the 4-window mixed
-        portrait/landscape fixture that first exposed this) reproduced it
-        -- calling _refine_notch_alignment directly, not through
-        auto_arrange, since auto_arrange's own build-selection logic can
-        end up returning a DIFFERENT internal build than the one being
-        refined here, which would make any movement comparison meaningless.
-        No window may move further than NOTCH_REFINE_MAX_TOTAL_SHIFT from
-        where it started."""
-        placed = {
-            "wide1": (0, 0, 1900, 950),
-            "wide2": (0, 955, 1300, 600),
-            "tall1": (1305, 955, 650, 950),
-            "tall2": (700, 1560, 600, 900),
-        }
-        origin = {a: (x, y) for a, (x, y, w, h) in placed.items()}
-        reference_area = arr._typical_area([{"address": a, "at": [0, 0], "size": [w, h]}
-                                             for a, (x, y, w, h) in placed.items()])
-        original_size = {a: (w, h) for a, (x, y, w, h) in placed.items()}
-
-        arr._refine_notch_alignment(placed, [], self.GAP, reference_area, original_size)
-
-        for a, (x, y, w, h) in placed.items():
-            ox, oy = origin[a]
-            moved = math.hypot(x - ox, y - oy)
-            self.assertLessEqual(moved, arr.NOTCH_REFINE_MAX_TOTAL_SHIFT + 1e-6,
-                                  f"{a} moved {moved:.0f}px during refinement -- unbounded cascading drift")
+        """LIVE REGRESSION (packed solver): chained "improving" shifts drifted
+        a window 718px over one pass. The drift guarantee now: on the same
+        4-window mixed portrait/landscape geometry, nothing moves on the
+        second or third press."""
+        layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, (x, y, w, h) in {
+            "wide1": (0, 0, 1900, 950), "wide2": (0, 955, 1300, 600),
+            "tall1": (1305, 955, 650, 950), "tall2": (700, 1560, 600, 900)}.items()]
+        presses = []
+        for _ in range(3):
+            result = arr.auto_arrange(layout, [], self.MON, self.GAP)
+            presses.append(sorted(result))
+            layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
+        self.assertEqual(presses[1], presses[0], "the second press moved something")
+        self.assertEqual(presses[2], presses[1], "the third press moved something")
 
     def test_shrink_closes_the_original_live_user_report_notch(self):
-        """Permanent regression pin for the exact 6-window fixture the
-        shrink extension (_refine_notch_alignment's shrink candidates) was
-        built for, with auto_arrange's normal default (allow_resize=True,
-        the only way this feature is ever actually invoked by SUPER+G).
-        0x4_huge_main (1800px) and 0x1_landscape_wide (1614px) end up
-        flush vertically with a notch no shift alone could close; this
-        asserts the shrink both fires AND wins the whole-composition
-        resize-vs-move-only comparison, closing 0x4_huge_main's own notch
-        to exactly zero with no new dead gap anywhere.
-
-        This exists because a later fix for a DIFFERENT bug (threading
-        allow_resize into this function so auto_arrange(allow_resize=False)
-        genuinely never resizes -- see test_positions_only_pass_never_
-        changes_a_size) was first implemented by gating on the wrong of
-        two allow_resize values in scope, which silently also disabled
-        this exact shrink and reintroduced the live-reported notch even
-        though every other test still passed. Nothing else in this file
-        pins the DEFAULT, allow_resize=True behavior on this fixture, so
-        nothing else would have caught that."""
+        """The 6-window live-report fixture the packed solver's shrink was
+        built for (it pinned 0x4_huge_main trimmed to 1614x1186 to close a
+        notch). Pinned now: the result is clean, 0x4_huge_main is never
+        cut by more than MAX_SHRINK_FRACTION, and its size is identical on
+        the next two presses (resize memory carried as main() does)."""
         eligible = [
             {"address": "0x0_portrait", "at": [1830, -131], "size": [323, 1138]},
             {"address": "0x1_landscape_wide", "at": [-454, -143], "size": [1614, 520]},
@@ -3089,70 +3047,42 @@ class TestNotchAlignmentRefinement(_RoundShapeFixtures):
             {"address": "0x4_huge_main", "at": [-556, 570], "size": [1800, 1213]},
             {"address": "0x5_ultra_wide", "at": [474, 254], "size": [2147, 389]},
         ]
-        result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
-        huge = next(r for r in result if r[0] == "0x4_huge_main")
-        self.assertEqual((huge[3], huge[4]), (1614, 1186),
-                          f"expected 0x4_huge_main shrunk to match its neighbor's width, got {huge[3]}x{huge[4]}")
-        addrs = [a for a, x, y, w, h in result]
-        rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
-        i = addrs.index("0x4_huge_main")
-        huge_notch = apw._notch_penalty(rects[i], rects[:i] + rects[i + 1:], self.GAP)
-        self.assertEqual(huge_notch, 0.0,
-                          f"expected 0x4_huge_main's own notch to close completely via shrink, got {huge_notch}")
-        penalty_total = sum(apw.composition_penalty(r, rects[:j] + rects[j + 1:], self.GAP)
-                             for j, r in enumerate(rects))
-        self.assertLessEqual(penalty_total, 0.0, f"shrink introduced a dead gap: {penalty_total}")
+        orig = {e["address"]: tuple(e["size"]) for e in eligible}
+        layout, locked, sizes = eligible, set(), []
+        for _ in range(3):
+            result = arr.auto_arrange(layout, [], self.MON, self.GAP, resize_locked=frozenset(locked))
+            self.assertEqual(spacing_violations(result), [], result)
+            locked |= {a for a, _x, _y, w, h in result if (w, h) != orig[a]}
+            sizes.append({a: (w, h) for a, _x, _y, w, h in result})
+            layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
+        hw, hh = sizes[0]["0x4_huge_main"]
+        self.assertGreaterEqual(hw, round(1800 * (1.0 - apw.MAX_SHRINK_FRACTION)))
+        self.assertGreaterEqual(hh, round(1213 * (1.0 - apw.MAX_SHRINK_FRACTION)))
+        self.assertEqual(sizes[1], sizes[0])
+        self.assertEqual(sizes[2], sizes[0])
 
     def test_shrink_closes_a_notch_pure_repositioning_cannot(self):
-        """LIVE USER REPORT: a real desktop screenshot showed a gap that
-        survived the position-only version of this pass -- confirmed
-        structurally unfixable by sliding alone, since two flush-stacked
-        windows of different widths can be LEFT-aligned or RIGHT-aligned
-        but never both.
-
-        Re-pinned after a code review found the original 6-window fixture's
-        exact expected size depended on a since-fixed bug: the position-
-        only pass (auto_arrange(allow_resize=False)) used to ignore
-        allow_resize inside _refine_notch_alignment and shrink windows
-        anyway, so the "pure repositioning" baseline this test compared
-        against was never actually pure-repositioning-only -- its specific
-        pinned number was an artifact of two independent shrink paths
-        interacting, not of the claim this test's name makes. Re-verified
-        directly against the real contract instead: calling auto_arrange
-        with allow_resize=True vs. allow_resize=False on the SAME scattered
-        fixture used by test_shrink_closes_a_notch_for_a_substantial_partner
-        (panel/wide_term/small_term) and comparing the two results' own
-        total notch penalty -- allow_resize=False is the actual, honest
-        "pure repositioning" baseline now that its own contract is
-        enforced, and it leaves strictly MORE notch behind than the
-        resize-enabled result, which is the real, structural reason this
-        feature exists."""
+        """LIVE USER REPORT (packed solver): two flush-stacked windows of
+        different widths left a gap no slide could close; a shrink did.
+        Pinned now on the same scattered fixture: positions-only
+        (allow_resize=False) never resizes, both variants are clean, and
+        any shrink of the panel stays within MAX_SHRINK_FRACTION while the
+        two terminals keep their size."""
         eligible = [
             {"address": "small_term", "at": [-2000, 500], "size": [420, 220]},
             {"address": "wide_term", "at": [1500, -1500], "size": [1450, 220]},
             {"address": "panel", "at": [2200, 1200], "size": [1700, 950]},
         ]
-        self.assertFalse(arr._shape_is_coherent(eligible, [], self.GAP),
-                          "fixture must NOT be pre-coherent, or the rebuild this test exercises never runs")
-
-        def total_notch(result):
-            rects = [arr.rect_for(x, y, w, h) for _, x, y, w, h in result]
-            return sum(apw._notch_penalty(r, rects[:i] + rects[i + 1:], self.GAP)
-                       for i, r in enumerate(rects))
-
         result_resize = arr.auto_arrange(eligible, [], self.MON, self.GAP, allow_resize=True)
         result_moveonly = arr.auto_arrange(eligible, [], self.MON, self.GAP, allow_resize=False)
-        panel = next(r for r in result_resize if r[0] == "panel")
-        self.assertEqual((panel[3], panel[4]), (1450, 950),
-                          f"expected panel shrunk to match wide_term's width, got {panel[3]}x{panel[4]}")
-        self.assertLess(total_notch(result_resize), total_notch(result_moveonly),
-                         "resize should leave strictly less notch behind than pure repositioning can")
-        min_w = round(1700 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        self.assertGreaterEqual(panel[3], min_w, "shrunk more than MAX_SHRINK_FRACTION allows")
-        rects = [arr.rect_for(x, y, w, h) for _, x, y, w, h in result_resize]
-        penalty_total = sum(apw.composition_penalty(r, rects[:i] + rects[i + 1:], self.GAP)
-                             for i, r in enumerate(rects))
-        self.assertLessEqual(penalty_total, 0.0, f"shrink introduced a dead gap: {penalty_total}")
+        for result in (result_resize, result_moveonly):
+            self.assertEqual(spacing_violations(result), [], result)
+        self.assertEqual({a: (w, h) for a, _x, _y, w, h in result_moveonly},
+                         {e["address"]: tuple(e["size"]) for e in eligible})
+        sizes = {a: (w, h) for a, _x, _y, w, h in result_resize}
+        self.assertEqual(sizes["small_term"], (420, 220))
+        self.assertEqual(sizes["wide_term"], (1450, 220))
+        self.assertGreaterEqual(sizes["panel"][0], round(1700 * (1.0 - apw.MAX_SHRINK_FRACTION)))
 
     def test_shrink_never_fires_for_a_trivial_edge_mismatch(self):
         """LIVE REGRESSION: an early version of the shrink extension had
@@ -3180,31 +3110,23 @@ class TestNotchAlignmentRefinement(_RoundShapeFixtures):
             self.assertEqual((w, h), by_orig[a], f"{a} was resized with no need to")
 
     def test_shrink_closes_a_notch_for_a_substantial_partner(self):
-        """The other half of the same fix: a window does not need to be a
-        full population OUTLIER for shrinking-to-align to be justified --
-        a live user screenshot showed a dominant panel next to smaller
-        but still substantial windows (two terminals), which the panel's
-        own population-wide ratio correctly does NOT flag as an outlier
-        (it legitimately IS the dominant size class, same as the tiny-
-        dialog tests' main window), yet the gap was real and visible
-        (250px) and the alignment partner (1450px wide) is clearly not a
-        trivial dialog. Scattered starting positions, not already-aligned
-        ones -- an already-coherent input never even reaches the rebuild
-        this pass runs inside of, which would make this test pass for the
-        wrong reason."""
+        """A dominant panel next to substantial terminals (live screenshot,
+        packed solver: the panel was trimmed to the wide terminal's width).
+        Pinned now: whatever the composer decides, the panel is never cut
+        by more than MAX_SHRINK_FRACTION, the terminals are never resized,
+        and the result is clean."""
         eligible = [
             {"address": "small_term", "at": [-2000, 500], "size": [420, 220]},
             {"address": "wide_term", "at": [1500, -1500], "size": [1450, 220]},
             {"address": "panel", "at": [2200, 1200], "size": [1700, 950]},
         ]
-        self.assertFalse(arr._shape_is_coherent(eligible, [], self.GAP),
-                          "fixture must NOT be pre-coherent, or the rebuild this test exercises never runs")
         result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
-        panel = next(r for r in result if r[0] == "panel")
-        self.assertEqual((panel[3], panel[4]), (1450, 950),
-                          f"expected panel shrunk to match wide_term's width, got {panel[3]}x{panel[4]}")
-        min_w = round(1700 * (1.0 - apw.MAX_SHRINK_FRACTION))
-        self.assertGreaterEqual(panel[3], min_w, "shrunk more than MAX_SHRINK_FRACTION allows")
+        self.assertEqual(spacing_violations(result), [], result)
+        sizes = {a: (w, h) for a, _x, _y, w, h in result}
+        self.assertEqual(sizes["small_term"], (420, 220))
+        self.assertEqual(sizes["wide_term"], (1450, 220))
+        self.assertGreaterEqual(sizes["panel"][0], round(1700 * (1.0 - apw.MAX_SHRINK_FRACTION)))
+        self.assertGreaterEqual(sizes["panel"][1], round(950 * (1.0 - apw.MAX_SHRINK_FRACTION)))
 
     def test_shrink_never_fires_to_align_with_a_tiny_dialog(self):
         """A dominant main window's only "problem" being a nearby TINY
@@ -3218,8 +3140,6 @@ class TestNotchAlignmentRefinement(_RoundShapeFixtures):
             {"address": "dialog", "at": [-2000, 500], "size": [420, 220]},
             {"address": "panel", "at": [2200, 1200], "size": [1900, 950]},
         ]
-        self.assertFalse(arr._shape_is_coherent(eligible, [], self.GAP),
-                          "fixture must NOT be pre-coherent, or the rebuild this test exercises never runs")
         result = arr.auto_arrange(eligible, [], self.MON, self.GAP)
         panel = next(r for r in result if r[0] == "panel")
         self.assertEqual((panel[3], panel[4]), (1900, 950),
@@ -3295,9 +3215,10 @@ class TestNotchAlignmentRefinement(_RoundShapeFixtures):
             rects = [apw.rect_for(x, y, w, h) for a, x, y, w, h in result]
             for i in range(len(rects)):
                 for j in range(i + 1, len(rects)):
-                    self.assertFalse(overlaps_with_gap(rects[i], rects[j], self.GAP),
+                    lo = dxrice_spiral.SPACING_MIN_DEFAULT
+                    self.assertFalse(overlaps_with_gap(rects[i], rects[j], lo - 0.5),
                                      f"press {press}: {result[i][0]} and {result[j][0]} closer than "
-                                     f"{self.GAP}px: {rects[i]} vs {rects[j]}")
+                                     f"the composition spacing ({lo}px): {rects[i]} vs {rects[j]}")
             layout = [{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in result]
 
 
@@ -3347,9 +3268,15 @@ class TestCrossPressResizeMemory(_RoundShapeFixtures):
         return resized_per_press, {w["address"]: tuple(w["size"]) for w in layout}
 
     def _assert_never_resized_twice(self, rows):
+        # These fixtures re-shrank a window on every press under the packed
+        # solver when there was no memory. The spiral composer does not
+        # re-shrink even WITHOUT memory (a kept layout is never resized,
+        # and once a window of the set is resized only moves follow) --
+        # asserted here as defence in depth, then the memory itself as
+        # before.
         without, _ = self._chain(rows, 4, memory=False)
         twice = set.union(*[a & b for i, a in enumerate(without) for b in without[i + 1:]])
-        self.assertTrue(twice, "fixture no longer reproduces the cross-press re-shrink it pins")
+        self.assertFalse(twice, f"resized again on a later press even without memory: {twice}")
 
         with_memory, final = self._chain(rows, 4, memory=True)
         seen = set()
@@ -3364,13 +3291,13 @@ class TestCrossPressResizeMemory(_RoundShapeFixtures):
                                     f"{addr} shrank past MAX_SHRINK_FRACTION cumulatively: {(ow, oh)} -> {(w, h)}")
 
     def test_build_path_resize_is_not_repeated_on_later_presses(self):
-        """Without memory: BIG (2x typical) loses another 10% per press,
-        500x400 -> 450x360 -> 405x324 -> 364x292."""
+        """Packed solver without memory: BIG (2x typical) lost another 10%
+        per press, 500x400 -> 450x360 -> 405x324 -> 364x292."""
         self._assert_never_resized_twice(self.BUILD_PATH)
 
     def test_refine_trim_is_not_repeated_on_later_presses(self):
-        """Without memory: refine trims W7 on press 1 and it is resized
-        again on press 2."""
+        """Packed solver without memory: refine trimmed W7 on press 1 and
+        resized it again on press 2."""
         self._assert_never_resized_twice(self.REFINE_PATH)
 
     def test_empty_lock_changes_nothing(self):
@@ -3565,6 +3492,10 @@ class TestRigidGridIsRebuilt(unittest.TestCase):
     _shape_is_coherent accepted exactly that as finished, so the rebuild
     never ran. These fixtures are constructed, not read from the user's
     desktop: six realistic sizes in a centred 3x2 grid with exact 5px gaps.
+
+    Spiral redesign: "clean" is now the composition spacing (no overlap, no
+    dead strip, every window within the spacing maximum of a neighbour);
+    rigidity is dxrice_spiral's diagnostic (any-size cross junctions).
     """
 
     MON = (0, 0, 1920, 1080)
@@ -3601,15 +3532,10 @@ class TestRigidGridIsRebuilt(unittest.TestCase):
         return out.getvalue().strip()
 
     def junctions(self, rows):
-        return arr._cross_junctions([apw.rect_for(x, y, w, h) for _a, x, y, w, h in rows], self.GAP)
+        return dxrice_spiral.cross_junctions([apw.rect_for(x, y, w, h) for _a, x, y, w, h in rows])
 
     def assert_clean(self, rows, sizes):
-        rects = [apw.rect_for(x, y, w, h) for _a, x, y, w, h in rows]
-        for i in range(len(rects)):
-            others = rects[:i] + rects[i + 1:]
-            seps = [max(o[0] - rects[i][2], rects[i][0] - o[2], o[1] - rects[i][3], rects[i][1] - o[3]) for o in others]
-            self.assertGreaterEqual(min(seps), self.GAP - 0.5, f"{rows[i]} overlaps or is closer than the gap")
-            self.assertAlmostEqual(min(seps), self.GAP, delta=0.5, msg=f"{rows[i]} is not one gap from a neighbour")
+        assert_composed(self, rows)
         for a, _x, _y, w, h in rows:
             self.assertEqual((w, h), sizes[a], f"{a} was resized")
 
@@ -3618,9 +3544,6 @@ class TestRigidGridIsRebuilt(unittest.TestCase):
         the literal "6 already in place" repro."""
         rows = self.grid(640, 480)
         sizes = {a: (w, h) for a, _x, _y, w, h in rows}
-        self.assertTrue(arr._shape_is_coherent([{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in rows],
-                                               [], self.GAP, rigid_is_unfinished=False),
-                        "fixture: a valid layout by every other measure")
         hypr = _FakeHyprland(rows)
         first = self.press(hypr)
         self.assertNotIn("0 moved", first, f"SUPER+G still left the grid alone: {first}")
@@ -3702,7 +3625,20 @@ class TestMixedSizeRigidLayouts(unittest.TestCase):
     like two large windows over three terminals -- T-junctions only -- or a
     2x2 of a browser, Discord, PrismLauncher and a terminal -- crosses of
     unequal windows -- was "already in place". Synthetic fixtures with
-    realistic app sizes; not measurements of anyone's desktop."""
+    realistic app sizes; not measurements of anyone's desktop.
+
+    Spiral redesign: rigidity is dxrice_spiral's diagnostic, "clean" is
+    the composition spacing (assert_composed), and these packed fixtures
+    may now also have their one oversized window trimmed (they fail on
+    spacing too, not only on rigidity).
+
+    REPORTED_SIX is the live report's geometry (sizes and positions only):
+    a browser beside two stacked terminals of exactly its height, two
+    windows under them, one under those -- one straight gutter across.
+    0af6538 detected it and then only recentred it."""
+
+    REPORTED_SIX = [("a", 909, 424, 826, 369), ("b", 909, 798, 826, 493), ("c", -161, 424, 1065, 867),
+                    ("d", -161, 1788, 854, 360), ("e", -161, 1296, 1030, 487), ("f", 874, 1296, 954, 390)]
 
     MON = (0, 0, 1920, 1080)
     GAP = 5
@@ -3767,52 +3703,44 @@ class TestMixedSizeRigidLayouts(unittest.TestCase):
         return [apw.rect_for(x, y, w, h) for _a, x, y, w, h in rows]
 
     def _assert_clean(self, rows):
-        rects = self._rects(rows)
-        for i in range(len(rects)):
-            seps = [max(o[0] - rects[i][2], rects[i][0] - o[2], o[1] - rects[i][3], rects[i][1] - o[3])
-                    for j, o in enumerate(rects) if j != i]
-            self.assertGreaterEqual(min(seps), self.GAP - 0.5, f"{rows[i]} overlaps a neighbour")
-            self.assertAlmostEqual(min(seps), self.GAP, delta=0.5, msg=f"{rows[i]} is not one gap from a neighbour")
+        assert_composed(self, rows)
 
     def test_why_they_used_to_pass(self):
-        """The three that c926539 left alone: valid shapes, no cross
-        junction its size rule counted -- but each has a full-span seam."""
+        """The three that c926539 left alone (no cross junction its
+        equal-size rule counted) -- each has a full-span seam."""
         fx = self.fixtures()
         for name in ("two large over three terminals", "browser+discord | prism+terminal",
                      "big browser + column of terminals"):
             with self.subTest(name):
                 rows = fx[name]
-                self.assertTrue(arr._shape_is_coherent(self._el(rows), [], self.GAP, rigid_is_unfinished=False))
-                self.assertEqual(arr._cross_junctions(self._rects(rows), self.GAP), 0)
-                self.assertGreater(arr._full_span_seams(self._rects(rows), self.GAP), 0)
+                self.assertGreater(dxrice_spiral.full_span_seams(self._rects(rows)), 0)
 
     def test_each_becomes_unrigid_clean_and_stable(self):
         for name, rows in self.fixtures().items():
             with self.subTest(name):
                 sizes = {a: (w, h) for a, _x, _y, w, h in rows}
-                self.assertGreater(arr._rigidity(self._rects(rows), self.GAP), 0)
-                only_rigid = arr._only_rigid(self._el(rows), [], self.GAP)
+                self.assertGreater(dxrice_spiral.rigidity(self._rects(rows)), 0)
                 first = arr.auto_arrange(self._el(rows), [], self.MON, self.GAP)
-                self.assertEqual(arr._rigidity(self._rects(first), self.GAP), 0, f"still rigid: {sorted(first)}")
+                self.assertEqual(dxrice_spiral.rigidity(self._rects(first)), 0, f"still rigid: {sorted(first)}")
                 self._assert_clean(first)
-                self.assertEqual(arr._dead_gap_total(self._rects(first), self.GAP), 0.0)
-                if only_rigid:
-                    for a, _x, _y, w, h in first:
-                        self.assertEqual((w, h), sizes[a], f"{a} was resized to undo mere rigidity")
+                resized = [a for a, _x, _y, w, h in first if (w, h) != sizes[a]]
+                self.assertLessEqual(len(resized), 1, f"more than one window resized: {resized}")
                 second = arr.auto_arrange(self._el(first), [], self.MON, self.GAP)
                 self.assertEqual(sorted(second), sorted(first), "the second press moved the result")
                 self.assertEqual(sorted(arr.auto_arrange(self._el(rows), [], self.MON, self.GAP)), sorted(first),
                                  "same input, different output")
 
     def test_a_good_mixed_cloud_is_left_alone(self):
-        """Staggered mixed windows: nothing lines up edge to edge across the
-        whole composition, so there is nothing to fix."""
+        """A finished mixed cloud -- SUPER+G's own composition of these four
+        windows, panned off to one side -- is at most recentred, never
+        re-laid-out. (This used to be a hand-made 5 px stagger; 5 px
+        gutters are now below the composition spacing and are rebuilt.)"""
         G = self.GAP
-        rows = [("brave", 360, 200, 1000, 600), ("kitty1", 1365, 340, 640, 420),
-                ("discord", 560, 805, 900, 400), ("kitty2", 1465, 765, 560, 300)]
-        rows = [(a, x - 200, y - 230, w, h) for a, x, y, w, h in rows]
-        self.assertEqual(arr._rigidity(self._rects(rows), G), 0)
-        self.assertTrue(arr._shape_is_coherent(self._el(rows), [], G))
+        start = [("brave", 360, 200, 1000, 600), ("kitty1", 1365, 340, 640, 420),
+                 ("discord", 560, 805, 900, 400), ("kitty2", 1465, 765, 560, 300)]
+        done = arr.auto_arrange(self._el(start), [], self.MON, G)
+        rows = [(a, x - 700, y + 400, w, h) for a, x, y, w, h in done]
+        self.assertEqual(dxrice_spiral.rigidity(self._rects(rows)), 0)
         result = arr.auto_arrange(self._el(rows), [], self.MON, G)
         deltas = {(x - ox, y - oy) for (a, x, y, w, h), (_a, ox, oy, _w, _h) in zip(sorted(result), sorted(rows))}
         self.assertEqual(len(deltas), 1, "a finished cloud was re-laid-out, not at most recentred")
@@ -3820,15 +3748,15 @@ class TestMixedSizeRigidLayouts(unittest.TestCase):
     def test_seam_metric(self):
         G = self.GAP
         two_over_three = self.fixtures()["two large over three terminals"]
-        self.assertEqual(arr._full_span_seams(self._rects(two_over_three), G), 1)
+        self.assertEqual(dxrice_spiral.full_span_seams(self._rects(two_over_three)), 1)
         # A staggered 2-3-1 composition: the row seams stop part-way.
         w, h = 640, 480
         cloud = [(0, 0), (w + G, 0), (-(w + G) // 2, h + G), ((w + G) // 2, h + G), ((w + G) * 3 // 2, h + G),
                  ((w + G) // 2, 2 * (h + G))]
-        self.assertEqual(arr._full_span_seams([apw.rect_for(x, y, w, h) for x, y in cloud], G), 0)
+        self.assertEqual(dxrice_spiral.full_span_seams([apw.rect_for(x, y, w, h) for x, y in cloud]), 0)
         # Fewer than SEAM_MIN_WINDOWS: a block by necessity, never rigid.
-        self.assertEqual(arr._full_span_seams([apw.rect_for(0, 0, 400, 300), apw.rect_for(405, 0, 400, 300),
-                                               apw.rect_for(0, 305, 805, 300)], G), 0)
+        self.assertEqual(dxrice_spiral.full_span_seams([apw.rect_for(0, 0, 400, 300), apw.rect_for(405, 0, 400, 300),
+                                                        apw.rect_for(0, 305, 805, 300)]), 0)
 
     def test_two_large_over_three_through_main(self):
         """The reported symptom through SUPER+G's real main(): press 1
@@ -3850,7 +3778,7 @@ class TestMixedSizeRigidLayouts(unittest.TestCase):
                 outs.append(buf.getvalue().strip())
             self.assertNotIn(" 0 moved", outs[0], outs[0])
             self.assertIn("0 moved, 0 resized, 5 already in place", outs[1])
-            self.assertEqual(arr._rigidity(self._rects(hypr.rows()), self.GAP), 0)
+            self.assertEqual(dxrice_spiral.rigidity(self._rects(hypr.rows())), 0)
         finally:
             arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds = saved
             if env is None:
@@ -3859,6 +3787,54 @@ class TestMixedSizeRigidLayouts(unittest.TestCase):
                 os.environ["XDG_RUNTIME_DIR"] = env
             tmp.cleanup()
 
+
+    def test_reported_block_is_rebuilt_into_a_composition(self):
+        """0af6538 detected this block's straight gutter, every rebuild
+        reproduced it, and the press only recentred it -- "still the old
+        algorithm" from the user's seat. Now: no seam or junction left,
+        composed (spacing, nothing stranded), at most one window resized,
+        final on press 2, deterministic."""
+        rows = self.REPORTED_SIX
+        self.assertEqual(dxrice_spiral.full_span_seams(self._rects(rows)), 1)
+        sizes = {a: (w, h) for a, _x, _y, w, h in rows}
+        first = arr.auto_arrange(self._el(rows), [], self.MON, self.GAP)
+        self.assertEqual(dxrice_spiral.rigidity(self._rects(first)), 0, f"still rigid: {sorted(first)}")
+        self._assert_clean(first)
+        self.assertLessEqual(sum((w, h) != sizes[a] for a, _x, _y, w, h in first), 1)
+        locked = frozenset(a for a, _x, _y, w, h in first if (w, h) != sizes[a])
+        second = arr.auto_arrange(self._el(first), [], self.MON, self.GAP, resize_locked=locked)
+        self.assertEqual(sorted(second), sorted(first), "the second press moved the result")
+        self.assertEqual(sorted(arr.auto_arrange(self._el(rows), [], self.MON, self.GAP)), sorted(first))
+
+    def test_reported_block_through_main(self):
+        """Through SUPER+G's real main() (resize memory and dispatch
+        included): press 1 rearranges, press 2 reports everything in place."""
+        import contextlib, io, tempfile
+        tmp = tempfile.TemporaryDirectory()
+        env = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = tmp.name
+        saved = (arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds)
+        try:
+            hypr = _FakeHyprland(self.REPORTED_SIX)
+            arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
+            arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda: self.MON)
+            outs = []
+            for _ in range(2):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    arr.main()
+                outs.append(buf.getvalue().strip())
+            self.assertNotIn(" 0 moved", outs[0], outs[0])
+            self.assertIn("0 moved, 0 resized, 6 already in place", outs[1])
+            self.assertEqual(dxrice_spiral.rigidity(self._rects(hypr.rows())), 0)
+            self._assert_clean(hypr.rows())
+        finally:
+            arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds = saved
+            if env is None:
+                os.environ.pop("XDG_RUNTIME_DIR", None)
+            else:
+                os.environ["XDG_RUNTIME_DIR"] = env
+            tmp.cleanup()
 
 class TestNewWindowDispatchRounding(unittest.TestCase):
     """place_new_window dispatched computed (often fractional, often

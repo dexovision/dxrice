@@ -1265,6 +1265,7 @@ verify_deploy() {
         "$REPO_DIR/scripts/dxrice_infinite_desktop_core.py"
         "$REPO_DIR/scripts/dxrice_auto_place_window.py"
         "$REPO_DIR/scripts/dxrice_auto_arrange.py"
+        "$REPO_DIR/scripts/dxrice_spiral.py"
         "$REPO_DIR/scripts/dxrice_hypr_ipc.py"
         "$REPO_DIR/scripts/dxrice_resize_memory.py"
         "$REPO_DIR/scripts/dxrice_window_class.py"

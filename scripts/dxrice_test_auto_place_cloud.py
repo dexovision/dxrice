@@ -25,6 +25,14 @@ import dxrice_auto_arrange as arr
 import dxrice_window_class as wc
 
 GAP = 5
+import dxrice_spiral  # noqa: E402
+LO, HI = dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT
+
+
+def _in_band(tc, gap, msg=None):
+    """A neighbour at the composition spacing (16-24 px by default; exact
+    5 px before the spiral redesign)."""
+    tc.assertTrue(LO - 0.5 <= gap <= HI + 0.5, msg or f"{gap}px is not the composition spacing")
 MON = (0, 0, 1920, 1080)
 
 
@@ -323,7 +331,7 @@ class TestDialogs(_Base):
                     _x11((dlg["at"][0], dlg["at"][1], 420, 260), types=["_NET_WM_WINDOW_TYPE_DIALOG"],
                          transient_for=(1200, 640, 600, 400))]
         self.assertEqual(apw.place_new_window("0xdlg", 1, GAP), "placed")
-        self.assertAlmostEqual(_sep(_rect(self.hypr.clients["0xdlg"]), (1200, 640, 1800, 1040)), GAP, delta=0.5)
+        _in_band(self, _sep(_rect(self.hypr.clients["0xdlg"]), (1200, 640, 1800, 1040)))
         self.assert_no_overlap()
 
     def test_scaled_popup_and_dialog_through_the_real_classification_seam(self):
@@ -345,7 +353,7 @@ class TestDialogs(_Base):
                     _x11((d["at"][0] * 1.5, d["at"][1] * 1.5, 630, 390), types=["_NET_WM_WINDOW_TYPE_DIALOG"],
                          transient_for=(1800, 960, 900, 600))]
         self.assertEqual(apw.place_new_window("0xdlg", 1, GAP), "placed")
-        self.assertAlmostEqual(_sep(_rect(self.hypr.clients["0xdlg"]), (1200, 640, 1800, 1040)), GAP, delta=0.5)
+        _in_band(self, _sep(_rect(self.hypr.clients["0xdlg"]), (1200, 640, 1800, 1040)))
 
     def test_small_dialog_never_moves_anything_else(self):
         self.cluster()
@@ -368,8 +376,9 @@ class TestJoinsTheCloud(_Base):
 
     def test_uses_super_g_step_not_a_separate_algorithm(self):
         """place_new_window's target is join_composition's, and
-        join_composition is SUPER+G's own per-window step: with the same
-        inputs, arr._find_best_position picks the same spot."""
+        join_composition is the shared spiral composer's join step
+        (dxrice_spiral.join -- the same candidates, spacing and spiral
+        preference a SUPER+G build step scores)."""
         self.cluster()
         self.hypr.open("0xnew", 700, 450)
         layout = [tuple(c["at"]) + tuple(c["size"]) for a, c in self.hypr.clients.items() if a != "0xnew"]
@@ -378,18 +387,19 @@ class TestJoinsTheCloud(_Base):
         self.assertEqual(tuple(self.hypr.clients["0xnew"]["at"]), want)
 
         calls = []
-        real = arr._find_best_position
-        arr._find_best_position = lambda *a, **k: calls.append(1) or real(*a, **k)
+        real = dxrice_spiral.join
+        dxrice_spiral.join = lambda *a, **k: calls.append(1) or real(*a, **k)
         try:
             arr.join_composition((700, 450), layout, layout, MON, GAP)
         finally:
-            arr._find_best_position = real
+            dxrice_spiral.join = real
         self.assertEqual(calls, [1])
 
     def test_sequences_keep_gaps_sizes_and_existing_windows(self):
         """200 realistic opening sequences: every new window keeps its size,
-        lands exactly one gap from a neighbour, overlaps nothing, and no
-        existing window ever moves or changes size."""
+        lands the composition spacing from a neighbour (exactly one 5 px gap
+        before the spiral redesign), keeps at least the spacing minimum from
+        everything, and no existing window ever moves or changes size."""
         rng = random.Random(7)
         opens = 0
         for _ in range(200):
@@ -407,30 +417,47 @@ class TestJoinsTheCloud(_Base):
                 others = [_rect(c) for a, c in self.hypr.clients.items() if a != addr]
                 if others:
                     gaps = [_sep(_rect(new), r) for r in others]
-                    self.assertGreaterEqual(min(gaps), GAP - 0.5, "overlap")
-                    self.assertAlmostEqual(min(gaps), GAP, delta=0.5, msg=f"{addr} not flush with anything")
+                    self.assertGreaterEqual(min(gaps), LO - 0.5, "overlap or closer than the spacing")
+                    _in_band(self, min(gaps), f"{addr} not at the spacing from anything: {min(gaps)}")
         self.assertGreater(opens, 900)
 
     def test_result_is_a_composition_super_g_accepts(self):
-        """SUPER+G's own test for "already a good arrangement"
-        (_shape_is_coherent) passes on what sequential opening builds, and
-        the shape follows the screen (wider than tall) -- the round target
-        the old placer used left 80/200 of these taller than wide."""
+        """What sequential opening builds is a finished composition by the
+        spiral's own rules -- no overlap, no window closer than the spacing
+        minimum, every window at the spacing from a neighbour -- and the
+        shape follows the screen (wider than tall; the round target the old
+        placer used left 80/200 of these taller than wide). SUPER+G on it
+        is final after ONE press.
+
+        Changed by the spiral redesign: this used to require that SUPER+G's
+        "already a good arrangement" test accept nearly all of these
+        (117/120). Auto-placement composes in opening order and never moves
+        an existing window, while SUPER+G orders the whole set by
+        prominence, so SUPER+G now re-winds about 40% of them (68/120 kept
+        as they are on this seed) -- measured and reported in
+        docs/phase1/REPORT_SPIRAL.md, not hidden behind a looser bound."""
         rng = random.Random(11)
-        coherent = wide = 0
+        wide = 0
         for _ in range(120):
             self.hypr.clients.clear()
             for i in range(rng.randint(3, 7)):
                 cls = rng.choice(list(APPS))
                 self.hypr.open(f"0x{cls}{i}", *APPS[cls], cls=cls, pid=1000 + i)
                 apw.place_new_window(f"0x{cls}{i}", 1, GAP)
-            el = [{"address": a, "at": c["at"], "size": c["size"]} for a, c in self.hypr.clients.items()]
-            coherent += arr._shape_is_coherent(el, [], GAP)
             rects = [_rect(c) for c in self.hypr.clients.values()]
+            for k, r in enumerate(rects):
+                seps = [_sep(r, o) for j2, o in enumerate(rects) if j2 != k]
+                self.assertGreaterEqual(min(seps), LO - 0.5, "closer than the spacing minimum")
+                _in_band(self, min(seps), f"a window is not at the spacing from any neighbour: {min(seps)}")
             bw = max(r[2] for r in rects) - min(r[0] for r in rects)
             bh = max(r[3] for r in rects) - min(r[1] for r in rects)
             wide += bw >= bh
-        self.assertGreaterEqual(coherent, 117)
+            el = [{"address": a, "at": list(c["at"]), "size": list(c["size"])} for a, c in self.hypr.clients.items()]
+            first = arr.auto_arrange(el, [], MON, GAP)
+            locked = frozenset(a for (a, x, y, w, h), e in zip(first, el) if (w, h) != tuple(e["size"]))
+            again = arr.auto_arrange([{"address": a, "at": [x, y], "size": [w, h]} for a, x, y, w, h in first],
+                                     [], MON, GAP, resize_locked=locked)
+            self.assertEqual(sorted(again), sorted(first), "SUPER+G needed a second press")
         self.assertGreaterEqual(wide, 96)
 
     def test_fullscreen_and_pinned_windows_are_obstacles_not_layout(self):
@@ -480,7 +507,8 @@ class TestRobustness(_Base):
 
     def test_window_settling_its_own_size_is_placed_at_the_settled_size(self):
         """zenity maps 320x246 and settles to 300x226: placing against the
-        transient size leaves a 15px gap where 5 was configured."""
+        transient size leaves a 20px-wider gap than the composition spacing
+        (15px where 5 was configured, before the spiral redesign)."""
         self.cluster()
         self.hypr.open("0xz", 320, 246)
         reads = {"n": 0}
@@ -494,8 +522,7 @@ class TestRobustness(_Base):
         self.hypr.on_clients_read = shrink
         self.assertEqual(apw.place_new_window("0xz", 1, GAP), "placed")
         z = _rect(self.hypr.clients["0xz"])
-        self.assertAlmostEqual(min(_sep(z, _rect(c)) for a, c in self.hypr.clients.items() if a != "0xz"),
-                               GAP, delta=0.5)
+        _in_band(self, min(_sep(z, _rect(c)) for a, c in self.hypr.clients.items() if a != "0xz"))
 
     def test_window_the_user_already_moved_is_left_where_they_put_it(self):
         self.cluster()
@@ -632,7 +659,7 @@ class TestEventStream(_Base):
             arr.main()
         self.assertTrue(self.hypr.dispatched, "SUPER+G did nothing with auto-placement off")
         a, b = _rect(self.hypr.clients["0xa"]), _rect(self.hypr.clients["0xb"])
-        self.assertAlmostEqual(_sep(a, b), GAP, delta=0.5)
+        _in_band(self, _sep(a, b))
 
 
 class TestRealListenerAgainstFakeHyprland(_Base):

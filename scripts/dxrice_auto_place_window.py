@@ -2344,8 +2344,13 @@ def place_new_window(address, workspace_id, gap):
     if family_anchor is None:
         family_anchor = _find_family_anchor(new_win, same_ws)
     if family_anchor is not None:
+        # beside its parent at the composition spacing, like any neighbour
+        # in the composition (see dxrice_spiral.pair_spacing)
+        import dxrice_spiral
+        spacing = dxrice_spiral.pair_spacing(new_w * new_h, family_anchor["size"][0] * family_anchor["size"][1],
+                                             dxrice_spiral.read_spacing())
         target = _place_beside_anchor(family_anchor, new_w, new_h,
-                                      [rect_for(*o) for o in obstacles], gap, center)
+                                      [rect_for(*o) for o in obstacles], spacing, center)
         if _DEBUG and target is not None:
             print(f"DEBUG address={address} placed beside family anchor "
                   f"{family_anchor.get('address')} ({family_anchor.get('title','')[:30]!r}) at {target}",

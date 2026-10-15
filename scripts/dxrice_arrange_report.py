@@ -6,14 +6,23 @@ the invariants dxrice_placement_benchmark.py checks.
 Per fixture, after the presses a user would make (SUPER+G pressed until it
 settles, resize memory carried between presses like main() does):
 
-  overlaps / spacing    pairs overlapping, or closer than the gap
-  sloppy_gutters        facing neighbours 2-40px further apart than the gap
-                        (reads as an accident, not a gap)
-  detached              windows not touching any other window at the gap
+  overlaps / spacing    pairs overlapping, or closer than the composition
+                        spacing minimum (dxrice_spiral, 16 px by default)
+  sloppy_gutters        facing neighbours further apart than the spacing
+                        maximum but closer than dxrice_spiral.SLIT_MAX --
+                        a slit (reads as an accident, not breathing room)
+  detached              windows not within the spacing maximum of any other
   fill                  occupied area / bounding-box area
-  dead_area / dead_max  notches, channels and slivers: empty area a 128px
-                        brush can't reach -- a morphological closing of the
-                        cluster (gaps fused) minus the cluster itself
+  dead_area / dead_max  concave pockets: empty area a 128px brush can't
+                        reach -- a morphological closing of the cluster
+                        (gutters up to the spacing maximum fused) minus the
+                        cluster itself. Since the spiral redesign the
+                        silhouette is staggered on purpose, so this is a
+                        measurement of how much negative space sits inside
+                        the outline, not a defect count; "holes" is.
+
+Before the spiral redesign the gap here was Hyprland's gaps_in (5 px),
+exact, and every other gutter counted as sloppy.
   holes                 empty area fully enclosed by windows, any size
   jaggedness            silhouette perimeter / bounding-box perimeter
                         (1.0 = a plain rectangle; organic shapes sit a bit
@@ -38,6 +47,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_auto_arrange as arr  # noqa: E402
+import dxrice_spiral  # noqa: E402
+
+BAND = (dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT)
 
 GAP = 5
 MONITOR = (0, 0, 1920, 1080)
@@ -182,7 +194,8 @@ def _components(mask, cols, rows):
     return comps
 
 
-def measure(rects, gap=GAP):
+def measure(rects, band=BAND):
+    lo, hi = band
     n = len(rects)
     overlaps = spacing = sloppy = 0
     for i in range(n):
@@ -201,14 +214,14 @@ def measure(rects, gap=GAP):
                 d = max(by - (ay + ah), ay - (by + bh))
             else:
                 continue
-            if d < gap - 0.5:
+            if d < lo - 0.5:
                 spacing += 1
-            elif gap + 2 <= d <= 40:
+            elif hi + 0.5 < d <= dxrice_spiral.SLIT_MAX:
                 sloppy += 1
     detached = sum(1 for r in rects if n > 1 and min(
         max(o[1] - (r[1] + r[3]), r[1] - (o[1] + o[3]), o[2] - (r[2] + r[4]), r[2] - (o[2] + o[4]))
-        for o in rects if o is not r) > gap + 2)
-    union, (gx, gy), cols, rows = _grid(rects, inflate=gap / 2 + 1)
+        for o in rects if o is not r) > hi + 1)
+    union, (gx, gy), cols, rows = _grid(rects, inflate=hi / 2 + 1)
     occupied = sum(sum(row) for row in union) * CELL * CELL
     bx0 = min(r[1] for r in rects); by0 = min(r[2] for r in rects)
     bx1 = max(r[1] + r[3] for r in rects); by1 = max(r[2] + r[4] for r in rects)
