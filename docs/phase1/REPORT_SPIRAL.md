@@ -106,16 +106,27 @@ both. Full output: `spiral/benchmark.txt`.
 
 | # | Target | Baseline | Spiral | Met? |
 |---|---|---|---|---|
-| 1 | Rotational flow clearly above random (random angles, same counts: 0.67), target ≥ 0.85 | median 0.67, mean 0.74 | **median 0.89, mean 0.88** | Overall yes. Per bucket: 1.00 / 0.95 / **0.83** / **0.77** at 3–4 / 5–6 / 7–9 / 10–12 windows. See caveats. |
+| 1 | Rotational flow clearly above random, target ≥ 0.85 (audit metric: random angles on the same counts give 0.67) | median 0.67, mean 0.74 | **median 0.89, mean 0.88** | Overall yes. Per bucket: 1.00 / 0.95 / **0.83** / **0.77** at 3–4 / 5–6 / 7–9 / 10–12 windows. See caveats, and the sweep measure below. |
 | 2 | ≥ 80% of neighbour spacing within 16–24 px | 0% (98% exactly 5 px) | **100%** | yes |
 | 3 | Zero overlaps | 0 | **0** | yes |
 | 4 | Stable by press 2–3 | 4 / 0 of 291 move on press 2 / 3 | **4 / 0** | yes |
 | 5 | No window shrunk again across presses | 2 re-shrunk | **0** | yes |
-| 6 | p95 at ≤ 12 windows no worse than baseline | 10 / 47 / 108 / 258 ms | **6 / 36 / 73 / 114 ms** | yes, every window-count bucket |
+| 6 | p95 at ≤ 12 windows no worse than baseline | 11 / 48 / 111 / 262 ms | **5 / 36 / 73 / 113 ms** | yes, every window-count bucket |
 | 7 | Your visual approval | | | **pending** |
 
 ### Other measurements
 
+- **Sweep consistency**, a more useful flow measure added to the
+  benchmark. It asks the rotation question the way the spiral is built:
+  windows in prominence order around the largest one, and the share of
+  bearing steps that turn the same way.
+  - Baseline 0.68; random angles 0.69.
+  - Spiral: mean 0.86, median 1.00. By bucket: 0.64 / 0.83 / **0.93** /
+    **0.95** at 3–4 / 5–6 / 7–9 / 10–12 windows, and 0.93 at 13–20.
+  - At 3–4 windows there are only one or two steps of about 180°, so
+    the turning direction is ambiguous by geometry.
+- **Radius never decreases along the sweep** (10% slack): 0.68 baseline
+  → 0.99 spiral. The arm really does wind outward.
 - **Size→centrality** (Spearman, +1 = big windows central): median 0.43
   baseline → 0.71 spiral.
 - **Fill:** 0.72 → 0.51. That is negative space by design. The arrange
@@ -127,9 +138,9 @@ both. Full output: `spiral/benchmark.txt`.
   real rearrangement moves more than a re-pack.
 - **Clearance to fixed and fullscreen windows:** at least 17 px
   (baseline 5).
-- **13–20 windows (stress):** p95 757 → 218 ms.
+- **13–20 windows (stress):** p95 745 → 212 ms.
 - **Wide (3440×1440) and tall (1080×1920) monitors:** only 6 layouts
-  each. p95 there was 62 and 79 ms against the baseline's 45 and 48 ms.
+  each. p95 there was 61 and 74 ms against the baseline's 46 and 50 ms.
   That's within the range of the 7–9-window bucket, but slower on those
   samples.
 - **Invariant benchmark** (`dxrice_placement_benchmark.py`, 300 layouts ×
@@ -158,16 +169,18 @@ one through the real `place_new_window`.
   so by pushing the hub to one edge (size→centrality 0.93 → 0.38 on one
   fixture) and cost the 5–6-window timing.
   `spiral/rotation_metric_caveat.png` shows it; the four-start results
-  are the galaxies. So 0.83 / 0.77 at 7–12 windows stands.
+  are the galaxies. So 0.83 / 0.77 at 7–12 windows stands. The sweep
+  measure above doesn't have this bias, and reads 0.93 / 0.95 there.
 - **Rotation at 3–4 windows** has only two steps (n = 4) or none (n = 3),
   so it reads 1.00 almost by definition.
 - **Fill.** Lower is the point here, but fill alone doesn't separate
   negative space from holes. Holes, slits and strands are measured
   separately, and all three are 0.
-- **SUPER+G re-winds about 40% of auto-placed sets.** Placement composes
-  in opening order and never moves an existing window. SUPER+G orders the
-  whole set by prominence. Raising the keep-margin hardly changed this,
-  because those sets genuinely score worse as a whole.
+- **SUPER+G re-winds about half of auto-placed sets** (110 of 200 in
+  the auto-placement report). Placement composes in opening order and
+  never moves an existing window. SUPER+G orders the whole set by
+  prominence. Raising the keep-margin hardly changed this, because those
+  sets genuinely score worse as a whole.
 
 ## Renders: actual algorithm output
 
@@ -225,8 +238,10 @@ docstring:
   restart was not done, because you're gaming.
 - **Spacing:** add `"window_spacing_min": 16, "window_spacing_max": 24` to
   `~/.config/dxrice/theme.json` to change it. Both SUPER+G and new windows
-  read it on every use. There's no Settings slider yet, because that's a
-  QML change and would reload Quickshell.
+  read it on every use. A Theme Editor save keeps these keys (it writes
+  the live file back with only its own fields overlaid). There's no
+  Settings slider yet, because that's a QML change and would reload
+  Quickshell.
 - **Spawn-then-jump** (new windows appearing, then moving) is not fixed
   here. A reliable fix needs Hyprland window rules, and changing the
   config reloads the compositor. It is left for a session when you're not
@@ -236,6 +251,13 @@ docstring:
 
 - No live-desktop validation; everything was measured offline.
 - Rotation at 7–12 windows is below 0.85 (see caveats).
-- SUPER+G re-winds about 40% of auto-placed layouts.
-- The packed solver is gone. Tag `backup/live-before-spiral` (0af6538)
-  restores it in one command.
+- SUPER+G re-winds about half of auto-placed layouts.
+- The packed solver is gone. Tag `backup/live-before-spiral` marks
+  0af6538. To go back without touching anything else:
+  `git -C ~/dxrice checkout backup/live-before-spiral -- scripts install.sh`
+  (undo with `git -C ~/dxrice checkout HEAD -- scripts install.sh`).
+- `~/dxrice-seam` (branch `fix/superg-seam`) still holds the uncommitted
+  attempt from before this redesign: a rebuild-from-each-start fallback
+  for the old solver. It is superseded, and its regression fixture
+  (your reported six) is carried over here. It was left in place
+  because it holds unique uncommitted work.

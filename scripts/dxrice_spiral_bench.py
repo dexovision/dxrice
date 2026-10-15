@@ -11,6 +11,15 @@ baseline and a candidate can be compared under identical conditions:
               `rotation_random` on the same window counts.
   centrality  Spearman rank correlation size -> nearness to the centre
               (+1 = the biggest windows are the central ones)
+  sweep       the same question asked the way the spiral is built: the
+              windows in prominence order (largest first) around the
+              largest one, share of bearing steps turning the same way.
+              The audit's rotation orders by distance from the mean centre,
+              which rates a one-sided arm above a ring wound round the hub
+              (docs/phase1/REPORT_SPIRAL.md); this one doesn't. 3-4 windows
+              leave 1-2 steps of ~180 degrees, so it is noisy there.
+  radial      share of consecutive prominence-ordered windows that are no
+              closer to the largest one than the window before (10% slack)
   spacing     every pair 0-60 px apart along a shared span > 40 px; share
               exactly 5 px, share 16-24 px, share 25-60 px ("slits")
   fill        occupied area / bounding-box area (1 - fill = negative space)
@@ -171,6 +180,14 @@ def shape_metrics(rows):
     if len(pts) >= 4:
         m["centrality"] = spearman([-p[2] for p in pts], [p[0] for p in pts])
         m["rotation"] = rotation_of([(p[0], p[1]) for p in pts])
+        order = sorted(rows, key=lambda r: (-(r[3] * r[4]), r[0]))
+        hx, hy = order[0][1] + order[0][3] / 2, order[0][2] + order[0][4] / 2
+        ang = [math.atan2(y + h / 2 - hy, x + w / 2 - hx) for _a, x, y, w, h in order[1:]]
+        rad = [math.hypot(x + w / 2 - hx, y + h / 2 - hy) for _a, x, y, w, h in order[1:]]
+        steps = [((b - a + math.pi) % (2 * math.pi)) - math.pi for a, b in zip(ang, ang[1:])]
+        pos = sum(s > 0 for s in steps)
+        m["sweep"] = max(pos, len(steps) - pos) / len(steps)
+        m["radial"] = sum(b >= 0.9 * a for a, b in zip(rad, rad[1:])) / (len(rad) - 1)
     xs0 = min(x for _, x, y, w, h in rows)
     ys0 = min(y for _, x, y, w, h in rows)
     xs1 = max(x + w for _, x, y, w, h in rows)
@@ -189,12 +206,17 @@ def shape_metrics(rows):
 
 
 def random_rotation(counts, seed=1):
+    """(rotation, sweep) for random angles on the same window counts."""
     rng = random.Random(seed)
-    vals = []
+    vals, sweeps = [], []
     for n in counts:
         for _ in range(20):
             vals.append(rotation_of([(rng.random(), rng.uniform(-math.pi, math.pi)) for _ in range(n)]))
-    return st.median(v for v in vals if v is not None)
+            a = [rng.uniform(-math.pi, math.pi) for _ in range(n - 1)]
+            steps = [((y - x + math.pi) % (2 * math.pi)) - math.pi for x, y in zip(a, a[1:])]
+            pos = sum(s > 0 for s in steps)
+            sweeps.append(max(pos, len(steps) - pos) / len(steps))
+    return st.median(v for v in vals if v is not None), st.mean(sweeps)
 
 
 def movement(before, after):
@@ -286,6 +308,9 @@ def report(name, by_bucket):
     g = [x for m in stat_m for x in m["gaps"]]
     rot = [m["rotation"] for m in stat_m if m.get("rotation") is not None]
     cen = [m["centrality"] for m in stat_m if "centrality" in m]
+    sw = [m["sweep"] for m in stat_m if "sweep" in m]
+    rad = [m["radial"] for m in stat_m if "radial" in m]
+    lines.append(f"  sweep mean {st.mean(sw):.2f} median {st.median(sw):.2f} | radial mean {st.mean(rad):.2f}")
     lines.append(f"  rotation median {st.median(rot):.2f} mean {st.mean(rot):.2f} | centrality median {st.median(cen):.2f}"
                  f" | fill median {st.median(m['fill'] for m in stat_m):.2f} | aspect median {st.median(m['aspect'] for m in stat_m):.2f}")
     if g:
@@ -301,7 +326,9 @@ def report(name, by_bucket):
         g = [x for m in ms for x in m["gaps"]]
         lines.append(f"  {b:8s} n={len(ms):3d} press1 ms p50 {pct([m['ms1'] for m in ms], .5):6.0f} p95 {pct([m['ms1'] for m in ms], .95):6.0f}"
                      f" max {max(m['ms1'] for m in ms):6.0f} | press2 p95 {pct([m['ms2'] for m in ms], .95):5.0f}"
-                     f" | rotation {st.mean(r) if r else float('nan'):.2f} | 16-24px {sum(16 <= x <= 24 for x in g) / max(1, len(g)):.0%}"
+                     f" | rotation {st.mean(r) if r else float('nan'):.2f}"
+                     f" | sweep {st.mean([m['sweep'] for m in ms if 'sweep' in m] or [float('nan')]):.2f}"
+                     f" | 16-24px {sum(16 <= x <= 24 for x in g) / max(1, len(g)):.0%}"
                      f" | fill {st.median(m['fill'] for m in ms):.2f}")
     return "\n".join(lines)
 
@@ -319,7 +346,8 @@ def main():
     fx = fixtures(a.per_bucket)
     res = run(sides, fx)
     counts = [len(f["eligible"]) for f in fx if f["bucket"] != "13-20" and len(f["eligible"]) >= 4]
-    print(f"fixtures {len(fx)}; random-angle rotation on the same window counts: median {random_rotation(counts):.2f}")
+    rot, sw = random_rotation(counts)
+    print(f"fixtures {len(fx)}; random angles on the same window counts: rotation median {rot:.2f}, sweep mean {sw:.2f}")
     dump = {}
     for name, _d in sides:
         bb = summarize(fx, res[name])
