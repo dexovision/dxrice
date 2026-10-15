@@ -27,6 +27,21 @@ user's real session, real Quickshell and real files were never touched.
 | `e12c252` | Offscreen gallery tool for every surface |
 | `69836bc` | Lock screen clock 12h -> 24h like the rest of the shell |
 
+## Galaxy Spiral growth, SUPER+C, transient UI (see REPORT_GROWTH.md)
+
+- Auto-placement now grows the spiral from the first window: anchor at
+  the usable centre, each window beside the arm's tip one angular width
+  further round, outward once a turn closes, holes reused. It's read
+  statelessly from geometry and creation order, and shares
+  `place_next` with SUPER+G.
+- SUPER+G keeps the anchor on screen when the group is bigger than it.
+- SUPER+C no longer climbs from an interpreted app into its launcher.
+- Attached dialogs move with their parent, and one rule now covers
+  unknown XWayland popups.
+- Opening-order sweep: 0.74 → 0.99. SUPER+G composition and timing are
+  unchanged.
+- The auto-placement service needs a restart to use it.
+
 ## SUPER+G and auto-placement: the airy spiral (see REPORT_SPIRAL.md)
 
 The audit's Phase 4 (section D), implemented. One composer
