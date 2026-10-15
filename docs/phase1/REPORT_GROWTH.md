@@ -107,7 +107,7 @@ windows (a 320×260 calculator) are still placed.
 All 14 Python suites pass. All shell suites pass; `launch_systemd` is
 skipped because the sandbox has no systemd.
 
-- `dxrice_test_spiral_growth.py` (19 new tests): one window centred; two
+- `dxrice_test_spiral_growth.py` (20 new tests): one window centred; two
   joining; six mixed with no rigidity; twelve wrapping round and moving
   out; nothing moving on opens; closing (hole reused / arm continues);
   fullscreen and pinned obstacles; SUPER+G after scattering; convergence;

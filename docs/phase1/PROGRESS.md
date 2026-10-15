@@ -38,7 +38,7 @@ user's real session, real Quickshell and real files were never touched.
 - SUPER+C no longer climbs from an interpreted app into its launcher.
 - Attached dialogs move with their parent, and one rule now covers
   unknown XWayland popups.
-- Opening-order sweep: 0.74 → 0.99. SUPER+G composition and timing are
+- Opening-order sweep: 0.74 → 0.96. SUPER+G composition and timing are
   unchanged.
 - The auto-placement service needs a restart to use it.
 
