@@ -8,6 +8,11 @@ compositor, nothing on screen), and measures what a user would see.
 --scripts points at another checkout's scripts/ to measure that version the
 same way (e.g. a worktree of an older commit); the default is this one.
 
+Per sequence also: how far the first window sits from the screen centre
+(the spiral's anchor), and the opening-order sweep -- round the first
+window, the share of bearing steps from one opened window to the next that
+turn the same way (random bearings give about 0.69).
+
 Per open: did an EXISTING window move or change size; is the new window
 at the composition spacing from something (dxrice_spiral's range; exactly
 Hyprland's 5 px gap for a checkout from before the spiral redesign), and
@@ -96,6 +101,8 @@ def run(scripts, n, render_dir=None, seed=7):
         lo, hi = spiral.SPACING_MIN_DEFAULT, spiral.SPACING_MAX_DEFAULT
     else:  # a checkout from before the spiral redesign: exact gaps_in
         lo = hi = GAP
+        spiral = None
+    rigidity_yardstick = spiral is not None and hasattr(spiral, "rigidity")
     apw.get_monitor_bounds = lambda: MON
     apw.time.sleep = lambda s: None
     rng = random.Random(seed)
@@ -129,8 +136,19 @@ def run(scripts, n, render_dir=None, seed=7):
         deltas = {(x - e["at"][0], y - e["at"][1], w - e["size"][0], hh2 - e["size"][1])
                   for (_a, x, y, w, hh2), e in zip(kept, el)}
         accepted = len(deltas) == 1 and next(iter(deltas))[2:] == (0, 0)
+        # the spiral as it grew: the first window's distance from the screen
+        # centre, and -- round it, in opening order -- the share of bearing
+        # steps turning the same way (needs 4+ windows: 2+ steps)
+        fx, fy = rows[0][1] + rows[0][3] / 2, rows[0][2] + rows[0][4] / 2
+        ang = [math.atan2(y + hh2 / 2 - fy, x + w / 2 - fx) for _a, x, y, w, hh2 in rows[1:]]
+        steps = [((b - a + math.pi) % (2 * math.pi)) - math.pi for a, b in zip(ang, ang[1:])]
+        pos = sum(st > 0 for st in steps)
+        sweep = max(pos, len(steps) - pos) / len(steps) if len(steps) >= 2 else None
         per.append(dict(aspect=bw / bh, dead=m["dead_area"], coherent=accepted,
-                        off_center=off, cover=min(cover, 1.0), n=len(rows)))
+                        off_center=off, cover=min(cover, 1.0), n=len(rows),
+                        first_off=math.hypot(fx - (MON[0] + MON[2]) / 2, fy - (MON[1] + MON[3]) / 2), sweep=sweep,
+                        rigid=(spiral.rigidity([(x, y, x + w, y + hh2) for _a, x, y, w, hh2 in rows]) > 0)
+                        if rigidity_yardstick else False))
         if render_dir and k < 8:
             os.makedirs(render_dir, exist_ok=True)
             report.render(os.path.join(render_dir, f"seq{k:02d}.png"), rows, [], dead,
@@ -144,7 +162,10 @@ def run(scripts, n, render_dir=None, seed=7):
         dead_area_mean_px2=round(statistics.mean(p["dead"] for p in per)),
         super_g_accepts_as_is=sum(p["coherent"] for p in per),
         off_center_median_px=round(statistics.median(p["off_center"] for p in per)),
-        screen_covered_median=round(statistics.median(p["cover"] for p in per), 3))
+        screen_covered_median=round(statistics.median(p["cover"] for p in per), 3),
+        first_window_off_centre_median_px=round(statistics.median(p["first_off"] for p in per)),
+        opening_order_sweep_mean=round(statistics.mean(p["sweep"] for p in per if p["sweep"] is not None), 2),
+        rigid_after_opening=sum(p["rigid"] for p in per))
 
 
 def main():

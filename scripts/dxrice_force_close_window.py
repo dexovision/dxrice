@@ -142,17 +142,63 @@ def _read_exe(pid):
         return None
 
 
+# Executables that run OTHER programs: an interpreter, a shell, a shared
+# runtime. Two processes of the same one of these are the same application
+# only if they run the same script/module -- a Python app started by
+# another Python program, or two apps on the system Electron, share the
+# executable and nothing else.
+_RUNTIME_PREFIXES = ("python", "pypy", "node", "nodejs", "deno", "bun", "java", "perl", "ruby", "php", "lua",
+                     "gjs", "electron", "mono", "dotnet", "wine", "bash", "sh", "dash", "zsh", "fish", "bwrap")
+
+
+def _is_runtime(exe):
+    base = os.path.basename(exe or "")
+    return any(base == p or base.startswith(p) and not base[len(p):].isalpha() for p in _RUNTIME_PREFIXES)
+
+
+def _read_cmdline(pid):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return [a.decode(errors="replace") for a in f.read().split(b"\0") if a]
+    except OSError:
+        return None
+
+
+def _program_of(pid):
+    """What a runtime process runs: its first non-option argument (a
+    script, an app directory, a jar), or the module after -m / -jar;
+    None when it can't be read."""
+    args = _read_cmdline(pid)
+    if not args:
+        return None
+    rest = args[1:]
+    for i, a in enumerate(rest):
+        if a in ("-m", "-jar", "-c") and i + 1 < len(rest):
+            return a + " " + rest[i + 1]
+        if not a.startswith("-"):
+            return a
+    return ""
+
+
 def _find_root(pid):
-    """Climb ancestors while the parent is the same executable."""
+    """Climb ancestors while the parent is the same program: the same
+    executable (folding in an app's own wrapper/relaunch stages) -- and,
+    for an interpreter or shared runtime (_is_runtime), the same script or
+    module too, so a Python app started by another Python program never
+    takes its launcher (and the launcher's other children) with it."""
     exe = _read_exe(pid)
     if exe is None:
         return pid
+    runtime = _is_runtime(exe)
+    program = _program_of(pid) if runtime else None
     cur = pid
     while True:
         ppid = _read_ppid(cur)
         if not ppid or ppid == 1:
             break
         if _read_exe(ppid) != exe:
+            break
+        if runtime and (program is None or _program_of(ppid) != program):
             break
         cur = ppid
     return cur

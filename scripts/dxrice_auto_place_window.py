@@ -95,15 +95,42 @@ def socket2_path():
     return os.path.join(runtime, "hypr", sig, ".socket2.sock")
 
 
+def usable_bounds(m):
+    """The part of one monitor (a `hyprctl monitors -j` entry) windows are
+    meant to use, in layout coordinates: its logical size (scale and a
+    90/270-degree transform applied) minus the space reserved by bars and
+    docks (`reserved`: left, top, right, bottom). Placement and SUPER+G aim
+    at this area's centre -- the raw monitor put "centre" under the bar's
+    share of the screen and let windows sit beneath it."""
+    w, h = m["width"], m["height"]
+    if m.get("transform", 0) in (1, 3, 5, 7):
+        w, h = h, w
+    try:
+        scale = float(m.get("scale") or 1.0)
+    except (TypeError, ValueError):
+        scale = 1.0
+    if scale > 0:
+        w, h = round(w / scale), round(h / scale)
+    x0, y0 = m["x"], m["y"]
+    res = m.get("reserved") or [0, 0, 0, 0]
+    try:
+        left, top, right, bottom = (int(v) for v in res)
+    except (TypeError, ValueError):
+        left = top = right = bottom = 0
+    if left + right < w and top + bottom < h:
+        return (x0 + left, y0 + top, x0 + w - right, y0 + h - bottom)
+    return (x0, y0, x0 + w, y0 + h)
+
+
 def get_monitor_bounds():
+    """The focused monitor's usable area (usable_bounds)."""
     try:
         monitors = hyprctl_json(["monitors"])
         if monitors:
             for m in monitors:
                 if m.get("focused"):
-                    return (m["x"], m["y"], m["x"] + m["width"], m["y"] + m["height"])
-            m = monitors[0]
-            return (m["x"], m["y"], m["x"] + m["width"], m["y"] + m["height"])
+                    return usable_bounds(m)
+            return usable_bounds(monitors[0])
     except Exception:
         pass
     return (0, 0, 1920, 1080)
@@ -2246,14 +2273,13 @@ def place_new_window(address, workspace_id, gap):
     # dxrice_window_class.py for the evidence) -- it must be left where the
     # app put it, and it must never count as part of anyone's layout.
     kinds, x11 = classify_clients(clients)
-    kind = kinds.get(address, dxrice_window_class.NORMAL)
     mx0, my0, mx1, my1 = get_monitor_bounds()
-    if kind == dxrice_window_class.UNKNOWN and (
-            new_win["size"][0] * new_win["size"][1] < STARTUP_DIALOG_AREA_FRACTION * (mx1 - mx0) * (my1 - my0)):
-        # XWayland window the X server couldn't be asked about. Big ones are
-        # still placed; a small one may well be a popup, and moving a popup
-        # away from what it points at is the bug this check exists for.
-        kind = dxrice_window_class.TRANSIENT
+    # An XWayland window the X server couldn't be asked about: big ones are
+    # still placed; a small one may well be a popup, and moving a popup
+    # away from what it points at is the bug this exists for. The same rule
+    # SUPER+G applies (dxrice_window_class.settle_unknown).
+    dxrice_window_class.settle_unknown(kinds, clients, (mx1 - mx0) * (my1 - my0))
+    kind = kinds.get(address, dxrice_window_class.NORMAL)
     if not dxrice_window_class.is_arrangeable(kind) or new_win.get("pinned"):
         if _DEBUG:
             print(f"DEBUG address={address} ignored: kind={kind} pinned={new_win.get('pinned')}",
@@ -2322,9 +2348,6 @@ def place_new_window(address, workspace_id, gap):
     new_w, new_h = new_win["size"][0], new_win["size"][1]
     seen_at = tuple(new_win["at"])
 
-    if not same_ws:
-        return "placed"  # first window on this workspace -- nothing to avoid
-
     obstacles = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in same_ws]
     center = ((mx0 + mx1) / 2, (my0 + my1) / 2)
 
@@ -2363,9 +2386,21 @@ def place_new_window(address, workspace_id, gap):
         # window held where it is (see dxrice_auto_arrange.join_composition).
         # Composed with what's in view; everything is an obstacle.
         import dxrice_auto_arrange
-        visible = [(x, y, w, h) for x, y, w, h in
-                   ((e["at"][0], e["at"][1], e["size"][0], e["size"][1]) for e in eligible)
-                   if x < mx1 and x + w > mx0 and y < my1 and y + h > my0]
+        # the composition it joins: visible application windows, not dialogs
+        # attached to a parent (those stay obstacles)
+        attached = dxrice_window_class.attached_children(clients, kinds, x11, _scales_for_matching()) if x11 else {}
+        # The composition it joins: every application window of the
+        # workspace (not dialogs attached to a parent -- those stay
+        # obstacles), in creation order, which is how the spiral reads its
+        # own arm (dxrice_spiral.sweep_state) -- including the outer windows
+        # that have grown past the screen edge, or the next window would
+        # lose track of the arm. Only when none of it is on screen (the
+        # user panned away) does a new window start a new anchor at the
+        # centre instead of being pulled off screen to join it.
+        members = [(e["at"][0], e["at"][1], e["size"][0], e["size"][1])
+                   for e in sorted(eligible, key=_creation_key) if e["address"] not in attached]
+        on_screen = any(x < mx1 and x + w > mx0 and y < my1 and y + h > my0 for x, y, w, h in members)
+        visible = members if on_screen else []
         target = dxrice_auto_arrange.join_composition((new_w, new_h), visible, obstacles,
                                                      (mx0, my0, mx1, my1), gap)
         if _DEBUG:
@@ -2387,9 +2422,22 @@ def place_new_window(address, workspace_id, gap):
         return "user-moved"
 
     tx, ty = _px(target[0]), _px(target[1])
+    if (tx, ty) == tuple(latest["at"]):
+        return "placed"  # already exactly there (a first window mapped centred)
     dispatch_async(move_window_exact_lua(tx, ty, address))
     _settle_moves({address: {"at": (tx, ty)}})
     return "placed"
+
+
+def _creation_key(client):
+    """Creation order of a client: Hyprland's stableId (assigned once, in
+    order, when a window is created), else its place in the client list
+    (which Hyprland keeps in creation order) -- sorted() is stable."""
+    sid = client.get("stableId")
+    try:
+        return int(str(sid), 16) if sid is not None else 0
+    except ValueError:
+        return 0
 
 
 def _scales_for_matching():

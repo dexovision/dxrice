@@ -408,6 +408,14 @@ if mode == "with-child":
     child = subprocess.Popen(["sleep", "300"])
     with open(marker + ".child", "w") as f:
         f.write(str(child.pid))
+if mode == "launch":
+    # another app (argv[3]) started by this one, with the same interpreter
+    import subprocess
+    child = subprocess.Popen([sys.executable, sys.argv[3], marker + "k", "normal"])
+    with open(marker + ".child", "w") as f:
+        f.write(str(child.pid))
+    while not os.path.exists(marker + "k.ready"):
+        time.sleep(0.02)
 with open(marker + ".ready", "w") as f:
     f.write("1")
 while True:
@@ -461,15 +469,16 @@ class TestTermination(unittest.TestCase):
                 except ProcessLookupError:
                     pass
 
-    def _fake_app(self, mode="normal"):
+    def _fake_app(self, mode="normal", interp=None, launches=None):
         marker = tempfile.mktemp(prefix="m", dir=self.tmp)
-        p = subprocess.Popen([self.interp, self.app, marker, mode], env=self.env)
+        p = subprocess.Popen([interp or self.interp, self.app, marker, mode] + ([launches] if launches else []),
+                             env=self.env)
         self._procs.append(p)
         deadline = time.monotonic() + 5
         while not os.path.exists(marker + ".ready") and time.monotonic() < deadline:
             time.sleep(0.02)
         p.marker = marker
-        if mode == "with-child":
+        if mode in ("with-child", "launch"):
             with open(marker + ".child") as f:
                 p.child_pid = int(f.read())
         return p
@@ -532,6 +541,69 @@ class TestTermination(unittest.TestCase):
         while self._alive(app.child_pid) and time.monotonic() < deadline:
             time.sleep(0.02)
         self.assertFalse(self._alive(app.child_pid), "the app's child process was left running")
+
+    # ---- targeting: only the selected window's own application ----
+
+    def _quits(self, p, timeout=3):
+        try:
+            p.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            return False
+
+    def test_two_instances_of_one_app_only_the_target_quits(self):
+        """Two separately started instances of the same program: forcing
+        one closed leaves the other running (each is its own root)."""
+        a, b = self._fake_app("normal"), self._fake_app("normal")
+        self._ignores_close(a.pid, extra=[{"address": "0xB", "pid": b.pid}])
+        fcw.main()
+        self.assertTrue(self._quits(a), "the targeted instance is still running")
+        self.assertTrue(self._alive(b.pid), "the other instance was killed too")
+
+    def test_instance_started_from_another_instance_takes_nothing_with_it(self):
+        """An instance launched by another instance of the same program is
+        part of that program's tree; the launcher has its own window, so
+        nothing is force-killed (the user is told why) -- neither the
+        target's launcher nor its window is touched."""
+        a = self._fake_app("launch", launches=self.app)
+        kid = a.child_pid
+        self._ignores_close(kid, address="0xKID", extra=[{"address": "0xA", "pid": a.pid}])
+        fcw.main()
+        time.sleep(0.3)
+        self.assertTrue(self._alive(a.pid), "the launching instance (with its own window) was killed")
+        self.assertTrue(self._alive(kid), "force-killed despite sharing a tree with another window")
+        self.assertTrue(self.notes, "no explanation given")
+        os.kill(kid, 9)
+
+    def test_python_app_started_by_another_python_program_quits_alone(self):
+        """The root-climbing bug: a Python app started by a different Python
+        program shares the interpreter executable, and climbing "while the
+        parent is the same executable" made the launcher (and everything
+        else it runs) part of the app. A runtime counts as the same program
+        only when it runs the same script."""
+        py = os.path.join(self.tmp, "python3.99")
+        if not os.path.exists(py):
+            shutil.copy(os.path.realpath(sys.executable), py)
+            os.chmod(py, 0o755)
+        other = os.path.join(self.tmp, "other_app.py")
+        with open(other, "w") as f:
+            f.write(FAKE_APP)
+        launcher = self._fake_app("launch", interp=py, launches=other)
+        kid = launcher.child_pid
+        self.assertEqual(fcw._find_root(kid), kid, "climbed into the launcher, a different program")
+        self._ignores_close(kid, address="0xKID")
+        fcw.main()
+        deadline = time.monotonic() + 3
+        while self._alive(kid) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertFalse(self._alive(kid), "the targeted app is still running")
+        self.assertTrue(self._alive(launcher.pid), "its launcher -- another program -- was killed with it")
+
+    def test_runtime_detection(self):
+        for exe, want in (("/usr/bin/python3.13", True), ("/usr/bin/python3", True), ("/usr/bin/java", True),
+                          ("/usr/lib/electron33/electron", True), ("/usr/bin/bash", True),
+                          ("/usr/bin/shotwell", False), ("/opt/brave/brave", False), ("/usr/bin/javac", False)):
+            self.assertEqual(fcw._is_runtime(exe), want, exe)
 
     def test_recycled_pid_is_never_signalled(self):
         """The process identified at the start is gone and its pid now

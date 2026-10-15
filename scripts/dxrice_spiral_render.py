@@ -11,6 +11,9 @@ Needs Pillow. Rendering only -- it computes nothing the benchmark didn't.
     python3 scripts/dxrice_spiral_render.py DUMP.json OUT_DIR [--fixtures a,b,...] [--sheet NAME]
     python3 scripts/dxrice_spiral_render.py --autoplace NAME=SCRIPTS_DIR[,NAME=SCRIPTS_DIR] OUT_DIR [--sequences 0,1,..]
 
+--growth SCRIPTS_DIR draws a frame per window opened (--sizes WxH,...), the
+flow line in opening order -- the spiral as auto-placement grows it.
+
 --autoplace opens windows one at a time through the real place_new_window
 against dxrice_autoplace_report's in-memory Hyprland (one column per
 scripts directory, e.g. a baseline checkout and this one) and draws the
@@ -41,7 +44,7 @@ def _font(size, bold=False):
     return ImageFont.load_default()
 
 
-def panel(img, box, title, rows, monitor, colors, metrics_line):
+def panel(img, box, title, rows, monitor, colors, metrics_line, order=None):
     d = ImageDraw.Draw(img)
     x0, y0, x1, y1 = box
     d.rounded_rectangle(box, 14, fill=CARD)
@@ -94,7 +97,11 @@ def panel(img, box, title, rows, monitor, colors, metrics_line):
                 col = GOOD if 16 <= dist <= 24 else (BAD if dist < 16 else WARN)
                 d.line(seg, fill=col, width=3)
     # flow: centres in prominence order
-    order = sorted((r for r in rows if r[0] != "fixed"), key=lambda r: (-(r[3] * r[4]), r[0]))
+    if order is None:  # prominence order (SUPER+G's sweep)
+        order = sorted((r for r in rows if r[0] != "fixed"), key=lambda r: (-(r[3] * r[4]), r[0]))
+    else:              # the given order (opening order, for growth frames)
+        by = {r[0]: r for r in rows}
+        order = [by[a] for a in order if a in by]
     pts = [T(x + w / 2, y + h / 2) for _a, x, y, w, h in order]
     if len(pts) > 1:
         d.line(pts, fill="#ffffff", width=2)
@@ -144,6 +151,49 @@ def autoplace_rows(scripts, seq_indices, seed=7):
     return json.loads(res.stdout.strip().splitlines()[-1])
 
 
+def growth_rows(scripts, sizes):
+    """Rows after each window opened (real place_new_window, in-memory
+    Hyprland, usable area of a 1920x1080 screen with a 52px bar and a 68px
+    dock), in a worker importing `scripts`."""
+    import subprocess
+    code = (
+        "import sys, json, os, importlib, tempfile\n"
+        f"sys.path.insert(0, {scripts!r}); sys.path.insert(1, {os.path.dirname(os.path.abspath(__file__))!r})\n"
+        "import dxrice_autoplace_report as R\n"
+        "os.environ['XDG_RUNTIME_DIR'] = tempfile.mkdtemp(); os.environ['XDG_CONFIG_HOME'] = tempfile.mkdtemp()\n"
+        "apw = importlib.import_module('dxrice_auto_place_window')\n"
+        "apw.get_monitor_bounds = lambda: (0, 52, 1920, 1012); apw.time.sleep = lambda s: None\n"
+        "h = R.Hypr(apw); apw.hyprctl_json, apw.batch_async = h.hyprctl_json, h.batch_async\n"
+        "apw.dispatch_async, apw.move_window_exact_async = h.dispatch_async, h.move_window_exact_async\n"
+        f"frames = []\nfor i, (w, hh) in enumerate({list(map(list, sizes))!r}):\n"
+        "    addr = f'w{i + 1}'\n"
+        "    h.open(addr, w, hh, 'app' + addr, 1000 + i); apw.place_new_window(addr, 1, R.GAP)\n"
+        "    frames.append(h.rows())\n"
+        "print(json.dumps(frames))\n")
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    return json.loads(res.stdout.strip().splitlines()[-1])
+
+
+def growth_sheet(scripts, sizes, out, sheet, frames=None, cols=4):
+    data = growth_rows(scripts, sizes)
+    pick = frames or list(range(1, len(data) + 1))
+    pw, ph = 520, 400
+    rows_n = (len(pick) + cols - 1) // cols
+    img = Image.new("RGB", (cols * pw + 20, rows_n * ph + 20), BG)
+    names = [f"w{i + 1}" for i in range(len(sizes))]
+    colors = {a: PAL[i % len(PAL)] for i, a in enumerate(names)}
+    usable = (0, 52, 1920, 1012)
+    for k, n in enumerate(pick):
+        rows = [tuple(r) for r in data[n - 1]]
+        x, y = 10 + (k % cols) * pw, 10 + (k // cols) * ph
+        panel(img, (x, y, x + pw - 10, y + ph - 10), f"{n} window{'s' if n > 1 else ''} opened", rows, usable,
+              colors, metrics_line(rows), order=names[:n])
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, sheet + ".png")
+    img.save(path)
+    print(path)
+
+
 def autoplace_sheet(dirs, out, seqs, sheet):
     cols = []
     for spec in dirs:  # NAME=DIR
@@ -176,7 +226,13 @@ def main():
     ap.add_argument("--sheet", default="spiral_renders")
     ap.add_argument("--autoplace")
     ap.add_argument("--sequences", default="0,1,2,3")
+    ap.add_argument("--growth", help="SCRIPTS_DIR: frames of windows opened one by one")
+    ap.add_argument("--sizes", default="1500x950,860x560,1100x750,640x400,900x620,550x300,1300x850,820x560")
+    ap.add_argument("--frames", default="")
     a = ap.parse_args()
+    if a.growth:
+        sizes = [tuple(int(v) for v in t.split("x")) for t in a.sizes.split(",")]
+        return growth_sheet(a.growth, sizes, a.out, a.sheet, [int(f) for f in a.frames.split(",") if f])
     if a.autoplace:
         return autoplace_sheet(a.autoplace.split(","), a.out, [int(x) for x in a.sequences.split(",")], a.sheet)
     data = json.load(open(a.dump))

@@ -291,6 +291,50 @@ def monitor_scales(monitors):
     return out
 
 
+# An XWayland window the X server couldn't describe (UNKNOWN) and that
+# covers less than this share of the screen is far more likely a popup or
+# tooltip than an application window, so neither placer touches it. One
+# definition for both (it used to live in new-window placement only, so
+# SUPER+G laid out the same window as an ordinary one).
+SMALL_UNKNOWN_FRACTION = 0.05
+
+
+def settle_unknown(kinds, clients, screen_area):
+    """UNKNOWN windows smaller than SMALL_UNKNOWN_FRACTION of the screen
+    become TRANSIENT, in place; returns kinds."""
+    for c in clients:
+        a = c.get("address")
+        if kinds.get(a) == UNKNOWN:
+            w, h = _geometry(c)[2:]
+            if w * h < SMALL_UNKNOWN_FRACTION * screen_area:
+                kinds[a] = TRANSIENT
+    return kinds
+
+
+def attached_children(clients, kinds, x11, scales=()):
+    """{child address: parent address} for dialogs the X server says belong
+    to another window (WM_TRANSIENT_FOR) that is itself a client here.
+    Such a dialog is part of its parent, not a member of the composition:
+    SUPER+G moves it with its parent rather than arranging it, and it is
+    not part of the layout a new window joins. Without X data (or for
+    native Wayland dialogs, whose parent Hyprland doesn't report) there is
+    nothing to attach -- the conservative default."""
+    out = {}
+    if not x11:
+        return out
+    for c in clients:
+        if kinds.get(c.get("address")) != DIALOG:
+            continue
+        parent_geom = x11_parent_geometry(c, x11, scales)
+        if parent_geom is None:
+            continue
+        for p in clients:
+            if p is not c and same_window(parent_geom, _geometry(p), scales):
+                out[c.get("address")] = p.get("address")
+                break
+    return out
+
+
 def is_arrangeable(kind):
     """May this window be placed by new-window placement / laid out by
     SUPER+G / count as part of the composition?"""

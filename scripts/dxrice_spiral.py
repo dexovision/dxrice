@@ -119,11 +119,17 @@ SLIT_PAIR_WEIGHT = 260.0    # per facing pair SPACING_MAX..SLIT_MAX apart
 FILL_RANGE = (0.5, 0.8)
 FILL_WEIGHT = 2500.0
 WHOLE_MOVE_WEIGHT = 0.25    # per px of mean (centroid-aligned) movement
-JOIN_VISIBLE_WEIGHT = 1500.0  # new window: per unit of its area left off-screen
+# A new window that would open mostly hidden pays up to JOIN_VISIBLE_WEIGHT
+# x JOIN_VISIBLE_SHARE: a tie-breaker, not a reason to leave the sweep --
+# beside an anchor that nearly fills the screen every next spot along it is
+# mostly off-screen, and the infinite desktop pans to it.
+JOIN_VISIBLE_WEIGHT = 1200.0  # per unit of the window's area hidden beyond...
+JOIN_VISIBLE_SHARE = 0.25     # ...this much of it visible
 JOIN_CENTRE_WEIGHT = 1.5      # new window: per px the composition's centre is off the screen's
 START_VARIANTS = 4          # start bearings tried per press (x2 directions)
 START_OFFSET = math.pi / 4  # ...on the diagonals, so no start favours a screen edge
 RECENTER_PARTIAL_MIN = 8.0  # px; see recenter_shift
+ANCHOR_MARGIN = 32          # px the anchor is kept inside the usable area's edges
 RECENTER_TOLERANCE = 0.15   # of the viewport's short side: a kept layout this close isn't shifted
 KEEP_MARGIN = 0.04          # a rebuild must beat the current layout by this
 KEEP_MARGIN_MIN = 60.0
@@ -284,7 +290,7 @@ class Composer:
                 s += extra(c)
             if best_s is None or s < best_s or (s == best_s and c < best):
                 best, best_s = c, s
-        return best
+        return best, best_s
 
     def _score(self, r, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect=None, cheap=None):
         total = self._bearing_cost(r, hub, theta, r_prev) if cheap is None else cheap
@@ -358,6 +364,27 @@ class Composer:
                         best, best_d = c, d
         return best or r
 
+    def place_next(self, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect,
+                   extra=None, obstacles=None):
+        """THE spiral step, shared by SUPER+G's build and new-window
+        placement: where `win` goes next in the sweep around the hub
+        centre `hub`, preferring bearing `theta`, no closer to the hub than
+        `r_prev`, beside the previous window of the sweep (`prev_rect`).
+        Candidates beside the neighbours nearest that frontier first, the
+        rest only if none of those is free. Returns (rect, score) or
+        (None, None)."""
+        target = (hub[0] + math.cos(theta) * (r_prev / RADIUS_FLOOR + 300),
+                  hub[1] + math.sin(theta) * (r_prev / RADIUS_FLOOR + 300))
+        anchors = sorted(range(len(placed)), key=lambda i: (placed[i] is not prev_rect, math.hypot(
+            _center(placed[i])[0] - target[0], _center(placed[i])[1] - target[1])))
+        for group in (anchors[:ANCHOR_CAP], anchors[ANCHOR_CAP:]):
+            cands = [c for i in group for c in self._beside(win, placed[i], areas[i], hub, theta)]
+            best, s = self._pick(cands, extra, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur,
+                                 prev_rect, obstacles)
+            if best is not None:
+                return best, s
+        return None, None
+
     def build(self, wins, theta0, direction):
         """{addr: rect} -- the whole composition, hub at the viewport centre
         (or the nearest free spot), every other window by the spiral
@@ -378,16 +405,7 @@ class Composer:
         for k, win in enumerate(order[1:], start=1):
             theta = theta0 + direction * bearings[k - 1]
             rel_cur = (win.cur[0] - hcx, win.cur[1] - hcy) if win.cur is not None else None
-            # neighbours nearest the preferred bearing's frontier first
-            target = (hub[0] + math.cos(theta) * (r_prev / RADIUS_FLOOR + 300), hub[1] + math.sin(theta) * (r_prev / RADIUS_FLOOR + 300))
-            anchors = sorted(range(len(placed)), key=lambda i: (i != len(placed) - 1, math.hypot(
-                _center(placed[i])[0] - target[0], _center(placed[i])[1] - target[1])))
-            best = None
-            for group in (anchors[:ANCHOR_CAP], anchors[ANCHOR_CAP:]):
-                cands = [c for i in group for c in self._beside(win, placed[i], areas[i], hub, theta)]
-                best = self._pick(cands, None, win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect)
-                if best is not None:
-                    break
+            best, _s = self.place_next(win, placed, areas, hub, theta, r_prev, bbox, mass, rel_cur, prev_rect)
             if best is None:
                 return None
             placed.append(best)
@@ -455,13 +473,30 @@ class Composer:
             total += WHOLE_MOVE_WEIGHT * mv
         return total
 
-    # -- recentring (as before: bounding box on the viewport centre, scaled
-    # back if the full shift would run into a fixed window) --
-    def recenter_shift(self, rects):
+    # -- recentring: the bounding box on the viewport centre, as nearly as
+    # the anchor (the window the spiral winds round) allows: it must keep
+    # covering the centre point, and stay ANCHOR_MARGIN inside the usable
+    # area where it fits -- centring a composition bigger than the screen
+    # used to cut the anchor off. Scaled back if it would run into a fixed
+    # window. --
+    def recenter_shift(self, rects, anchor=None):
         rs = list(rects)
         bx0, by0 = min(r[0] for r in rs), min(r[1] for r in rs)
         bx1, by1 = max(r[2] for r in rs), max(r[3] for r in rs)
-        full = (self.view_center[0] - (bx0 + bx1) / 2.0, self.view_center[1] - (by0 + by1) / 2.0)
+        full = [self.view_center[0] - (bx0 + bx1) / 2.0, self.view_center[1] - (by0 + by1) / 2.0]
+        if anchor is not None:
+            mx0, my0, mx1, my1 = self.monitor
+            for axis, (lo_edge, hi_edge) in enumerate(((mx0, mx1), (my0, my1))):
+                a0, a1 = anchor[axis], anchor[axis + 2]
+                c = self.view_center[axis]
+                # the anchor keeps covering the centre point (so it stays
+                # the anchor, see anchor_index)...
+                lo, hi = c - a1, c - a0
+                # ...and comfortably inside the usable area where it fits
+                vlo, vhi = lo_edge + ANCHOR_MARGIN - a0, hi_edge - ANCHOR_MARGIN - a1
+                if vlo <= vhi and max(lo, vlo) <= min(hi, vhi):
+                    lo, hi = max(lo, vlo), min(hi, vhi)
+                full[axis] = min(hi, max(lo, full[axis]))
 
         def safe(dx, dy):
             for r in rs:
@@ -623,7 +658,8 @@ def compose(eligible, fixed_rects, monitor, band, sizes=None):
             best, kept = current_rects, True
     if best is None:
         best, kept = current_rects, True
-    dx, dy = comp.recenter_shift(best.values())
+    anchor_rect = best[wins[anchor_index([best[w.addr] for w in wins], comp.view_center)].addr]
+    dx, dy = comp.recenter_shift(best.values(), anchor_rect)
     if kept:
         # a finished layout already about on screen stays exactly where it is
         mx0, my0, mx1, my1 = monitor
@@ -642,12 +678,195 @@ def score_rows(rows, eligible, fixed_rects, monitor, band):
     return comp.whole_score({a: _rect(x, y, w, h) for a, x, y, w, h in rows}, wins, cur)
 
 
+def anchor_index(rects, view_center):
+    """Which window a composition winds round, read from geometry alone (no
+    remembered state to go stale when windows close or workspaces change):
+    the window covering the usable area's centre point -- where new-window
+    placement puts the first window and SUPER+G puts its hub, and where
+    recentring keeps it (Composer.recenter_shift). When none does (the user
+    panned away), the most central one: the smallest mean distance to the
+    others, to the pixel; ties nearest the centre, then the larger, then
+    the first listed."""
+    cx, cy = view_center
+    covering = [i for i, r in enumerate(rects) if r[0] <= cx <= r[2] and r[1] <= cy <= r[3]]
+    if covering:
+        return min(covering, key=lambda i: (math.hypot(_center(rects[i])[0] - cx, _center(rects[i])[1] - cy), i))
+    cs = [_center(r) for r in rects]
+    n = len(cs)
+    if n == 1:
+        return 0
+
+    def key(i):
+        mean = sum(math.hypot(cs[i][0] - c[0], cs[i][1] - c[1]) for c in cs) / (n - 1)
+        own = math.hypot(cs[i][0] - cx, cs[i][1] - cy)
+        r = rects[i]
+        return (round(mean), round(own, 3), -(r[2] - r[0]) * (r[3] - r[1]), i)
+    return min(range(n), key=key)
+
+
+def _touches(a, b, reach=SPACING_MAX_DEFAULT + 1):
+    f = _facing(a, b)
+    return f is not None and f[0] <= reach
+
+
+def _consistency(seq, bearing):
+    steps = [_wrap(bearing[b] - bearing[a]) for a, b in zip(seq, seq[1:])]
+    if not steps:
+        return 0.0, 1
+    pos = sum(st > 0 for st in steps)
+    neg = len(steps) - pos
+    sign = 1 if pos > neg else -1 if neg > pos else (1 if steps[-1] >= 0 else -1)
+    return max(pos, neg) / len(steps), sign
+
+
+def sweep_state(rects, anchor, new_area=None):
+    """The spiral as it stands, read without remembered state: (others,
+    tip, bearing, direction, step). `rects` must be in the order the
+    windows were created (Hyprland's stableId / client list order), so a
+    spiral auto-placement grew reads in creation order; one SUPER+G built
+    reads in its own sweep order, prominence. Of the two, the order whose
+    bearing steps round the anchor turn most consistently one way is the
+    arm (creation wins ties): its last window is the tip and its turning
+    sense the direction. A closed window just drops out of both orders.
+    `step` is the bearing to the next window: the tip's and the new
+    window's angular half-widths as seen from the anchor (JOIN_ARC_RANGE),
+    so the new window sits beside the tip one window further round.
+    SUPER+G's build knows every window in advance and shares a planned
+    sweep out instead (_sweep_offsets); opening windows one at a time can
+    only extend the arm by what is actually there."""
+    hub = _center(rects[anchor])
+    rad, bearing = {}, {}
+    for i in range(len(rects)):
+        if i != anchor:
+            c = _center(rects[i])
+            rad[i] = math.hypot(c[0] - hub[0], c[1] - hub[1])
+            bearing[i] = math.atan2(c[1] - hub[1], c[0] - hub[0])
+    created = [i for i in range(len(rects)) if i != anchor]
+    area = lambda i: (rects[i][2] - rects[i][0]) * (rects[i][3] - rects[i][1])  # noqa: E731
+    prominent = sorted(created, key=lambda i: (-area(i), i))
+    direction = None
+    seq = created
+    if len(created) >= 2:
+        c_score, c_dir = _consistency(created, bearing)
+        p_score, p_dir = _consistency(prominent, bearing)
+        seq, direction = (prominent, p_dir) if p_score > c_score else (created, c_dir)
+    tip = seq[-1] if seq else anchor
+    others = seq
+    step = None
+    if others and new_area is not None:
+        side = lambda r: math.sqrt((r[2] - r[0]) * (r[3] - r[1]))  # noqa: E731
+        reach = max(rad[tip], side(rects[anchor]) / 2.0, 1.0)
+        arc = (math.atan2(side(rects[tip]) / 2.0, reach) + math.atan2(math.sqrt(new_area) / 2.0, reach))
+        step = min(JOIN_ARC_RANGE[1], max(JOIN_ARC_RANGE[0], arc))
+    return others, tip, bearing, direction, step
+
+
+# Bearing step from the arm's tip to a newly opened window (see sweep_state).
+JOIN_ARC_RANGE = (math.radians(30), math.radians(150))
+
+
+# A closed window can leave an enclosed hole inside the spiral. A new
+# window takes it before extending the arm when it fits snugly there: a free
+# spot closer to the anchor than the arm's tip, touching at least
+# FILL_MIN_CONTACTS windows at the composition spacing, with no slit. Any
+# looser test fires during ordinary growth too and scatters the sweep (each
+# window dropping into whichever inner nook is nearest the anchor); after a
+# close in an airy layout the arm simply continues, which keeps every
+# window where it was.
+FILL_MIN_CONTACTS = 3
+VACANCY_BEARINGS = 12        # projection bearings tried when looking for one
+# Auto-placement can never move a window later, so a slit it leaves stays:
+# a candidate that makes one is all but ruled out.
+JOIN_SLIT_PENALTY = 5000.0
+
+
+def _slits(c, placed, hi):
+    n = 0
+    for p in placed:
+        f = _facing(c, p)
+        if f is not None and hi + 1 < f[0] <= SLIT_MAX and f[1] > 40:
+            n += 1
+    return n
+
+
+def _snug_beside(comp, new, q, q_area, placed, areas):
+    """Positions beside `q` at the pair's spacing, slid to line up with
+    another window's edge at its own spacing -- the spots where a window
+    fits snugly between two or three others (a closed window's hole)."""
+    w, h = new.w, new.h
+    out = []
+    qw, qh = q[2] - q[0], q[3] - q[1]
+    for side in (0, 1, 2, 3):
+        s = pair_spacing(new.area, q_area, comp.band)
+        if side < 2:
+            x = q[2] + s if side == 0 else q[0] - s - w
+            need = MIN_SHARED_FRACTION * min(h, qh)
+            lo, hi = q[1] - h + need, q[3] - need
+            for p, pa in zip(placed, areas):
+                sp_ = pair_spacing(new.area, pa, comp.band)
+                for y in (p[3] + sp_, p[1] - sp_ - h):
+                    if lo <= y <= hi:
+                        out.append(_rect(x, int(y), w, h))
+        else:
+            y = q[3] + s if side == 2 else q[1] - s - h
+            need = MIN_SHARED_FRACTION * min(w, qw)
+            lo, hi = q[0] - w + need, q[2] - need
+            for p, pa in zip(placed, areas):
+                sp_ = pair_spacing(new.area, pa, comp.band)
+                for x in (p[2] + sp_, p[0] - sp_ - w):
+                    if lo <= x <= hi:
+                        out.append(_rect(int(x), y, w, h))
+    return out
+
+
+def _vacancy(comp, new, placed, areas, anchor, others, r_tip):
+    """The best enclosed hole for `new` (see FILL_MIN_CONTACTS), or None:
+    the snuggest -- nearest the anchor, fewest collinear edges."""
+    if len(others) < 2:
+        return None
+    hub = _center(placed[anchor])
+    hi = comp.band[1] + 1
+    best, best_s = None, None
+    cands = set()
+    for i, q in enumerate(placed):
+        for k in range(VACANCY_BEARINGS):
+            cands.update(comp._beside(new, q, areas[i], hub, k * 2 * math.pi / VACANCY_BEARINGS))
+        cands.update(_snug_beside(comp, new, q, areas[i], placed, areas))
+    for c in sorted(cands):
+        if not comp._clear(c, []):
+            continue
+        cx, cy = _center(c)
+        rad = math.hypot(cx - hub[0], cy - hub[1])
+        if rad >= r_tip:
+            continue
+        r_short = min(c[2] - c[0], c[3] - c[1])
+        contacts, touches_anchor, seams = 0, False, 0
+        for k, p in enumerate(placed):
+            seams += sum(abs(c[e] - p[e]) <= SEAM_TOL for e in range(4))
+            f = _facing(c, p)
+            if f is not None and f[0] <= hi and f[1] >= MIN_SHARED_FRACTION * min(r_short, p[2] - p[0], p[3] - p[1]):
+                contacts += 1
+                touches_anchor = touches_anchor or k == anchor
+        if contacts < FILL_MIN_CONTACTS or _slits(c, comp.fixed, comp.band[1]):
+            continue
+        sc = rad + SEAM_WEIGHT * seams
+        if best_s is None or sc < best_s or (sc == best_s and c < best):
+            best, best_s = c, sc
+    return best
+
+
 def join(new_size, layout, obstacles, monitor, band):
     """Where a newly opened window joins the composition, every existing
-    window held where it is: the same candidates, spacing and spiral
-    preference as a SUPER+G build step, with the new window's preferred
-    bearing continuing the existing layout's sweep at its prominence rank.
-    layout / obstacles: [(x, y, w, h)]. Returns the top-left (x, y)."""
+    window held where it is. The first window becomes the anchor, at the
+    usable area's centre (clear of fixed windows). Every later one is the
+    next step of the same sweep SUPER+G builds (Composer.place_next): round
+    the anchor (anchor_index), beside the arm's outer end, one step further
+    round (sweep_state), no closer in -- or into a vacancy a closed window
+    left inside the spiral (_vacancy). While the sweep's start or
+    turning direction is still open (one or two windows), the same start
+    bearings / both directions SUPER+G tries are tried and the best kept.
+    layout: [(x, y, w, h)] in the order the windows were created (see
+    sweep_state); obstacles: [(x, y, w, h)]. Returns the top-left (x, y)."""
     nw, nh = int(new_size[0]), int(new_size[1])
     obstacle_rects = [_rect(*o) for o in obstacles]
     comp = Composer(band, obstacle_rects, monitor)
@@ -655,50 +874,55 @@ def join(new_size, layout, obstacles, monitor, band):
     if not layout:
         r = comp._hub_rect(new)
         return r[0], r[1]
-    wins = [_Win(f"w{i:04d}", w, h, (x + w / 2.0, y + h / 2.0)) for i, (x, y, w, h) in enumerate(layout)]
-    order = prominence_order(wins + [new])
-    rank = order.index(new)
-    existing = prominence_order(wins)
-    theta0, direction = orientation(wins)
-    hub = existing[0].cur
     placed = [_rect(int(x), int(y), int(w), int(h)) for x, y, w, h in layout]
-    by_win = {id(w): placed[i] for i, w in enumerate(wins)}
-    # it follows the window one rank above it in the sweep (the end of the
-    # arm when it outranks everything)
-    prev = existing[rank - 1] if rank > 0 else existing[-1]
-    prev_rect = by_win[id(prev)]
-    bearings = _sweep_offsets(order)
-    theta = theta0 + direction * (bearings[rank - 1] if rank > 0 else bearings[-1] + (bearings[-1] - bearings[-2] if len(bearings) > 1 else math.pi))
     areas = [float(w) * float(h) for _x, _y, w, h in layout]
-    r_prev = RADIUS_FLOOR * math.hypot(prev.cur[0] - hub[0], prev.cur[1] - hub[1])
+    a = anchor_index(placed, comp.view_center)
+    hub = _center(placed[a])
+    others, tip, bearing, direction, step = sweep_state(placed, a, nw * nh)
+    r_tip = math.hypot(_center(placed[tip])[0] - hub[0], _center(placed[tip])[1] - hub[1])
+    hole = _vacancy(comp, new, placed, areas, a, others, r_tip)
+    if hole is not None:
+        return hole[0], hole[1]
+    if not others:
+        # the second window: where the sweep starts is still open -- the
+        # same start bearings SUPER+G tries; the score (screen shape,
+        # balance, staying central) decides
+        thetas = [START_OFFSET + k * 2 * math.pi / START_VARIANTS for k in range(START_VARIANTS)]
+    else:
+        dirs = [direction] if direction is not None else [1, -1]
+        thetas = [bearing[tip] + d * step for d in dirs]
+    # no radius floor: round a wide anchor the next spot along can be nearer
+    # its centre; contact with the tip and the bearing keep the arm going,
+    # and it moves outward once the turn round the anchor is full
+    r_prev = 0.0
     bbox = (min(r[0] for r in placed), min(r[1] for r in placed), max(r[2] for r in placed), max(r[3] for r in placed))
     m = sum(areas)
-    mass = (m, sum(a * _center(r)[0] for a, r in zip(areas, placed)), sum(a * _center(r)[1] for a, r in zip(areas, placed)))
+    mass = (m, sum(ar * _center(r)[0] for ar, r in zip(areas, placed)), sum(ar * _center(r)[1] for ar, r in zip(areas, placed)))
     mx0, my0, mx1, my1 = monitor
+    half = min(mx1 - mx0, my1 - my0) / 2.0
+
+    def extra(c):
+        # a new window should open where most of it can be seen -- outer
+        # windows may run past the screen edge, but not open mostly hidden
+        vis_w = max(0, min(c[2], mx1) - max(c[0], mx0))
+        vis_h = max(0, min(c[3], my1) - max(c[1], my0))
+        s = JOIN_VISIBLE_WEIGHT * max(0.0, JOIN_VISIBLE_SHARE - (vis_w * vis_h) / float(nw * nh))
+        s += JOIN_SLIT_PENALTY * _slits(c, obstacle_rects, comp.band[1])  # every window, seen or not
+        # ...and keep the composition about the screen centre (SUPER+G
+        # recentres afterwards; opening a window can't move the others)
+        gx0, gy0 = min(bbox[0], c[0]), min(bbox[1], c[1])
+        gx1, gy1 = max(bbox[2], c[2]), max(bbox[3], c[3])
+        # (each axis relative to the usable area's size: a wide screen has
+        # more room sideways than up and down)
+        return s + JOIN_CENTRE_WEIGHT * half * math.hypot(((gx0 + gx1) / 2.0 - comp.view_center[0]) / (mx1 - mx0) * 2,
+                                                          ((gy0 + gy1) / 2.0 - comp.view_center[1]) / (my1 - my0) * 2)
+
     best, best_s = None, None
-    target = (hub[0] + math.cos(theta) * (r_prev / RADIUS_FLOOR + 300), hub[1] + math.sin(theta) * (r_prev / RADIUS_FLOOR + 300))
-    anchors = sorted(range(len(placed)), key=lambda i: math.hypot(_center(placed[i])[0] - target[0],
-                                                                 _center(placed[i])[1] - target[1]))
-    for pass_anchors in (anchors[:ANCHOR_CAP * 2], anchors[ANCHOR_CAP * 2:]):
-        for i in pass_anchors:
-            for c in comp._beside(new, placed[i], areas[i], hub, theta):
-                if not comp._clear(c, []):
-                    continue
-                s = comp._score(c, new, placed, areas, hub, theta, r_prev, bbox, mass, None, prev_rect)
-                # a new window should open where it can be seen...
-                vis_w = max(0, min(c[2], mx1) - max(c[0], mx0))
-                vis_h = max(0, min(c[3], my1) - max(c[1], my0))
-                s += JOIN_VISIBLE_WEIGHT * (1.0 - (vis_w * vis_h) / float(nw * nh))
-                # ...and keep the composition about the screen centre (SUPER+G
-                # recentres afterwards; opening a window can't move the others)
-                gx0, gy0 = min(bbox[0], c[0]), min(bbox[1], c[1])
-                gx1, gy1 = max(bbox[2], c[2]), max(bbox[3], c[3])
-                s += JOIN_CENTRE_WEIGHT * math.hypot((gx0 + gx1) / 2.0 - comp.view_center[0],
-                                                     (gy0 + gy1) / 2.0 - comp.view_center[1])
-                if best_s is None or s < best_s or (s == best_s and c < best):
-                    best, best_s = c, s
-        if best is not None:
-            break
+    for theta in thetas:
+        c, sc = comp.place_next(new, placed, areas, hub, theta, r_prev, bbox, mass, None, placed[tip],
+                                extra=extra, obstacles=[])
+        if c is not None and (best_s is None or sc < best_s):
+            best, best_s = c, sc
     if best is None:
         r = comp._hub_rect(new)
         return r[0], r[1]

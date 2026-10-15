@@ -324,10 +324,17 @@ def main():
     # Pinned windows are fixed, like fullscreen ones.
     scales = (dxrice_window_class.monitor_scales(hyprctl_json(["monitors"]))
               if any(c.get("xwayland") for c in clients) else [])
-    kinds, _x11 = dxrice_window_class.classify_all(clients, scales=scales)
+    kinds, x11 = dxrice_window_class.classify_all(clients, scales=scales)
+    monitor = get_monitor_bounds()
+    dxrice_window_class.settle_unknown(kinds, clients, (monitor[2] - monitor[0]) * (monitor[3] - monitor[1]))
     eligible, fixed = dxrice_window_class.partition(clients, workspace_id, kinds)
-    if len(eligible) + len(fixed) < 2:
-        print("Fewer than 2 floating windows here -- nothing to arrange.")
+    # Dialogs that belong to another window (WM_TRANSIENT_FOR) are part of
+    # that window, not members of the composition: they move with it.
+    attached = dxrice_window_class.attached_children(clients, kinds, x11, scales)
+    children = [w for w in eligible if attached.get(w["address"]) in {e["address"] for e in eligible}]
+    eligible = [w for w in eligible if w not in children]
+    if not eligible and not fixed:
+        print("No floating windows here -- nothing to arrange.")
         return
 
     if _DEBUG:
@@ -338,7 +345,6 @@ def main():
         return
 
     gap = live_gap()
-    monitor = get_monitor_bounds()
 
     state_path = _resize_state_path()
     resize_state = _load_resize_state(state_path)
@@ -405,6 +411,16 @@ def main():
                 if eligible:
                     results = auto_arrange(eligible, fixed, monitor, gap, allow_resize=False)
                     by_addr = {w["address"]: w for w in eligible}
+
+    # each attached dialog follows its parent's move
+    parent_delta = {a: (nx - by_addr[a]["at"][0], ny - by_addr[a]["at"][1])
+                    for a, nx, ny, _w, _h in results if a in by_addr}
+    for child in children:
+        dx, dy = parent_delta.get(attached[child["address"]], (0, 0))
+        if (dx, dy) != (0, 0):
+            results.append((child["address"], child["at"][0] + dx, child["at"][1] + dy,
+                            child["size"][0], child["size"][1]))
+            by_addr[child["address"]] = child
 
     exprs = []
     moved = 0

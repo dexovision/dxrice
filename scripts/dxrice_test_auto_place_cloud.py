@@ -479,10 +479,23 @@ class TestJoinsTheCloud(_Base):
         x, y = self.hypr.clients["0xnew"]["at"]
         self.assertTrue(0 <= x and x + 700 <= 1920 and 0 <= y and y + 450 <= 1080, (x, y))
 
-    def test_first_window_is_left_where_it_mapped(self):
+    def test_first_window_mapped_centred_needs_no_move(self):
+        """The first window is the spiral's anchor at the usable area's
+        centre; one Hyprland already mapped there is not moved at all."""
         self.hypr.open("0xonly", 900, 600)
         self.assertEqual(apw.place_new_window("0xonly", 1, GAP), "placed")
         self.assertEqual(self.hypr.dispatched, [])
+
+    def test_first_window_becomes_the_anchor_at_the_usable_centre(self):
+        """Changed by the spiral-growth pass (this used to leave the first
+        window wherever it mapped): it is moved to the centre of the usable
+        area -- the monitor minus reserved bars (get_monitor_bounds)."""
+        usable = (0, 52, 1920, 1012)
+        apw.get_monitor_bounds = lambda: usable
+        self.hypr.add("0xonly", 40, 600, 900, 600)
+        self.assertEqual(apw.place_new_window("0xonly", 1, GAP), "placed")
+        r = _rect(self.hypr.clients["0xonly"])
+        self.assertEqual(((r[0] + r[2]) / 2, (r[1] + r[3]) / 2), (960, 532))
 
 
 class TestRobustness(_Base):
