@@ -124,6 +124,16 @@ hl.animation({ leaf = "windowsOut", enabled = true, speed = 1.49, bezier = "line
 hl.animation({ leaf = "border", enabled = true, speed = 5.39, bezier = "easeOutQuint" })
 hl.animation({ leaf = "fade", enabled = true, speed = 3.03, bezier = "quick" })
 hl.animation({ leaf = "workspaces", enabled = true, speed = 1.94, bezier = "linear", style = "fade" })
+-- Layer-shell surfaces (the desktop overview, launchers, notifications) must
+-- not be faded by the compositor. The `fade` animation above also drives
+-- fadeLayersIn/fadeLayersOut, and Hyprland applies them to the WHOLE surface
+-- as it maps and unmaps: the desktop overview, however opaque it paints, was
+-- composited at 0..100% over the real windows for ~300 ms while its window
+-- pictures moved, so every window showed twice. (No per-layer rule exists:
+-- layer_rule's no_anim only skips the unmap snapshot.) Shell panels animate
+-- themselves in QML.
+hl.animation({ leaf = "fadeLayersIn",  enabled = false })
+hl.animation({ leaf = "fadeLayersOut", enabled = false })
 
 hl.config({
     dwindle = { preserve_split = true },

@@ -31,7 +31,14 @@ import "OverviewGeometry.js" as Geo
 //                visible, so nothing is ever seen twice.
 // Closing plays it back fully covered, and the overlay lets go only after
 // the frame with every picture exactly over its real window (and no dim)
-// has been drawn -- the last thing it shows is the desktop under it.
+// has been drawn -- the last thing it shows is the desktop under it -- then
+// commits two frames of nothing before the surface unmaps.
+//
+// Hyprland fades every layer surface in and out as a whole (fadeLayersIn /
+// fadeLayersOut), however opaque it paints: on a real desktop that showed
+// every window twice while the pictures moved. The hyprland.lua template
+// turns those two leaves off; the empty frames before the unmap keep the
+// closing clean even without them (see docs/OVERVIEW.md).
 //
 // One click on any window focuses exactly that window (by its Hyprland
 // address) and closes. A window not entirely inside the visible area is
@@ -72,7 +79,12 @@ PanelWindow {
     property real dataAt: 0
     property int tilesBuilt: 0   // tile delegates ever created (tests: in-place updates)
 
-    readonly property bool showing: root.open || root.fade > 0 || root.covering
+    readonly property bool showing: root.open || root.fade > 0 || root.covering || root._lingering
+    // The surface stays mapped, drawing nothing, for two frames after the
+    // overview has let go: Hyprland fades a layer surface out from a snapshot
+    // of its last frame, so unmapping straight from a drawn frame would show
+    // that frame (the overview, previews and all) fading over the real desktop.
+    property bool _lingering: false
     // The overview has taken over the screen: its wallpaper and pictures are
     // drawn, opaque. False before the handover (the real desktop shows,
     // dimmed) and again from the final, aligned frame of closing.
@@ -102,6 +114,7 @@ PanelWindow {
         // desktop, while the window data is read.
         exitAnim.stop();
         release.stop();
+        root._lingering = false;
         scrimIn.restart();
         root._pendingEnter = true;
         root.refresh();
@@ -346,16 +359,24 @@ PanelWindow {
     // The animation ends on the value it was heading to, but the frame
     // showing that value hasn't been drawn yet: let go of the screen only
     // once it has (two frames on), so the last thing the overview shows is
-    // exactly the desktop it uncovers -- no pop of dim or position.
+    // exactly the desktop it uncovers -- no pop of dim or position. Then a
+    // frame of nothing at all is committed before the surface unmaps (see
+    // _lingering).
     FrameAnimation {
         id: release
         onTriggered: {
-            if (root.open) { stop(); return; }
+            if (root.open) { stop(); root._lingering = false; return; }
             if (currentFrame < 2) return;
+            if (root.covering) {
+                root._lingering = true;
+                root.covering = false;
+                root.layout = null;
+                tileModel.clear();
+                return;
+            }
+            if (currentFrame < 4) return;
             stop();
-            root.covering = false;
-            root.layout = null;
-            tileModel.clear();
+            root._lingering = false;
             if (root._focusAfterClose) focusAgain.restart();
         }
     }

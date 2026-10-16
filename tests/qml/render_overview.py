@@ -70,9 +70,11 @@ def wallpaper(bridge, w, h):
     bridge.wall = path
 
 
-def load(clients, mon, hang=False):
-    s = Scene("OverviewDesktop.qml", width=mon["width"], height=mon["height"],
-              setup=lambda b: wallpaper(b, mon["width"], mon["height"]))
+def load(clients, mon, hang=False, layer_fade_ms=0):
+    def setup(b):
+        wallpaper(b, mon["width"], mon["height"])
+        b.layer_fade_ms = layer_fade_ms   # >0: the surface fades in on map, as Hyprland's fadeLayersIn does
+    s = Scene("OverviewDesktop.qml", width=mon["width"], height=mon["height"], setup=setup)
     s.ev("wallpaper = " + json.dumps(s.bridge.wall))
     layout = ov.overview(clients, [mon])
     if hang:
@@ -163,6 +165,7 @@ def main(out):
     one_click_sequence(out)
     timing_chart(out)
     print("handover max diff (open, close):", ghost_check(out))
+    print("second-copy pixels per frame (fade on, fade off):", compositor_fade(out))
 
 
 def _bezier(x1, y1, x2, y2, u):
@@ -224,6 +227,62 @@ def timelines(out):
         s.close()
     (out / "_tmp.png").unlink(missing_ok=True)
     sheet([rows[0][:3], rows[0][3:], rows[1][:3], rows[1][3:]], out / "overview_timeline.png", scale=0.3)
+
+
+def compositor_fade(out, fade_ms=303, times=(30, 60, 90, 120, 160, 220)):
+    """The real-desktop artifact, reproduced in the real QML path and then
+    fixed. A recording of SUPER+Tab showed every window twice while the
+    overview opened: Hyprland fades every layer-shell surface in on map
+    (fadeLayersIn, inherited from `fade`: 3.03 ds, bezier `quick`) -- the
+    WHOLE surface, however opaque the overview paints it. The stub surface
+    does the same here.
+
+    Top rows: that fade on (a hyprland.lua without the two fadeLayers lines),
+    the surface's alpha following the `quick` curve. Bottom rows: off (the
+    template's lines). The same instants of the opening, stepped by hand on
+    the real curves; one window is magenta (real window and its picture
+    alike) so a second copy stands out, and its pixels outside every picture
+    are counted."""
+    from test_overview import MAGENTA
+    clients = spiral(MIXED[:8])   # the same eight windows the tests use
+    rows, counts = [], []
+    for ms in (fade_ms, 0):
+        s, layout = load(clients, monitor(), layer_fade_ms=ms)
+        r = layout["reserved"]
+        target = layout["windows"][0]
+        fake = json.loads(s.ev("JSON.stringify(fakeWindows)")); fake[0]["color"] = MAGENTA
+        s.ev("fakeWindows = " + json.dumps(fake))
+        tl = json.loads(s.ev("JSON.stringify(hypr.toplevels.values)")); tl[0]["wayland"]["color"] = MAGENTA
+        s.ev("hypr.toplevels = ({ values: " + json.dumps(tl) + " })")
+        s.ev("findNamed('overview').show()")
+        s.wait(SETTLE)          # animations done: the values below are set by hand
+        row, cnt = [], []
+        for t in times:
+            fade, prog, covering = open_state(t)
+            alpha = _bezier(0.15, 0.0, 0.1, 1.0, min(1.0, t / fade_ms)) if ms else 1.0
+            s.ev(f"findNamed('overview').layerAlpha = {alpha}")
+            _set(s, fade, prog, covering)
+            img = s.view.grabWindow()
+            tiles = json.loads(s.ev("JSON.stringify(tileRects())"))
+            hits = 0
+            for i in range(2, int(target["w"]) - 1, 4):
+                for j in range(2, int(target["h"]) - 1, 4):
+                    x, y = target["x"] + r[0] + i, target["y"] + r[1] + j
+                    if not (0 <= x < img.width() and 0 <= y < img.height()):
+                        continue
+                    if any(t_[0] - 2 <= x <= t_[0] + t_[2] + 2 and t_[1] - 2 <= y <= t_[1] + t_[3] + 2
+                           for t_ in tiles.values()):
+                        continue
+                    c = img.pixelColor(int(x), int(y))
+                    hits += (c.red() - c.green() > 12 and c.blue() - c.green() > 12)
+            row.append(label(img, f"{'fade on' if ms else 'fade off'}  +{t} ms  zoom {prog * 100:.0f}%",
+                             f"surface alpha {alpha:.2f}   second copy: {hits} px"))
+            cnt.append(hits)
+        rows.append(row)
+        counts.append(cnt)
+        s.close()
+    sheet([rows[0][:3], rows[0][3:], rows[1][:3], rows[1][3:]], out / "overview_compositor_fade.png", scale=0.3)
+    return counts
 
 
 def diff_image(a, b, gain=8):

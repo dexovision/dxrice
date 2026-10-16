@@ -412,6 +412,138 @@ class TestKeybinds(unittest.TestCase):
             self.assertIn("Tabbb", no.stdout + no.stderr)
 
 
+class TestCompositorLayerFade(unittest.TestCase):
+    """The double image seen on a real recording of SUPER+Tab: Hyprland fades
+    every layer surface in and out (fadeLayersIn/Out, inherited from `fade`),
+    so the opaque overview was composited at 0..100% over the real windows
+    while its pictures moved. The template turns those two leaves off, and an
+    install that predates the lines is told about them."""
+
+    TEMPLATE = TestKeybinds.TEMPLATE
+    LEAVES = ("fadeLayersIn", "fadeLayersOut")
+
+    def lines(self, text):
+        import re
+        return {m.group(1): m.group(0) for m in re.finditer(r'hl\.animation\(\{\s*leaf\s*=\s*"(\w+)"[^\n]*', text)}
+
+    def test_the_template_turns_the_layer_fades_off_and_keeps_the_rest(self):
+        import re
+        found = self.lines(open(self.TEMPLATE).read())
+        for leaf in self.LEAVES:
+            self.assertIn(leaf, found)
+            self.assertRegex(found[leaf], r"enabled\s*=\s*false")
+        # the window/border/workspace animations are the user's look: untouched
+        for leaf in ("windows", "windowsOut", "border", "fade", "workspaces"):
+            self.assertRegex(found[leaf], r"enabled\s*=\s*true", leaf)
+
+    def verify(self, text):
+        import shutil
+        import subprocess
+        import tempfile
+        hypr = shutil.which("Hyprland")
+        if not hypr:
+            self.skipTest("Hyprland not installed")
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("HYPRLAND_INSTANCE_SIGNATURE", "WAYLAND_DISPLAY", "DISPLAY")}
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.lua")
+            open(path, "w").write(text)
+            r = subprocess.run([hypr, "--verify-config", "-c", path], capture_output=True, text=True,
+                               timeout=60, env=env)
+        return r.stdout + r.stderr
+
+    def test_hyprland_accepts_the_leaf_names(self):
+        """Hyprland's own parser (nothing started or executed): the template
+        is fine, and a made-up leaf in a copy is refused -- so the two names
+        are real, not silently ignored."""
+        text = open(self.TEMPLATE).read()
+        self.assertIn("config ok", self.verify(text))
+        bad = text.replace('leaf = "fadeLayersIn"', 'leaf = "fadeLayersInn"')
+        self.assertIn("fadeLayersInn", self.verify(bad))
+
+    def test_an_existing_install_is_told_about_the_lines(self):
+        import tempfile
+        from pathlib import Path
+        import dxrice_check_hypr_drift as drift
+        text = open(self.TEMPLATE).read()
+        ids = drift._identities(text)
+        for leaf in self.LEAVES:
+            self.assertIn(f"animation:{leaf}", ids)
+        old = "".join(l for l in text.splitlines(True) if not any(f'"{x}"' in l for x in self.LEAVES))
+        saved = drift.REPO, drift.SNAPSHOT_DIR
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "repo" / "hypr").mkdir(parents=True)
+            (d / "repo" / "hypr" / "hyprland.lua").write_text(text)
+            (d / "snap").mkdir()
+            (d / "snap" / "hypr_hyprland.lua").write_text(old)
+            live = d / "live.lua"
+            live.write_text(old)
+            drift.REPO, drift.SNAPSHOT_DIR = d / "repo", d / "snap"
+            try:
+                before = drift.check_one("hypr/hyprland.lua", live, "hypr_hyprland.lua")
+                live.write_text(text)
+                after = drift.check_one("hypr/hyprland.lua", live, "hypr_hyprland.lua")
+            finally:
+                drift.REPO, drift.SNAPSHOT_DIR = saved
+        self.assertEqual(before["status"], "drift")
+        self.assertEqual(set(before["detail"]), {f"animation:{x}" for x in self.LEAVES})
+        self.assertEqual(after["status"], "clean")
+
+
+class TestRecordingProbe(unittest.TestCase):
+    """scripts/dxrice_overview_probe.py tells a one-frame handover from a
+    compositor fade by how many frames the bar takes to go, on synthetic
+    recordings (a fixed 'bar' pattern replaced by 'wallpaper', instantly or
+    blended over a quick-bezier ramp, under a uniform dim)."""
+
+    def setUp(self):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest("numpy not installed")
+        import dxrice_overview_probe as probe
+        self.np, self.probe = numpy, probe
+        rng = numpy.random.RandomState(7)
+        self.bar = rng.randint(0, 255, (40, 180)).astype(float)
+        self.wall = rng.randint(60, 120, (40, 180)).astype(float)
+
+    def clip(self, alphas, dims):
+        """Frames of bar*(1-a) + wallpaper*a, darkened by dim."""
+        frames = [(self.bar * (1 - a) + self.wall * a) * (1 - d) for a, d in zip(alphas, dims)]
+        return self.np.array(frames)
+
+    def run_probe(self, alphas, dims):
+        strips = self.clip(alphas, dims)
+        times = [i / 60.0 for i in range(len(strips))]
+        return self.probe.transitions(self.probe.correlations(strips), times)
+
+    def test_a_one_frame_handover_is_clean_even_while_the_overview_darkens(self):
+        alphas = [0] * 10 + [1] * 30 + [0] * 10
+        dims = [0] * 10 + [0.38 * min(1, i / 18) for i in range(30)] + [0] * 10
+        found = self.run_probe(alphas, dims)
+        self.assertEqual([f[0] for f in found], ["covers", "uncovers"])
+        for kind, a, b, frames, ms in found:
+            self.assertLessEqual(frames, self.probe.CLEAN_MAX_FRAMES, (kind, frames))
+
+    def test_a_compositor_fade_in_and_out_is_flagged(self):
+        quick = lambda u: 1 - (1 - u) ** 3     # a fast-start ease, like `quick`
+        ramp = [quick(i / 18) for i in range(1, 18)]
+        alphas = [0] * 10 + ramp + [1] * 20 + ramp[::-1] + [0] * 10
+        found = self.run_probe(alphas, [0.0] * len(alphas))
+        self.assertEqual([f[0] for f in found], ["covers", "uncovers"])
+        for kind, a, b, frames, ms in found:
+            self.assertGreater(frames, self.probe.CLEAN_MAX_FRAMES, (kind, frames))
+
+    def test_noise_in_one_frame_does_not_split_or_hide_a_transition(self):
+        quick = lambda u: 1 - (1 - u) ** 3
+        alphas = [0] * 10 + [quick(i / 18) for i in range(1, 18)] + [1] * 20
+        alphas[14] = 0.0   # one stray frame back to the bar
+        found = self.run_probe(alphas, [0.0] * len(alphas))
+        self.assertEqual(len(found), 1)
+        self.assertGreater(found[0][3], self.probe.CLEAN_MAX_FRAMES)
+
+
 class TestPerformance(unittest.TestCase):
     def test_layout_cost(self):
         """Computing the view is negligible next to starting Python: a few

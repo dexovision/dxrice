@@ -116,6 +116,9 @@ class HarnessBridge(QObject):
         self.run_log: list[list[str]] = []
         self.env_over = {"HOME": str(Path(config_home).parent), "XDG_CONFIG_HOME": str(config_home),
                          "USER": "dexo", "XDG_SESSION_ID": "2"}
+        # >0: the stub PanelWindow fades a surface in over this many ms when it
+        # maps, the way Hyprland's fadeLayersIn does (see PanelWindow.qml)
+        self.layer_fade_ms = 0
 
     # Not notifiable on purpose: each Scene configures these BEFORE loading
     # any QML, and a fresh QQmlEngine reads them anew.
@@ -126,6 +129,10 @@ class HarnessBridge(QObject):
     @Property(int, constant=True)
     def screenHeight(self):
         return self._h
+
+    @Property(int, constant=True)
+    def layerFadeMs(self):
+        return int(self.layer_fade_ms)
 
     @Property(str, constant=True)
     def shellDir(self):

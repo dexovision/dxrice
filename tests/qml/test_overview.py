@@ -66,12 +66,15 @@ def bezier(x1, y1, x2, y2, u):
 class OverviewScene:
     """The OverviewDesktop scene with a workspace loaded into it."""
 
-    def __init__(self, clients, mon=None, uncapturable=()):
+    def __init__(self, clients, mon=None, uncapturable=(), layer_fade_ms=0):
         mon = mon or monitor()
         self.mon = mon
-        # the surface is the monitor's LOGICAL size, as Quickshell gives it
+        # the surface is the monitor's LOGICAL size, as Quickshell gives it;
+        # layer_fade_ms > 0 makes the stub surface fade in on map the way
+        # Hyprland's fadeLayersIn does
         sc = mon.get("scale", 1) or 1
-        self.scene = Scene("OverviewDesktop.qml", width=round(mon["width"] / sc), height=round(mon["height"] / sc))
+        self.scene = Scene("OverviewDesktop.qml", width=round(mon["width"] / sc), height=round(mon["height"] / sc),
+                           setup=lambda b: setattr(b, "layer_fade_ms", layer_fade_ms))
         self.load(clients, uncapturable)
 
     def load(self, clients, uncapturable=()):
@@ -454,6 +457,17 @@ def max_diff(a, b, step=7):
     return d
 
 
+def diff_fraction(a, b, tol=8, step=3):
+    """Share of sampled pixels differing by more than tol in any channel."""
+    n = bad = 0
+    for x in range(0, min(a.width(), b.width()), step):
+        for y in range(0, min(a.height(), b.height()), step):
+            p, q = a.pixelColor(x, y), b.pixelColor(x, y)
+            n += 1
+            bad += max(abs(p.red() - q.red()), abs(p.green() - q.green()), abs(p.blue() - q.blue())) > tol
+    return bad / n
+
+
 def moved_to(dispatches):
     """{address: (x, y)} from the hl.dsp.window.move requests sent."""
     import re
@@ -564,17 +578,15 @@ class TestSelectionCentring(unittest.TestCase):
             o.scene.close()
 
 
-class TestNoGhosting(unittest.TestCase):
-    """Bug report: during the zoom the real window and its picture were both
-    visible -- two copies tweening (the wallpaper used to fade in over the
-    first sixth of the zoom and out over the last, so the real windows
-    showed through it while their pictures moved). Now the overview takes
-    over in one frame, pictures exactly over the real windows, and gives
-    the screen back the same way: checked on the rendered frames."""
+class GhostRig:
+    """Eight windows, the first painted (real window and picture alike) a
+    colour nothing else has, so a second copy of it is unmistakable."""
+
+    LAYER_FADE_MS = 0
 
     def setUp(self):
         self.rects = sp.arrange(MIXED[:8], [], (0, 52, 1920, 1012), (32, 56))
-        self.o = OverviewScene(clients_for(self.rects))
+        self.o = OverviewScene(clients_for(self.rects), layer_fade_ms=self.LAYER_FADE_MS)
         # paint one real window (and its picture) a colour nothing else has
         fake = json.loads(self.o.scene.ev("JSON.stringify(fakeWindows)"))
         self.target = self.o.layout["windows"][0]
@@ -619,6 +631,14 @@ class TestNoGhosting(unittest.TestCase):
             img = self.o.scene.view.grabWindow()
             out.append((self.o.ov("progress"), self.o.ov("covering"), (img, self.o.tiles())))
         return out
+
+
+class TestNoGhosting(GhostRig, unittest.TestCase):
+    """The overview itself never shows a window twice: the overview takes
+    over in one frame, pictures exactly over the real windows, zooms fully
+    covering, and lets go the same way -- checked on rendered frames. (What
+    the COMPOSITOR does to the surface on top of that is
+    TestUnderTheCompositorFade.)"""
 
     def test_opening_never_shows_the_real_window_and_its_picture_together(self):
         self.o.call("show")
@@ -751,6 +771,32 @@ class TestNoGhosting(unittest.TestCase):
         self.assertTrue(self.o.ov("covering"))
         self.assertEqual(len(self.o.tiles()), len(self.o.layout["windows"]))
 
+    def test_the_surface_draws_nothing_in_its_last_frames(self):
+        """Hyprland fades a layer surface out from a snapshot of its last
+        frame. So before it unmaps, the overview commits frames with nothing
+        in them: the screen is exactly the desktop, and the last frame seen
+        while the surface exists is one of those (the old code unmapped
+        straight from the drawn overview, which then faded over the real
+        windows on a real compositor)."""
+        desk = self.o.scene.view.grabWindow()
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        self.o.call("hide")
+        last_visible_covering = None
+        empty_frames = []
+        for _ in range(1500):
+            self.o.scene.wait(1)
+            if not self.o.ov("visible"):
+                break
+            covering = self.o.ov("covering")
+            last_visible_covering = covering
+            if not covering and not self.o.ov("open"):
+                empty_frames.append(max_diff(desk, self.o.scene.view.grabWindow(), 5))
+        self.assertFalse(self.o.ov("visible"), "the overview never unmapped")
+        self.assertFalse(last_visible_covering, "unmapped straight from a drawn frame")
+        self.assertGreaterEqual(len(empty_frames), 1, "no empty frame before the unmap")
+        self.assertLessEqual(max(empty_frames), 2, empty_frames)
+
     def test_the_handover_waits_for_the_pictures(self):
         """The overview doesn't take over while a visible window has no
         picture yet -- that window would vanish for a frame or two; it waits
@@ -773,6 +819,51 @@ class TestNoGhosting(unittest.TestCase):
         self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
         self.assertFalse(self.o.ov("covering"))
         self.assertEqual(self.o.dispatches(), [])
+
+
+class TestUnderTheCompositorFade(GhostRig, unittest.TestCase):
+    """What a real recording of SUPER+Tab showed: every window twice for
+    ~300 ms, the overview's pictures moving over a real desktop still
+    visible through them. Hyprland's fadeLayersIn (inherited from `fade`,
+    3.03 ds, bezier `quick`) composites the whole overlay surface at 0..100%
+    as it maps, however opaque Overview.qml paints it. The stub surface here
+    does the same (layer_fade_ms), reproducing it in the real QML path."""
+
+    LAYER_FADE_MS = 303
+
+    def test_control_the_recorded_double_image_is_reproduced(self):
+        """With the fade on (a config without the two fadeLayers lines) the
+        real window shows through while its picture moves. This is the
+        control: it proves these frames can see the artifact, so the
+        ghost-free results with the fade off (TestNoGhosting) mean something."""
+        self.o.call("show")
+        worst = 0
+        for p, covering, (img, tiles) in self.frames(16, 20):
+            if p > 0.03:
+                worst = max(worst, self.magenta_outside_tiles(img, tiles))
+        self.assertGreater(worst, 200, "the fade emulation no longer shows the double image")
+
+    def test_the_overlay_equals_the_desktop_until_it_moves(self):
+        """The one thing the shell controls: the surface's content, from the
+        moment it covers until the zoom begins, is the desktop itself -- so
+        whatever alpha the compositor has it at over that stretch is
+        invisible. (Held at progress 0 and a 40% surface alpha, the frame is
+        the desktop.)"""
+        from PySide6.QtCore import QRect
+        r = self.o.layout["reserved"]
+        area = QRect(r[0], r[1], self.o.layout["monitor"]["width"], self.o.layout["monitor"]["height"])
+        desk = self.o.scene.view.grabWindow().copy(area)
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        self.o.scene.ev("findNamed('overview').progress = 0")
+        self.o.scene.ev("findNamed('overview').fade = 0")        # the uniform keypress dim is not a copy
+        self.o.scene.ev("findNamed('overview').layerAlpha = 0.4")  # the compositor mid-fade
+        self.o.scene.wait(60)
+        self.assertTrue(self.o.ov("covering"))
+        self.assertEqual(self.o.ov("layerAlpha"), 0.4)
+        # not bit-exact: the flattened surface's texture resamples the
+        # anti-aliased edges of text -- a handful of pixels in tens of thousands
+        self.assertLess(diff_fraction(desk, self.o.scene.view.grabWindow().copy(area)), 0.001)
 
 
 class TestGeometryParity(unittest.TestCase):

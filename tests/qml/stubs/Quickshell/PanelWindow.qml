@@ -25,4 +25,24 @@ Item {
     implicitWidth: Harness.screenWidth
     width: implicitWidth
     height: implicitHeight
+
+    // Hyprland fades every layer-shell surface in when it maps (animation leaf
+    // fadeLayersIn, inherited from `fade`: the ramp seen on a real recording of
+    // the overview). Off unless a scene sets the bridge's layer_fade_ms, so only
+    // the tests that reproduce it see it: the whole surface, however opaque the
+    // shell paints it, is composited at this alpha over the real desktop.
+    property real layerAlpha: 1
+    opacity: layerAlpha
+    // the compositor blends the flattened surface, not each of its items
+    layer.enabled: layerAlpha < 1
+    onVisibleChanged: {
+        if (visible && Harness.layerFadeMs > 0) layerFadeIn.restart();
+        else if (!visible) { layerFadeIn.stop(); layerAlpha = 1; }
+    }
+    NumberAnimation {
+        id: layerFadeIn
+        target: root; property: "layerAlpha"; from: 0; to: 1
+        duration: Harness.layerFadeMs
+        easing.type: Easing.BezierSpline; easing.bezierCurve: [0.15, 0.0, 0.1, 1.0, 1, 1]
+    }
 }

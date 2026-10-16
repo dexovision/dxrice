@@ -46,11 +46,10 @@ after the animation ends. So the last frame it shows is the desktop under
 it, and there is no pop. No window has moved, unless a click panned the
 desktop; then the pictures close onto the windows' new places.
 
-There is never a crossfade between the overview and the real desktop. An
-earlier version faded the wallpaper in over the first sixth of the zoom
-(and out over the last): for those frames the real windows showed through it
-while their pictures moved away, two copies of every window. See
-`overview_ghost_before_after.png`.
+The overview itself never crossfades with the real desktop. (An earlier
+version faded its wallpaper in over the first sixth of the zoom and out over
+the last, so the real windows showed through it; that is gone. It was not
+the whole story: see "The double image" below.)
 
 Toggling while it's still moving eases out of wherever it is, never
 snapping.
@@ -107,6 +106,59 @@ overview closes.
   as above.
 - **Monitors:** it opens on the focused monitor, fitted to that monitor's
   logical size (scale and rotation applied).
+
+## The double image: what actually caused it
+
+On the real desktop, every window showed twice while the overview opened
+(and faintly while it closed). A screen recording of SUPER+Tab, taken after
+the in-QML crossfade above had been removed, showed it plainly: the real
+terminal at full size, fading out, beside a smaller, moving picture of it.
+Two copies, so two things visible at once, so the overview was not opaque on
+screen -- although `Overview.qml` paints it opaque.
+
+**The cause is Hyprland, not the shell.** Hyprland fades every layer-shell
+surface in when it maps and out when it unmaps (animation leaves
+`fadeLayersIn` / `fadeLayersOut`, which inherit the `fade` setting: 3.03
+with the `quick` bezier, here). It applies that to the *whole surface*,
+however opaque the shell paints it, so the overview was composited at 0..100%
+over the real windows for about 300 ms while its pictures moved. The recording
+shows the top bar's clock fading out over 9 frames (125 ms) opening and 4
+closing (55 ms); a one-frame handover would be 1. `hyprctl animations`
+confirms `fadeLayersIn` / `fadeLayersOut` are not overridden. Hyprland has no
+per-layer switch: `layer_rule`'s `no_anim` only skips the unmap snapshot.
+
+A synthetic harness has no compositor, so nothing there could show it.
+`PanelWindow.qml`'s test stub now fades a surface in on map the same way
+(`layer_fade_ms`), flattened as a compositor does, which reproduces the
+recording's frames: `overview_compositor_fade.png`.
+
+**The fix has two parts:**
+
+1. `hypr/hyprland.lua` turns the two layer fades off:
+
+   ```lua
+   hl.animation({ leaf = "fadeLayersIn",  enabled = false })
+   hl.animation({ leaf = "fadeLayersOut", enabled = false })
+   ```
+
+   This is global to layer surfaces (the overview, launchers, notifications,
+   the theme window): they appear and go at once. The bar and the shell's
+   panels animate themselves in QML. The window, border and workspace
+   animations are untouched. **Your deployed `hyprland.lua` is copy-once and
+   never merged, so add the two lines to it by hand**; `dxrice_check_hypr_drift.py`
+   now reports them as missing. Hyprland reloads the file when it's saved.
+2. `Overview.qml` no longer unmaps from a drawn frame. Hyprland fades a
+   surface out from a snapshot of its last frame, so the overview now commits
+   two frames of nothing (the surface mapped, drawing nothing) before it
+   unmaps. That makes the closing clean even without the config lines. The
+   opening can't be fixed from the shell: whatever alpha the compositor has the
+   surface at, only the config removes it. Without the lines the overview
+   still looks correct at the handover (the first covered frame is the
+   desktop, so any alpha over it is invisible) but doubles while it zooms.
+
+To check a real recording, `python3 scripts/dxrice_overview_probe.py
+RECORDING.mp4` measures how many frames the bar's clock takes to go: 1 or 2 is
+a clean handover, 3 or more is a compositor fade.
 
 ## How it works, and why not a "real" zoom
 
@@ -182,7 +234,7 @@ key would silently do nothing, so the proven path is kept.
 
 ## Testing
 
-- `scripts/dxrice_test_overview.py` (26 tests, no compositor). It covers:
+- `scripts/dxrice_test_overview.py` (32 tests, no compositor). It covers:
   - which windows count, and their stacking order;
   - no zoom when everything fits;
   - centring and the margin;
@@ -202,8 +254,15 @@ key would silently do nothing, so the proven path is kept.
     - the drift checker sees the bind;
     - no IpcHandler function is named after a `qs ipc` subcommand
       (`qs ipc call overview show` used to run `qs ipc show` instead);
-    - the bind calls a function that exists.
-- `tests/qml/test_overview.py` (32 tests, offscreen harness, the real
+    - the bind calls a function that exists;
+  - **the compositor layer fade:** the template turns `fadeLayersIn` and
+    `fadeLayersOut` off and keeps the other animations, Hyprland's parser
+    accepts the leaf names (and refuses a made-up one), and an install that
+    predates the lines is told by the drift checker;
+  - **the recording probe**, on synthetic recordings: one frame is clean even
+    while the overview darkens, a fade is flagged, one noisy frame doesn't
+    split a transition.
+- `tests/qml/test_overview.py` (35 tests, offscreen harness, the real
   shell). It covers:
   - opening and closing back exactly;
   - the first and last frames on the real windows;
@@ -229,6 +288,10 @@ key would silently do nothing, so the proven path is kept.
     - the last frame drawn on closing is the desktop (letting go one frame
       early fails this by 242/255);
     - the handover waits for the pictures, at most 150 ms;
+    - the surface draws nothing in its last frames before it unmaps;
+    - **under the emulated compositor fade** (`TestUnderTheCompositorFade`):
+      a control that reproduces the recorded double image, and that the
+      overlay equals the desktop until it moves;
     - pressing again before the handover, or during the release frames,
       backs out or resumes cleanly;
   - focus always in Lua syntax;
@@ -246,6 +309,8 @@ key would silently do nothing, so the proven path is kept.
     the frame pairs on either side of the handover and of the release;
   - `overview_ghost_check.png`: those two pairs as actual frames, with their
     pixel difference (both 0/255);
+  - `overview_compositor_fade.png`: the same opening with the compositor fade
+    on (the recording's double image) and off (the template's two lines);
   - `overview_one_click.png`: one click on an off-screen window, ending
     with it centred (screen centre marked);
   - `overview_timing.png`: before and after, plotted;
@@ -253,12 +318,15 @@ key would silently do nothing, so the proven path is kept.
     fullscreen and pinned windows, and a 1440p monitor;
   - the zoom frames.
 
-`overview_ghost_before_after.png` was rendered once, from both the previous
-version (7de7718) and this one: the zoom at 3, 8 and 14%.
+`overview_ghost_before_after.png` was rendered once, from both the 7de7718
+version and 0be89f9: the zoom at 3, 8 and 14%. It shows the in-QML
+crossfade only; the compositor's is `overview_compositor_fade.png`.
 
 ## Activation
 
 `git -C ~/dxrice merge --ff-only origin/claude/task-kcttpa`, then
 `systemctl --user restart dxrice-quickshell.service`. The restart makes the
-bar and dock blink once. `hyprland.lua` needs no change: SUPER+Tab is
-already the overview's only bind.
+bar and dock blink once. Then, in `~/.config/hypr/hyprland.lua`, add the two
+`hl.animation({ leaf = "fadeLayersIn"/"fadeLayersOut", enabled = false })`
+lines from the template (after the `workspaces` animation); Hyprland reloads
+the file when it's saved. SUPER+Tab is already the overview's only bind.
