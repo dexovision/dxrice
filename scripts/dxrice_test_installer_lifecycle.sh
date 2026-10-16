@@ -119,6 +119,21 @@ DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > "$LOG/norepo.out" 2>&1
 assert "file without the repo variable is not edited" "$(yes_if "cmp -s '$LOG/norepo.lua' '$LUA'")"
 assert "...and the user is told what to change" "$(yes_if "grep -q 'dxrice_polkit_agent.sh' '$LOG/norepo.out'")"
 
+echo "=== a checkout path hyprland.lua can't use ==="
+
+SPACED="$SANDBOX/my stuff/dxrice"
+mkdir -p "$SANDBOX/my stuff"
+cp -a "$REPO_DIR" "$SPACED"
+new_home spaced
+env -i HOME="$H" USER="${USER:-tester}" PATH="$BIN:/usr/bin:/bin" TERM=dumb \
+    XDG_CONFIG_HOME="$H/.config" XDG_DATA_HOME="$H/.local/share" XDG_STATE_HOME="$H/.local/state" \
+    bash "$SPACED/install.sh" < /dev/null > "$LOG/spaced.out" 2>&1
+rc=$?
+assert "install refuses a checkout path with a space (rc=$rc)" "$(yes_if "[ $rc != 0 ]")"
+assert "...says why and what to use" "$(yes_if "grep -q 'contains spaces or shell characters' '$LOG/spaced.out'")"
+assert "...before deploying anything" "$(yes_if "[ ! -e '$H/.config/hypr/hyprland.lua' ]")"
+assert "plain paths are accepted" "$(yes_if "call path_is_plain /home/me/dxrice-2.0_x+y@z")"
+
 echo "=== uninstall removes DXrice's services ==="
 
 new_home uninstall

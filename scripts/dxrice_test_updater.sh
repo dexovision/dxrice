@@ -137,5 +137,15 @@ run_update; rc=$?
 assert "exits 0 without updating (rc=$rc)" "$(yes_if "[ $rc = 0 ] && [ \"\$(head_of)\" = '$before' ]")"
 assert "says why" "$(yes_if "grep -q 'detached commit' '$LOG/update.out'")"
 
+echo "=== a branch whose upstream is another local branch ==="
+git -C "$CO" checkout -q main
+G -C "$CO" branch -q base main
+G -C "$CO" checkout -q -b work --track base
+printf 'on base\n' >> "$CO/README.md"; G -C "$CO" commit -qam "base moves"
+G -C "$CO" checkout -q work 2>/dev/null
+G -C "$CO" checkout -q base && G -C "$CO" checkout -q work
+run_update; rc=$?
+assert "updates from the local branch without fetching (rc=$rc)" "$(yes_if "[ $rc = 0 ] && grep -q 'on base' '$CO/README.md'")"
+
 echo ""
 if [ "$FAILED" = 0 ]; then echo "All assertions passed."; else echo "FAILED"; tail -40 "$LOG/update.out"; exit 1; fi

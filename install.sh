@@ -406,6 +406,11 @@ remove_shell_alias() {
     fi
 }
 
+# Whether a path can be spliced into hyprland.lua's commands unquoted.
+path_is_plain() {
+    [[ "$1" =~ ^[A-Za-z0-9._/@+-]+$ ]]
+}
+
 # Lets a fresh install put the checkout wherever the user actually wants it,
 # instead of silently assuming wherever they happened to `git clone` it to.
 # Re-execs install.sh from the new location if it moves, so the rest of the
@@ -426,6 +431,14 @@ choose_install_location() {
     answer="${answer:-$default}"
     answer="${answer/#\~/$HOME}"
     answer="$(realpath -m "$answer")"
+
+    if ! path_is_plain "$answer"; then
+        err "'$answer' contains spaces or shell characters."
+        info "hyprland.lua runs DXrice's scripts by this path without quoting it, so"
+        info "every keybind would break. Pick a path made of letters, digits and . _ - / + @"
+        info "(for example ~/dxrice) and run ./install.sh again."
+        exit 1
+    fi
 
     if [ "$answer" = "$REPO_DIR" ]; then
         ok "Using $REPO_DIR"
@@ -1136,6 +1149,10 @@ verify_deploy() {
         "$REPO_DIR/scripts/dxrice_gtk_widgets.py"
         "$REPO_DIR/scripts/dxrice_list_desktop_apps.py"
         "$REPO_DIR/scripts/dxrice_launch.sh"
+        "$REPO_DIR/scripts/dxrice_session.sh"
+        "$REPO_DIR/scripts/dxrice_power.sh"
+        "$REPO_DIR/scripts/dxrice_polkit_agent.sh"
+        "$REPO_DIR/scripts/dxrice_monitor.py"
         "$REPO_DIR/quickshell/shell.qml"
         "$REPO_DIR/quickshell/qmldir"
         "$REPO_DIR/quickshell/Theme.qml"
@@ -1150,6 +1167,14 @@ verify_deploy() {
             ok "$f"
         else
             err "MISSING: $f"
+            all_ok=0
+        fi
+    done
+    # hyprland.lua runs these directly, so they must be executable (a
+    # checkout unpacked from an archive can lose the bit)
+    for f in "$REPO_DIR/scripts/dxrice_session.sh" "$REPO_DIR/scripts/dxrice_polkit_agent.sh"; do
+        if [ -f "$f" ] && [ ! -x "$f" ]; then
+            err "NOT EXECUTABLE: $f -- fix with: chmod +x '$f'"
             all_ok=0
         fi
     done
@@ -1561,8 +1586,10 @@ update_checkout() {
         return 0
     fi
 
+    local remote
+    remote="$(git config "branch.$branch.remote" || echo origin)"
     info "Fetching $upstream..."
-    if ! git fetch --quiet "${upstream%%/*}" 2>"$STATE_DIR/fetch.err"; then
+    if [ "$remote" != "." ] && ! git fetch --quiet "$remote" 2>"$STATE_DIR/fetch.err"; then
         err "Couldn't fetch updates: $(head -1 "$STATE_DIR/fetch.err" 2>/dev/null)"
         info "Nothing was changed. Check your network connection and run './install.sh update' again."
         return 1
@@ -1630,6 +1657,11 @@ do_update() {
     require_repo_layout
     mkdir -p "$STATE_DIR"
     cd "$REPO_DIR"
+    if ! path_is_plain "$REPO_DIR"; then
+        warn "This checkout's path ($REPO_DIR) contains spaces or shell characters;"
+        info "hyprland.lua's keybinds can't run scripts from it. Move it (e.g. to ~/dxrice)"
+        info "and run ./install.sh from there."
+    fi
 
     step "Checking for updates"
     UPDATE_SUMMARY="Deployed the checkout as it is (no update was applied)."
