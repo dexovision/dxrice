@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
+import Quickshell.Hyprland
 
 // A fake monitor: wallpaper, an ordinary application window underneath the
 // shell (the "Discord" from the dead-zone report), and the REAL shell.qml
@@ -52,6 +53,7 @@ Item {
     readonly property Item overlay: overlayLayer
 
     readonly property QtObject panels: PanelManager
+    readonly property QtObject hypr: Hyprland
     readonly property QtObject theme: Theme
     // The hosted panel Item whose type exposes `prop` (QuickSettings has
     // currentTab, TaskbarManager has addPanelOpen, CalendarPanel viewDate).

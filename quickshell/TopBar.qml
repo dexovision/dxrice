@@ -188,27 +188,16 @@ PanelWindow {
     // ---- left island: the shell's anchor. Workspaces + focused window,
     // bundled -- see the file header for why this is one island and not two.
     // Summons no panel; it exists to be substantial, not to expand. ----
-    // NOT Quickshell's own Hyprland.activeToplevel, and NOT each
-    // HyprlandToplevel's own `activated` flag either -- both turned out to be
-    // a real gap in this Quickshell version's Hyprland module: neither is
-    // backed by Hyprland's initial state on connect (unlike `workspaces` and
-    // `toplevels`, which populate immediately and correctly), only by live
-    // "activewindow" events from that point on. Confirmed two different ways:
-    // toplevelsCount was correctly 4 immediately after connecting while
-    // activeToplevel stayed null throughout, and separately every toplevel's
-    // own `activated` read false even while `hyprctl activewindow -j`
-    // (queried completely independently of Quickshell) correctly reported
-    // the real focused window. A session that never triggers a fresh
-    // Hyprland focus event after this shell starts would otherwise show no
-    // focused window here indefinitely.
-    //
-    // The reliable fix is the one already used elsewhere in this codebase for
-    // anything Quickshell's own bindings don't cover (CPU/mem via /proc, disk
-    // via `df`): a native subprocess, polled -- here `hyprctl activewindow
-    // -j`, which is always correct because it asks Hyprland fresh every time
-    // rather than trusting a change notification that might never come.
+    // The focused window's class and title. Not Hyprland.activeToplevel:
+    // in the Quickshell version this was built against it stays null until
+    // the first focus change after the shell starts. So: one
+    // `hyprctl activewindow -j` read at startup (and after a config reload),
+    // then Hyprland's own events -- activewindow>>CLASS,TITLE on every focus
+    // change, windowtitlev2>>ADDRESS,TITLE when a window renames itself (a
+    // browser switching tabs). No polling.
     property string activeAppId: ""
     property string activeTitle: ""
+    property string _activeAddress: ""
 
     Process {
         id: activeWindowProc
@@ -217,25 +206,44 @@ PanelWindow {
             onStreamFinished: {
                 try {
                     const w = JSON.parse(this.text);
-                    // Title before appId: onActiveAppIdChanged (below) reads
-                    // root.activeTitle synchronously the moment appId is
-                    // assigned, so setting title second meant every icon
-                    // lookup ran one step behind, using whatever title had
-                    // been set on the PREVIOUS window.
-                    root.activeTitle = w.title || "";
-                    root.activeAppId = w.class || "";
+                    root._activeAddress = String(w.address || "").replace(/^0x/, "");
+                    root.setActive(w.class || "", w.title || "");
                 } catch (e) {
-                    // No focused window (e.g. an empty workspace) prints
-                    // "{}" or an error string, not valid single-window JSON.
-                    root.activeAppId = "";
-                    root.activeTitle = "";
+                    // no focused window prints "{}" or an error string
+                    root._activeAddress = "";
+                    root.setActive("", "");
                 }
             }
         }
     }
-    Timer {
-        interval: 1500; running: true; repeat: true; triggeredOnStart: true
-        onTriggered: activeWindowProc.running = true
+    Component.onCompleted: activeWindowProc.running = true
+
+    // Title first: onActiveAppIdChanged reads activeTitle at once.
+    function setActive(cls, title) {
+        root.activeTitle = title;
+        root.activeAppId = cls;
+    }
+    // "a,b,c" -> ["a", "b,c"]: the payload's last field may contain commas
+    function _splitFirst(data) {
+        const i = data.indexOf(",");
+        return i < 0 ? [data, ""] : [data.substring(0, i), data.substring(i + 1)];
+    }
+    Connections {
+        target: Hyprland
+        function onRawEvent(event) {
+            const data = String(event.data || "");
+            if (event.name === "activewindow") {
+                const parts = root._splitFirst(data);
+                root.setActive(parts[0], parts[1]);
+            } else if (event.name === "activewindowv2") {
+                root._activeAddress = data.replace(/^0x/, "");
+            } else if (event.name === "windowtitlev2") {
+                const parts = root._splitFirst(data);
+                if (parts[0].replace(/^0x/, "") === root._activeAddress) root.activeTitle = parts[1];
+            } else if (event.name === "configreloaded") {
+                activeWindowProc.running = true;
+            }
+        }
     }
 
     Process {
@@ -387,12 +395,17 @@ PanelWindow {
             property string date: ""
             text: "<b>" + time + "</b>&nbsp;&nbsp;&nbsp;<font color=\"" + Theme.text + "\">" + date + "</font>"
         }
+        // Shows minutes, so it wakes once a minute, just after the minute
+        // turns (re-aimed every time, so it never drifts).
         Timer {
-            interval: 1000; running: true; repeat: true; triggeredOnStart: true
+            id: clockTick
+            interval: 1; running: true; repeat: false
             onTriggered: {
                 const now = new Date();
                 clockText.time = Qt.formatDateTime(now, "HH:mm");
                 clockText.date = Qt.formatDateTime(now, "ddd MMM d");
+                clockTick.interval = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds()) + 50;
+                clockTick.restart();
             }
         }
         hovered: clockArea.containsMouse
