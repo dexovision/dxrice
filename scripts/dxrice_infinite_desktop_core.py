@@ -29,12 +29,15 @@ KEY_LEFTALT = 56; KEY_RIGHTALT = 100
 KEY_LEFTCTRL = 29; KEY_RIGHTCTRL = 97
 BTN_LEFT = 272
 
-STATE_FILE = "/tmp/infinite-desktop-state"
 PROTECTED_APPS = ['brave-browser', 'chromium', 'chromium-browser', 'google-chrome',
                   'firefox', 'firefoxdeveloperedition', 'librewolf', 'vivaldi',
                   'opera', 'microsoft-edge']
 
 lock = threading.Lock()
+# Notified by the input readers whenever a modifier or the left button
+# changes. Both loops below sleep on it while nothing is being panned or
+# dragged, so an idle session costs no wakeups at all.
+state_changed = threading.Condition(lock)
 super_pressed = False; alt_pressed = False; ctrl_pressed = False; btn_left = False
 acc_x = 0.0; acc_y = 0.0
 
@@ -42,22 +45,6 @@ window_drag_active = False
 last_window_bounds = None
 mouse_rel_x = 0
 mouse_rel_y = 0
-
-_inverted_cache = False
-_inverted_last_check = 0.0
-INVERTED_CACHE_TTL = 0.5
-
-def get_cached_inverted():
-    global _inverted_cache, _inverted_last_check
-    now = time.time()
-    if now - _inverted_last_check > INVERTED_CACHE_TTL:
-        try:
-            with open(STATE_FILE) as f:
-                _inverted_cache = f.read().strip() == 'inverse'
-        except Exception:
-            _inverted_cache = False
-        _inverted_last_check = now
-    return _inverted_cache
 
 def get_monitor_bounds():
     try:
@@ -97,17 +84,6 @@ def get_frame_interval():
     display is actually capable of."""
     rate = get_cached_monitor_bounds().get('refreshRate', 60.0) or 60.0
     return 1.0 / max(30.0, min(rate, 240.0))
-
-# Idle poll rate for both while-True loops below, used whenever nothing is
-# actually being panned/dragged right now -- there is no reason to wake up
-# up to 240 times/sec (this machine's real refresh rate) just to re-check
-# two booleans that a keyboard-reader thread updates asynchronously anyway.
-# 60Hz still notices a drag start within ~16ms (imperceptible) while
-# cutting idle wakeups by up to ~4x on a 240Hz panel and ~2.4x on this
-# machine's own 144Hz one -- real, measured-in-kind savings for a loop that
-# otherwise runs unconditionally for the entire session, not just while
-# actively dragging.
-IDLE_POLL_INTERVAL = 1.0 / 60.0
 
 def get_floating_windows(workspace_id):
     try:
@@ -208,10 +184,19 @@ def monitor_window_drag():
             _last_focused_poll = now
         return _cached_focused
 
+    def drag_held():
+        return super_pressed and btn_left and not alt_pressed and not ctrl_pressed
+
     while True:
         try:
+            if not window_drag_active:
+                with state_changed:
+                    state_changed.wait_for(drag_held)
+                    # pointer motion from before the drag isn't part of it
+                    mouse_rel_x = 0
+                    mouse_rel_y = 0
             with lock:
-                is_dragging = super_pressed and btn_left and not alt_pressed and not ctrl_pressed
+                is_dragging = drag_held()
                 mouse_dx = mouse_rel_x
                 mouse_dy = mouse_rel_y
                 mouse_rel_x = 0
@@ -268,7 +253,7 @@ def monitor_window_drag():
                     window_drag_active = False
                     dragged_window_addr = None
 
-            time.sleep(get_frame_interval() if (is_dragging or window_drag_active) else IDLE_POLL_INTERVAL)
+            time.sleep(get_frame_interval())
         except Exception:
             time.sleep(0.1)
 
@@ -295,14 +280,39 @@ def classify_device(path):
 
     return None
 
+# Devices already classified as neither keyboard nor mouse, keyed by path and
+# the device node's identity, so a rescan only opens devices it hasn't seen.
+# A replugged device gets a new node and is looked at again.
+_ignored_devices = set()
+
+
+def _node_id(path):
+    try:
+        st = os.stat(path)
+        return (path, st.st_rdev, st.st_ctime_ns)
+    except OSError:
+        return None
+
+
 def scan_devices():
+    """(keyboards, mice) among the input devices that have no reader yet."""
     keyboards, mice = [], []
     for path in list_devices():
-        kind = classify_device(path)
-        if kind == 'mouse':
-            mice.append(path)
-        elif kind == 'keyboard':
-            keyboards.append(path)
+        for threads in (_active_kbd_threads, _active_mouse_threads):
+            t = threads.get(path)
+            if t is not None and t.is_alive():
+                break
+        else:
+            node = _node_id(path)
+            if node is None or node in _ignored_devices:
+                continue
+            kind = classify_device(path)
+            if kind == 'mouse':
+                mice.append(path)
+            elif kind == 'keyboard':
+                keyboards.append(path)
+            else:
+                _ignored_devices.add(node)
     return keyboards, mice
 
 def kbd_reader_device(path):
@@ -325,13 +335,16 @@ def kbd_reader_device(path):
         if value == 2:
             continue
 
-        with lock:
+        with state_changed:
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
                 super_pressed = (value == 1)
             elif code in (KEY_LEFTALT, KEY_RIGHTALT):
                 alt_pressed = (value == 1)
             elif code in (KEY_LEFTCTRL, KEY_RIGHTCTRL):
                 ctrl_pressed = (value == 1)
+            else:
+                continue
+            state_changed.notify_all()
 
     try:
         fd.close()
@@ -354,9 +367,10 @@ def mouse_reader_device(path):
             break
         _, _, etype, code, value = struct.unpack('llHHi', data)
 
-        with lock:
+        with state_changed:
             if etype == EV_KEY and code == BTN_LEFT:
                 btn_left = (value == 1)
+                state_changed.notify_all()
             elif etype == EV_REL:
                 if code == REL_X:
                     mouse_rel_x += value
@@ -364,11 +378,10 @@ def mouse_reader_device(path):
                     mouse_rel_y += value
 
                 if super_pressed and alt_pressed:
-                    sign = -1 if get_cached_inverted() else 1
                     if code == REL_X:
-                        acc_x += value * speed * sign
+                        acc_x += value * speed
                     elif code == REL_Y:
-                        acc_y += value * speed * sign
+                        acc_y += value * speed
                 else:
                     acc_x = 0.0
                     acc_y = 0.0
@@ -391,20 +404,16 @@ def device_manager():
             keyboards, mice = scan_devices()
 
             for path in keyboards:
-                t = _active_kbd_threads.get(path)
-                if t is None or not t.is_alive():
-                    nt = threading.Thread(target=kbd_reader_device, args=(path,), daemon=True)
-                    nt.start()
-                    _active_kbd_threads[path] = nt
-                    print(f"[+] Keyboard detected: {path}", flush=True)
+                nt = threading.Thread(target=kbd_reader_device, args=(path,), daemon=True)
+                nt.start()
+                _active_kbd_threads[path] = nt
+                print(f"[+] Keyboard detected: {path}", flush=True)
 
             for path in mice:
-                t = _active_mouse_threads.get(path)
-                if t is None or not t.is_alive():
-                    nt = threading.Thread(target=mouse_reader_device, args=(path,), daemon=True)
-                    nt.start()
-                    _active_mouse_threads[path] = nt
-                    print(f"[+] Mouse detected: {path}", flush=True)
+                nt = threading.Thread(target=mouse_reader_device, args=(path,), daemon=True)
+                nt.start()
+                _active_mouse_threads[path] = nt
+                print(f"[+] Mouse detected: {path}", flush=True)
         except Exception as e:
             print(f"Error in device_manager: {e}", flush=True)
 
@@ -513,9 +522,16 @@ _pending_dx = 0
 _pending_dy = 0
 _frame_count = 0
 
+def pan_held():
+    return super_pressed and alt_pressed
+
+
 _was_active = False
 while True:
-    time.sleep(get_frame_interval() if _was_active else IDLE_POLL_INTERVAL)
+    if not _was_active:
+        with state_changed:
+            state_changed.wait_for(pan_held)
+    time.sleep(get_frame_interval())
 
     with lock:
         active_drag = super_pressed and alt_pressed
