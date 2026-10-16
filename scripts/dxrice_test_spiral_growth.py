@@ -33,8 +33,8 @@ def _centre(r):
 class _Growth(cloud._Base):
     def setUp(self):
         super().setUp()
-        apw.get_monitor_bounds = lambda: USABLE
-        arr.get_monitor_bounds = lambda: USABLE
+        apw.get_monitor_bounds = lambda *_: USABLE
+        arr.get_monitor_bounds = lambda *_: USABLE
 
     def open_seq(self, sizes, prefix="0xw"):
         """Opens windows one at a time through the real place_new_window;

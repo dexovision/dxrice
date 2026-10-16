@@ -76,6 +76,8 @@ from dxrice_hypr_ipc import (hyprctl_json, move_window_exact_async, move_window_
 import dxrice_singleton
 import dxrice_xdg
 import dxrice_window_class
+import dxrice_monitor
+from dxrice_monitor import usable_bounds  # noqa: F401  (imported from here by other scripts and tests)
 
 DEFAULT_GAP = 5
 
@@ -96,45 +98,13 @@ def socket2_path():
     return os.path.join(runtime, "hypr", sig, ".socket2.sock")
 
 
-def usable_bounds(m):
-    """The part of one monitor (a `hyprctl monitors -j` entry) windows are
-    meant to use, in layout coordinates: its logical size (scale and a
-    90/270-degree transform applied) minus the space reserved by bars and
-    docks (`reserved`: left, top, right, bottom). Placement and SUPER+G aim
-    at this area's centre -- the raw monitor put "centre" under the bar's
-    share of the screen and let windows sit beneath it."""
-    w, h = m["width"], m["height"]
-    if m.get("transform", 0) in (1, 3, 5, 7):
-        w, h = h, w
+def get_monitor_bounds(monitor_id=None):
+    """The usable area (dxrice_monitor.usable_bounds) of the monitor with
+    `monitor_id`, else of the focused monitor."""
     try:
-        scale = float(m.get("scale") or 1.0)
-    except (TypeError, ValueError):
-        scale = 1.0
-    if scale > 0:
-        w, h = round(w / scale), round(h / scale)
-    x0, y0 = m["x"], m["y"]
-    res = m.get("reserved") or [0, 0, 0, 0]
-    try:
-        left, top, right, bottom = (int(v) for v in res)
-    except (TypeError, ValueError):
-        left = top = right = bottom = 0
-    if left + right < w and top + bottom < h:
-        return (x0 + left, y0 + top, x0 + w - right, y0 + h - bottom)
-    return (x0, y0, x0 + w, y0 + h)
-
-
-def get_monitor_bounds():
-    """The focused monitor's usable area (usable_bounds)."""
-    try:
-        monitors = hyprctl_json(["monitors"])
-        if monitors:
-            for m in monitors:
-                if m.get("focused"):
-                    return usable_bounds(m)
-            return usable_bounds(monitors[0])
+        return dxrice_monitor.bounds(hyprctl_json(["monitors"]), monitor_id)
     except Exception:
-        pass
-    return (0, 0, 1920, 1080)
+        return dxrice_monitor.FALLBACK_BOUNDS
 
 
 def find_window(clients, address):
@@ -2274,7 +2244,9 @@ def place_new_window(address, workspace_id, gap):
     # dxrice_window_class.py for the evidence) -- it must be left where the
     # app put it, and it must never count as part of anyone's layout.
     kinds, x11 = classify_clients(clients)
-    mx0, my0, mx1, my1 = get_monitor_bounds()
+    # The monitor the window opened on, which isn't always the focused one
+    # (a workspace rule, or an app started on the other screen).
+    mx0, my0, mx1, my1 = get_monitor_bounds(new_win.get("monitor"))
     # An XWayland window the X server couldn't be asked about: big ones are
     # still placed; a small one may well be a popup, and moving a popup
     # away from what it points at is the bug this exists for. The same rule

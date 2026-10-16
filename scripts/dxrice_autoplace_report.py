@@ -111,7 +111,7 @@ def run(scripts, n, render_dir=None, seed=7):
         def sep(a, b):
             return spiral.dist((a[1], a[2], a[1] + a[3], a[2] + a[4]), (b[1], b[2], b[1] + b[3], b[2] + b[4]))
     rigidity_yardstick = spiral is not None and hasattr(spiral, "rigidity")
-    apw.get_monitor_bounds = lambda: MON
+    apw.get_monitor_bounds = lambda *_: MON
     apw.time.sleep = lambda s: None
     rng = random.Random(seed)
     per = []

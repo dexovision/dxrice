@@ -2406,7 +2406,7 @@ class TestFullscreenStartupTransition(unittest.TestCase):
                  apw.move_window_exact_async, apw._settle_moves, apw.batch_async,
                  apw.dispatch_async)
         apw.hyprctl_json = lambda args, **kw: clients if args and args[0] == "clients" else None
-        apw.get_monitor_bounds = lambda: (0, 0, 1920, 1080)
+        apw.get_monitor_bounds = lambda *_: (0, 0, 1920, 1080)
         apw.live_gap = lambda: GAP
         apw.move_window_exact_async = lambda x, y, a: dispatched.append(("move", a, x, y))
         apw._settle_moves = lambda *a, **k: None
@@ -3413,7 +3413,7 @@ class TestSuperGMainFlow(_RoundShapeFixtures):
     def _press(self, hypr):
         import contextlib, io
         arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
-        arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda: self.MON)
+        arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda *_: self.MON)
         with contextlib.redirect_stdout(io.StringIO()):
             arr.main()
 
@@ -3500,7 +3500,7 @@ class TestRigidGridIsRebuilt(unittest.TestCase):
     def press(self, hypr):
         import contextlib, io
         arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
-        arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda: self.MON)
+        arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda *_: self.MON)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             arr.main()
@@ -3581,7 +3581,7 @@ class TestRigidGridIsRebuilt(unittest.TestCase):
             hypr = _FakeHyprland(self.grid(560, 420))
             apw.hyprctl_json, apw.batch_async = hypr.hyprctl_json, hypr.batch_async
             apw.dispatch_async, apw.move_window_exact_async = hypr.dispatch_async, hypr.move_window_exact_async
-            apw.get_monitor_bounds = lambda: self.MON
+            apw.get_monitor_bounds = lambda *_: self.MON
             apw.time.sleep = lambda s: None
             before = {a: (x, y, w, h) for a, x, y, w, h in hypr.rows()}
             hypr.open("0xnew", 700, 450, "kitty", 4242)
@@ -3744,7 +3744,7 @@ class TestMixedSizeRigidLayouts(unittest.TestCase):
         try:
             hypr = _FakeHyprland(self.fixtures()["two large over three terminals"])
             arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
-            arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda: self.MON)
+            arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda *_: self.MON)
             outs = []
             for _ in range(2):
                 buf = io.StringIO()
@@ -3792,7 +3792,7 @@ class TestMixedSizeRigidLayouts(unittest.TestCase):
         try:
             hypr = _FakeHyprland(self.REPORTED_SIX)
             arr.hyprctl_json, arr.batch_async = hypr.hyprctl_json, hypr.batch_async
-            arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda: self.MON)
+            arr.live_gap, arr.get_monitor_bounds = (lambda: self.GAP), (lambda *_: self.MON)
             outs = []
             for _ in range(2):
                 buf = io.StringIO()
@@ -3847,7 +3847,7 @@ class TestNewWindowDispatchRounding(unittest.TestCase):
         hypr = _FakeHyprland()
         apw.hyprctl_json, apw.batch_async = hypr.hyprctl_json, hypr.batch_async
         apw.dispatch_async, apw.move_window_exact_async = hypr.dispatch_async, hypr.move_window_exact_async
-        apw.get_monitor_bounds = lambda: _FakeHyprland.MON
+        apw.get_monitor_bounds = lambda *_: _FakeHyprland.MON
         apw.time.sleep = lambda s: None
         for addr, w, h, cls, pid in (("0xsettings0", 824, 566, "settings", 1000),
                                      ("0xsettings4", 886, 605, "settings", 1004),
@@ -3896,7 +3896,7 @@ class TestOpeningNeverResizesExistingWindows(unittest.TestCase):
         hypr = _FakeHyprland()
         apw.hyprctl_json, apw.batch_async = hypr.hyprctl_json, hypr.batch_async
         apw.dispatch_async, apw.move_window_exact_async = hypr.dispatch_async, hypr.move_window_exact_async
-        apw.get_monitor_bounds = lambda: _FakeHyprland.MON
+        apw.get_monitor_bounds = lambda *_: _FakeHyprland.MON
         apw.time.sleep = lambda s: None
         for addr, w, h, cls, pid in self.SEQUENCE:
             hypr.open(addr, w, h, cls, pid)
@@ -3906,6 +3906,59 @@ class TestOpeningNeverResizesExistingWindows(unittest.TestCase):
             self.assertEqual(after, before, f"opening {addr} changed an existing window")
         self.assertFalse(os.path.exists(arr._resize_state_path()),
                          "placement wrote SUPER+G's resize memory without resizing anything")
+
+
+class TestPlacementUsesTheWindowsOwnMonitor(unittest.TestCase):
+    """A window that opens on a monitor other than the focused one (a
+    workspace rule, an app started there) is placed in that monitor's area,
+    not dragged into the focused monitor's coordinates."""
+
+    MONITORS = [
+        {"id": 0, "name": "DP-1", "x": 0, "y": 0, "width": 1920, "height": 1080, "scale": 1.0,
+         "transform": 0, "focused": True, "reserved": [0, 52, 0, 68]},
+        # a scaled 1440p panel to the right: 1707x960 in the layout
+        {"id": 1, "name": "DP-2", "x": 1920, "y": 0, "width": 2560, "height": 1440, "scale": 1.5,
+         "transform": 0, "focused": False, "reserved": [0, 0, 0, 0]},
+    ]
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = self._tmp.name
+        self._saved = (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
+                       apw.time.sleep)
+
+    def tearDown(self):
+        (apw.hyprctl_json, apw.batch_async, apw.dispatch_async, apw.move_window_exact_async,
+         apw.time.sleep) = self._saved
+        if self._env is None:
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+        else:
+            os.environ["XDG_RUNTIME_DIR"] = self._env
+        self._tmp.cleanup()
+
+    def test_window_on_the_other_monitor_stays_there(self):
+        hypr = _FakeHyprland()
+        monitors = self.MONITORS
+
+        def hyprctl_json(args, **kw):
+            if args and args[0] == "monitors":
+                return monitors
+            return _FakeHyprland.hyprctl_json(hypr, args, **kw)
+        apw.hyprctl_json, apw.batch_async = hyprctl_json, hypr.batch_async
+        apw.dispatch_async, apw.move_window_exact_async = hypr.dispatch_async, hypr.move_window_exact_async
+        apw.time.sleep = lambda s: None
+        # mapped on DP-2, workspace 5, while DP-1 has focus
+        hypr.clients["0xb"] = {"address": "0xb", "at": [2500, 300], "size": [800, 500], "floating": True,
+                               "fullscreen": 0, "workspace": {"id": 5}, "monitor": 1, "title": "b",
+                               "class": "app", "initialClass": "app", "pid": 2001}
+        self.assertEqual(apw.place_new_window("0xb", 5, GAP), "placed")
+        x, y = hypr.clients["0xb"]["at"]
+        x0, y0, x1, y1 = apw.usable_bounds(monitors[1])
+        self.assertEqual((x0, y0, x1, y1), (1920, 0, 1920 + 1707, 960))
+        self.assertTrue(x0 <= x and x + 800 <= x1 and y0 <= y and y + 500 <= y1,
+                        f"placed at {(x, y)}, outside DP-2's area {(x0, y0, x1, y1)}")
 
 
 if __name__ == "__main__":

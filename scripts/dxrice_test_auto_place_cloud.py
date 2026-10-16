@@ -128,10 +128,10 @@ class _Base(unittest.TestCase):
         h = self.hypr
         apw.hyprctl_json, apw.dispatch_async, apw.batch_async = h.hyprctl_json, h.dispatch_async, h.batch_async
         apw.move_window_exact_async = h.move_window_exact_async
-        apw.get_monitor_bounds = lambda: MON
+        apw.get_monitor_bounds = lambda *_: MON
         apw.time.sleep = lambda s: None
         arr.hyprctl_json, arr.batch_async = h.hyprctl_json, h.batch_async
-        arr.live_gap, arr.get_monitor_bounds = (lambda: GAP), (lambda: MON)
+        arr.live_gap, arr.get_monitor_bounds = (lambda: GAP), (lambda *_: MON)
         wc.x11_windows = lambda display=None: self.X11
         apw.classify_clients = lambda clients: wc.classify_all(clients)
 
@@ -493,7 +493,7 @@ class TestJoinsTheCloud(_Base):
         window wherever it mapped): it is moved to the centre of the usable
         area -- the monitor minus reserved bars (get_monitor_bounds)."""
         usable = (0, 52, 1920, 1012)
-        apw.get_monitor_bounds = lambda: usable
+        apw.get_monitor_bounds = lambda *_: usable
         self.hypr.add("0xonly", 40, 600, 900, 600)
         self.assertEqual(apw.place_new_window("0xonly", 1, GAP), "placed")
         r = _rect(self.hypr.clients["0xonly"])
