@@ -1082,7 +1082,10 @@ PanelWindow {
     // regions are frames around composition rather than settings lists. ====
     component PreviewRegion: Rectangle {
         default property alias data: inner.data
-        property real regionPadding: Theme.padLg
+        // The same inset as the settings Cards stacked beside/below it
+        // (padding: Theme.pad2xl), so a preview's label and a settings
+        // group's title start on one vertical line instead of 8px apart.
+        property real regionPadding: Theme.pad2xl
         radius: ShellSurface.cardRadius
         color: Theme.cardTone
         // Same borderless group as Card: tone carries the boundary.
@@ -1215,7 +1218,6 @@ PanelWindow {
             // that actually matters. ----
             PreviewRegion {
                 width: parent.width
-                regionPadding: Theme.padLg
                 Column {
                     width: parent.width
                     spacing: Theme.padSm
