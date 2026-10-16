@@ -110,9 +110,12 @@ def restore_floating_windows(workspace_id):
             continue
         x, y = pos["x"], pos["y"]
         w2, h2 = pos.get("w"), pos.get("h")
-        move_exprs.append(move_window_exact_lua(x, y, addr))
+        # Size first, then position: Hyprland resizes a floating window
+        # around its centre, so resizing after the move would shift the
+        # window by half the size change.
         if w2 and h2:
             move_exprs.append(resize_window_exact_lua(w2, h2, addr))
+        move_exprs.append(move_window_exact_lua(x, y, addr))
         print(f"  - {pos.get('class', addr)} -> ({x}, {y}) [{w2}x{h2}]")
 
     if move_exprs:
