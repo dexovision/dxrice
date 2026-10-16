@@ -22,6 +22,7 @@ import Quickshell.Io
 //   qs -p <repo>/quickshell/shell.qml ipc call theme toggle
 //   qs -p <repo>/quickshell/shell.qml ipc call taskbar toggle
 //   qs -p <repo>/quickshell/shell.qml ipc call calendar toggle
+//   qs -p <repo>/quickshell/shell.qml ipc call overview toggle   (SUPER+Tab)
 ShellRoot {
     id: root
 
@@ -141,5 +142,21 @@ ShellRoot {
     Dock {
         id: dock
         onTaskbarRequested: PanelManager.toggle("taskbar")
+    }
+
+    // Desktop overview (SUPER+Tab / SUPER+minus / SUPER+equal): the current
+    // workspace zoomed out to fit the screen -- a view drawn from live window
+    // pictures, never a re-layout (see Overview.qml). Always constructed so
+    // the first keypress only waits for the window list, but it holds no
+    // surface and captures nothing until opened.
+    Overview {
+        id: overview
+        objectName: "overview"
+    }
+    IpcHandler {
+        target: "overview"
+        function toggle(): void { overview.toggle(); }
+        function show(): void { overview.show(); }
+        function hide(): void { overview.hide(); }
     }
 }

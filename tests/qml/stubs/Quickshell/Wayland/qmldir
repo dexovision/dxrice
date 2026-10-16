@@ -1,5 +1,8 @@
 module Quickshell.Wayland
 ExclusionMode 1.0 ExclusionMode.qml
 WlrLayer 1.0 WlrLayer.qml
+WlrKeyboardFocus 1.0 WlrKeyboardFocus.qml
 WlSessionLock 1.0 WlSessionLock.qml
 WlSessionLockSurface 1.0 WlSessionLockSurface.qml
+ScreencopyView 1.0 ScreencopyView.qml
+FakeAppWindow 1.0 FakeAppWindow.qml

@@ -38,6 +38,7 @@ MediaBackend 1.0 MediaBackend.qml
 ClipboardBackend 1.0 ClipboardBackend.qml
 LockScreen 1.0 LockScreen.qml
 OSD 1.0 OSD.qml
+Overview 1.0 Overview.qml
 CalendarPanel 1.0 CalendarPanel.qml
 QuickSettings 1.0 QuickSettings.qml
 TaskbarManager 1.0 TaskbarManager.qml

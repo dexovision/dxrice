@@ -258,6 +258,20 @@ hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxric
 -- this bind at it instead to revert to that simpler behavior).
 hl.bind(mainMod .. " + G", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_auto_arrange.py"))
 
+-- Desktop overview: the current workspace zoomed out until every window --
+-- the whole Galaxy Spiral, past the screen edges too -- fits on screen. A
+-- view (live window pictures drawn by Quickshell, Overview.qml), never a
+-- re-layout: no window moves or resizes. Esc, a click on empty space or
+-- the toggle key closes it; clicking a window focuses it. To use other
+-- keys, change them on these three lines -- nothing else refers to them.
+local function overview(action)
+    return hl.dsp.exec_cmd("sh -c 'qs -p " .. repo .. "/quickshell/shell.qml ipc call overview "
+        .. action .. " 2>/dev/null'")
+end
+hl.bind(mainMod .. " + Tab", overview("toggle"))    -- zoom out / back in
+hl.bind(mainMod .. " + minus", overview("show"))    -- zoom out
+hl.bind(mainMod .. " + equal", overview("hide"))    -- zoom back in
+
 hl.bind(mainMod .. " + left",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py left"))
 hl.bind(mainMod .. " + right", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py right"))
 hl.bind(mainMod .. " + up",    hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py up"))

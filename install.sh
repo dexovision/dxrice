@@ -276,6 +276,9 @@ dx() {
         settings|qs)
             qs -p "$repo/quickshell/shell.qml" ipc call quicksettings toggle 2>/dev/null \
                 || python3 "$repo/scripts/dxrice_quick_settings.py" ;;
+        overview)
+            qs -p "$repo/quickshell/shell.qml" ipc call overview toggle 2>/dev/null \
+                || echo "Couldn't reach Quickshell (is it installed and running?)." ;;
         sddm-theme)
             "$repo/install.sh" sddm-theme ;;
         lock)
@@ -289,11 +292,12 @@ dx() {
             fi
             ;;
         *)
-            echo "Usage: dx <update|theme|taskbar|settings|lock|sddm-theme>"
+            echo "Usage: dx <update|theme|taskbar|settings|overview|lock|sddm-theme>"
             echo "  update      pull the latest DXrice and re-deploy (same as dxrice-update)"
             echo "  theme       open the Theme settings (Quickshell if installed, else GTK)"
             echo "  taskbar     open the Taskbar manager"
             echo "  settings    open Quick Settings (alias: qs)"
+            echo "  overview    zoom the desktop out to see every window (SUPER+Tab)"
             echo "  lock        try the new Quickshell lock screen (SUPER+L still uses hyprlock)"
             echo "  sddm-theme  sync the SDDM login theme (needs sudo)"
             return 1
@@ -1266,6 +1270,7 @@ verify_deploy() {
         "$REPO_DIR/scripts/dxrice_auto_place_window.py"
         "$REPO_DIR/scripts/dxrice_auto_arrange.py"
         "$REPO_DIR/scripts/dxrice_spiral.py"
+        "$REPO_DIR/scripts/dxrice_overview.py"
         "$REPO_DIR/scripts/dxrice_hypr_ipc.py"
         "$REPO_DIR/scripts/dxrice_resize_memory.py"
         "$REPO_DIR/scripts/dxrice_window_class.py"
@@ -1285,6 +1290,7 @@ verify_deploy() {
         "$REPO_DIR/quickshell/QuickSettings.qml"
         "$REPO_DIR/quickshell/ThemeEditor.qml"
         "$REPO_DIR/quickshell/TaskbarManager.qml"
+        "$REPO_DIR/quickshell/Overview.qml"
     )
     local all_ok=1
     for f in "${required[@]}"; do
