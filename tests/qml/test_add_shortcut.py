@@ -165,6 +165,26 @@ class AddShortcutTest(unittest.TestCase):
         self.s.ev(f"{TB}.addPanelOpen = false"); self.s.wait(700)
         self.assertFalse(self._focus_in_branch(), "a hidden branch field kept keyboard focus after close")
 
+    def test_closing_the_taskbar_dissolves_the_branch_in_place(self):
+        """Taskbar closed while the branch is open. The branch used to keep
+        re-placing itself against the collapsing panel: it slid down after
+        it and, as the centred panel narrowed, flipped to the other side
+        mid-fold; it also outlived the TaskbarManager it reads."""
+        self.open_branch()
+        geom = lambda: (self.s.ev(f"{B}.side"), self.s.ev(f"{B}.x"), self.s.ev(f"{B}.y"),
+                        self.s.ev(f"{B}.width"), self.s.ev(f"{B}.height"))
+        start = geom()
+        self.s.ev("panels.closeCurrent()")
+        gone_before_manager = None
+        for _ in range(20):
+            self.s.wait(20)
+            g = geom()
+            self.assertEqual(g, start, "the branch moved or re-placed itself while its parent collapsed")
+            if self.s.ev(f"{B}.manager") is None and gone_before_manager is None:
+                gone_before_manager = self.s.ev(f"{B}.reveal") == 0
+        self.assertTrue(gone_before_manager, "the branch was still on screen when its TaskbarManager was destroyed")
+        self.assertFalse(self.s.ev(f"{B}.visible"))
+
     def test_no_new_warnings(self):
         self.open_branch()
         self.s.ev(f"{TB}.query = 'x'"); self.s.wait(200)

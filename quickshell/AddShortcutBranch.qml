@@ -58,23 +58,30 @@ Item {
     readonly property real fixedH: pad * 2 + headerRow.height + searchField.height + customCaption.height
         + nameField.height + cmdField.height + addRow.height + Theme.padMd * 6
     readonly property real wantH: fixedH + rowH * 6
-    readonly property var anchorPoint: Qt.point(
+    // Where the branch leaves its parent and where it goes. Both follow the
+    // parent's live geometry ONLY while the branch is open (so it stays
+    // attached if the panel resizes under it) and freeze the moment a close
+    // starts. Tracking a COLLAPSING parent made the folding branch slide
+    // after it and, as the centred panel narrowed symmetrically, flip from
+    // its right side to its left mid-fold (rendered: at 110 ms into a
+    // taskbar close it had jumped sides; at 180 ms it was a detached pill).
+    // Frozen, it folds back into the exact spot it grew from. Closed, no
+    // placement JS runs at all -- the island's geometry animates on every
+    // taskbar open/close.
+    readonly property var _liveAnchor: Qt.point(
         anchorIsland.x + (manager ? manager.addAnchorX : anchorIsland.width / 2),
         anchorIsland.y + (manager ? manager.headerCenterY : 24))
-    // Only computed while the branch is showing (or folding away). It
-    // depends on the island's live geometry, which animates on every
-    // taskbar open/close -- unguarded, this JS ran every frame of every
-    // morph even with the branch closed. Closed, it keeps its last value.
-    property var _lastPlacement: ({ side: "right", x: 0, y: 0, w: 340, h: 0 })
-    readonly property bool _placing: root.open || root.reveal > 0
-    readonly property var placement: !root._placing ? root._lastPlacement : BranchGeometry.place(
+    property point _frozenAnchor: Qt.point(0, 0)
+    property var _frozenPlacement: ({ side: "right", x: 0, y: 0, w: 340, h: 0 })
+    readonly property var anchorPoint: root.open ? root._liveAnchor : root._frozenAnchor
+    readonly property var placement: !root.open ? root._frozenPlacement : BranchGeometry.place(
         { x: anchorIsland.x, y: anchorIsland.y, w: anchorIsland.width, h: anchorIsland.height },
-        anchorPoint,
+        root._liveAnchor,
         { w: 340, h: wantH },
         { w: screenWidth, h: screenHeight },
         { margin: edgeMargin, gap: gap, minW: 280, minH: fixedH + rowH * 3,
           headerH: manager ? manager.headerHeight : 48, footerH: anchorIsland.collapsedHeight })
-    onPlacementChanged: if (root._placing) root._lastPlacement = root.placement
+    onPlacementChanged: if (root.open) { root._frozenPlacement = root.placement; root._frozenAnchor = root._liveAnchor; }
     readonly property string side: placement.side
     readonly property bool horizontal: side === "right" || side === "left"
 
@@ -89,13 +96,44 @@ Item {
     readonly property real anchorLocalY: Math.max(0, Math.min(height, anchorPoint.y - y))
 
     // ---- motion ----
-    property real reveal: root.open ? 1 : 0
-    Behavior on reveal {
-        NumberAnimation { duration: Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+    // One value drives the whole fold, run from wherever it is (so a toggle
+    // mid-way reverses with no jump), with the same per-direction grammar as
+    // ShellIsland: enter decelerates over durationEnter; exit accelerates
+    // away over durationExit -- or, when the whole taskbar is leaving, over
+    // the short content fade-out, so the child is gone before its parent has
+    // visibly moved instead of outliving it (and the TaskbarManager it reads,
+    // which the island destroys durationExit + 40 ms after closing).
+    property real reveal: 0
+    NumberAnimation {
+        id: revealAnim
+        target: root
+        property: "reveal"
+        easing.type: Theme.easingType
     }
+    function _animateReveal() {
+        revealAnim.stop();
+        revealAnim.from = root.reveal;
+        revealAnim.to = root.open ? 1 : 0;
+        revealAnim.duration = root.open ? Theme.durationEnter
+            : (PanelManager.isOpen("taskbar") ? Theme.durationExit : Theme.durationFadeOut);
+        revealAnim.easing.bezierCurve = root.open ? Theme.curveEnter : Theme.curveExit;
+        // Folding back into its origin only makes sense while that origin
+        // stays put. When the whole taskbar is leaving, the branch keeps its
+        // shape and dissolves in place instead -- a fold would shrink toward
+        // a header line the collapsing parent has already moved away from.
+        root._dissolve = !root.open && !PanelManager.isOpen("taskbar");
+        // ... and on exactly the curve and duration ShellIsland fades the
+        // parent's own content with, so the two leave as one.
+        if (root._dissolve) revealAnim.easing.bezierCurve = Theme.curveStandard;
+        revealAnim.start();
+    }
+    property bool _dissolve: false
+    // What the SHAPE follows: the reveal, or full size while dissolving.
+    readonly property real shape: root._dissolve ? 1 : root.reveal
+    opacity: root._dissolve ? root.reveal : 1
     function sub(p, from, to) { return Math.max(0, Math.min(1, (p - from) / (to - from))); }
-    readonly property real pMain: sub(reveal, 0.0, 0.55)
-    readonly property real pCross: sub(reveal, 0.25, 1.0)
+    readonly property real pMain: sub(shape, 0.0, 0.55)
+    readonly property real pCross: sub(shape, 0.25, 1.0)
     readonly property real stem: 36
     visible: reveal > 0.001
 
@@ -107,6 +145,12 @@ Item {
     // taskbar still open edited a hidden search query) and keep its cursor
     // blinking -- repainting the dock window twice a second forever.
     onOpenChanged: {
+        if (!open) {
+            // freeze before anything moves (placement already holds its last
+            // open value; the anchor must match it)
+            root._frozenAnchor = root._liveAnchor;
+        }
+        root._animateReveal();
         if (open) {
             searchInput.forceActiveFocus();
         } else {
@@ -141,10 +185,10 @@ Item {
         readonly property real thickness: 18
         x: root.side === "right" ? -root.gap - 1 : (root.side === "left" ? root.width - 1 : root.anchorLocalX - thickness / 2)
         y: root.horizontal ? root.anchorLocalY - thickness / 2 : (root.side === "above" ? root.height - 1 : -root.gap - 1)
-        width: root.horizontal ? (root.gap + 2) * root.sub(root.reveal, 0, 0.2) : thickness
-        height: root.horizontal ? thickness : (root.gap + 2) * root.sub(root.reveal, 0, 0.2)
+        width: root.horizontal ? (root.gap + 2) * root.sub(root.shape, 0, 0.2) : thickness
+        height: root.horizontal ? thickness : (root.gap + 2) * root.sub(root.shape, 0, 0.2)
         color: Theme.panel
-        opacity: root.sub(root.reveal, 0, 0.15)
+        opacity: root.sub(root.shape, 0, 0.15)
     }
 
     RectangularShadow {
@@ -188,7 +232,7 @@ Item {
             y: -surface.y
             width: root.width
             height: root.height
-            opacity: root.sub(root.reveal, 0.6, 1.0)
+            opacity: root.sub(root.shape, 0.6, 1.0)
             // Fading out is not a state to interact with.
             enabled: root.open
 
