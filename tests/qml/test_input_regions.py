@@ -213,6 +213,46 @@ class InputRegionTest(unittest.TestCase):
             self.settle()
             self.assert_idle(f"after {name} finished closing")
 
+    def test_10_closing_overview_releases_input_immediately(self):
+        """The overview is a full-monitor overlay that stays mapped through
+        its closing zoom and the release frames. It used to have no input
+        mask at all, so for that whole time (up to the compositor's window
+        move after a panning click) every click on the desktop landed on its
+        stage instead of the application underneath."""
+        import json
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+        from test_overview import MIXED, clients_for, monitor
+        import dxrice_spiral as sp
+        s = self.scene
+        mon = monitor()
+        mon["width"], mon["height"] = s.width, s.height
+        rects = sp.arrange(MIXED, [], (0, 52, s.width, s.height - 68), (32, 56))
+        s.set_command("hyprctl -j clients", json.dumps(clients_for(rects)))
+        s.set_command("hyprctl -j monitors", json.dumps([mon]))
+        ov = "findNamed('overview')"
+        x, y = int(s.width * 0.6), int(s.height * 0.6)
+        for close in [f"{ov}.hide()", "pan"]:
+            s.ev(f"{ov}.show()"); self.settle(900)
+            self.assertTrue(s.ev(f"{ov}.open"))
+            self.assertEqual(s.input_owner(x, y), "overview", "an open overview must take the click")
+            if close == "pan":
+                # click the window farthest off screen: the close then runs as
+                # long as the compositor's move
+                tiles = json.loads(s.ev("JSON.stringify(" + ov + ".layout.windows)"))
+                far = max(tiles, key=lambda w: abs(w["x"]) + abs(w["y"]))
+                s.ev(f"{ov}.activate(findNamed('overviewTile:{far['address']}'))")
+            else:
+                s.ev(close)
+            for wait in (30, 60, 90):  # cumulative 180ms, inside the 300ms zoom
+                s.wait(wait)
+                self.assertTrue(s.ev(f"{ov}.showing"), "test needs the overview still on screen")
+                self.assertIsNone(s.input_owner(x, y), f"closing overview ({close}) still takes input after {wait}ms")
+            before = s.ev("appClicks")
+            s.click(x, y)
+            self.assertEqual(s.ev("appClicks"), before + 1, "a click right after closing the overview was swallowed")
+            self.settle()
+        self.assert_idle("after the overview closed")
+
     def test_08_clicks_inside_a_panel_never_dismiss_it(self):
         """The other half of the invariant: inside an open surface, bare
         (non-control) areas must not fall through to the click-outside

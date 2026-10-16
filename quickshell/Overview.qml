@@ -409,6 +409,17 @@ PanelWindow {
 
     // ---- the surface ----
     visible: root.showing
+    // Input only while open. The surface stays mapped through the closing
+    // zoom (and a compositor-length move after a panning click) and the
+    // release frames; without a mask it took the pointer over the whole
+    // monitor all that time, so a click on the application underneath right
+    // after Esc or a click on empty space was swallowed by the stage.
+    // Closed, the region is empty: Quickshell then makes the surface
+    // input-transparent outright.
+    mask: Region {
+        width: root.open ? root.width : 0
+        height: root.open ? root.height : 0
+    }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     aboveWindows: true
