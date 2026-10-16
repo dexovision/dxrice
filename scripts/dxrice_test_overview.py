@@ -272,6 +272,97 @@ class TestReadOnly(unittest.TestCase):
         self.assertIsNone(json.loads(buf.getvalue())["monitor"])
 
 
+class TestPanTo(unittest.TestCase):
+    def test_pan_to_centres_one_window_by_moving_all_floating_ones_together(self):
+        """dxrice_navigate_windows.py --to ADDRESS (the overview's confirmed
+        click on an off-screen window): every floating window of the active
+        workspace moves by the same delta, the target ends up centred on the
+        focused monitor, tiled windows and other workspaces are untouched,
+        nothing but moves is sent."""
+        import dxrice_navigate_windows as nav
+        cl = spiral_clients(MIXED)
+        cl.append(client(80, (100, 100, 900, 700), floating=False))
+        cl.append(client(81, (100, 100, 900, 700), ws=2))
+        sent = []
+        saved = (nav.hyprctl_json, nav.batch_async, nav.focus_window)
+
+        def fake(args, timeout=2):
+            return {"activeworkspace": {"id": 1}, "clients": cl, "monitors": [monitor()]}[args[0]]
+        nav.hyprctl_json, nav.batch_async = fake, sent.extend
+        nav.focus_window = lambda *a: self.fail("pan_to focused something (the caller does)")
+        try:
+            target = cl[12]
+            dx, dy = nav.pan_to(target["address"])
+            self.assertIsNone(nav.pan_to("0xdead"))
+        finally:
+            nav.hyprctl_json, nav.batch_async, nav.focus_window = saved
+        floating = [c for c in cl if c["workspace"]["id"] == 1 and c["floating"]]
+        self.assertEqual(len(sent), len(floating))
+        for c, expr in zip(floating, sent):
+            self.assertIn(f'address:{c["address"]}', expr)
+            self.assertIn(f'x = {int(c["at"][0] + dx)}, y = {int(c["at"][1] + dy)}', expr)
+        self.assertEqual((target["at"][0] + target["size"][0] // 2 + dx, target["at"][1] + target["size"][1] // 2 + dy),
+                         (960, 540))
+
+
+class TestKeybinds(unittest.TestCase):
+    """The overview's keys in the hyprland.lua template: present, unique,
+    accepted by Hyprland's own parser, and visible to the drift checker
+    (so an existing install is told they are new)."""
+
+    TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hypr", "hyprland.lua")
+    KEYS = {" + Tab": "toggle", " + minus": "show", " + KP_Subtract": "show",
+            " + SHIFT + equal": "hide", " + equal": "hide", " + KP_Add": "hide"}
+
+    def binds(self):
+        import re
+        text = open(self.TEMPLATE).read()
+        return text, re.findall(r'hl\.bind\(\s*mainMod\s*\.\.\s*"([^"]+)"\s*,\s*overview\("(\w+)"\)', text)
+
+    def test_every_overview_key_and_its_action(self):
+        _text, found = self.binds()
+        self.assertEqual(dict(found), self.KEYS)
+
+    def test_no_key_is_bound_twice(self):
+        import re
+        from collections import Counter
+        text = open(self.TEMPLATE).read()
+        combos = [b.strip().upper().replace(" ", "")
+                  for b in re.findall(r'hl\.bind\(\s*(?:mainMod\s*\.\.\s*)?"([^"]+)"', text)]
+        self.assertEqual([k for k, v in Counter(combos).items() if v > 1], [])
+
+    def test_the_drift_checker_sees_them(self):
+        import dxrice_check_hypr_drift as drift
+        ids = drift._identities(open(self.TEMPLATE).read())
+        for key in self.KEYS:
+            self.assertIn(f"bind:{key}", ids)
+
+    def test_hyprland_parses_every_key(self):
+        """Hyprland's own --verify-config (no compositor started, nothing
+        executed) on the real template; a bogus key name in a copy must be
+        rejected, proving key names really are checked."""
+        import shutil
+        import subprocess
+        import tempfile
+        hypr = shutil.which("Hyprland")
+        if not hypr:
+            self.skipTest("Hyprland not installed")
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("HYPRLAND_INSTANCE_SIGNATURE", "WAYLAND_DISPLAY", "DISPLAY")}
+        with tempfile.TemporaryDirectory() as d:
+            good = os.path.join(d, "good.lua")
+            bad = os.path.join(d, "bad.lua")
+            text = open(self.TEMPLATE).read()
+            open(good, "w").write(text)
+            open(bad, "w").write(text.replace('mainMod .. " + KP_Add"', 'mainMod .. " + KP_Plusss"'))
+            ok = subprocess.run([hypr, "--verify-config", "-c", good], capture_output=True, text=True,
+                                timeout=60, env=env)
+            self.assertIn("config ok", ok.stdout + ok.stderr)
+            no = subprocess.run([hypr, "--verify-config", "-c", bad], capture_output=True, text=True,
+                                timeout=60, env=env)
+            self.assertIn("KP_Plusss", no.stdout + no.stderr)
+
+
 class TestPerformance(unittest.TestCase):
     def test_layout_cost(self):
         """Computing the view is negligible next to starting Python: a few

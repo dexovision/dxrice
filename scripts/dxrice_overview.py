@@ -19,6 +19,11 @@ top-left so windows at negative coordinates never come into view; the
 overview plugins (hyprexpo, Hyprspace) show a grid of workspaces rather than
 one workspace zoomed out, and need rebuilding against each Hyprland release.
 
+The shell computes the same thing itself (quickshell/OverviewGeometry.js,
+a line-for-line mirror, so opening never waits for a Python interpreter);
+this module is the reference implementation, the CLI, and what the tests
+check the shell's copy against.
+
     python3 scripts/dxrice_overview.py [--monitor NAME] [--margin PX]
 
 prints the overview for the focused (or named) monitor as one JSON object:

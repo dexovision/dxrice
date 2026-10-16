@@ -1,9 +1,11 @@
 """The desktop overview (Overview.qml) in the real shell, offscreen.
 
-Window geometry comes from the real dxrice_overview.py run on synthetic
-`hyprctl` data (fed to the shell's Process through the harness fixture);
-window pictures are the ScreencopyView stub; Hyprland.dispatch only records.
-Nothing here talks to a compositor.
+The shell reads synthetic `hyprctl -j clients` / `hyprctl -j monitors`
+output (harness fixtures) and computes the geometry itself
+(OverviewGeometry.js); the test's expectations come from the reference
+implementation, dxrice_overview.py, on the same data. Window pictures are the
+ScreencopyView stub; Hyprland.dispatch only records. Nothing here talks to a
+compositor.
 
     python3 tests/qml/test_overview.py
 """
@@ -59,7 +61,8 @@ class OverviewScene:
         self.clients = clients
         self.layout = ov.overview(clients, [self.mon])
         s = self.scene
-        s.set_command("dxrice_overview.py", json.dumps(self.layout))
+        s.set_command("hyprctl -j clients", json.dumps(clients))
+        s.set_command("hyprctl -j monitors", json.dumps([self.mon]))
         r = self.layout["reserved"]
         fake = [{"x": w["x"] + r[0], "y": w["y"] + r[1], "w": w["w"], "h": w["h"], "color": PAL[i % len(PAL)],
                  "title": w["title"]} for i, w in enumerate(self.layout["windows"])]
@@ -158,18 +161,26 @@ class TestOverview(unittest.TestCase):
         self.o.scene.wait(450)
         p0 = self.o.ov("progress")
         self.assertTrue(0 < p0 < 1, p0)
+        import time
+        T = self.o.scene.ev("theme.durationExit") + 60
+        t0 = time.perf_counter()
         self.o.call("hide")
-        seen = [p0]
+        seen = [(0.0, p0)]
         for _ in range(12):
             self.o.scene.wait(40)
-            seen.append(self.o.ov("progress"))
-        # monotonic all the way back, starting gently (the reversal eases
-        # in rather than snapping), ending exactly on the real view. (Step
-        # sizes in the middle aren't asserted: the offscreen software
-        # renderer's frame pacing, not the curve, sets them here.)
-        self.assertTrue(all(b <= a + 1e-6 for a, b in zip(seen, seen[1:])), seen)
-        self.assertLess(seen[0] - seen[1], 0.1, seen)
-        self.assertEqual(seen[-1], 0.0)
+            seen.append(((time.perf_counter() - t0) * 1000, self.o.ov("progress")))
+        # monotonic all the way back, ending exactly on the real view, and
+        # never ahead of the ease-in-out curve for the time actually elapsed
+        # (InOutCubic: 4t^3 in the first half) -- the reversal eases in
+        # rather than snapping. Judged against measured time, not sample
+        # counts: the offscreen software renderer's frames are irregular.
+        ps = [p for _t, p in seen]
+        self.assertTrue(all(b <= a + 1e-6 for a, b in zip(ps, ps[1:])), seen)
+        self.assertEqual(ps[-1], 0.0)
+        for t, p in seen[1:]:
+            u = min(1.0, t / T)
+            if u < 0.5:
+                self.assertLessEqual(p0 - p, p0 * 4 * u ** 3 + 0.06, (t, p, seen))
 
     def test_show_and_hide_are_idempotent(self):
         self.o.call("show"); self.o.call("show")
@@ -194,21 +205,115 @@ class TestOverview(unittest.TestCase):
         self.assertFalse(self.o.ov("open"))
         self.assertEqual(self.o.dispatches(), [])
 
-    def test_clicking_a_window_focuses_it_and_closes(self):
-        self.o.call("show")
-        self.o.scene.wait(SETTLE)
-        w = self.o.layout["windows"][-1]  # the top of the stack
+    def visible_point(self, w):
+        """A point of w's overview tile that no tile above it covers."""
         r = self.o.layout["reserved"]
-        self.o.click(w["tx"] + r[0] + w["tw"] / 2, w["ty"] + r[1] + w["th"] / 2)
-        self.o.scene.wait(SETTLE)
-        self.assertEqual(self.o.dispatches(), [f'hl.dsp.focus({{ window = "address:{w["address"]}" }})'])
-        self.assertFalse(self.o.ov("open"))
+        above = [o for o in self.o.layout["windows"] if o["z"] > w["z"]]
+        for fy in (0.5, 0.25, 0.75, 0.1, 0.9):
+            for fx in (0.5, 0.25, 0.75, 0.1, 0.9):
+                x, y = w["tx"] + w["tw"] * fx, w["ty"] + w["th"] * fy
+                if not any(o["tx"] <= x <= o["tx"] + o["tw"] and o["ty"] <= y <= o["ty"] + o["th"] for o in above):
+                    return x + r[0], y + r[1]
+        return None
+
+    def on_screen(self, w):
+        r = self.o.layout["reserved"]
+        W, H = self.o.mon["width"], self.o.mon["height"]
+        return w["x"] + r[0] < W and w["x"] + r[0] + w["w"] > 0 and w["y"] + r[1] < H and w["y"] + r[1] + w["h"] > 0
+
+    @staticmethod
+    def lua(address):
+        return f'hl.dsp.focus({{ window = "address:{address}" }})'
+
+    def runs(self):
+        return [list(r) for r in self.o.scene.bridge.run_log]
+
+    def test_clicking_every_window_focuses_exactly_that_window(self):
+        """Every thumbnail, clicked: the overview closes and every focus
+        request names that window's own Hyprland address (sent after the
+        keyboard is released and once more after the overlay is gone -- see
+        Overview.qml's focusLua). A window entirely off screen first says so
+        (no focus); a second click pans the desktop there with
+        dxrice_navigate_windows.py --to <that address>, then focuses it."""
+        on, off = 0, 0
+        for w in self.o.layout["windows"]:
+            pt = self.visible_point(w)
+            if pt is None:
+                continue
+            before = len(self.o.dispatches())
+            self.o.call("show")
+            self.o.scene.wait(SETTLE)
+            self.o.click(*pt)
+            self.o.scene.wait(250)
+            if not self.on_screen(w):
+                self.assertEqual(self.o.dispatches()[before:], [], w["address"])
+                self.assertTrue(self.o.ov("open"))
+                self.assertTrue(self.o.scene.ev("findNamed('overviewOffScreenNote')").property("visible"))
+                self.o.click(*pt)
+                self.o.scene.wait(SETTLE)
+                pans = [r for r in self.runs() if "--to" in r]
+                self.assertEqual(pans[-1][-2:], ["--to", w["address"]])
+                off += 1
+            else:
+                self.o.scene.wait(SETTLE)
+                on += 1
+            sent = self.o.dispatches()[before:]
+            self.assertTrue(sent, w["address"])
+            self.assertEqual(set(sent), {self.lua(w["address"])}, (w["address"], sent))
+            self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
+        self.assertGreaterEqual(on, 3)
+        self.assertGreaterEqual(off, 6)
+
+    def test_focus_is_always_sent_in_lua_syntax(self):
+        """DXrice's Hyprland runs hyprland.lua: the classic
+        "focuswindow address:" form would be refused, whatever Quickshell's
+        usingLua says."""
         self.o.scene.ev("hypr.usingLua = false")
+        w = next(w for w in reversed(self.o.layout["windows"]) if self.on_screen(w))
         self.o.call("show")
         self.o.scene.wait(SETTLE)
-        self.o.click(w["tx"] + r[0] + w["tw"] / 2, w["ty"] + r[1] + w["th"] / 2)
-        self.o.scene.wait(300)
-        self.assertEqual(self.o.dispatches()[-1], f"focuswindow address:{w['address']}")
+        self.o.click(*self.visible_point(w))
+        self.o.scene.wait(SETTLE)
+        self.assertEqual(set(self.o.dispatches()), {self.lua(w["address"])})
+
+    def test_a_window_entirely_off_screen_is_never_focused_silently(self):
+        """One click on a window none of which is on the monitor: no focus,
+        no pan, the overview stays open and says what a second click does.
+        Clicking a different window instead cancels the pending pan."""
+        off = [w for w in self.o.layout["windows"] if not self.on_screen(w) and self.visible_point(w)]
+        self.assertGreaterEqual(len(off), 2, "the fixture needs off-screen windows")
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        self.o.click(*self.visible_point(off[0]))
+        self.o.scene.wait(400)
+        self.assertEqual(self.o.dispatches(), [])
+        self.assertEqual([r for r in self.runs() if "--to" in r], [])
+        self.assertTrue(self.o.ov("open"))
+        note = self.o.scene.ev("findNamed('overviewOffScreenNote')")
+        self.assertIn("off screen", note.property("text"))
+        self.assertIn("Click it again", note.property("text"))
+        self.o.click(*self.visible_point(off[1]))   # a different one: asks again, no pan
+        self.o.scene.wait(400)
+        self.assertEqual([r for r in self.runs() if "--to" in r], [])
+        self.assertEqual(self.o.dispatches(), [])
+
+    def test_the_keypress_gets_feedback_before_any_data(self):
+        """The first frame after the keypress already shows the overview
+        coming up (a dim over the real desktop), even if the window data
+        never arrives; nothing stale is drawn meanwhile, and Esc still
+        closes it."""
+        from PySide6.QtCore import Qt
+        self.o.scene.set_command("hyprctl -j clients", "__HANG__")
+        self.o.call("show")
+        self.o.scene.wait(20)
+        self.assertTrue(self.o.ov("visible"))
+        scrim = self.o.scene.ev("findNamed('overviewScrim')")
+        self.assertGreater(scrim.property("opacity"), 0)
+        self.assertEqual(self.o.tiles(), {})
+        self.o.scene.ev("findNamed('overview').children[0].forceActiveFocus()")
+        self.o.scene.key(Qt.Key_Escape)
+        self.o.scene.wait(SETTLE)
+        self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
 
     def test_windows_opening_and_closing_while_open(self):
         self.o.call("show")
@@ -253,10 +358,53 @@ class TestOverview(unittest.TestCase):
             " return n === 1; })()"))
 
     def test_no_compositor_answer_drops_the_request(self):
-        self.o.scene.set_command("dxrice_overview.py", "")
+        self.o.scene.set_command("hyprctl -j clients", "")
+        self.o.scene.set_command("hyprctl -j monitors", "")
         self.o.call("show")
         self.o.scene.wait(SETTLE)
         self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
+
+
+class TestGeometryParity(unittest.TestCase):
+    """The shell's geometry (OverviewGeometry.js) and the reference
+    (dxrice_overview.py) agree on hundreds of random workspaces: monitors of
+    every scale/rotation/reservation, hidden and unmapped windows, pinned and
+    fullscreen ones, other workspaces."""
+
+    def test_js_equals_python(self):
+        import random
+        from PySide6.QtQml import QJSEngine
+        from harness import app
+        app()  # the harness's GUI application: a bare QCoreApplication would starve later scenes of screens
+        eng = QJSEngine()
+        src = (Path(__file__).resolve().parents[2] / "quickshell" / "OverviewGeometry.js").read_text()
+        eng.evaluate(src.replace(".pragma library", ""))
+        js_overview = eng.globalObject().property("overview")
+        stringify = eng.evaluate("JSON.stringify")
+        rng = random.Random(4)
+        for k in range(300):
+            mons = [{"id": 0, "name": "A", "x": rng.choice([0, 1920, -1080]), "y": 0,
+                     "width": rng.choice([1920, 2560, 3840]), "height": rng.choice([1080, 1440, 2160]),
+                     "scale": rng.choice([1, 1.25, 1.5, 2]), "transform": rng.choice([0, 0, 1, 3]), "focused": True,
+                     "activeWorkspace": {"id": 1}, "specialWorkspace": {"id": rng.choice([0, 0, -98])},
+                     "reserved": [rng.choice([0, 30]), rng.choice([0, 40, 52]), 0, rng.choice([0, 68])]}]
+            cl = []
+            for i in range(rng.randint(0, 20)):
+                cl.append({"address": f"0x{i:x}", "at": [rng.randint(-3000, 5000), rng.randint(-2000, 3000)],
+                           "size": [rng.randint(1, 1500), rng.randint(1, 1000)],
+                           "workspace": {"id": rng.choice([1, 1, 1, 2, -98])}, "monitor": rng.choice([0, 0, 1]),
+                           "mapped": rng.random() > 0.05, "hidden": rng.random() < 0.05,
+                           "floating": rng.random() > 0.3, "fullscreen": rng.choice([0, 0, 0, 2]),
+                           "pinned": rng.random() < 0.1, "focusHistoryID": rng.randint(0, 10), "class": "c", "title": "t"})
+            py = ov.overview(cl, mons)
+            js = json.loads(stringify.call([js_overview.call([eng.toScriptValue(cl), eng.toScriptValue(mons)])]).toString())
+            for key in ("monitor", "reserved", "workspace", "fits", "clipped"):
+                self.assertEqual(js[key], py[key], (k, key))
+            self.assertAlmostEqual(js["scale"], py["scale"], places=9)
+            self.assertEqual([w["address"] for w in js["windows"]], [w["address"] for w in py["windows"]], k)
+            for a, b in zip(js["windows"], py["windows"]):
+                for f in ("x", "y", "w", "h", "tx", "ty", "tw", "th"):
+                    self.assertAlmostEqual(a[f], b[f], delta=0.011, msg=(k, f))
 
 
 class TestOtherMonitor(unittest.TestCase):

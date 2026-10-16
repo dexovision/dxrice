@@ -3,8 +3,9 @@
 Each case is a synthetic workspace (the Galaxy Spiral's own placement,
 dxrice_spiral.arrange, or hand-made windows), drawn as the normal desktop
 -- the monitor showing what is on it, the bar and dock on top -- and then
-with the overview open, through the real shell (Overview.qml) and the real
-dxrice_overview.py geometry. Window pictures are stand-ins (the
+with the overview open, through the real shell (Overview.qml, reading
+synthetic `hyprctl -j clients/monitors` output and computing the geometry in
+OverviewGeometry.js). Window pictures are stand-ins (the
 ScreencopyView stub); the wallpaper is a synthetic gradient.
 
     python3 tests/qml/render_overview.py OUT_DIR
@@ -69,12 +70,15 @@ def wallpaper(bridge, w, h):
     bridge.wall = path
 
 
-def load(clients, mon):
+def load(clients, mon, hang=False):
     s = Scene("OverviewDesktop.qml", width=mon["width"], height=mon["height"],
               setup=lambda b: wallpaper(b, mon["width"], mon["height"]))
     s.ev("wallpaper = " + json.dumps(s.bridge.wall))
     layout = ov.overview(clients, [mon])
-    s.set_command("dxrice_overview.py", json.dumps(layout))
+    if hang:
+        s.set_command("hyprctl -j clients", "__HANG__")
+    s.set_command("hyprctl -j clients", json.dumps(clients))
+    s.set_command("hyprctl -j monitors", json.dumps([mon]))
     r = layout["reserved"]
     colour = {}
     for i, w in enumerate(layout["windows"]):
@@ -154,6 +158,42 @@ def main(out):
     s.close()
     (out / "_tmp.png").unlink(missing_ok=True)
     sheet([frames[:3], frames[3:]], out / "overview_zoom_frames.png", scale=0.36)
+
+    # Opening, as it happens: the frame after the keypress (no window data
+    # yet: the real desktop, dimmed), the data in (pictures over the real
+    # windows), a third of the way (the wallpaper covering the real windows),
+    # done -- and a click on a window that is entirely off screen.
+    seq = []
+    s, layout = load(cases()[3][1], monitor(), hang=True)
+    s.ev("findNamed('overview').show()")
+    s.wait(1)
+    s.ev("findNamed('overview').fade = 1")
+    seq.append(label(s.grab(out / "_tmp.png"), "keypress: dim at once, window data not in yet"))
+    s.close()
+    s, layout = load(cases()[3][1], monitor())
+    s.ev("findNamed('overview').show()")
+    s.wait(SETTLE)  # let the real animation finish, then step through it by hand
+    s.ev("findNamed('overview').progress = 0")
+    s.wait(60)
+    seq.append(label(s.grab(out / "_tmp.png"), "~10 ms: data in, pictures exactly over the windows"))
+    s.ev("findNamed('overview').progress = 0.2")
+    s.wait(60)
+    seq.append(label(s.grab(out / "_tmp.png"), "zooming: wallpaper fading in over the real windows"))
+    s.ev("findNamed('overview').progress = 1")
+    s.wait(60)
+    seq.append(label(s.grab(out / "_tmp.png"), "zoomed out"))
+    r = layout["reserved"]
+    off = next(w for w in reversed(layout["windows"])
+               if not (w["x"] + r[0] < 1920 and w["x"] + r[0] + w["w"] > 0 and w["y"] + r[1] < 1080 and w["y"] + r[1] + w["h"] > 0))
+    from PySide6.QtCore import QPointF
+    from PySide6.QtTest import QTest
+    QTest.mouseClick(s.view, Qt.LeftButton, Qt.NoModifier,
+                     QPointF(off["tx"] + r[0] + off["tw"] / 2, off["ty"] + r[1] + off["th"] / 2).toPoint())
+    s.wait(400)
+    seq.append(label(s.grab(out / "_tmp.png"), "click on an off-screen window: asks first"))
+    s.close()
+    (out / "_tmp.png").unlink(missing_ok=True)
+    sheet([seq[:3], seq[3:]], out / "overview_opening_sequence.png", scale=0.36)
 
 
 if __name__ == "__main__":
