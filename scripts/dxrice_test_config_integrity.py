@@ -33,6 +33,7 @@ import unittest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LUA = os.path.join(REPO, "hypr", "hyprland.lua")
 INSTALL = os.path.join(REPO, "install.sh")
+DEPS = os.path.join(REPO, "deps")
 
 # Programs every supported system has: the shell, coreutils/util-linux,
 # systemd, procps -- not something install.sh could or should install.
@@ -72,24 +73,27 @@ PROVIDED_BY = {
 }
 
 # Arch package -> its name in another package manager's list, where that
-# differs. None: not packaged there -- install.sh must tell the user so
-# (a `warn` naming it) instead.
+# differs (Gentoo's are category/name atoms). Packages a distro doesn't
+# have must still appear in its list as `manual`, so the installer tells the
+# user where to get them.
+_EMERGE = {
+    "python": "dev-lang/python", "kitty": "x11-terms/kitty", "nautilus": "gnome-base/nautilus",
+    "wofi": "gui-apps/wofi", "waybar": "gui-apps/waybar", "swaybg": "gui-apps/swaybg", "mako": "gui-apps/mako",
+    "network-manager-applet": "gnome-extra/nm-applet", "blueman": "net-wireless/blueman",
+    "wl-clipboard": "gui-apps/wl-clipboard", "grim": "gui-apps/grim", "slurp": "gui-apps/slurp",
+    "wireplumber": "media-video/wireplumber", "brightnessctl": "app-misc/brightnessctl",
+    "pavucontrol": "media-sound/pavucontrol", "qt6ct": "gui-apps/qt6ct", "hyprland": "gui-wm/hyprland",
+    "hyprlock": "gui-apps/hyprlock",
+}
 OTHER_DISTRO_NAMES = {
     "python": {"dnf": "python3", "apt": "python3", "zypper": "python3"},
     "mako": {"apt": "mako-notifier"},
     "network-manager-applet": {"apt": "network-manager-gnome", "zypper": "NetworkManager-applet"},
-    "cliphist": {"dnf": None, "apt": None, "zypper": None},
-    "nwg-look": {"dnf": None, "apt": None, "zypper": None},
 }
+for _arch, _atom in _EMERGE.items():
+    OTHER_DISTRO_NAMES.setdefault(_arch, {})["emerge"] = _atom
 
-# Package manager -> install.sh's arrays it installs from. HYPR_PACKAGES is
-# shared: install_hypr_ecosystem resolves it per distro.
-MANAGER_ARRAYS = {
-    "pacman": ("GENERAL_PACMAN", "HYPR_PACKAGES", "AUR_PACKAGES"),
-    "dnf": ("GENERAL_DNF", "HYPR_PACKAGES"),
-    "apt": ("GENERAL_APT", "HYPR_PACKAGES"),
-    "zypper": ("GENERAL_ZYPPER", "HYPR_PACKAGES"),
-}
+MANAGERS = ("pacman", "emerge", "dnf", "apt", "zypper")
 
 # Placeholders a program may legitimately start with (see lua_commands).
 # Any other <name> is a variable the parser couldn't resolve -- which used
@@ -244,13 +248,18 @@ def _simple_commands(script):
     return programs
 
 
-def installer_packages(install_src, manager):
-    pkgs = set()
-    for name in MANAGER_ARRAYS[manager]:
-        m = re.search(r"^" + name + r"=\(([^)]*)\)", install_src, re.M)
-        assert m, f"install.sh has no {name} array"
-        pkgs |= set(m.group(1).split())
-    return pkgs
+def read_lists(deps_dir=DEPS):
+    """{manager: {package: group}} from deps/<manager>.list."""
+    out = {}
+    for mgr in MANAGERS:
+        pkgs = {}
+        with open(os.path.join(deps_dir, f"{mgr}.list")) as f:
+            for line in f:
+                words = line.split("#", 1)[0].split()
+                if len(words) >= 2:
+                    pkgs[words[1]] = words[0]
+        out[mgr] = pkgs
+    return out
 
 
 def absolute_path_problems(commands):
@@ -259,10 +268,10 @@ def absolute_path_problems(commands):
             for cmd in commands for prog in _simple_commands(cmd) if prog.startswith("/")]
 
 
-def program_problems(commands, install_src):
+def program_problems(commands, install_src, lists=None):
     """Every program the commands run that isn't accounted for, on any of
-    install.sh's package managers."""
-    installed = {mgr: installer_packages(install_src, mgr) for mgr in MANAGER_ARRAYS}
+    install.sh's package managers (deps/*.list)."""
+    installed = lists if lists is not None else read_lists()
     problems = []
     for cmd in commands:
         for prog in _simple_commands(cmd):
@@ -284,11 +293,8 @@ def program_problems(commands, install_src):
             arch_pkg = PROVIDED_BY[prog]
             for mgr, pkgs in installed.items():
                 pkg = arch_pkg if mgr == "pacman" else OTHER_DISTRO_NAMES.get(arch_pkg, {}).get(mgr, arch_pkg)
-                if pkg is None:
-                    if not re.search(r'warn "[^"\n]*' + re.escape(arch_pkg), install_src):
-                        problems.append(f"{prog}: not packaged for {mgr}, and install.sh never tells the user")
-                elif pkg not in pkgs:
-                    problems.append(f"{prog}: needs package {pkg!r}, which install.sh's {mgr} list doesn't install")
+                if pkg not in pkgs and arch_pkg not in pkgs:
+                    problems.append(f"{prog}: needs package {pkg!r}, which deps/{mgr}.list doesn't have")
     return sorted(set(problems))
 
 
@@ -392,12 +398,20 @@ class CheckerSelfTest(unittest.TestCase):
 
     def test_package_missing_from_another_distro_is_caught(self):
         src = _read(INSTALL)
-        broken = re.sub(r"^(GENERAL_DNF=\([^)]*?) wl-clipboard", r"\1", src, flags=re.M)
-        self.assertNotEqual(broken, src, "fixture: wl-clipboard not found in GENERAL_DNF")
+        lists = read_lists()
         cmds = self.commands('hl.exec_cmd("wl-paste --watch cliphist store")\n')
-        self.assertEqual(program_problems(cmds, src), [])
-        self.assertEqual(program_problems(cmds, broken),
-                         ["wl-paste: needs package 'wl-clipboard', which install.sh's dnf list doesn't install"])
+        self.assertEqual(program_problems(cmds, src, lists), [])
+        del lists["emerge"]["gui-apps/wl-clipboard"]
+        self.assertEqual(program_problems(cmds, src, lists),
+                         ["wl-paste: needs package 'gui-apps/wl-clipboard', which deps/emerge.list doesn't have"])
+
+    def test_every_list_has_the_same_shape(self):
+        """Each package manager's list names the same number of hyprland,
+        quickshell and core packages, so a package added for one distro
+        isn't forgotten for the others (a missing one is `manual`)."""
+        lists = read_lists()
+        groups = {mgr: sorted(g for g in pkgs.values() if g in ("hypr", "shell")) for mgr, pkgs in lists.items()}
+        self.assertEqual(len({tuple(g) for g in groups.values()}), 1, groups)
 
     def test_block_comment_is_ignored(self):
         self.assertEqual(self.commands('--[[\nhl.exec_cmd("/usr/lib/old")\n]]\nhl.exec_cmd("mako")\n'), ["mako"])

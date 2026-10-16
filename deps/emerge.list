@@ -1,0 +1,41 @@
+# Gentoo. Atoms checked against packages.gentoo.org on 2026-10-16.
+# Hyprland >= 0.55 (the first release that reads hyprland.lua) is in the
+# hyproverlay overlay, Quickshell in GURU; see the README's Gentoo section.
+core gui-apps/swaybg
+core gui-apps/waybar
+core gui-apps/wofi
+core gui-apps/mako
+core x11-terms/kitty
+core gnome-base/nautilus
+core gui-apps/grim
+core gui-apps/slurp
+core gui-apps/wl-clipboard
+core x11-misc/qt5ct
+core gui-apps/qt6ct
+core media-video/pipewire
+core media-video/wireplumber
+core media-sound/pavucontrol
+core net-misc/networkmanager
+core gnome-extra/nm-applet
+core net-wireless/bluez
+core net-wireless/blueman
+core media-fonts/fontawesome
+core media-fonts/noto
+core kde-plasma/polkit-kde-agent
+core dev-lang/python
+core dev-python/evdev
+core app-misc/jq
+core app-misc/brightnessctl
+core media-sound/playerctl
+core dev-python/pygobject
+core gui-libs/gtk
+core gui-libs/libadwaita
+core gui-libs/gtk4-layer-shell
+hypr gui-wm/hyprland
+hypr gui-apps/hyprlock
+hypr gui-apps/hypridle
+hypr gui-apps/hyprpaper
+hypr gui-libs/xdg-desktop-portal-hyprland
+shell gui-apps/quickshell
+manual cliphist        not in the Gentoo tree; https://github.com/sentriz/cliphist/releases
+manual nwg-look        GURU (gui-apps/nwg-look) or https://github.com/nwg-piotr/nwg-look

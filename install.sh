@@ -4,17 +4,16 @@
 #   ./install.sh                 fresh install: asks where to put
 #                                 everything, sanity checks, deps, input
 #                                 group, monitor detection, deploy
-#   ./install.sh update          git pull (auto-stashing any local repo
-#                                 edits), then re-deploy -- any file you've
-#                                 hand-edited in $XDG_CONFIG_HOME since the
-#                                 last deploy is left alone, not
-#                                 overwritten. Theme colors and taskbar
-#                                 shortcuts live outside the repo, so this
-#                                 never touches your personal look. Also
-#                                 offers to set up (or re-sync) the SDDM
-#                                 login theme if SDDM is installed -- see
-#                                 'sddm-theme' below; same needs-sudo
-#                                 prompt, no separate command required.
+#   ./install.sh update          fetch, show the incoming commits, ask,
+#                                 fast-forward, then re-deploy. Refuses
+#                                 (changing nothing) if your own edits in
+#                                 the checkout touch the same files or the
+#                                 branch has diverged, and says how to
+#                                 resolve it. Never resets or stashes.
+#                                 Files you've hand-edited in
+#                                 $XDG_CONFIG_HOME are left alone. Also
+#                                 offers to re-sync the SDDM login theme if
+#                                 it's set up.
 #   ./install.sh sddm-theme      deploy the DXrice login theme for SDDM
 #                                 (needs sudo; only touches SDDM's own
 #                                 theme dir and config -- never installs or
@@ -39,6 +38,11 @@
 #                                 files deployed, whether sudo would be
 #                                 needed) without changing anything.
 #   ./install.sh help            show this usage text
+#
+#   --yes                         answer yes to privileged and file-changing
+#                                 prompts (package installs, the input group,
+#                                 hyprland.lua migrations). Without a terminal
+#                                 and without --yes, those prompts answer no.
 #
 # Everything this rice needs beyond real app config files (which have to
 # live where each app expects, e.g. $XDG_CONFIG_HOME/waybar/) stays inside
@@ -84,12 +88,10 @@ for arg in "$@"; do
 done
 MODE="${MODE:-install}"
 
-# The Hyprland ecosystem itself needs distro-specific handling (see
-# install_hypr_ecosystem): native on Arch and openSUSE, third-party COPR on
-# Fedora, no reliable path on Ubuntu/Debian (see that function for why).
-# Everything else below is packaged natively pretty much everywhere, just
-# under different names.
-HYPR_PACKAGES=(hyprland hyprlock hypridle hyprpaper xdg-desktop-portal-hyprland)
+# Distro package names live in deps/<package manager>.list, one line per
+# package (see deps/README.md); nothing below names a distro package.
+# Hyprland 0.55 is the first release that reads hyprland.lua.
+HYPRLAND_MIN_VERSION="0.55"
 
 # Script basenames from much older, pre-Quickshell versions of this rice
 # (back when it used plain bash scripts and had no dxrice_ prefix at all).
@@ -101,42 +103,11 @@ HYPR_PACKAGES=(hyprland hyprlock hypridle hyprpaper xdg-desktop-portal-hyprland)
 LEGACY_SCRIPT_NAMES=(manage-taskbar.sh reorder-taskbar.sh infinite_desktop_core.py
     theme_gui.py floating_tile_toggle.py)
 
-GENERAL_PACMAN=(swaybg waybar wofi mako kitty nautilus grim slurp wl-clipboard cliphist qt5ct qt6ct
-    pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol
-    networkmanager network-manager-applet bluez bluez-utils blueman
-    ttf-font-awesome noto-fonts ttf-jetbrains-mono-nerd polkit-kde-agent
-    python python-evdev jq brightnessctl playerctl
-    python-gobject gtk4 libadwaita gtk4-layer-shell)
-AUR_PACKAGES=(nwg-look)
-
 # The systemd user units deploy_systemd_units writes and do_uninstall
 # removes -- one list, so the two can't drift apart (scripts/
 # dxrice_test_config_integrity.py also checks it against hyprland.lua's
 # autostart lines).
 DXRICE_UNITS=(dxrice-quickshell.service dxrice-auto-place-window.service dxrice-infinite-desktop.service)
-
-GENERAL_DNF=(swaybg waybar wofi mako kitty nautilus grim slurp wl-clipboard qt5ct qt6ct
-    pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol
-    NetworkManager network-manager-applet bluez blueman
-    fontawesome-fonts google-noto-fonts-common google-noto-sans-fonts polkit-kde
-    python3 python3-evdev jq brightnessctl playerctl
-    python3-gobject gtk4 libadwaita gtk4-layer-shell)
-
-GENERAL_APT=(swaybg waybar wofi mako-notifier kitty nautilus grim slurp wl-clipboard qt5ct qt6ct
-    pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol
-    network-manager network-manager-gnome bluez bluez-tools blueman
-    fonts-font-awesome fonts-noto polkit-kde-agent-1
-    python3 python3-evdev jq brightnessctl playerctl
-    python3-gi libgtk-4-1 libadwaita-1-0 libgtk4-layer-shell0)
-# cliphist has no apt package as of this writing -- handled as a manual
-# note in check_dependencies instead of guessing a name that doesn't exist.
-
-GENERAL_ZYPPER=(swaybg waybar wofi mako kitty nautilus grim slurp wl-clipboard qt5ct qt6ct
-    pipewire pipewire-pulseaudio pipewire-alsa wireplumber pavucontrol
-    NetworkManager NetworkManager-applet bluez blueman
-    fontawesome-fonts noto-sans-fonts polkit-kde-authentication-agent-1
-    python3 python3-evdev jq brightnessctl playerctl
-    python3-gobject gtk4 libadwaita-1-0 gtk4-layer-shell)
 
 # JetBrains Mono Nerd Font isn't a real package almost anywhere outside
 # Arch's community repo -- fetched straight from the Nerd Fonts project's
@@ -146,6 +117,7 @@ NERD_FONT_RELEASE_URL="https://github.com/ryanoasis/nerd-fonts/releases/latest/d
 
 SKIP_DEPS=0
 PKG_MANAGER=""
+INIT_SYSTEM=""
 INPUT_GROUP_JUST_ADDED=0
 
 # ---------------------------------------------------------------------------
@@ -171,7 +143,7 @@ banner() {
 }
 
 usage() {
-    sed -n '2,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,/^set -euo pipefail/{/^#/p}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # ask_yes_no "prompt" DEFAULT   (DEFAULT is Y or N)
@@ -233,31 +205,80 @@ check_not_root() {
     fi
 }
 
+# Which distro, package manager and init system this is. Package manager
+# first found wins; os-release only names the distro in messages.
 check_platform() {
-    if command -v pacman >/dev/null 2>&1; then
-        PKG_MANAGER="pacman"
-    elif command -v dnf >/dev/null 2>&1; then
-        PKG_MANAGER="dnf"
-    elif command -v apt-get >/dev/null 2>&1; then
-        PKG_MANAGER="apt"
-    elif command -v zypper >/dev/null 2>&1; then
-        PKG_MANAGER="zypper"
+    local distro="unknown Linux"
+    if [ -r /etc/os-release ]; then
+        distro="$(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-${NAME:-unknown Linux}}")"
+    fi
+    PKG_MANAGER="$(detect_pkg_manager)"
+    if [ -d /run/systemd/system ]; then
+        INIT_SYSTEM=systemd
+    elif command -v openrc >/dev/null 2>&1 || command -v rc-status >/dev/null 2>&1; then
+        INIT_SYSTEM=openrc
     else
-        PKG_MANAGER="unknown"
+        INIT_SYSTEM=other
+    fi
+    ok "System: $distro (package manager: $PKG_MANAGER, init: $INIT_SYSTEM)"
+    if [ "$INIT_SYSTEM" != systemd ]; then
+        info "No systemd: the shell and its daemons will run under DXrice's own supervisor"
+        info "(scripts/dxrice_session.sh) instead of systemd user units."
     fi
 
     if [ "$PKG_MANAGER" = "unknown" ]; then
-        warn "Couldn't find pacman, dnf, apt, or zypper -- this installer doesn't know how to"
-        info "install dependencies automatically here. You can still continue: you'll need to"
-        info "make sure Hyprland, waybar, wofi, mako, kitty, python-gobject, gtk4, libadwaita,"
-        info "etc. are already installed yourself."
+        warn "No supported package manager (pacman, emerge, dnf, apt, zypper) -- dependencies"
+        info "can't be installed automatically. You can still continue if Hyprland, Quickshell"
+        info "or waybar, Python 3 with python-evdev and PyGObject, GTK4 and libadwaita are already"
+        info "installed; see the README's dependency table."
         if ! ask_yes_no "Continue anyway?" N; then
             exit 1
         fi
         SKIP_DEPS=1
-        return
     fi
-    ok "Detected package manager: $PKG_MANAGER"
+}
+
+detect_pkg_manager() {
+    local pm
+    for pm in pacman emerge dnf apt-get zypper; do
+        if command -v "$pm" >/dev/null 2>&1; then
+            [ "$pm" = apt-get ] && pm=apt
+            echo "$pm"
+            return
+        fi
+    done
+    echo unknown
+}
+
+# packages GROUP: this package manager's packages in GROUP (deps/*.list)
+packages() {
+    local list="$REPO_DIR/deps/$PKG_MANAGER.list"
+    [ -f "$list" ] || return 0
+    awk -v g="$1" '$1 == g { print $2 }' "$list"
+}
+
+# manual_notes: "name -- where to get it" for packages no repository has
+manual_notes() {
+    local list="$REPO_DIR/deps/$PKG_MANAGER.list"
+    [ -f "$list" ] || return 0
+    awk '$1 == "manual" { name = $2; $1 = ""; $2 = ""; sub(/^ +/, ""); print name " -- " $0 }' "$list"
+}
+
+# Hyprland only reads hyprland.lua from 0.55 on; an older one silently
+# ignores DXrice's whole config. Returns 1 (after explaining) when the
+# installed Hyprland is too old, 0 otherwise (including when it's absent).
+check_hyprland_version() {
+    command -v Hyprland >/dev/null 2>&1 || return 0
+    local v
+    v="$(Hyprland --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+    [ -n "$v" ] || return 0
+    if [ "$(printf '%s\n%s\n' "$HYPRLAND_MIN_VERSION" "$v" | sort -V | head -1)" != "$HYPRLAND_MIN_VERSION" ]; then
+        warn "Hyprland $v is installed, but DXrice's config (hyprland.lua) needs $HYPRLAND_MIN_VERSION or newer."
+        info "Older Hyprland reads only hyprland.conf, so none of DXrice's keybinds or autostart"
+        info "would load. Update Hyprland first (see the README for your distro)."
+        return 1
+    fi
+    ok "Hyprland $v (needs $HYPRLAND_MIN_VERSION or newer)."
 }
 
 record_repo_path() {
@@ -428,18 +449,32 @@ choose_install_location() {
 _pkg_installed() {
     case "$PKG_MANAGER" in
         pacman) pacman -Qi "$1" >/dev/null 2>&1 ;;
+        emerge) compgen -G "${DXRICE_VDB:-/var/db/pkg}/$1-[0-9]*" >/dev/null ;;
         apt) dpkg -s "$1" >/dev/null 2>&1 ;;
         dnf|zypper) rpm -q "$1" >/dev/null 2>&1 ;;
+        *) return 1 ;;
     esac
 }
 
+# Always behind confirm(). emerge --ask shows Portage's own plan (USE flags,
+# dependencies, keyword changes) and asks again before building anything.
 _pkg_install() {
     case "$PKG_MANAGER" in
         pacman) sudo pacman -S --needed "$@" ;;
+        emerge) sudo emerge --ask --noreplace "$@" ;;
         dnf) sudo dnf install -y "$@" ;;
         apt) sudo apt-get update && sudo apt-get install -y "$@" ;;
         zypper) sudo zypper install -y "$@" ;;
     esac
+}
+
+# missing GROUP: the GROUP packages not installed yet
+missing() {
+    local pkg
+    while read -r pkg; do
+        [ -n "$pkg" ] || continue
+        _pkg_installed "$pkg" || echo "$pkg"
+    done < <(packages "$1")
 }
 
 check_dependencies() {
@@ -449,57 +484,26 @@ check_dependencies() {
     fi
 
     info "Checking dependencies via $PKG_MANAGER..."
-    local -a general
-    case "$PKG_MANAGER" in
-        pacman) general=("${GENERAL_PACMAN[@]}") ;;
-        dnf) general=("${GENERAL_DNF[@]}") ;;
-        apt) general=("${GENERAL_APT[@]}") ;;
-        zypper) general=("${GENERAL_ZYPPER[@]}") ;;
-    esac
-
-    local missing=()
-    for pkg in "${general[@]}"; do
-        _pkg_installed "$pkg" || missing+=("$pkg")
-    done
-    if [ "${#missing[@]}" -gt 0 ]; then
-        warn "Missing: ${missing[*]}"
-        if confirm "Install them now?"; then
-            _pkg_install "${missing[@]}" || warn "Install failed or was cancelled; continuing anyway."
+    local -a core=()
+    mapfile -t core < <(missing core)
+    if [ "${#core[@]}" -gt 0 ]; then
+        warn "Missing: ${core[*]}"
+        if confirm "Install them now with $PKG_MANAGER (needs sudo)?"; then
+            _pkg_install "${core[@]}" || warn "Install failed or was cancelled; continuing anyway."
         fi
     else
         ok "All dependencies present."
     fi
 
-    if [ "$PKG_MANAGER" = "pacman" ]; then
-        local missing_aur=()
-        for pkg in "${AUR_PACKAGES[@]}"; do
-            pacman -Qi "$pkg" >/dev/null 2>&1 || missing_aur+=("$pkg")
-        done
-        if [ "${#missing_aur[@]}" -gt 0 ]; then
-            warn "AUR packages not installed (install manually with yay/paru): ${missing_aur[*]}"
-        fi
-    else
-        warn "nwg-look (theme picker helper) isn't packaged outside Arch -- build it yourself"
-        info "from https://github.com/nwg-piotr/nwg-look if you want it; everything else in"
-        info "this rice works fine without it."
-        if ! command -v cliphist >/dev/null 2>&1; then
-            warn "cliphist (clipboard history) doesn't have a package on most non-Arch distros."
-            info "Grab a release binary from https://github.com/sentriz/cliphist if you want it."
-        fi
-    fi
+    local note
+    while IFS= read -r note; do
+        [ -n "$note" ] || continue
+        command -v "${note%% *}" >/dev/null 2>&1 && continue
+        info "Optional, not installed automatically: $note"
+    done < <(manual_notes)
 
     install_hypr_ecosystem
     install_quickshell
-    # CONFIRMED LIVE BUG (bash -x trace from a real install): a bare
-    # `[ cond ] && action` as a function's LAST statement makes that
-    # test's own exit status become check_dependencies's return value
-    # whenever cond is false -- which it always is on pacman, the most
-    # common case this installer runs on. check_dependencies is called as
-    # a plain statement in do_install (no ||/if guard), and with
-    # `set -euo pipefail` active, that silently killed the ENTIRE install
-    # right after printing "Quickshell present.", before Step 3/4 ever
-    # ran -- no error message from install.sh itself, just a dead script.
-    # An `if` never leaves its own exit status exposed this way.
     if [ "$PKG_MANAGER" != "pacman" ]; then
         install_nerd_font_fallback
     fi
@@ -515,20 +519,28 @@ check_dependencies() {
 # whatever the current recommended path is before trusting any of this
 # blindly on Fedora specifically.
 install_hypr_ecosystem() {
-    local missing=()
-    for pkg in "${HYPR_PACKAGES[@]}"; do
-        _pkg_installed "$pkg" || missing+=("$pkg")
-    done
-    if [ "${#missing[@]}" -eq 0 ]; then
+    local -a missing_hypr=()
+    mapfile -t missing_hypr < <(missing hypr)
+    if [ "${#missing_hypr[@]}" -eq 0 ]; then
         ok "Hyprland ecosystem present."
         return
     fi
 
     case "$PKG_MANAGER" in
         pacman|zypper)
-            warn "Missing Hyprland packages: ${missing[*]}"
-            if confirm "Install them now?"; then
-                _pkg_install "${missing[@]}" || warn "Install failed or was cancelled; continuing anyway."
+            warn "Missing Hyprland packages: ${missing_hypr[*]}"
+            if confirm "Install them now (needs sudo)?"; then
+                _pkg_install "${missing_hypr[@]}" || warn "Install failed or was cancelled; continuing anyway."
+            fi
+            ;;
+        emerge)
+            warn "Missing Hyprland packages: ${missing_hypr[*]}"
+            if [ -z "$(portageq best_visible / gui-wm/hyprland 2>/dev/null)" ]; then
+                info "No Hyprland ebuild is visible to Portage. Hyprland $HYPRLAND_MIN_VERSION+ is in the"
+                info "hyproverlay overlay; the README's Gentoo section shows how to add it"
+                info "(eselect repository enable hyproverlay && emaint sync -r hyproverlay)."
+            elif confirm "Install them with emerge --ask (needs sudo; Portage shows its plan first)?"; then
+                _pkg_install "${missing_hypr[@]}" || warn "emerge failed or was cancelled; continuing anyway."
             fi
             ;;
         dnf)
@@ -538,7 +550,7 @@ install_hypr_ecosystem() {
             info "recommended before trusting this."
             if ask_yes_no "Try enabling solopasha/hyprland and installing from it now?" N; then
                 sudo dnf copr enable -y solopasha/hyprland || warn "Could not enable that COPR."
-                sudo dnf install -y "${missing[@]}" || warn "Install failed -- that COPR may be stale; check the Hyprland wiki for a current alternative."
+                sudo dnf install -y "${missing_hypr[@]}" || warn "Install failed -- that COPR may be stale; check the Hyprland wiki for a current alternative."
             else
                 info "Skipped -- install Hyprland yourself (https://wiki.hypr.land/Getting-Started/Installation/) and re-run this."
             fi
@@ -547,7 +559,7 @@ install_hypr_ecosystem() {
             warn "Hyprland has no reliable Ubuntu/Debian package. Its own community advises"
             info "against running it on point-release distros like Ubuntu for this reason. If you"
             info "want to try anyway, see https://wiki.hypr.land/Getting-Started/Installation/ for"
-            info "building from source. Skipping automatic install of: ${missing[*]}"
+            info "building from source. Skipping automatic install of: ${missing_hypr[*]}"
             ;;
     esac
 }
@@ -561,17 +573,26 @@ install_hypr_ecosystem() {
 # COPR; no clean path on Ubuntu/Debian/openSUSE as of this writing --
 # see https://quickshell.org for whatever's current before trusting this.
 install_quickshell() {
-    if _pkg_installed quickshell || command -v qs >/dev/null 2>&1; then
+    if command -v qs >/dev/null 2>&1 || [ -z "$(missing shell)" ]; then
         ok "Quickshell present."
         return
     fi
 
     case "$PKG_MANAGER" in
         pacman)
-            if confirm "Install Quickshell (Theme/Taskbar/Quick Settings UI)?"; then
+            if confirm "Install Quickshell (the bar, panels and overview; needs sudo)?"; then
                 _pkg_install quickshell || warn "Install failed or was cancelled; the GTK apps will be used instead."
             else
                 info "Skipped -- the older GTK apps will be used instead. Install 'quickshell' any time."
+            fi
+            ;;
+        emerge)
+            if [ -z "$(portageq best_visible / gui-apps/quickshell 2>/dev/null)" ]; then
+                info "Quickshell is in the GURU overlay (gui-apps/quickshell); enable it with"
+                info "eselect repository enable guru && emaint sync -r guru, then re-run this."
+                info "Until then the waybar bars and the GTK apps are used instead."
+            elif confirm "Install Quickshell with emerge --ask (needs sudo)?"; then
+                _pkg_install gui-apps/quickshell || warn "emerge failed or was cancelled; the GTK apps will be used instead."
             fi
             ;;
         dnf)
@@ -1188,6 +1209,7 @@ do_install() {
 
     step "Step 2/4 -- Dependencies"
     check_dependencies
+    check_hyprland_version || true
 
     step "Step 3/4 -- Permissions"
     check_input_group
@@ -1440,43 +1462,30 @@ do_dry_run() {
     fi
 
     step "Package manager / dependencies"
-    local pm=""
-    if command -v pacman >/dev/null 2>&1; then pm="pacman"
-    elif command -v dnf >/dev/null 2>&1; then pm="dnf"
-    elif command -v apt-get >/dev/null 2>&1; then pm="apt"
-    elif command -v zypper >/dev/null 2>&1; then pm="zypper"
-    fi
-    if [ -z "$pm" ]; then
+    PKG_MANAGER="$(detect_pkg_manager)"
+    if [ "$PKG_MANAGER" = unknown ]; then
         warn "No supported package manager detected -- would skip automatic dependency installation."
     else
-        PKG_MANAGER="$pm"
-        info "Detected: $pm"
-        local -a general=() missing=()
-        case "$pm" in
-            pacman) general=("${GENERAL_PACMAN[@]}") ;;
-            dnf) general=("${GENERAL_DNF[@]}") ;;
-            apt) general=("${GENERAL_APT[@]}") ;;
-            zypper) general=("${GENERAL_ZYPPER[@]}") ;;
-        esac
-        for pkg in "${general[@]}"; do
-            _pkg_installed "$pkg" || missing+=("$pkg")
-        done
-        if [ "${#missing[@]}" -gt 0 ]; then
-            info "Would offer to install (needs sudo): ${missing[*]}"
+        info "Detected: $PKG_MANAGER (package list: deps/$PKG_MANAGER.list)"
+        local -a core=() hypr=()
+        mapfile -t core < <(missing core)
+        mapfile -t hypr < <(missing hypr)
+        if [ "${#core[@]}" -gt 0 ]; then
+            info "Would offer to install (needs sudo): ${core[*]}"
         else
             ok "All general dependencies already present -- nothing to install."
         fi
-        local -a hmissing=()
-        for pkg in "${HYPR_PACKAGES[@]}"; do
-            _pkg_installed "$pkg" || hmissing+=("$pkg")
-        done
-        [ "${#hmissing[@]}" -gt 0 ] && info "Would also offer Hyprland packages (needs sudo): ${hmissing[*]}"
-        if _pkg_installed quickshell || command -v qs >/dev/null 2>&1; then
+        if [ "${#hypr[@]}" -gt 0 ]; then
+            info "Would also offer Hyprland packages where $PKG_MANAGER can install them: ${hypr[*]}"
+        fi
+        if command -v qs >/dev/null 2>&1 || [ -z "$(missing shell)" ]; then
             ok "Quickshell already present."
         else
-            info "Would offer to install Quickshell (needs sudo, pacman only -- other distros get manual instructions)."
+            info "Would offer Quickshell where it's packaged (pacman, emerge with GURU);"
+            info "otherwise the waybar bars and GTK apps are used."
         fi
     fi
+    check_hyprland_version || true
 
     step "Input group"
     if id -nG "$USER" | grep -qw input; then
@@ -1532,64 +1541,102 @@ do_dry_run() {
     echo "${C_BOLD}${C_CYAN}End of dry run.${C_RESET} Nothing was changed. Run without --dry-run to apply."
 }
 
+# Brings the checkout up to its upstream branch, or explains why not and
+# returns 1 having changed nothing. Never resets, stashes or rewrites
+# anything: local edits stay exactly where they are, and an update that
+# would touch the same files is refused with the steps to resolve it.
+# Sets UPDATE_SUMMARY for the final report.
+update_checkout() {
+    local branch upstream before
+    before="$(git rev-parse --short HEAD)"
+    if ! branch="$(git symbolic-ref --short -q HEAD)"; then
+        warn "The checkout is on a detached commit ($before), not a branch -- not updating it."
+        info "Check out a branch (e.g. 'git -C $REPO_DIR checkout main') and re-run."
+        UPDATE_SUMMARY="Left on detached commit $before."
+        return 0
+    fi
+    if ! upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
+        warn "Branch '$branch' has no upstream to update from -- deploying it as it is."
+        UPDATE_SUMMARY="Branch $branch at $before (no upstream)."
+        return 0
+    fi
+
+    info "Fetching $upstream..."
+    if ! git fetch --quiet "${upstream%%/*}" 2>"$STATE_DIR/fetch.err"; then
+        err "Couldn't fetch updates: $(head -1 "$STATE_DIR/fetch.err" 2>/dev/null)"
+        info "Nothing was changed. Check your network connection and run './install.sh update' again."
+        return 1
+    fi
+
+    local ahead behind
+    read -r ahead behind < <(git rev-list --left-right --count "HEAD...$upstream")
+    if [ "$behind" = 0 ]; then
+        ok "Already up to date ($branch at $before)."
+        UPDATE_SUMMARY="Already up to date: $branch at $before."
+        return 0
+    fi
+
+    echo ""
+    info "$behind new commit(s) on $upstream:"
+    git log --oneline --no-decorate -n 15 "HEAD..$upstream" | sed 's/^/    /'
+    [ "$behind" -gt 15 ] && info "    ... and $((behind - 15)) more"
+    echo ""
+
+    if [ "$ahead" != 0 ]; then
+        err "Your branch has $ahead commit(s) of its own that $upstream doesn't, so it can't be"
+        info "fast-forwarded. Nothing was changed. To keep your commits on top of the update:"
+        info "  git -C $REPO_DIR pull --rebase      # then re-run ./install.sh update"
+        info "To see what differs first: git -C $REPO_DIR log --oneline --left-right HEAD...$upstream"
+        return 1
+    fi
+
+    # Files with local changes (tracked or not) that the update also touches.
+    local -a overlap=()
+    mapfile -t overlap < <(comm -12 \
+        <(git status --porcelain=v1 -uall | cut -c4- | sed 's/.* -> //' | sort -u) \
+        <(git diff --name-only HEAD "$upstream" | sort -u))
+    if [ "${#overlap[@]}" -gt 0 ]; then
+        err "You've changed files in the checkout that this update also changes:"
+        local f
+        for f in "${overlap[@]}"; do info "    $f"; done
+        info "Nothing was changed. Either keep your version aside and update:"
+        info "  git -C $REPO_DIR stash push -- ${overlap[*]}"
+        info "  ./install.sh update"
+        info "  git -C $REPO_DIR stash pop        # re-apply your edits, resolving any conflict"
+        info "or discard your edits to those files (git -C $REPO_DIR restore <file>) and re-run."
+        return 1
+    fi
+
+    if ! ask_yes_no "Update $branch from $before to $(git rev-parse --short "$upstream")?" Y; then
+        info "Not updated. Deploying the checkout as it is."
+        UPDATE_SUMMARY="Update declined: $branch stays at $before."
+        return 0
+    fi
+    if ! git merge --ff-only --quiet "$upstream"; then
+        err "The update couldn't be applied; the checkout is still at $before."
+        info "See 'git -C $REPO_DIR status' for what's in the way."
+        return 1
+    fi
+    local after
+    after="$(git rev-parse --short HEAD)"
+    printf '%s %s -> %s\n' "$(date -Iseconds)" "$before" "$after" >> "$STATE_DIR/update-history"
+    ok "Updated $branch: $before -> $after."
+    UPDATE_SUMMARY="Updated $branch from $before to $after ($behind commit(s)). To go back: git -C $REPO_DIR checkout $before"
+}
+
 do_update() {
     banner
     check_not_root
     require_repo_layout
+    mkdir -p "$STATE_DIR"
     cd "$REPO_DIR"
 
-    step "Checking repo status"
+    step "Checking for updates"
+    UPDATE_SUMMARY="Deployed the checkout as it is (no update was applied)."
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        warn "Not a git repository -- skipping git pull, deploying what's on disk."
+        warn "Not a git repository -- deploying what's on disk."
     else
-        local stashed=0
-        if [ -n "$(git status --porcelain)" ]; then
-            info "Stashing your local repo edits..."
-            git stash push -u -m "dxrice-update-autostash" >/dev/null
-            stashed=1
-        fi
-
-        if ! git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-            warn "Current branch has no upstream tracking branch -- skipping git pull."
-        else
-            info "Pulling latest changes..."
-            if ! git pull --ff-only; then
-                err "git pull --ff-only failed."
-                info "This usually means your local branch has diverged from the remote"
-                info "(e.g. you made local commits, or the remote history was rewritten)."
-                info "Resolve it by hand, then re-run './install.sh update':"
-                info "  git fetch && git status     # see how far you've diverged"
-                info "  git pull --rebase           # replay local commits on top, if you want to keep them"
-                if [ "$stashed" = "1" ]; then
-                    info "Restoring your stashed local edits first..."
-                    git stash pop || warn "Could not auto-restore stashed changes; recover with 'git stash list' / 'git stash pop'."
-                fi
-                exit 1
-            fi
-            ok "Repo up to date."
-        fi
-
-        if [ "$stashed" = "1" ]; then
-            info "Restoring your local repo edits..."
-            # A failed pop (merge conflict between your edit and the pulled
-            # change) can leave literal <<<<<<< conflict markers sitting in
-            # a tracked .py file -- confirmed live: redeploying straight
-            # through that state makes dxrice_deploy.py's own `import`
-            # crash with a raw Python SyntaxError traceback instead of a
-            # clear explanation. Stop here instead; the stash is never
-            # dropped on failure, so nothing is lost by stopping.
-            if ! git stash pop; then
-                err "Could not auto-restore your stashed local repo edits -- this usually means"
-                info "they conflict with what was just pulled. Your edits are safe in the stash"
-                info "(not lost), but the repo is left mid-conflict, so redeploying now would fail."
-                info "Resolve it by hand, then re-run './install.sh update':"
-                info "  git status               # see which file(s) conflict"
-                info "  <edit the conflicted file(s), remove the <<<<<<< / ======= / >>>>>>> markers>"
-                info "  git add <file>            # mark each one resolved"
-                info "  git stash drop            # once you're happy with the result"
-                exit 1
-            fi
-        fi
+        update_checkout || exit 1
     fi
 
     step "Redeploying"
@@ -1613,7 +1660,10 @@ do_update() {
 
     echo ""
     echo "${C_BOLD}${C_GREEN}Update complete.${C_RESET}"
-    info "Anything hand-edited in ~/.config or ~/scripts was left alone (see above)."
+    info "$UPDATE_SUMMARY"
+    info "Anything hand-edited in $CONFIG_HOME was left alone (see above)."
+    info "Nothing was restarted: the running bar and daemons keep their old code until"
+    info "you log out and back in."
 
     if [ "$hypr_existed" = "0" ] && hyprland_is_running; then
         echo ""
