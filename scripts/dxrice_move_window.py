@@ -12,29 +12,22 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, move_window_exact_lua, batch_async, dispatch
+import dxrice_monitor
 
 STEP = 90
 
 
-def get_monitor_bounds():
-    monitors = hyprctl_json(["monitors"]) or []
-    for m in monitors:
-        if m.get("focused"):
-            return {
-                "left": m["x"],
-                "right": m["x"] + m["width"],
-                "top": m["y"],
-                "bottom": m["y"] + m["height"],
-            }
-    return {"left": 0, "right": 1920, "top": 0, "bottom": 1080}
+def get_monitor_bounds(monitor_id=None):
+    """The usable area (logical size, minus bar and dock) of the window's
+    monitor."""
+    x0, y0, x1, y1 = dxrice_monitor.bounds(hyprctl_json(["monitors"]) or [], monitor_id)
+    return {"left": x0, "right": x1, "top": y0, "bottom": y1}
 
 
 def get_floating_windows(workspace_id):
+    """The windows the desktop's camera moves (not pinned or fullscreen)."""
     clients = hyprctl_json(["clients"]) or []
-    return [
-        w for w in clients
-        if w.get("floating") and w.get("workspace", {}).get("id") == workspace_id
-    ]
+    return [w for w in clients if dxrice_monitor.pans_with_desktop(w, workspace_id)]
 
 
 def main():
@@ -53,7 +46,7 @@ def main():
     if workspace_id is None:
         sys.exit(1)
 
-    monitor = get_monitor_bounds()
+    monitor = get_monitor_bounds(window.get("monitor"))
     addr = window["address"]
     wx, wy = window["at"][0], window["at"][1]
     ww, wh = window["size"][0], window["size"][1]

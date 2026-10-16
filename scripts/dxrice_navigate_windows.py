@@ -20,6 +20,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, move_focus, move_window_exact_lua, focus_window, batch_async
+import dxrice_monitor
 
 PROTECTED_APPS = ['brave-browser', 'chromium', 'chromium-browser', 'google-chrome',
                   'firefox', 'firefoxdeveloperedition', 'librewolf', 'vivaldi',
@@ -33,11 +34,10 @@ def movefocus(direction):
 
 
 def get_monitor_center():
-    monitors = hyprctl_json(["monitors"]) or []
-    for m in monitors:
-        if m.get("focused"):
-            return m["x"] + m["width"] // 2, m["y"] + m["height"] // 2
-    return 960, 540
+    """The centre of the focused monitor's usable area (logical size, minus
+    the bar and dock): where SUPER+G and the overview centre windows too."""
+    x0, y0, x1, y1 = dxrice_monitor.bounds(hyprctl_json(["monitors"]) or [])
+    return (x0 + x1) // 2, (y0 + y1) // 2
 
 
 def get_window_center(w):
@@ -142,7 +142,7 @@ def pan_to(address):
     if not ws:
         return None
     clients = hyprctl_json(["clients"]) or []
-    floating = [w for w in clients if w.get("workspace", {}).get("id") == ws["id"] and w.get("floating")]
+    floating = [w for w in clients if dxrice_monitor.pans_with_desktop(w, ws["id"])]
     target = next((w for w in floating if w["address"] == address), None)
     if target is None:
         return None
@@ -169,11 +169,11 @@ def main():
 
     clients = hyprctl_json(["clients"]) or []
     ws_clients = [w for w in clients if w.get("workspace", {}).get("id") == workspace_id]
-    floating = [w for w in ws_clients if w.get("floating")]
-
-    if not floating:
+    if not any(w.get("floating") for w in ws_clients):
         movefocus(direction)
         return
+    # what the camera moves, and what it can centre on
+    floating = [w for w in ws_clients if dxrice_monitor.pans_with_desktop(w, workspace_id)]
 
     if len(floating) <= 1:
         return

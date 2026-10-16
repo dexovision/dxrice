@@ -4,6 +4,7 @@ from evdev import InputDevice, list_devices, ecodes
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import move_window_exact_lua, batch_async, hyprctl_json
 import dxrice_singleton
+import dxrice_monitor
 
 # Same exclusive-instance guard dxrice_auto_place_window.py uses -- this
 # daemon has the same "exactly one per session, started by an unguarded
@@ -50,11 +51,13 @@ def get_monitor_bounds():
     try:
         monitors = hyprctl_json(['monitors'])
         if monitors:
-            m = next((x for x in monitors if x.get('focused', False)), monitors[0])
+            m = dxrice_monitor.pick(monitors)
+            # logical size: window positions are in layout coordinates
+            w, h = dxrice_monitor.logical_size(m)
             return {
-                'left': m['x'], 'right': m['x'] + m['width'],
-                'top': m['y'], 'bottom': m['y'] + m['height'],
-                'width': m['width'], 'height': m['height'],
+                'left': m['x'], 'right': m['x'] + w,
+                'top': m['y'], 'bottom': m['y'] + h,
+                'width': w, 'height': h,
                 # Real refresh rate (this machine's panel is 144Hz, not the
                 # 60Hz this loop used to assume) -- see get_frame_interval().
                 'refreshRate': m.get('refreshRate', 60.0),
@@ -88,7 +91,7 @@ def get_frame_interval():
 def get_floating_windows(workspace_id):
     try:
         clients = hyprctl_json(['clients']) or []
-        return [w for w in clients if w.get('floating') and w.get('workspace', {}).get('id') == workspace_id]
+        return [w for w in clients if dxrice_monitor.pans_with_desktop(w, workspace_id)]
     except Exception:
         return []
 
@@ -195,6 +198,7 @@ def monitor_window_drag():
                     # pointer motion from before the drag isn't part of it
                     mouse_rel_x = 0
                     mouse_rel_y = 0
+                forget_workspace()
             with lock:
                 is_dragging = drag_held()
                 mouse_dx = mouse_rel_x
@@ -460,6 +464,14 @@ def get_cached_workspace_id():
             pass
     return _cached_workspace_id
 
+def forget_workspace():
+    """A pan or drag is starting: read the active workspace afresh. The 2 s
+    cache only spares the per-frame reads during one; across an idle gap the
+    user may have switched workspace, and the old one's windows would move."""
+    global _last_workspace_check
+    _last_workspace_check = 0
+
+
 DRAG_CACHE_REFRESH = 0.2
 _drag_cache = {}
 _drag_cache_workspace = None
@@ -500,7 +512,7 @@ def refresh_drag_cache(workspace_id, force=False):
         live = {
             w['address']: [w['at'][0], w['at'][1]]
             for w in clients
-            if w.get('floating') and w.get('workspace', {}).get('id') == workspace_id
+            if dxrice_monitor.pans_with_desktop(w, workspace_id)
         }
         if fresh_start:
             _drag_cache = live
@@ -539,6 +551,7 @@ while True:
     if not _was_active:
         with state_changed:
             state_changed.wait_for(pan_held)
+        forget_workspace()
     time.sleep(get_frame_interval())
 
     with lock:

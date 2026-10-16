@@ -61,6 +61,7 @@ class FakeHyprland(threading.Thread):
     def __init__(self, path, clients, monitor, active):
         super().__init__(daemon=True)
         self.clients, self.monitor, self.active = clients, monitor, active
+        self.workspace = 1
         self.dispatches = []
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.bind(path)
@@ -76,7 +77,7 @@ class FakeHyprland(threading.Thread):
                 cmd = conn.recv(1 << 20).decode()
                 reply = b""
                 if cmd == "j/activeworkspace":
-                    reply = json.dumps({"id": 1}).encode()
+                    reply = json.dumps({"id": self.workspace}).encode()
                 elif cmd == "j/clients":
                     reply = json.dumps(self.clients).encode()
                 elif cmd == "j/monitors":
@@ -91,8 +92,8 @@ class FakeHyprland(threading.Thread):
                     pass
 
 
-def window(addr, x, y, w=400, h=300):
-    return {"address": addr, "at": [x, y], "size": [w, h], "floating": True, "workspace": {"id": 1}}
+def window(addr, x, y, w=400, h=300, ws=1, **extra):
+    return {"address": addr, "at": [x, y], "size": [w, h], "floating": True, "workspace": {"id": ws}, **extra}
 
 
 class Rig:
@@ -224,6 +225,40 @@ class TestInfiniteDesktop(unittest.TestCase):
         # are all that's left; the old loops alone made ~120/s
         self.assertLess(rate, 5, f"{rate:.1f} wakeups/s while idle")
         self.assertEqual(r.hypr.dispatches, [])
+
+
+class TestWhatMoves(unittest.TestCase):
+    def pan(self, rig):
+        rig.key(KEY_LEFTMETA, True)
+        rig.key(KEY_LEFTALT, True)
+        time.sleep(0.1)
+        rig.move(5, 0, steps=10)
+        time.sleep(0.3)
+        rig.key(KEY_LEFTALT, False)
+        rig.key(KEY_LEFTMETA, False)
+        time.sleep(0.1)
+
+    def test_pinned_and_fullscreen_windows_stay_put(self):
+        clients = [window("0xa", 100, 100), window("0xpip", 1500, 800, pinned=True),
+                   window("0xfs", 0, 0, 1920, 1080, fullscreen=2)]
+        rig = Rig(clients, active=clients[0])
+        try:
+            self.pan(rig)
+            self.assertEqual(set(rig.moves()), {"0xa"})
+        finally:
+            rig.close()
+
+    def test_a_pan_right_after_switching_workspace_moves_the_new_one(self):
+        clients = [window("0xa", 100, 100, ws=1), window("0xb", 300, 300, ws=2)]
+        rig = Rig(clients, active=clients[0])
+        try:
+            self.pan(rig)                 # caches workspace 1
+            rig.hypr.dispatches.clear()
+            rig.hypr.workspace = 2        # SUPER+2, then pan again at once
+            self.pan(rig)
+            self.assertEqual(set(rig.moves()), {"0xb"})
+        finally:
+            rig.close()
 
 
 class TestSessionEnd(unittest.TestCase):
