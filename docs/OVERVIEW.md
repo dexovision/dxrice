@@ -29,7 +29,7 @@ missing from your live file.
 
 To move the keys, change them on these lines next to SUPER+G.
 From a terminal, `dx overview` toggles it; so does
-`qs -p <repo>/quickshell/shell.qml ipc call overview toggle|show|hide`.
+`qs -p <repo>/quickshell/shell.qml ipc call overview toggle|zoomOut|zoomIn`.
 
 ## What it does
 
@@ -245,11 +245,11 @@ yet. When you're ready:
            .. action .. " 2>/dev/null'")
    end
    hl.bind(mainMod .. " + Tab", overview("toggle"))             -- zoom out / back in
-   hl.bind(mainMod .. " + minus", overview("show"))             -- zoom out: SUPER and -
-   hl.bind(mainMod .. " + KP_Subtract", overview("show"))       --   ... or the keypad's -
-   hl.bind(mainMod .. " + SHIFT + equal", overview("hide"))     -- zoom in: SUPER and + (Shift and =)
-   hl.bind(mainMod .. " + equal", overview("hide"))             --   ... or = without Shift
-   hl.bind(mainMod .. " + KP_Add", overview("hide"))            --   ... or the keypad's +
+   hl.bind(mainMod .. " + minus", overview("zoomOut"))             -- zoom out: SUPER and -
+   hl.bind(mainMod .. " + KP_Subtract", overview("zoomOut"))       --   ... or the keypad's -
+   hl.bind(mainMod .. " + SHIFT + equal", overview("zoomIn"))     -- zoom in: SUPER and + (Shift and =)
+   hl.bind(mainMod .. " + equal", overview("zoomIn"))             --   ... or = without Shift
+   hl.bind(mainMod .. " + KP_Add", overview("zoomIn"))            --   ... or the keypad's +
    ```
 
    Hyprland reloads its config on save. `install.sh update`'s drift check

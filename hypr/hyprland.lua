@@ -275,11 +275,11 @@ local function overview(action)
         .. action .. " 2>/dev/null'")
 end
 hl.bind(mainMod .. " + Tab", overview("toggle"))             -- zoom out / back in
-hl.bind(mainMod .. " + minus", overview("show"))             -- zoom out: SUPER and -
-hl.bind(mainMod .. " + KP_Subtract", overview("show"))       --   ... or the keypad's -
-hl.bind(mainMod .. " + SHIFT + equal", overview("hide"))     -- zoom in: SUPER and + (Shift and =)
-hl.bind(mainMod .. " + equal", overview("hide"))             --   ... or = without Shift
-hl.bind(mainMod .. " + KP_Add", overview("hide"))            --   ... or the keypad's +
+hl.bind(mainMod .. " + minus", overview("zoomOut"))             -- zoom out: SUPER and -
+hl.bind(mainMod .. " + KP_Subtract", overview("zoomOut"))       --   ... or the keypad's -
+hl.bind(mainMod .. " + SHIFT + equal", overview("zoomIn"))     -- zoom in: SUPER and + (Shift and =)
+hl.bind(mainMod .. " + equal", overview("zoomIn"))             --   ... or = without Shift
+hl.bind(mainMod .. " + KP_Add", overview("zoomIn"))            --   ... or the keypad's +
 
 hl.bind(mainMod .. " + left",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py left"))
 hl.bind(mainMod .. " + right", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py right"))

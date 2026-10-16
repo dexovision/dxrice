@@ -23,6 +23,11 @@ import Quickshell.Io
 //   qs -p <repo>/quickshell/shell.qml ipc call taskbar toggle
 //   qs -p <repo>/quickshell/shell.qml ipc call calendar toggle
 //   qs -p <repo>/quickshell/shell.qml ipc call overview toggle   (SUPER+Tab)
+//   ... ipc call overview zoomOut / zoomIn                        (SUPER+- / SUPER++)
+//
+// No IpcHandler function may be named show, call, wait, listen or prop:
+// those are `qs ipc` subcommands, and `qs ipc call <target> show` lists the
+// targets instead of calling anything (dxrice_test_overview.py checks).
 ShellRoot {
     id: root
 
@@ -68,26 +73,26 @@ ShellRoot {
     IpcHandler {
         target: "theme"
         function toggle(): void { PanelManager.toggle("theme"); }
-        function show(): void { PanelManager.open("theme"); }
+        function open(): void { PanelManager.open("theme"); }
         function hide(): void { PanelManager.close("theme"); }
     }
 
     IpcHandler {
         target: "quicksettings"
         function toggle(): void { PanelManager.toggle("quicksettings"); }
-        function show(): void { PanelManager.open("quicksettings"); }
+        function open(): void { PanelManager.open("quicksettings"); }
         function hide(): void { PanelManager.close("quicksettings"); }
     }
     IpcHandler {
         target: "calendar"
         function toggle(): void { PanelManager.toggle("calendar"); }
-        function show(): void { PanelManager.open("calendar"); }
+        function open(): void { PanelManager.open("calendar"); }
         function hide(): void { PanelManager.close("calendar"); }
     }
     IpcHandler {
         target: "taskbar"
         function toggle(): void { PanelManager.toggle("taskbar"); }
-        function show(): void { PanelManager.open("taskbar"); }
+        function open(): void { PanelManager.open("taskbar"); }
         function hide(): void { PanelManager.close("taskbar"); }
     }
 
@@ -156,7 +161,7 @@ ShellRoot {
     IpcHandler {
         target: "overview"
         function toggle(): void { overview.toggle(); }
-        function show(): void { overview.show(); }
-        function hide(): void { overview.hide(); }
+        function zoomOut(): void { overview.show(); }
+        function zoomIn(): void { overview.hide(); }
     }
 }

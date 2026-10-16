@@ -311,8 +311,33 @@ class TestKeybinds(unittest.TestCase):
     (so an existing install is told they are new)."""
 
     TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hypr", "hyprland.lua")
-    KEYS = {" + Tab": "toggle", " + minus": "show", " + KP_Subtract": "show",
-            " + SHIFT + equal": "hide", " + equal": "hide", " + KP_Add": "hide"}
+    KEYS = {" + Tab": "toggle", " + minus": "zoomOut", " + KP_Subtract": "zoomOut",
+            " + SHIFT + equal": "zoomIn", " + equal": "zoomIn", " + KP_Add": "zoomIn"}
+    SHELL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "quickshell", "shell.qml")
+    # `qs ipc` subcommands: `qs ipc call <target> show` runs `qs ipc show`
+    # (lists the targets) and never calls the function -- which is how
+    # SUPER+minus, bound to "show", silently did nothing.
+    QS_IPC_SUBCOMMANDS = {"show", "call", "wait", "listen", "prop"}
+
+    def ipc_functions(self):
+        import re
+        text = open(self.SHELL).read()
+        out = {}
+        for m in re.finditer(r'IpcHandler\s*\{\s*target:\s*"(\w+)"(.*?)\n    \}', text, re.S):
+            out[m.group(1)] = re.findall(r'function\s+(\w+)\s*\(', m.group(2))
+        return out
+
+    def test_no_ipc_function_is_shadowed_by_a_qs_subcommand(self):
+        funcs = self.ipc_functions()
+        self.assertIn("overview", funcs)
+        for target, names in funcs.items():
+            self.assertEqual(set(names) & self.QS_IPC_SUBCOMMANDS, set(), target)
+
+    def test_every_overview_bind_calls_a_function_that_exists(self):
+        _text, found = self.binds()
+        have = set(self.ipc_functions()["overview"])
+        for key, action in found:
+            self.assertIn(action, have, key)
 
     def binds(self):
         import re
