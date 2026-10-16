@@ -675,7 +675,8 @@ class TestTermination(unittest.TestCase):
         app = self._fake_app("normal")
         self._ignores_close(app.pid)
         real_uid = fcw._owner_uid
-        fcw._owner_uid = lambda pid: 0 if pid == app.pid else real_uid(pid)
+        other_uid = os.getuid() + 1  # never this user, root included
+        fcw._owner_uid = lambda pid: other_uid if pid == app.pid else real_uid(pid)
         fcw.main()
         time.sleep(0.15)
         self.assertIsNone(app.poll())

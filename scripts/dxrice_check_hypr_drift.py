@@ -141,6 +141,8 @@ def main():
                 kind, _, name = identity.partition(":")
                 if kind == "autostart":
                     print(f"    - autostart entry for scripts/{name} (not found anywhere in your live file)")
+                elif kind == "animation":
+                    print(f"    - animation setting \"{name}\" (not found anywhere in your live file)")
                 else:
                     print(f"    - keybind \"{name}\" (not found anywhere in your live file)")
             print(f"  This file is copy-once and yours to hand-edit (see the README), so nothing here "

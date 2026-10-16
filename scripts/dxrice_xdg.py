@@ -87,3 +87,14 @@ def cache_dir():
     """Disposable generated data: thumbnails, anything safe to delete and
     regenerate."""
     return os.path.join(cache_home(), "dxrice")
+
+
+def runtime_dir():
+    """Per-login scratch files (pid files, locks, short-lived state):
+    $XDG_RUNTIME_DIR/dxrice, private to this user and cleared at logout.
+    Without XDG_RUNTIME_DIR, a 0700 directory of this user's own under
+    /tmp -- never a fixed shared /tmp path another user could own first."""
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    path = os.path.join(base, "dxrice") if base else f"/tmp/dxrice-{os.getuid()}"
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path

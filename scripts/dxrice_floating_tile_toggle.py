@@ -8,9 +8,10 @@ import fcntl
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import (hyprctl_json, toggle_floating_lua, move_window_exact_lua,
                        resize_window_exact_lua, batch)
+import dxrice_xdg
 
-LOCK_FILE = "/tmp/floating_tile_toggle.lock"
-STATE_FILE = "/tmp/floating_tile_state.json"
+LOCK_FILE = os.path.join(dxrice_xdg.runtime_dir(), "floating_tile_toggle.lock")
+STATE_FILE = os.path.join(dxrice_xdg.runtime_dir(), "floating_tile_state.json")
 
 
 def load_state():
