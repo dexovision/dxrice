@@ -173,7 +173,8 @@ Item {
 
     Process {
         id: idleInhibitProc
-        command: ["systemd-inhibit", "--what=idle:sleep", "--who=DXrice", "--why=Quick Settings Keep Awake", "sleep", "infinity"]
+        // systemd-inhibit or elogind-inhibit, whichever this system has
+        command: ["sh", Quickshell.shellDir + "/../scripts/dxrice_power.sh", "inhibit"]
     }
 
     function setWifi(on) {
@@ -1492,11 +1493,11 @@ Item {
                         }
                         Item {
                             width: powerRow.slot; height: Theme.iconMd
-                            IconButton { anchors.centerIn: parent; glyph: "\uf2ea"; size: Theme.iconMd; onClicked: Quickshell.execDetached(["systemctl", "reboot"]) }
+                            IconButton { anchors.centerIn: parent; glyph: "\uf2ea"; size: Theme.iconMd; onClicked: Quickshell.execDetached(["sh", Quickshell.shellDir + "/../scripts/dxrice_power.sh", "reboot"]) }
                         }
                         Item {
                             width: powerRow.slot; height: Theme.iconMd
-                            IconButton { anchors.centerIn: parent; glyph: "\uf011"; size: Theme.iconMd; destructive: true; onClicked: Quickshell.execDetached(["systemctl", "poweroff"]) }
+                            IconButton { anchors.centerIn: parent; glyph: "\uf011"; size: Theme.iconMd; destructive: true; onClicked: Quickshell.execDetached(["sh", Quickshell.shellDir + "/../scripts/dxrice_power.sh", "poweroff"]) }
                         }
                     }
                 }

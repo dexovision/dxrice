@@ -312,14 +312,19 @@ class HyprlandConfigIntegrityTest(unittest.TestCase):
         self.assertEqual(program_problems(self.commands, _read(INSTALL)), [])
 
     def test_systemd_units_agree(self):
-        lua_units = set(re.findall(r"dxrice-[a-z-]+\.service", "\n".join(self.commands)))
+        # hyprland.lua starts them through dxrice_session.sh, which restarts
+        # the units under systemd
+        self.assertTrue(any("<REPO>/scripts/dxrice_session.sh" in c for c in self.commands),
+                        "hyprland.lua's autostart doesn't run dxrice_session.sh")
+        session = _read(os.path.join(REPO, "scripts", "dxrice_session.sh"))
+        lua_units = set(re.findall(r"dxrice-[a-z-]+\.service", session))
         install_src = _read(INSTALL)
         m = re.search(r"DXRICE_UNITS=\(([^)]*)\)", install_src)
         self.assertIsNotNone(m, "install.sh has no DXRICE_UNITS list")
         removed = set(m.group(1).split())
         written = set(re.findall(r'\$unit_dir/(dxrice-[a-z-]+\.service)', install_src))
-        self.assertTrue(lua_units, "no DXrice units found in hyprland.lua's autostart")
-        self.assertEqual(lua_units, written, "units hyprland.lua restarts != units install.sh writes")
+        self.assertTrue(lua_units, "no DXrice units found in dxrice_session.sh")
+        self.assertEqual(lua_units, written, "units dxrice_session.sh restarts != units install.sh writes")
         self.assertEqual(written, removed, "units install.sh writes != units uninstall removes")
 
 

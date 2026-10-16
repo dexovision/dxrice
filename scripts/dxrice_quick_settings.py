@@ -64,7 +64,7 @@ import dxrice_apply_theme as apply_theme
 import dxrice_xdg
 
 HOME = os.path.expanduser("~")
-PID_FILE = "/tmp/dxrice-quick-settings.pid"
+PID_FILE = os.path.join(dxrice_xdg.runtime_dir(), "quick-settings.pid")
 CSS_PATH = os.path.join(dxrice_xdg.config_dir(), "gtk_style.css")
 
 # The Theme app's own animation-speed setting, so this panel's entrance
@@ -325,19 +325,22 @@ def action_logout():
     # better failure than one that strands the machine with no greeter.
 
 
+_POWER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_power.sh")
+
+
 def action_reboot():
-    subprocess.Popen(["systemctl", "reboot"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(["sh", _POWER, "reboot"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def action_shutdown():
-    subprocess.Popen(["systemctl", "poweroff"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(["sh", _POWER, "poweroff"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 # ---------------------------------------------------------------------------
 # Idle inhibit ("Keep Awake")
 # ---------------------------------------------------------------------------
 
-IDLE_INHIBIT_PID_FILE = "/tmp/dxrice-idle-inhibit.pid"
+IDLE_INHIBIT_PID_FILE = os.path.join(dxrice_xdg.runtime_dir(), "idle-inhibit.pid")
 
 
 def idle_inhibit_active():
@@ -348,10 +351,10 @@ def idle_inhibit_active():
         # going through set_idle_inhibit(False) -- OOM kill, manual pkill --
         # the stale pid file remains, and the OS can hand that same PID
         # number to an unrelated process later. Confirming it's actually
-        # still a systemd-inhibit process avoids a false "active" reading.
+        # still an inhibitor process avoids a false "active" reading.
         with open(f"/proc/{pid}/comm") as f:
             comm = f.read().strip()
-        return comm == "systemd-inhibit"
+        return comm in ("systemd-inhibit", "elogind-inhibit")
     except (OSError, ValueError):
         return False
 
@@ -364,11 +367,10 @@ def set_idle_inhibit(enabled):
     if enabled:
         if idle_inhibit_active():
             return
-        proc = subprocess.Popen(
-            ["systemd-inhibit", "--what=idle:sleep", "--who=DXrice",
-             "--why=Quick Settings Keep Awake", "sleep", "infinity"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        # execs systemd-inhibit or elogind-inhibit in place, so this pid is
+        # the inhibitor's own
+        proc = subprocess.Popen(["sh", _POWER, "inhibit"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with open(IDLE_INHIBIT_PID_FILE, "w") as f:
             f.write(str(proc.pid))
     else:
