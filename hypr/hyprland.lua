@@ -258,28 +258,17 @@ hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxric
 -- this bind at it instead to revert to that simpler behavior).
 hl.bind(mainMod .. " + G", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_auto_arrange.py"))
 
--- Desktop overview: the current workspace zoomed out until every window --
--- the whole Galaxy Spiral, past the screen edges too -- fits on screen. A
--- view (live window pictures drawn by Quickshell, Overview.qml), never a
--- re-layout: no window moves or resizes. Esc, a click on empty space or
--- the toggle key closes it; clicking a window focuses it. To use other
--- keys, change them on these lines -- nothing else refers to them.
---
--- Keys are named by the key's own (unshifted) symbol on a US layout:
--- "SHIFT + equal" is SUPER+Shift+= -- i.e. SUPER and the + key -- the same
--- way SUPER+SHIFT+1 above means SUPER and Shift+1. "equal" alone (no Shift)
--- and the keypad's + and - work too. Every key name here is checked by
--- Hyprland's own parser in scripts/dxrice_test_overview.py.
+-- Desktop overview: SUPER+Tab zooms the current workspace out until every
+-- window -- the whole Galaxy Spiral, past the screen edges too -- fits on
+-- screen, and SUPER+Tab again zooms back in. A view (live window pictures
+-- drawn by Quickshell, Overview.qml), never a re-layout. Click a window to
+-- focus it; Esc or a click on empty space closes. To use another key,
+-- change it on the hl.bind line -- nothing else refers to it.
 local function overview(action)
     return hl.dsp.exec_cmd("sh -c 'qs -p " .. repo .. "/quickshell/shell.qml ipc call overview "
         .. action .. " 2>/dev/null'")
 end
-hl.bind(mainMod .. " + Tab", overview("toggle"))             -- zoom out / back in
-hl.bind(mainMod .. " + minus", overview("zoomOut"))             -- zoom out: SUPER and -
-hl.bind(mainMod .. " + KP_Subtract", overview("zoomOut"))       --   ... or the keypad's -
-hl.bind(mainMod .. " + SHIFT + equal", overview("zoomIn"))     -- zoom in: SUPER and + (Shift and =)
-hl.bind(mainMod .. " + equal", overview("zoomIn"))             --   ... or = without Shift
-hl.bind(mainMod .. " + KP_Add", overview("zoomIn"))            --   ... or the keypad's +
+hl.bind(mainMod .. " + Tab", overview("toggle"))
 
 hl.bind(mainMod .. " + left",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py left"))
 hl.bind(mainMod .. " + right", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_navigate_windows.py right"))

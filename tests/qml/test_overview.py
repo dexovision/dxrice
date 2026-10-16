@@ -48,6 +48,20 @@ def clients_for(rects, **extra):
     return out
 
 
+def bezier(x1, y1, x2, y2, u):
+    """CSS/Qt cubic-bezier easing value at time fraction u."""
+    def coord(t, a, b):
+        return 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3
+    lo, hi = 0.0, 1.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if coord(mid, x1, x2) < u:
+            lo = mid
+        else:
+            hi = mid
+    return coord((lo + hi) / 2, y1, y2)
+
+
 class OverviewScene:
     """The OverviewDesktop scene with a workspace loaded into it."""
 
@@ -157,11 +171,11 @@ class TestOverview(unittest.TestCase):
 
     def test_reversing_mid_zoom_never_jumps(self):
         self.o.call("show")
-        self.o.scene.wait(200)
+        self.o.scene.wait(130)
         p0 = self.o.ov("progress")
         self.assertTrue(0 < p0 < 1, p0)
         import time
-        T = self.o.scene.ev("theme.durationExit") + 60
+        T = self.o.ov("zoomMs")
         t0 = time.perf_counter()
         self.o.call("hide")
         seen = [(0.0, p0)]
@@ -169,17 +183,17 @@ class TestOverview(unittest.TestCase):
             self.o.scene.wait(40)
             seen.append(((time.perf_counter() - t0) * 1000, self.o.ov("progress")))
         # monotonic all the way back, ending exactly on the real view, and
-        # never ahead of the ease-in-out curve for the time actually elapsed
-        # (InOutCubic: 4t^3 in the first half) -- the reversal eases in
-        # rather than snapping. Judged against measured time, not sample
-        # counts: the offscreen software renderer's frames are irregular.
+        # never ahead of the zoom's own ease-in-out curve (cubic-bezier
+        # 0.4, 0, 0.2, 1) for the time actually elapsed -- the reversal eases
+        # out of the current position rather than snapping. Judged against
+        # measured time, not sample counts: the offscreen software renderer's
+        # frames are irregular.
         ps = [p for _t, p in seen]
         self.assertTrue(all(b <= a + 1e-6 for a, b in zip(ps, ps[1:])), seen)
         self.assertEqual(ps[-1], 0.0)
         for t, p in seen[1:]:
             u = min(1.0, t / T)
-            if u < 0.5:
-                self.assertLessEqual(p0 - p, p0 * 4 * u ** 3 + 0.06, (t, p, seen))
+            self.assertLessEqual(p0 - p, p0 * bezier(0.4, 0.0, 0.2, 1.0, u) + 0.06, (t, p, seen))
 
     def test_show_and_hide_are_idempotent(self):
         self.o.call("show"); self.o.call("show")
@@ -207,7 +221,10 @@ class TestOverview(unittest.TestCase):
     def visible_point(self, w):
         """A point of w's overview tile that no tile above it covers."""
         r = self.o.layout["reserved"]
-        above = [o for o in self.o.layout["windows"] if o["z"] > w["z"]]
+        # the overview's own stacking: a fullscreen window lies at the bottom
+        def level(o):
+            return -1 if o["fullscreen"] else o["z"]
+        above = [o for o in self.o.layout["windows"] if level(o) > level(w)]
         for fy in (0.5, 0.25, 0.75, 0.1, 0.9):
             for fx in (0.5, 0.25, 0.75, 0.1, 0.9):
                 x, y = w["tx"] + w["tw"] * fx, w["ty"] + w["th"] * fy
@@ -227,73 +244,137 @@ class TestOverview(unittest.TestCase):
     def runs(self):
         return [list(r) for r in self.o.scene.bridge.run_log]
 
-    def test_clicking_every_window_focuses_exactly_that_window(self):
-        """Every thumbnail, clicked: the overview closes and every focus
-        request names that window's own Hyprland address (sent after the
-        keyboard is released and once more after the overlay is gone -- see
-        Overview.qml's focusLua). A window entirely off screen first says so
-        (no focus); a second click pans the desktop there with
-        dxrice_navigate_windows.py --to <that address>, then focuses it."""
-        on, off = 0, 0
+    def fully_visible(self, w):
+        W, H = self.o.layout["monitor"]["width"], self.o.layout["monitor"]["height"]
+        return w["x"] >= 0 and w["y"] >= 0 and w["x"] + w["w"] <= W and w["y"] + w["h"] <= H
+
+    def expected_pan(self, w):
+        """Overview.qml's panDelta: the smallest shift bringing w 24 px
+        inside the usable area (centred if bigger), per axis."""
+        W, H = self.o.layout["monitor"]["width"], self.o.layout["monitor"]["height"]
+
+        def axis(p, size, span, m=24):
+            if p >= 0 and p + size <= span:
+                return 0
+            if size + 2 * m > span:
+                return round((span - size) / 2 - p)
+            if p < m:
+                return round(m - p)
+            return round((span - m) - (p + size))
+        return axis(w["x"], w["w"], W), axis(w["y"], w["h"], H)
+
+    def test_one_click_on_every_window_focuses_exactly_that_window(self):
+        """Every thumbnail -- on screen or not -- in ONE click: the overview
+        closes and every focus request names that window's own Hyprland
+        address (sent after the keyboard is released and once more after the
+        overlay is gone). A window not entirely in view is brought there
+        first by panning the whole desktop: every floating window moved by
+        the same smallest delta (the spiral keeps its shape); a window
+        already in view moves nothing at all."""
+        mx, my = self.o.layout["monitor"]["x"], self.o.layout["monitor"]["y"]
+        panned = still = 0
         for w in self.o.layout["windows"]:
             pt = self.visible_point(w)
             if pt is None:
                 continue
+            self.o.load(self.o.clients)  # the desktop as it is (no pan carried over)
             before = len(self.o.dispatches())
             self.o.call("show")
             self.o.scene.wait(SETTLE)
             self.o.click(*pt)
-            self.o.scene.wait(250)
-            if not self.on_screen(w):
-                self.assertEqual(self.o.dispatches()[before:], [], w["address"])
-                self.assertTrue(self.o.ov("open"))
-                self.assertTrue(self.o.scene.ev("findNamed('overviewOffScreenNote')").property("visible"))
-                self.o.click(*pt)
-                self.o.scene.wait(SETTLE)
-                pans = [r for r in self.runs() if "--to" in r]
-                self.assertEqual(pans[-1][-2:], ["--to", w["address"]])
-                off += 1
-            else:
-                self.o.scene.wait(SETTLE)
-                on += 1
+            self.o.scene.wait(SETTLE)
             sent = self.o.dispatches()[before:]
-            self.assertTrue(sent, w["address"])
-            self.assertEqual(set(sent), {self.lua(w["address"])}, (w["address"], sent))
+            moves = [d for d in sent if d.startswith("hl.dsp.window.move")]
+            focus = [d for d in sent if d.startswith("hl.dsp.focus")]
+            self.assertTrue(focus, w["address"])
+            self.assertEqual(set(focus), {self.lua(w["address"])}, (w["address"], sent))
             self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
-        self.assertGreaterEqual(on, 3)
-        self.assertGreaterEqual(off, 6)
+            if self.fully_visible(w):
+                self.assertEqual(moves, [], f"{w['address']} was in view: nothing may move")
+                still += 1
+                continue
+            dx, dy = self.expected_pan(w)
+            want = {f'hl.dsp.window.move({{ window = "address:{o["address"]}", x = {round(o["x"] + mx + dx)}, '
+                    f'y = {round(o["y"] + my + dy)}, relative = false }})'
+                    for o in self.o.layout["windows"] if o["floating"] and not o["pinned"] and not o["fullscreen"]}
+            self.assertEqual(set(moves), want, w["address"])
+            self.assertLess(sent.index(moves[0]), sent.index(focus[0]), "moved after focusing")
+            panned += 1
+        self.assertGreaterEqual(still, 1)
+        self.assertGreaterEqual(panned, 8)
 
     def test_focus_is_always_sent_in_lua_syntax(self):
         """DXrice's Hyprland runs hyprland.lua: the classic
         "focuswindow address:" form would be refused, whatever Quickshell's
         usingLua says."""
         self.o.scene.ev("hypr.usingLua = false")
-        w = next(w for w in reversed(self.o.layout["windows"]) if self.on_screen(w))
+        w = next(w for w in reversed(self.o.layout["windows"]) if self.fully_visible(w))
         self.o.call("show")
         self.o.scene.wait(SETTLE)
         self.o.click(*self.visible_point(w))
         self.o.scene.wait(SETTLE)
         self.assertEqual(set(self.o.dispatches()), {self.lua(w["address"])})
 
-    def test_a_window_entirely_off_screen_is_never_focused_silently(self):
-        """One click on a window none of which is on the monitor: no focus,
-        no pan, the overview stays open and says what a second click does.
-        Clicking a different window instead cancels the pending pan."""
-        off = [w for w in self.o.layout["windows"] if not self.on_screen(w) and self.visible_point(w)]
-        self.assertGreaterEqual(len(off), 2, "the fixture needs off-screen windows")
+    def test_fullscreen_pinned_and_tiled_windows_focus_without_a_pan(self):
+        """Pinned and fullscreen windows belong to the screen, not the
+        desktop; tiled ones are always in view: one click focuses them and
+        nothing moves. Clicking the fullscreen one (on top of the stack)
+        works; so does a pinned one beside it."""
+        self.o.scene.close()
+        cl = clients_for(self.rects[:6])
+        cl.append({"address": "0xb01", "at": [100, 120], "size": [700, 500], "workspace": {"id": 1}, "monitor": 0,
+                   "mapped": True, "floating": False, "focusHistoryID": 9, "class": "tiled", "title": "Tiled"})
+        cl.append({"address": "0xb02", "at": [1500, 90], "size": [400, 300], "workspace": {"id": 4}, "monitor": 0,
+                   "mapped": True, "floating": True, "pinned": True, "focusHistoryID": 8, "class": "pin", "title": "Pinned"})
+        cl.append({"address": "0xb03", "at": [0, 0], "size": [1920, 1080], "workspace": {"id": 1}, "monitor": 0,
+                   "mapped": True, "floating": False, "fullscreen": 2, "focusHistoryID": 0, "class": "game", "title": "Game"})
+        self.o = OverviewScene(cl)
+        for addr in ("0xb03", "0xb02", "0xb01"):
+            w = next(x for x in self.o.layout["windows"] if x["address"] == addr)
+            pt = self.visible_point(w)
+            self.assertIsNotNone(pt, addr)
+            before = len(self.o.dispatches())
+            self.o.call("show")
+            self.o.scene.wait(SETTLE)
+            self.o.click(*pt)
+            self.o.scene.wait(SETTLE)
+            self.assertEqual(set(self.o.dispatches()[before:]), {self.lua(addr)}, addr)
+
+    def test_a_window_that_just_closed_says_so(self):
+        """Clicking a window that has closed since the last refresh: nothing
+        is focused (it can't be), the overview stays open and says so."""
+        w = self.o.layout["windows"][-1]
         self.o.call("show")
         self.o.scene.wait(SETTLE)
-        self.o.click(*self.visible_point(off[0]))
-        self.o.scene.wait(400)
+        gone = w["address"].replace("0x", "")
+        self.o.scene.ev(f"hypr.toplevels = ({{ values: hypr.toplevels.values.filter(t => t.address !== '{gone}') }})")
+        self.o.click(*self.visible_point(w))
+        self.o.scene.wait(300)
         self.assertEqual(self.o.dispatches(), [])
-        self.assertEqual([r for r in self.runs() if "--to" in r], [])
         self.assertTrue(self.o.ov("open"))
-        note = self.o.scene.ev("findNamed('overviewOffScreenNote')")
-        self.assertIn("off screen", note.property("text"))
-        self.assertIn("Click it again", note.property("text"))
-        self.o.click(*self.visible_point(off[1]))   # a different one: asks again, no pan
-        self.o.scene.wait(400)
-        self.assertEqual([r for r in self.runs() if "--to" in r], [])
+        self.assertIn("closed", self.o.scene.ev("findNamed('overviewOffScreenNote')").property("text"))
+
+    def test_windows_opening_and_closing_mid_animation(self):
+        """A window event during the zoom: the overview ends on the fresh
+        layout, every tile in place, and the tiles of windows that were
+        already there are updated, not rebuilt (their live pictures carry
+        on)."""
+        self.o.call("show")
+        self.o.scene.wait(120)  # zoom under way
+        built = self.o.ov("tilesBuilt")
+        extra = clients_for(self.rects + [(2300, 900, 2900, 1300)])
+        self.o.load(extra)
+        self.o.scene.ev("hypr.rawEvent({ name: 'openwindow', data: 'a010,1,app,new' })")
+        self.o.scene.wait(SETTLE + 400)
+        self.assertEqual(self.o.state(), (True, 1.0, 1.0, True))
+        self.assert_tiles_at("target")
+        self.assertEqual(self.o.ov("tilesBuilt") - built, 1, "existing tiles were rebuilt")
+        self.o.load(extra[:4])
+        self.o.scene.ev("hypr.rawEvent({ name: 'closewindow', data: 'a010' })")
+        self.o.call("hide")   # and closing at the same moment
+        self.o.scene.wait(SETTLE)
+        self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
+        self.assertEqual(self.o.tiles(), {})
         self.assertEqual(self.o.dispatches(), [])
 
     def test_the_keypress_gets_feedback_before_any_data(self):

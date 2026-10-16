@@ -311,8 +311,10 @@ class TestKeybinds(unittest.TestCase):
     (so an existing install is told they are new)."""
 
     TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hypr", "hyprland.lua")
-    KEYS = {" + Tab": "toggle", " + minus": "zoomOut", " + KP_Subtract": "zoomOut",
-            " + SHIFT + equal": "zoomIn", " + equal": "zoomIn", " + KP_Add": "zoomIn"}
+    # ONE key for the overview: SUPER+Tab opens it and closes it again.
+    KEYS = {" + Tab": "toggle"}
+    # the separate zoom keys an earlier version bound -- gone for good
+    OBSOLETE = (" + minus", " + KP_Subtract", " + SHIFT + equal", " + equal", " + KP_Add")
     SHELL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "quickshell", "shell.qml")
     # `qs ipc` subcommands: `qs ipc call <target> show` runs `qs ipc show`
     # (lists the targets) and never calls the function -- which is how
@@ -346,7 +348,29 @@ class TestKeybinds(unittest.TestCase):
 
     def test_every_overview_key_and_its_action(self):
         _text, found = self.binds()
-        self.assertEqual(dict(found), self.KEYS)
+        self.assertEqual(found, list(self.KEYS.items()), "SUPER+Tab must be the overview's only key")
+
+    def assert_no_obsolete_zoom_keys(self, text):
+        import re
+        for key in self.OBSOLETE:
+            self.assertIsNone(re.search(r'hl\.bind\(\s*\w+\s*\.\.\s*"' + re.escape(key) + '"', text), key)
+        self.assertNotIn("zoomOut", text)
+        self.assertNotIn("zoomIn", text)
+
+    def test_no_separate_zoom_keys_in_the_template(self):
+        self.assert_no_obsolete_zoom_keys(open(self.TEMPLATE).read())
+
+    def test_no_separate_zoom_keys_in_the_live_config(self):
+        """The deployed ~/.config/hypr/hyprland.lua, where there is one (a
+        real session; skipped in a sandbox with a throwaway HOME)."""
+        live = os.path.join(os.path.expanduser("~"), ".config", "hypr", "hyprland.lua")
+        if not os.path.exists(live):
+            self.skipTest("no deployed hyprland.lua here")
+        text = open(live).read()
+        if "overview(" not in text:
+            self.skipTest("the overview isn't wired into this config")
+        self.assert_no_obsolete_zoom_keys(text)
+        self.assertIn('mainMod .. " + Tab", overview("toggle")', text)
 
     def test_no_key_is_bound_twice(self):
         import re
@@ -379,13 +403,13 @@ class TestKeybinds(unittest.TestCase):
             bad = os.path.join(d, "bad.lua")
             text = open(self.TEMPLATE).read()
             open(good, "w").write(text)
-            open(bad, "w").write(text.replace('mainMod .. " + KP_Add"', 'mainMod .. " + KP_Plusss"'))
+            open(bad, "w").write(text.replace('mainMod .. " + Tab"', 'mainMod .. " + Tabbb"'))
             ok = subprocess.run([hypr, "--verify-config", "-c", good], capture_output=True, text=True,
                                 timeout=60, env=env)
             self.assertIn("config ok", ok.stdout + ok.stderr)
             no = subprocess.run([hypr, "--verify-config", "-c", bad], capture_output=True, text=True,
                                 timeout=60, env=env)
-            self.assertIn("KP_Plusss", no.stdout + no.stderr)
+            self.assertIn("Tabbb", no.stdout + no.stderr)
 
 
 class TestPerformance(unittest.TestCase):

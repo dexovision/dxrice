@@ -1,97 +1,94 @@
-# Desktop overview (zoom out)
+# Desktop overview (SUPER+Tab)
 
 Zoom the current workspace out until every window on it fits on screen,
 including the whole Galaxy Spiral and the parts of it past the screen edges.
 Zoom back in to exactly the desktop you left.
 
-## Keybinds
+## Using it
 
-| Keybind | Action |
+| Do | Result |
 |---|---|
-| `SUPER + Tab` | Toggle: zoom out, or back in |
-| `SUPER + -` (the minus key), or `SUPER + keypad -` | Zoom out only |
-| `SUPER + +` (that is, `SUPER + Shift + =`), `SUPER + =`, or `SUPER + keypad +` | Zoom back in only |
-| `Esc`, or a click on empty space | Zoom back in, focus unchanged |
-| Click a window | Focus that window and zoom back in |
+| `SUPER + Tab` | Zoom out; press it again to zoom back in |
+| Click a window | Focus that window and zoom back in, in one click |
+| `Esc`, or a click on empty space | Zoom back in without changing anything |
 
-**Key names.** These are for a US layout. In `hypr/hyprland.lua` they are
-`Tab`, `minus`, `KP_Subtract`, `SHIFT + equal`, `equal` and `KP_Add`.
-- On a US keyboard, `+` is Shift and `=`. Hyprland matches
-  `SUPER + SHIFT + equal` when you hold Shift, the same way the
-  SUPER+SHIFT+1 workspace keys work.
-- `equal` alone is bound too, so it zooms in with or without Shift.
-- All were unbound before.
+SUPER+Tab is the overview's only key. It's the one
+`hl.bind(mainMod .. " + Tab", overview("toggle"))` line in
+`hypr/hyprland.lua`; change the key there to move it. From a terminal,
+`dx overview` or `qs -p <repo>/quickshell/shell.qml ipc call overview
+toggle` does the same.
 
-`scripts/dxrice_test_overview.py` runs Hyprland's own config parser
-(`Hyprland --verify-config`, which starts nothing) over the template. That
-proves every key name is accepted, and the drift checker reports any of them
-missing from your live file.
+## What happens
 
-To move the keys, change them on these lines next to SUPER+G.
-From a terminal, `dx overview` toggles it; so does
-`qs -p <repo>/quickshell/shell.qml ipc call overview toggle|zoomOut|zoomIn`.
+### Opening
 
-## What it does
+| time after the keypress | what you see |
+|---|---|
+| about 30 ms | The keypress reaches the shell. On the next frame the screen starts to dim. The real desktop still shows through, so nothing stale is ever drawn. |
+| about 6 ms later | Fresh window positions arrive (two parallel `hyprctl -j` reads). Each window's live picture is placed exactly over the real window. |
+| over the next 300 ms | One ease-in-out zoom (cubic-bezier 0.4, 0, 0.2, 1). The wallpaper fades in over the first sixth, covering the real windows while their pictures have barely left them. |
 
-- **Opening.**
-  1. The keypress dims the screen on the next frame, with the real desktop
-     showing through. This happens before any window data is read, so
-     nothing stale is ever drawn.
-  2. About 5 ms later, fresh window data from two parallel `hyprctl -j`
-     reads puts each window's picture exactly over the real window.
-  3. The whole composition zooms out over about 420 ms (the theme's
-     animation speed). The wallpaper fades in under it over the first
-     third, covering the real windows. All windows scale and move by one
-     transform, so their relative positions, sizes, spacing and the spiral's
-     shape are kept.
-  4. The result is centred in the usable area (the screen minus the bar and
-     dock) with a 48 px margin.
-- **No unnecessary zoom.** If every window is already fully on screen,
-  nothing moves at all.
-- **Minimum scale.** The zoom stops at 8%. A composition bigger than that
-  (more than about 12 screens across) is centred, and its outermost windows
-  stay partly off screen.
-- **Closing** plays the same motion back. The last frames before the overlay
-  disappears are the real desktop, so there is no jump. Toggling while it is
-  still moving reverses from wherever it is.
-- **Clicking a window.**
-  - It focuses that exact window by its Hyprland address, then closes.
-  - Focus is sent in Lua syntax, because DXrice runs hyprland.lua.
-  - It is sent only after the overview releases the keyboard, and again
-    after the overlay is gone. Otherwise Hyprland would refocus whatever
-    real window happens to be under the pointer.
-- **A window entirely off screen** can't be shown without moving windows, so
-  it is never focused silently: typing would go to a window you can't see.
-  - The first click says so.
-  - A second click on the same window pans the desktop there, moving every
-    window together the same way SUPER+arrow keys do
-    (`dxrice_navigate_windows.py --to`). The overview then closes onto the
-    windows in their new places, and the window is focused.
-  - A window that is partly on screen is focused straight away.
-- **Nothing is changed.** No window is moved, resized, refocused, retiled or
-  sent to another workspace when the overview opens or closes. The workspace
-  doesn't change. Coming back is exact because nothing was touched.
-- **Which windows:** every mapped window of the focused monitor's active
-  workspace:
-  - tiled, floating and maximized windows;
-  - fullscreen windows;
-  - windows pinned to that monitor;
-  - a special workspace if one is showing.
-- **Stacking order.** Windows keep Hyprland's order:
-  - tiled at the bottom;
-  - floating and pinned above them;
-  - fullscreen on top;
-  - within each group, the most recently focused window is higher.
-- **Fullscreen windows** (a game, say) stay at their real size and place.
-  As the view zooms out they turn half transparent, so the windows behind
-  them on that workspace can be seen too. The game itself is untouched and
-  keeps running.
+At the end, every window is in the usable area (the screen minus the bar and
+dock) with a 48 px margin, centred. They all scale and move by one
+transform, so positions, sizes, spacing and the spiral's shape are kept.
+
+If everything already fits, nothing zooms. The zoom stops at 8%; a
+composition bigger than that is centred, and its outermost windows stay
+partly off screen.
+
+### Closing
+
+The same 300 ms curve played back, with the dim fading out alongside it. The
+last frames are the real desktop, so there is no jump, and no window has
+moved.
+
+Toggling while it's still moving eases out of wherever it is, never
+snapping.
+
+### Clicking a window
+
+One click focuses exactly that window, by its Hyprland address, and the
+overview closes.
+- **Already in view:** if the window is entirely inside the usable area,
+  nothing moves.
+- **Partly or entirely off screen:** the whole desktop pans first, the way
+  the SUPER+arrow keys move the infinite desktop.
+  - Every floating window moves by the same, smallest shift that brings the
+    clicked one fully into view, 24 px inside the edge.
+  - A window bigger than the screen is centred instead.
+  - The spiral keeps its shape. The overview then closes onto the windows in
+    their new places.
+- **Pinned and fullscreen windows** belong to the screen, not the desktop.
+  They never pan, and clicking them just focuses them.
+- **Tiled windows** are always in view.
+- **How focus is sent:**
+  - In Lua syntax, because DXrice runs hyprland.lua.
+  - Only after the overview has released the keyboard.
+  - Once more after the overlay is gone. When an overlay unmaps, Hyprland
+    refocuses whatever window is under the pointer, which was over the
+    picture, not over the real window.
+- **A window that closed since the overview opened** can't be focused, so
+  the overview says so and stays open.
+
+### Other cases
+
+- **A fullscreen window** (a game, say) covers its workspace. The windows
+  behind it can't be seen at first, exactly as on screen, and they fade in
+  over it as the view zooms out. Its picture lies at the bottom of the
+  overview's stack. What can be seen is what can be clicked: a window
+  showing over the game's picture is that window, not the game.
 - **Windows opening or closing while it's open.** The overview re-reads
-  Hyprland on each window event, not on a timer, and re-fits. Switching
-  workspace while it's open shows the new workspace.
-- **Monitors.** It opens on the focused monitor and shows that monitor's
-  workspace, fitted to that monitor's logical size (scale and rotation
-  applied).
+  Hyprland on each window event, not on a timer. Only the affected window's
+  tile is added or dropped; every other tile, and its live picture, carries
+  on. While zoomed out, the tiles glide to their new places.
+- **Which windows:** every mapped window of the focused monitor's active
+  workspace (tiled, floating, maximized, fullscreen), windows pinned to that
+  monitor, and a special workspace if one is showing.
+- **Stacking order:** Hyprland's order (tiled below, floating above, the
+  most recently focused highest), except that fullscreen goes to the bottom
+  as above.
+- **Monitors:** it opens on the focused monitor, fitted to that monitor's
+  logical size (scale and rotation applied).
 
 ## How it works, and why not a "real" zoom
 
@@ -107,153 +104,120 @@ Hyprland has no way to zoom the desktop out:
 
 So the overview is a **view**: an overlay drawn by Quickshell
 (`quickshell/Overview.qml`) on top of everything.
-- **Geometry.** The shell computes it itself, in `quickshell/OverviewGeometry.js`.
-  That file mirrors `scripts/dxrice_overview.py` line for line. The Python
-  module is the reference and CLI, and a test keeps the two identical on
-  300 random workspaces.
 - **Window pictures.** It shows a live picture of each window, captured
   through Hyprland's toplevel-export protocol (Quickshell's
   `ScreencopyView`).
 - **Backdrop.** Your wallpaper, drawn the way hyprpaper draws it.
-- **Data.** Opening reads `hyprctl -j clients` and `monitors`, and nothing
-  else.
-- **What it ever sends Hyprland.** The only thing the overview ever tells
-  Hyprland is to focus the window you click, plus the pan you confirm for
-  an off-screen one.
+- **Geometry.** `quickshell/OverviewGeometry.js` computes it, a line-for-line
+  mirror of `scripts/dxrice_overview.py`, which is the reference and CLI.
+  A test keeps the two identical on 300 random workspaces.
+- **What it sends Hyprland.** Opening and closing never move, resize or
+  refocus anything. The only things the overview ever sends are the focus
+  for the window you click, and the pan when that window wasn't in view.
 
-No background service, timer or new dependency is involved. A closed
-overview holds no surface, no window pictures and no capture sessions.
+No background service, timer or dependency is involved. A closed overview
+holds no surface, no window pictures, no capture sessions and no decoded
+wallpaper.
+
+## Measured latency
+
+Measured on this machine; the window data is read live, read-only.
+
+| stage | before | now |
+|---|---|---|
+| keypress → the shell (`qs ipc call`, every DXrice panel key uses it) | 26–32 ms | 26–32 ms |
+| first visible feedback after that | the next frame | the next frame |
+| window data | 1st version: `python3 dxrice_overview.py`, 50–52 ms; then 2 × `hyprctl -j`, 5–7 ms | 2 × `hyprctl -j` in parallel, 5–7 ms |
+| geometry | 0.07 ms (16 windows), 1.1 ms (200) | the same |
+| zoom | 420 ms decelerating | 300 ms ease-in-out |
+| close | 360 ms, then a separate 120 ms fade | 300 ms, the fade alongside |
+
+`overview_timing.png` plots both. The remaining 30 ms before the shell even
+hears the key is the `qs ipc call` client process. Hyprland's
+global-shortcut dispatcher (`hl.dsp.global(...)`) would remove it, but
+whether Quickshell receives it can only be checked live. If it didn't, the
+key would silently do nothing, so the proven path is kept.
 
 ## Limitations
 
-- **Not yet seen on your real desktop.** Everything was validated offscreen,
-  in the QML harness, with stand-in window pictures; see Testing. Two things
-  only a live session shows:
-  - whether Hyprland exports windows that are off screen as readily as
-    visible ones;
-  - how the live captures look.
-
-  A window that can't be captured shows a card with its title instead of a
-  hole.
+- **The look of the live captures** can only be judged on the real desktop.
+  - The tests use stand-in pictures.
+  - It's unconfirmed whether Hyprland exports windows that are off screen.
+    A window that can't be captured shows a card with its title, once the
+    zoom is a sixth under way. Before that the real window shows through.
 - **Window decorations.** The pictures are the windows' own contents.
-  Hyprland's borders, rounded corners and shadows aren't part of them, so a
-  thin edge changes as the zoom starts.
-- **Bar and dock.** They stay visible, dimmed, until the wallpaper fades in
-  during the first third of the zoom, and come back in the last third of the
-  way out. While zoomed out the overlay must cover them: the bar is separate
-  islands, and windows reaching under them would otherwise show through
-  around the overview.
+  Hyprland's borders, rounded corners and shadows aren't part of them.
+- **Bar and dock.** They are dimmed at first, then covered once the
+  wallpaper is in, and come back as the overview closes. While zoomed out
+  the overlay must cover them: the bar is separate islands, and windows
+  reaching under them would otherwise show through.
 - **Infinite-desktop panning.** SUPER-drag panning reads input devices
   directly, so it still moves your real windows while the overview is open.
-  The overview follows as it re-reads, but it's best not to pan while zoomed
-  out.
-- **The key's own delay.** Most of what's left comes from the keybind
-  itself: about 30 ms, the `qs ipc call` client process every DXrice panel
-  key uses. Quickshell's Hyprland global-shortcut binding
-  (`hl.dsp.global(...)`) would remove it. Hyprland's parser accepts it, but
-  whether Quickshell receives the shortcut can only be confirmed live. If it
-  didn't, the keys would silently do nothing, so the proven path is kept.
-- **Off-screen windows** need the confirmed pan described above. That pan
-  is the one action in the overview that moves windows, and only when you
-  click twice.
+  The overview follows as it re-reads.
 - **One monitor at a time.** Only the focused monitor zooms out.
 
 ## Testing
 
-- `scripts/dxrice_test_overview.py` (22 tests, no compositor). It covers:
+- `scripts/dxrice_test_overview.py` (26 tests, no compositor). It covers:
   - which windows count, and their stacking order;
   - no zoom when everything fits;
   - centring and the margin;
   - one transform for every window, so the shape is kept;
-  - spirals of 2 to 32 windows, mixed sizes, and very wide and very tall
-    windows;
-  - windows far off screen, and the minimum scale;
+  - spirals of 2 to 32 windows, mixed sizes, very wide and very tall
+    windows, windows far off screen, and the minimum scale;
   - fullscreen and pinned windows;
   - three monitors, including a scaled 1440p one and a rotated one;
   - windows opening and closing while open;
-  - that the entry point never dispatches anything;
+  - that the geometry never dispatches anything;
   - speed;
-  - the keybinds: present, unique, accepted by Hyprland's own parser (with
-    a bogus key name rejected as a control), and seen by the drift checker;
-  - the pan for an off-screen window: every floating window moves by one
-    delta, and the target ends up centred.
-- `tests/qml/test_overview.py` (16 tests, offscreen harness, the real
+  - **keys:**
+    - SUPER+Tab is the only overview bind, and the old zoom keys are
+      absent from the template and from your live `hyprland.lua`;
+    - Hyprland's own parser (`--verify-config`, which starts nothing)
+      accepts the template, with a bogus key name as a control;
+    - the drift checker sees the bind;
+    - no IpcHandler function is named after a `qs ipc` subcommand
+      (`qs ipc call overview show` used to run `qs ipc show` instead);
+    - the bind calls a function that exists.
+- `tests/qml/test_overview.py` (18 tests, offscreen harness, the real
   shell). It covers:
-  - opening to the fitted view and closing back;
-  - the first and last frames lying exactly on the real windows;
-  - repeated toggles, fast and slow;
-  - reversing mid-zoom without a jump;
-  - Esc and clicks on empty space;
-  - clicking every thumbnail: each focuses its own window's address and
-    closes. Off-screen windows ask first, then pan to that address on the
-    second click;
-  - focus always sent in Lua syntax;
-  - a single click on an off-screen window never focusing or panning;
-  - feedback on the first frame even when the window data never arrives;
-  - JS geometry identical to the Python reference on 300 random workspaces;
-  - windows opening and closing while open;
-  - an open panel closing when the overview opens;
-  - the placeholder for an uncapturable window;
-  - no compositor answer;
-  - a 2560×1440 monitor;
-  - that a closed overview holds no tiles.
-- **Renders:** `python3 tests/qml/render_overview.py OUT_DIR` writes the
-  before/after sheets in `docs/overview/`:
-  - one window;
-  - 6 windows;
-  - 16 windows (reference proportions);
-  - 16 mixed windows;
-  - 32 windows;
-  - very wide windows;
-  - very tall windows;
-  - fullscreen and pinned windows;
-  - a 1440p monitor;
-  - and `overview_opening_sequence.png`: the frame after the keypress, the
-    data arriving, the crossfade, zoomed out, and the off-screen notice.
-  - the zoom at 0, 25, 50, 75 and 100%.
-
-**Latency**, measured stage by stage, sandboxed:
-
-| stage | before | now |
-|---|---|---|
-| keypress → `qs ipc call` delivered | about 30 ms | about 30 ms |
-| first visible feedback after that | waited for data, then a 150 ms fade | the next frame (the dim) |
-| window data | `python3 dxrice_overview.py`, about 60 ms | 2 × `hyprctl -j` in parallel, about 5 ms |
-| geometry | inside the Python run | `OverviewGeometry.js`, under 1 ms for 16 windows |
-| zoom starts | about 90 ms, then after the 150 ms fade | about 35 ms (the fade runs alongside) |
-
-Window pictures start capturing as soon as the data is in. A picture that
-isn't ready yet is simply not drawn, and the real window shows through until
-the wallpaper covers it.
+  - opening and closing back exactly;
+  - the first and last frames on the real windows;
+  - repeated and reversed toggles that never jump, judged against the
+    zoom's own curve and the time actually elapsed;
+  - Esc and empty-space clicks change nothing;
+  - **one click on every thumbnail** focuses that exact window. Windows not
+    in view pan the desktop by one shared delta, sent before the focus;
+    windows in view move nothing;
+  - focus always in Lua syntax;
+  - fullscreen, pinned and tiled windows focus without a pan;
+  - a window that just closed says so;
+  - windows opening or closing mid-animation, with existing tiles updated
+    rather than rebuilt;
+  - the first frame's feedback before any data;
+  - JS geometry identical to the Python reference;
+  - the placeholder card;
+  - a 1440p monitor.
+- **Renders:** `python3 tests/qml/render_overview.py OUT_DIR` writes
+  `docs/overview/`:
+  - `overview_timeline.png`: opening and closing at 0 to 300 ms;
+  - `overview_one_click.png`: one click on an off-screen window;
+  - `overview_timing.png`: before and after, plotted;
+  - before/after sheets for one window up to 32, very wide, very tall,
+    fullscreen and pinned windows, and a 1440p monitor;
+  - the zoom frames.
 
 ## Activation
 
-The first version went live on 2026-10-15. These fixes are not activated
-yet. When you're ready:
-
 1. `git -C ~/dxrice merge --ff-only origin/claude/task-kcttpa`, then
-   `systemctl --user restart dxrice-quickshell.service`. On the first
-   activation, the fast-forward alone did not reload the shell. The restart
-   makes the bar and dock blink once, so do it when you're not mid-game.
-2. In `~/.config/hypr/hyprland.lua` (DXrice never overwrites your copy),
-   replace the overview's three `hl.bind` lines after SUPER+G with these
-   six:
+   `systemctl --user restart dxrice-quickshell.service`. The restart makes
+   the bar and dock blink once.
+2. In `~/.config/hypr/hyprland.lua`, the overview block after SUPER+G keeps
+   only:
 
    ```lua
-   local function overview(action)
-       return hl.dsp.exec_cmd("sh -c 'qs -p " .. repo .. "/quickshell/shell.qml ipc call overview "
-           .. action .. " 2>/dev/null'")
-   end
-   hl.bind(mainMod .. " + Tab", overview("toggle"))             -- zoom out / back in
-   hl.bind(mainMod .. " + minus", overview("zoomOut"))             -- zoom out: SUPER and -
-   hl.bind(mainMod .. " + KP_Subtract", overview("zoomOut"))       --   ... or the keypad's -
-   hl.bind(mainMod .. " + SHIFT + equal", overview("zoomIn"))     -- zoom in: SUPER and + (Shift and =)
-   hl.bind(mainMod .. " + equal", overview("zoomIn"))             --   ... or = without Shift
-   hl.bind(mainMod .. " + KP_Add", overview("zoomIn"))            --   ... or the keypad's +
+   hl.bind(mainMod .. " + Tab", overview("toggle"))
    ```
 
-   Hyprland reloads its config on save. `install.sh update`'s drift check
-   lists these three binds as new if they're missing.
-
-Fresh installs get both: the keybinds in the template, and the overview in
-the shell.
+   Delete the five `overview("zoomOut")` / `overview("zoomIn")` lines.
+   Hyprland reloads the file when it's saved.

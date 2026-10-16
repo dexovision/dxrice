@@ -23,7 +23,6 @@ import Quickshell.Io
 //   qs -p <repo>/quickshell/shell.qml ipc call taskbar toggle
 //   qs -p <repo>/quickshell/shell.qml ipc call calendar toggle
 //   qs -p <repo>/quickshell/shell.qml ipc call overview toggle   (SUPER+Tab)
-//   ... ipc call overview zoomOut / zoomIn                        (SUPER+- / SUPER++)
 //
 // No IpcHandler function may be named show, call, wait, listen or prop:
 // those are `qs ipc` subcommands, and `qs ipc call <target> show` lists the
@@ -149,7 +148,7 @@ ShellRoot {
         onTaskbarRequested: PanelManager.toggle("taskbar")
     }
 
-    // Desktop overview (SUPER+Tab / SUPER+minus / SUPER+equal): the current
+    // Desktop overview (SUPER+Tab, which also closes it): the current
     // workspace zoomed out to fit the screen -- a view drawn from live window
     // pictures, never a re-layout (see Overview.qml). Always constructed so
     // the first keypress only waits for the window list, but it holds no
@@ -161,7 +160,5 @@ ShellRoot {
     IpcHandler {
         target: "overview"
         function toggle(): void { overview.toggle(); }
-        function zoomOut(): void { overview.show(); }
-        function zoomIn(): void { overview.hide(); }
     }
 }

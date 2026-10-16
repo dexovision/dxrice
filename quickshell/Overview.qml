@@ -26,13 +26,13 @@ import "OverviewGeometry.js" as Geo
 //                wallpaper fades in under it over the first third
 // Closing plays it back: the last frames are the real desktop again.
 //
-// Clicking a window focuses it (by its Hyprland address) and closes. A window
-// entirely off screen can't be shown without moving windows, so it is never
-// focused silently (keystrokes would go to a window nobody can see): the
-// first click says so, a second click on the same window pans the desktop
-// there -- every window moved together, the arrow keys' camera pan
-// (dxrice_navigate_windows.py --to) -- and then focuses it. Esc, a click on
-// empty space or the keybind again closes without changing focus.
+// One click on any window focuses exactly that window (by its Hyprland
+// address) and closes. A window not entirely inside the visible area is
+// first brought into view by panning the whole desktop -- every floating
+// window of the workspace moved by the same, smallest delta, so the Galaxy
+// Spiral keeps its shape -- and the overview closes onto the windows in
+// their new places. Esc, a click on empty space or SUPER+Tab again closes
+// without changing anything.
 //
 // Hyprland itself cannot zoom the desktop out (see dxrice_overview.py's
 // docstring for why its magnifier, a monitor-scale change and the overview
@@ -54,12 +54,20 @@ PanelWindow {
     property bool _pendingEnter: false
     // a clicked window to focus once the overview has let go of the keyboard
     property string _focusAfterClose: ""
+    // one quick, readable ease-in-out zoom each way (instant under
+    // reduce_motion); the dim runs alongside it, never as a stage of its own
+    readonly property int zoomMs: Theme.reduceMotion ? 1 : Math.round(Theme.animMs * 2)
+    readonly property var zoomCurve: [0.4, 0.0, 0.2, 1.0, 1, 1]
+    // settled: zoomed out and not animating -- window changes then glide
+    readonly property bool _settled: root.open && root.progress === 1 && !enterAnim.running
     // when the last open began (ms since epoch), for the latency test
     property real openedAt: 0
     property real dataAt: 0
+    property int tilesBuilt: 0   // tile delegates ever created (tests: in-place updates)
 
     readonly property bool showing: root.open || root.fade > 0
     readonly property var windows: root.layout && root.layout.windows ? root.layout.windows : []
+    readonly property bool hasFullscreen: root.windows.some(w => w.fullscreen)
     // the usable area (the monitor minus the bar's and dock's strips) the
     // windows are fitted into, and the strips around it
     readonly property real usableWidth: root.layout && root.layout.monitor ? root.layout.monitor.width : 1920
@@ -73,8 +81,6 @@ PanelWindow {
         root.open = true;
         root.openedAt = Date.now();
         root._focusAfterClose = "";
-        root._confirmPan = "";
-        root._hideAfterRefresh = false;
         offScreenNote.shown = false;
         PanelManager.closeCurrent();
         // Immediate feedback: the surface comes up now, dimming the real
@@ -125,14 +131,8 @@ PanelWindow {
             return;
         }
         root.layout = parsed;
+        root._syncTiles(parsed.windows);
         root.dataAt = Date.now();
-        if (root._hideAfterRefresh) {
-            // after a pan: close onto the windows where they now are
-            root._hideAfterRefresh = false;
-            root.hide();
-            focusSoon.restart();
-            return;
-        }
         if (root._pendingEnter) {
             root._pendingEnter = false;
             enterAnim.restart();
@@ -140,6 +140,28 @@ PanelWindow {
     }
     function _parse(text) {
         try { return JSON.parse(text); } catch (e) { return null; }
+    }
+    // The tiles, keyed by window address and updated in place: a window
+    // opening or closing while the overview is up adds or drops its own tile
+    // and leaves every other tile -- and its live capture -- untouched.
+    ListModel { id: tileModel }
+    function _roles(w) {
+        return { address: String(w.address), rx: w.x, ry: w.y, rw: w.w, rh: w.h, tx: w.tx, ty: w.ty,
+                 tw: w.tw, th: w.th, stack: w.z, title: w.title || "", cls: w["class"] || "",
+                 floating: !!w.floating, fullscreen: !!w.fullscreen, pinned: !!w.pinned };
+    }
+    function _syncTiles(list) {
+        const want = {};
+        for (let i = 0; i < list.length; i++) want[String(list[i].address)] = list[i];
+        for (let i = tileModel.count - 1; i >= 0; i--)
+            if (!(tileModel.get(i).address in want)) tileModel.remove(i);
+        const have = {};
+        for (let i = 0; i < tileModel.count; i++) have[tileModel.get(i).address] = i;
+        for (let i = 0; i < list.length; i++) {
+            const r = root._roles(list[i]);
+            if (r.address in have) tileModel.set(have[r.address], r);
+            else tileModel.append(r);
+        }
     }
     Process {
         id: clientsProc
@@ -180,38 +202,52 @@ PanelWindow {
         const a = String(address).startsWith("0x") ? String(address) : "0x" + address;
         return 'hl.dsp.focus({ window = "address:' + a + '" })';
     }
-    property string _confirmPan: ""   // an off-screen window clicked once
-    property bool _hideAfterRefresh: false
-    function activate(w) {
-        if (!root.open || !w || panProc.running) return;
-        if (!Geo.onScreen(w, root.layout)) {
-            if (root._confirmPan !== w.address) {
-                root._confirmPan = w.address;
-                offScreenNote.text = (w.title || w["class"] || "This window") + " is off screen. "
-                    + "Click it again to pan the desktop there (every window moves together, "
-                    + "as with SUPER+arrow keys) and focus it.";
-                offScreenNote.shown = true;
-                noteTimer.restart();
-                return;
-            }
-            // confirmed: pan, re-read the (moved) windows, close onto them
-            root._confirmPan = "";
-            offScreenNote.shown = false;
-            root._focusAfterClose = w.address;
-            panProc.command = ["python3", Quickshell.shellDir + "/../scripts/dxrice_navigate_windows.py", "--to", w.address];
-            panProc.running = true;
+    // How far the whole desktop must pan for window w (usable-area rect) to
+    // be entirely in view: on each axis zero if it already is, else the
+    // smallest shift that brings it PAN_MARGIN inside the edge (centred if
+    // it is bigger than the area).
+    readonly property int panMargin: 24
+    function panDelta(w) {
+        function axis(p, size, span) {
+            if (p >= 0 && p + size <= span) return 0;
+            if (size + 2 * root.panMargin > span) return Math.round((span - size) / 2 - p);
+            if (p < root.panMargin) return Math.round(root.panMargin - p);
+            return Math.round((span - root.panMargin) - (p + size));
+        }
+        return [axis(w.rx, w.rw, root.usableWidth), axis(w.ry, w.rh, root.usableHeight)];
+    }
+    // The desktop's camera, as SUPER+arrow navigation moves it: every
+    // floating window of the workspace by the same delta, so the spiral keeps
+    // its shape. Pinned and fullscreen windows belong to the screen, not the
+    // desktop, and stay put; tiled windows are always in view.
+    function _pan(d) {
+        const mx = root.layout.monitor.x, my = root.layout.monitor.y;
+        for (let i = 0; i < tileModel.count; i++) {
+            const t = tileModel.get(i);
+            if (!t.floating || t.pinned || t.fullscreen) continue;
+            Hyprland.dispatch('hl.dsp.window.move({ window = "address:' + t.address + '", x = '
+                + Math.round(t.rx + mx + d[0]) + ', y = ' + Math.round(t.ry + my + d[1]) + ', relative = false })');
+            tileModel.setProperty(i, "rx", t.rx + d[0]);
+            tileModel.setProperty(i, "ry", t.ry + d[1]);
+        }
+    }
+    function activate(t) {
+        if (!root.open || !t) return;
+        if (!root.toplevelFor(t.address) && Hyprland.toplevels && Hyprland.toplevels.values.length) {
+            // it closed between the last refresh and this click
+            offScreenNote.text = (t.title || t.cls || "That window") + " has just closed.";
+            offScreenNote.shown = true;
+            noteTimer.restart();
+            root.refresh();
             return;
         }
-        root._focusAfterClose = w.address;
+        if (t.floating && !t.pinned && !t.fullscreen) {
+            const d = root.panDelta(t);
+            if (d[0] || d[1]) root._pan(d);
+        }
+        root._focusAfterClose = t.address;
         root.hide();
         focusSoon.restart();
-    }
-    Process {
-        id: panProc
-        onExited: {
-            root._hideAfterRefresh = true;
-            root.refresh();
-        }
     }
     Timer { id: focusSoon; interval: 30; onTriggered: if (root._focusAfterClose) Hyprland.dispatch(root.focusLua(root._focusAfterClose)) }
     Timer {
@@ -221,7 +257,7 @@ PanelWindow {
             root._focusAfterClose = "";
         }
     }
-    Timer { id: noteTimer; interval: 4000; onTriggered: { offScreenNote.shown = false; root._confirmPan = ""; } }
+    Timer { id: noteTimer; interval: 2500; onTriggered: offScreenNote.shown = false }
     // The live Wayland toplevel for a window, matched by address (Hyprland's
     // JSON writes "0x..." where its event-fed model may not).
     function toplevelFor(address) {
@@ -234,33 +270,32 @@ PanelWindow {
     }
 
     // ---- motion ----
-    // Each step animates from wherever it is, so toggling mid-way reverses
-    // without a jump.
+    // One ease-in-out zoom each way, the dim alongside it. Every animation
+    // runs from wherever the value is, so toggling mid-way reverses with no
+    // jump: the curve eases back out of the current position.
     NumberAnimation {
         id: scrimIn
         target: root; property: "fade"; to: 1; duration: Theme.durationFast; easing.type: Easing.OutCubic
     }
-    // the zoom runs alongside the keypress's dim (scrimIn), which is
-    // already under way by the time the window data is in
     NumberAnimation {
         id: enterAnim
-        target: root; property: "progress"; to: 1; duration: Theme.durationEnter
-        easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter
+        target: root; property: "progress"; to: 1; duration: root.zoomMs
+        easing.type: Easing.BezierSpline; easing.bezierCurve: root.zoomCurve
     }
     SequentialAnimation {
         id: exitAnim
-        // ease in AND out: the way back starts gently even when it reverses
-        // a zoom still in flight, and settles onto the real windows
-        NumberAnimation {
-            target: root; property: "progress"; to: 0; duration: Theme.durationExit + 60
-            easing.type: Easing.InOutCubic
+        ParallelAnimation {
+            NumberAnimation {
+                target: root; property: "progress"; to: 0; duration: root.zoomMs
+                easing.type: Easing.BezierSpline; easing.bezierCurve: root.zoomCurve
+            }
+            NumberAnimation { target: root; property: "fade"; to: 0; duration: root.zoomMs; easing.type: Easing.InQuad }
         }
-        NumberAnimation { target: root; property: "fade"; to: 0; duration: Theme.durationFadeOut; easing.type: Easing.InCubic }
         // closed: let the tiles (and their capture sessions) go entirely,
         // then give a clicked window its focus once more (see focusLua)
         ScriptAction {
             script: {
-                if (!root.open) root.layout = null;
+                if (!root.open) { root.layout = null; tileModel.clear(); }
                 if (root._focusAfterClose) focusAgain.restart();
             }
         }
@@ -300,13 +335,14 @@ PanelWindow {
         Keys.onEscapePressed: root.hide()
 
         // The real wallpaper, drawn as hyprpaper draws it (cover). It fades
-        // in over the first third of the zoom, covering the real windows as
-        // their pictures move away from them -- and out over the last third
-        // of the way back, so the final frames are the real desktop.
+        // in over the first sixth of the zoom -- covering the real windows
+        // while their pictures have barely left them, so there is no double
+        // image -- and out over the last sixth of the way back, so the final
+        // frames are the real desktop.
         Item {
             id: backdrop
             anchors.fill: parent
-            opacity: Math.min(1, root.progress * 3)
+            opacity: Math.min(1, root.progress * 6)
             visible: opacity > 0
         Rectangle { anchors.fill: parent; color: "#0d0f13" }
         Image {
@@ -333,23 +369,45 @@ PanelWindow {
             x: root.reserved[0]; y: root.reserved[1]
             width: root.usableWidth; height: root.usableHeight
         Repeater {
-            model: root.windows
+            model: tileModel
             delegate: Item {
                 id: tile
-                required property var modelData
-                objectName: "overviewTile:" + tile.modelData.address
+                required property string address
+                required property real rx
+                required property real ry
+                required property real rw
+                required property real rh
+                required property real tx
+                required property real ty
+                required property real tw
+                required property real th
+                required property int stack
+                required property string title
+                required property string cls
+                required property bool floating
+                required property bool fullscreen
+                required property bool pinned
+                objectName: "overviewTile:" + tile.address
                 readonly property real p: root.progress
-                readonly property var toplevel: root.toplevelFor(tile.modelData.address)
-                x: tile.modelData.x + (tile.modelData.tx - tile.modelData.x) * tile.p
-                y: tile.modelData.y + (tile.modelData.ty - tile.modelData.y) * tile.p
-                width: Math.max(1, tile.modelData.w + (tile.modelData.tw - tile.modelData.w) * tile.p)
-                height: Math.max(1, tile.modelData.h + (tile.modelData.th - tile.modelData.h) * tile.p)
-                z: tile.modelData.z
-                // A fullscreen window keeps its real place at the top of the
-                // stack -- the first frame is the real desktop -- but turns
-                // half see-through as the view zooms out, so the windows it
-                // covers on this workspace can be seen too.
-                opacity: tile.modelData.fullscreen ? 1 - 0.5 * tile.p : 1
+                readonly property var toplevel: root.toplevelFor(tile.address)
+                x: tile.rx + (tile.tx - tile.rx) * tile.p
+                y: tile.ry + (tile.ty - tile.ry) * tile.p
+                width: Math.max(1, tile.rw + (tile.tw - tile.rw) * tile.p)
+                height: Math.max(1, tile.rh + (tile.th - tile.rh) * tile.p)
+                // A fullscreen window covers its workspace: in the real view
+                // the windows behind it can't be seen. So its picture lies at
+                // the bottom of the overview's stack, and the others -- not
+                // shown at first, exactly as on screen -- fade in over it as
+                // the view zooms out. What can be seen is what can be clicked.
+                z: tile.fullscreen ? -1 : tile.stack
+                opacity: (root.hasFullscreen && !tile.fullscreen) ? Math.min(1, 2 * tile.p) : 1
+                // a window opening or closing while zoomed out re-fits the
+                // view: the tiles glide to their new places
+                Behavior on x { enabled: root._settled; NumberAnimation { duration: Theme.durationDefault; easing.type: Easing.InOutQuad } }
+                Behavior on y { enabled: root._settled; NumberAnimation { duration: Theme.durationDefault; easing.type: Easing.InOutQuad } }
+                Behavior on width { enabled: root._settled; NumberAnimation { duration: Theme.durationDefault; easing.type: Easing.InOutQuad } }
+                Behavior on height { enabled: root._settled; NumberAnimation { duration: Theme.durationDefault; easing.type: Easing.InOutQuad } }
+                Component.onCompleted: root.tilesBuilt += 1
 
                 // Placeholder when a window can't be captured (no live
                 // picture yet, or the compositor declines): its card, title
@@ -358,7 +416,7 @@ PanelWindow {
                 Rectangle {
                     objectName: "overviewPlaceholder"
                     anchors.fill: parent
-                    visible: !capture.hasContent && tile.p > 0.3
+                    visible: !capture.hasContent && tile.p > 0.15
                     color: Theme.panel
                     radius: 6 * tile.p
                     border.color: Theme.border
@@ -370,7 +428,7 @@ PanelWindow {
                         elide: Text.ElideRight
                         color: Theme.text
                         font.pixelSize: Math.max(9, Math.min(16, parent.height * 0.12))
-                        text: tile.modelData.title || tile.modelData["class"] || ""
+                        text: tile.title || tile.cls
                     }
                 }
                 ScreencopyView {
@@ -395,7 +453,7 @@ PanelWindow {
                     anchors.fill: parent
                     hoverEnabled: true
                     enabled: root.open
-                    onClicked: root.activate(tile.modelData)
+                    onClicked: root.activate(tile)
                 }
             }
         }
