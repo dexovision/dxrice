@@ -135,9 +135,8 @@ class TestOverview(unittest.TestCase):
         """With the picture fully faded in but not yet zoomed (and likewise
         on the way out), every tile lies exactly over its real window."""
         self.o.call("show")
-        self.o.scene.wait(40)
-        self.o.scene.ev("findNamed('overview').fade = 1")  # the opening fade done, the zoom not begun
-        self.assertEqual(self.o.ov("progress"), 0)
+        self.o.scene.wait(SETTLE)  # the real animation done; then step it by hand
+        self.o.scene.ev("findNamed('overview').progress = 0")  # the zoom's first frame
         self.assert_tiles_at("real")
 
     def test_repeated_toggles_end_where_they_should(self):
@@ -158,7 +157,7 @@ class TestOverview(unittest.TestCase):
 
     def test_reversing_mid_zoom_never_jumps(self):
         self.o.call("show")
-        self.o.scene.wait(450)
+        self.o.scene.wait(200)
         p0 = self.o.ov("progress")
         self.assertTrue(0 < p0 < 1, p0)
         import time

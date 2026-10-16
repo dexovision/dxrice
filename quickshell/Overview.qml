@@ -240,13 +240,12 @@ PanelWindow {
         id: scrimIn
         target: root; property: "fade"; to: 1; duration: Theme.durationFast; easing.type: Easing.OutCubic
     }
-    SequentialAnimation {
+    // the zoom runs alongside the keypress's dim (scrimIn), which is
+    // already under way by the time the window data is in
+    NumberAnimation {
         id: enterAnim
-        NumberAnimation { target: root; property: "fade"; to: 1; duration: Theme.durationFast * (1 - root.fade); easing.type: Easing.OutCubic }
-        NumberAnimation {
-            target: root; property: "progress"; to: 1; duration: Theme.durationEnter
-            easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter
-        }
+        target: root; property: "progress"; to: 1; duration: Theme.durationEnter
+        easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter
     }
     SequentialAnimation {
         id: exitAnim
