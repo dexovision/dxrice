@@ -342,3 +342,63 @@ wasn't worth a change.
 Commit hashes above are those of `claude/dxrice-engineering-audit-uplvjy`
 after it was rebased onto the rewritten `main` (2026-10-16); commit messages
 written before the rebase still cite the earlier hashes.
+
+## Third pass (interaction lifecycle, input, motion, visuals), 2026-10-16
+
+Independent pass on `78c008a`, aimed at what happy-path tests miss:
+interrupted transitions, input that outlives what is drawn, overlapping
+refreshes, ugly data. Every fix below has a regression test that was also
+run against the code before the fix and failed there.
+
+### Fixed
+
+| Severity | Where | Finding and evidence | Commit |
+|---|---|---|---|
+| high (input) | `Overview.qml` | no input mask: the overlay stays mapped through its closing zoom (300 ms, or the compositor's window move -- 480 ms -- after a panning click) and the release frames, and took the pointer over the whole monitor all that time. A click on the app underneath right after Esc / a click on empty space / SUPER+Tab was swallowed. Harness: owner `overview` at 30/120/250 ms into a close. Now input only while `open`. Old code fails `test_input_regions` test_10 | 138504a |
+| medium (motion) | `AddShortcutBranch.qml` | closing the taskbar with Add Shortcut open: the branch kept re-placing itself against the collapsing panel; as the centred panel narrowed, right/left tied and it flipped sides mid-fold (rendered: left side at 110 ms, a detached pill at 180 ms). Its fold (420 ms) also outlived the parent (300 ms) and the TaskbarManager it reads. Now geometry freezes when a close starts, and when the parent is leaving the branch dissolves in place on the parent's own content-fade curve. Old code fails `test_closing_the_taskbar_dissolves_the_branch_in_place` | 929fab0 |
+| medium | `WifiBackend.qml`, `dxrice_quick_settings.py` | `nmcli -t` escapes `:` and `\` in values; every line was split on every `:`, so "Cafe: Free" became "Cafe\", its signal was misread, Connect asked for a network that doesn't exist, and saved-profile matching (also escaped) failed. Old code fails `WifiTerseParsing` | 3279327 |
+| medium | `BluetoothBackend.qml` | one chained process reads every device; a refresh mid-chain re-pointed it while a `bluetoothctl info` was running, so that reply was filed under the next device (reproduced: headset shown disconnected with another device's 10% battery). A bluetoothctl that can't start left the list on "Looking for devices..." forever. Refreshes are serialized; failed starts end the chain. Old code fails all 3 tests in `test_bluetooth.py` | 03fdc7f |
+| low (visual) | `ThemeEditor.qml` | previews inset 16 px, the settings cards beside them 24 px: labels in one column started 8 px apart | cd41483 |
+| test | `test_overview.py` | the pan-close ghosting test sampled ~350 ms of a 480 ms close: it failed every time it ran alone and passed in the full suite only because frame grabs were slower there | 7588ab7 |
+
+Harness fidelity, same commits: the Process stub now produces the output
+of the command as started (not as `command` reads at exit) and models a
+binary that cannot start (`__FAIL__`).
+
+### Investigated, left alone
+
+| Where | Finding | Why |
+|---|---|---|
+| `TopBar.qml` `refreshActiveIcon` | restarting a running lookup can briefly show a stale/empty glyph before the right one | transient, self-correcting; same class as the Overview note above |
+| `WifiBackend.savedCheckProc` | two Connect clicks within one `nmcli` call (~10 ms) drop the first | both runs read the same list; nothing misattributed |
+| Dashboard Audio card | on a machine without a backlight it stretches to match Networks and keeps ~40 px empty under two sliders | keeping both columns' bottom edges aligned was judged the better trade; brightness fills it on laptops |
+| Calendar -> Quick Settings switch at 1366 px | QS grows over the retracting calendar for ~2 frames | rendered frame by frame: the covered island fades on the panel's live edge as designed |
+| Lifecycle fuzz | 240 seeded random interleavings of open/close/toggle/tab switch/branch/overview/Escape at 0-400 ms intervals, each settled and checked (input mask back to idle, every island at rest, branch and overview released, Theme unloaded, no QML warnings) | 0 failures; a negative control (skipping the final close) is caught by every check |
+
+### Measurements (harness, software renderer, this container)
+
+| What | How | 78c008a | after |
+|---|---|---|---|
+| CPU per frame during open/close | process CPU / frames swapped, 4 cycles x 2 runs | QS 3.4 ms, taskbar 2.7-2.8, branch 1.4-1.5, tabs 2.9 | QS 3.5-3.7, taskbar 2.8-3.0, branch 1.7-1.8, tabs 2.5-2.6 |
+| idle frames, Dashboard open | frames swapped in 3.6 s | 0 | 0 |
+| object growth | items in every shell surface after 150 full cycles (all panels, tabs, branch, Theme, overview) | 168 -> 168 | 168 -> 168 |
+| RSS growth over the same 150 cycles | VmRSS of the harness process | 111 -> 123 MiB | 111 -> 123 MiB |
+
+The RSS creep is identical before and after and the item count is flat, so
+it is not something this pass introduced; it can't be attributed further
+without a live Quickshell (allocator, JS heap and image caches all live in
+the same harness process). Not measured: GPU frame pacing, real 144 Hz,
+compositor blur, live Quickshell memory.
+
+### Manual checks on the real desktop
+
+1. Overview: SUPER+Tab, then Esc, then click a window *immediately*; it
+   must take the click. Repeat with a click on a window off screen (the
+   desktop pans): click another app during the slide.
+2. `hyprctl layers` with nothing open: only `dxrice-bar-top`,
+   `dxrice-bar-dock` and the OSD; `pgrep -af "qs -p"`: one shell.
+3. Taskbar -> Add -> close the taskbar (click outside): the branch fades
+   with the panel's contents and never jumps sides.
+4. A network whose name contains `:` connects and shows Forget once saved.
+5. Bluetooth: toggle the radio off/on quickly with two devices paired;
+   each row keeps its own state and battery.
