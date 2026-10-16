@@ -373,6 +373,7 @@ binary that cannot start (`__FAIL__`).
 | `WifiBackend.savedCheckProc` | two Connect clicks within one `nmcli` call (~10 ms) drop the first | both runs read the same list; nothing misattributed |
 | Dashboard Audio card | on a machine without a backlight it stretches to match Networks and keeps ~40 px empty under two sliders | keeping both columns' bottom edges aligned was judged the better trade; brightness fills it on laptops |
 | Calendar -> Quick Settings switch at 1366 px | QS grows over the retracting calendar for ~2 frames | rendered frame by frame: the covered island fades on the panel's live edge as designed |
+| `tests/qml/test_overview.py` | one test failed once in 16 runs of the final commit (inside the full-suite run); 15 runs since, 3 of them concurrent, all 38/38. The baseline under load also showed 2 failures, one of them the pan-close test fixed above | name unknown: the runner kept counts, not logs. It should keep per-suite logs; until then this is an open intermittent, not a clean suite |
 | Lifecycle fuzz | 240 seeded random interleavings of open/close/toggle/tab switch/branch/overview/Escape at 0-400 ms intervals, each settled and checked (input mask back to idle, every island at rest, branch and overview released, Theme unloaded, no QML warnings) | 0 failures; a negative control (skipping the final close) is caught by every check |
 
 ### Measurements (harness, software renderer, this container)
@@ -402,3 +403,10 @@ compositor blur, live Quickshell memory.
 4. A network whose name contains `:` connects and shows Forget once saved.
 5. Bluetooth: toggle the radio off/on quickly with two devices paired;
    each row keeps its own state and battery.
+6. Overview focus after the input change (unverified): the overlay now
+   stops taking the pointer at `hide()`, not at unmap, so with
+   focus-follows-mouse Hyprland may focus the window under the pointer
+   during the close. Click an off-screen window (the desktop pans), keep
+   the mouse still and type: the keys must reach the clicked window.
+   Repeat while moving the mouse across another window during the slide.
+   If focus lands wrong, the `focusAgain` retry is the place to look.
