@@ -301,7 +301,7 @@ fix, and failed there.
 | low | `install.sh` | update failed for a branch tracking a local branch (`git fetch main`). Old updater: rc 1 | 5011baf |
 | low | `install.sh` `verify_deploy` | didn't check `dxrice_session.sh` and the other new helpers, or the executable bit of the two scripts `hyprland.lua` runs directly | 5011baf |
 | medium | every atomic writer of user files | `os.replace` replaced a dotfiles symlink with a plain file (`hyprland.lua`, `theme.json`, dock config, `.bashrc`/`.zshrc`). Reproduced; old code fails the new tests. Five duplicate writers consolidated | e416001 |
-| low | `dxrice_navigate_windows.py` | `--to`/`pan_to` was dead code (the overview pans in QML), and its docstring said otherwise | this pass |
+| low | `dxrice_navigate_windows.py` | `--to`/`pan_to` was dead code (the overview pans in QML), and its docstring said otherwise | 348871e |
 
 ### Found, not fixed
 
