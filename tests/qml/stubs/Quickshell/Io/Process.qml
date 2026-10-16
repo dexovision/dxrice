@@ -24,15 +24,21 @@ QtObject {
     // streamFinished fires, so handlers may set `running = true` to chain
     // the next command (BluetoothBackend does exactly that).
     property bool _live: false
+    property var _argv: []
     property bool _target: false
     onRunningChanged: {
-        if (root.running && !root._live) { root._live = true; Qt.callLater(root._finish); }
+        if (root.running && !root._live) { root._live = true; root._argv = (root.command || []).slice(); Qt.callLater(root._finish); }
         else if (root.running && root._live) root._target = true;
     }
     function _finish() {
-        const out = Harness.run(root.command || []);
+        // the output of the command AS STARTED, like a real process --
+        // not of whatever `command` holds by the time it finishes
+        const out = Harness.run(root._argv);
         // Fixture sentinel for "still loading": the process never finishes.
         if (out === "__HANG__") return;
+        // "__FAIL__": the binary could not be started -- Quickshell then
+        // reports the process stopped and never emits streamFinished/exited.
+        if (out === "__FAIL__") { root._live = false; root.running = false; return; }
         root._live = false;
         // "__NOSTART__": the binary could not be started. Quickshell emits
         // no `exited` then -- only `running` drops (process.cpp
