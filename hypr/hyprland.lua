@@ -274,7 +274,9 @@ hl.bind(mainMod .. " + CTRL + up",    hl.dsp.exec_cmd("python3 " .. repo .. "/sc
 hl.bind(mainMod .. " + CTRL + down",  hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_resize_window.py down"),  { repeating = true })
 
 hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("firefox"))
-hl.bind(mainMod .. " + SHIFT + D", hl.dsp.exec_cmd("discord"))
+-- Native Wayland + PipeWire capture: under XWayland (Discord's default)
+-- screen sharing sees only X11 windows and a full-screen share is black.
+hl.bind(mainMod .. " + SHIFT + D", hl.dsp.exec_cmd("discord --enable-features=WebRTCPipeWireCapturer,WaylandWindowDecorations --ozone-platform=wayland"))
 hl.bind(mainMod .. " + SHIFT + M", hl.dsp.exec_cmd("pavucontrol"))
 hl.bind(mainMod .. " + SHIFT + B", hl.dsp.exec_cmd("blueman-manager"))
 hl.bind(mainMod .. " + N", hl.dsp.exec_cmd("nm-connection-editor"))
