@@ -227,7 +227,7 @@ Branch: `claude/dxrice-engineering-audit-uplvjy`, from `4688761`.
 | G1-G3 Gentoo, package lists | `deps/*.list`, emerge backend, docs | e6fbbcc |
 | U1-U3 updater | fetch/preview/ask/fast-forward, refusals change nothing | e6fbbcc |
 | D1-D2 README | rewritten; `dxrice_test_docs.py` checks it | 7f6db89 |
-| Daemons outliving their Hyprland (found in review) | placement and panning daemons exit when their Hyprland instance is gone; the supervisor stops restarting | see below |
+| Daemons outliving their Hyprland (found in review) | placement and panning daemons exit when their Hyprland instance is gone; the supervisor stops restarting | 6ac7767 |
 | Fixed `/tmp` paths (found during the work) | moved to `$XDG_RUNTIME_DIR/dxrice` | b22dc20 |
 | Unattended prompts defaulting to yes (found during the work) | privileged/file-changing prompts need a terminal or `--yes` | 311982b |
 
