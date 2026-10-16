@@ -173,10 +173,19 @@ PanelWindow {
     Binding { target: ShellSurface; property: "screenHeight"; value: root.screen ? root.screen.height : 1080 }
 
     // ---- workspaces (native Hyprland IPC -- no hyprctl subprocess) ----
+    // Ordinary workspaces only: special ones (scratchpads, negative ids) are
+    // toggled, not switched to, and don't belong in the row.
     readonly property var workspaceList: {
-        const list = Hyprland.workspaces.values.slice();
+        const list = Hyprland.workspaces.values.filter((w) => w.id > 0);
         list.sort((a, b) => a.id - b.id);
         return list;
+    }
+    // In Lua syntax, like every other DXrice dispatch: this Hyprland runs
+    // hyprland.lua and refuses the classic form, which Quickshell's own
+    // HyprlandWorkspace.activate() may send (its usingLua has been seen to
+    // be wrong; see Overview.qml's focusLua).
+    function focusWorkspace(ws) {
+        Hyprland.dispatch("hl.dsp.focus({ workspace = " + ws.id + " })");
     }
 
     // ---- audio, for the status cluster ----
@@ -296,6 +305,7 @@ PanelWindow {
                     delegate: Rectangle {
                         id: wsPill
                         required property var modelData
+                        objectName: "workspacePill:" + modelData.id
                         readonly property bool active: modelData.focused
                         width: active ? 22 : 8
                         height: 8
@@ -312,7 +322,7 @@ PanelWindow {
                             anchors.margins: -4
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: wsPill.modelData.activate()
+                            onClicked: root.focusWorkspace(wsPill.modelData)
                         }
                     }
                 }

@@ -73,5 +73,35 @@ class TopBarFocusedWindow(unittest.TestCase):
         self.assertEqual(self.queries(), before + 1)
 
 
+class WorkspacePills(unittest.TestCase):
+    def setUp(self):
+        self.s = Scene()
+        self.s.ev("hypr.workspaces = ({ values: ["
+                  "{ id: -98, name: 'special:scratch', focused: false, activated: false, activate: function() { this.activated = true; } },"
+                  "{ id: 1, focused: true, activated: false, activate: function() { this.activated = true; } },"
+                  "{ id: 2, focused: false, activated: false, activate: function() { this.activated = true; } }] })")
+        self.s.wait(100)
+
+    def tearDown(self):
+        self.s.close()
+
+    def test_special_workspaces_get_no_pill(self):
+        self.assertIsNone(self.s.ev("findNamed('workspacePill:-98')"))
+        self.assertIsNotNone(self.s.ev("findNamed('workspacePill:2')"))
+
+    def test_clicking_a_pill_switches_in_lua_syntax(self):
+        import json
+        pos = json.loads(self.s.ev("(function(){ const p = findNamed('workspacePill:2');"
+                                   " const q = p.mapToItem(null, p.width / 2, p.height / 2);"
+                                   " return JSON.stringify([q.x, q.y]); })()"))
+        self.s.ev("hypr.dispatchLog = []")
+        self.s.click(int(pos[0]), int(pos[1]))
+        self.s.wait(50)
+        self.assertEqual(json.loads(self.s.ev("JSON.stringify(hypr.dispatchLog)")),
+                         ["hl.dsp.focus({ workspace = 2 })"])
+        self.assertFalse(self.s.ev("hypr.workspaces.values[2].activated"),
+                         "went through Quickshell's activate(), whose syntax may be classic")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
