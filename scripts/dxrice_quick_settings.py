@@ -146,6 +146,28 @@ def set_wifi_radio(enabled):
     run_ok(["nmcli", "radio", "wifi", "on" if enabled else "off"])
 
 
+def nmcli_terse_fields(line):
+    """Split one line of `nmcli -t` output into its fields. Terse mode
+    escapes ':' and '\\' inside a value with a backslash (nmcli's default
+    --escape yes), so an SSID such as "Cafe: Free" arrives as "Cafe\\: Free"
+    and must not be cut at that colon."""
+    fields, cur, i = [], [], 0
+    while i < len(line):
+        c = line[i]
+        if c == "\\" and i + 1 < len(line):
+            cur.append(line[i + 1])
+            i += 2
+            continue
+        if c == ":":
+            fields.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+        i += 1
+    fields.append("".join(cur))
+    return fields
+
+
 def list_wifi_networks():
     """Returns [(ssid, signal, security, connected), ...], deduped, strongest first."""
     r = run(["nmcli", "-t", "-f", "active,ssid,signal,security", "dev", "wifi", "list"], timeout=8)
@@ -153,7 +175,7 @@ def list_wifi_networks():
         return []
     seen = {}
     for line in r.stdout.splitlines():
-        parts = line.split(":")
+        parts = nmcli_terse_fields(line)
         if len(parts) < 4 or not parts[1]:
             continue
         active, ssid, signal_str, security = parts[0], parts[1], parts[2], parts[3]
@@ -169,7 +191,7 @@ def list_wifi_networks():
 
 def has_saved_connection(ssid):
     r = run(["nmcli", "-t", "-f", "NAME", "connection", "show"])
-    return bool(r and ssid in r.stdout.splitlines())
+    return bool(r and ssid in [nmcli_terse_fields(n)[0] for n in r.stdout.splitlines()])
 
 
 _WIFI_CONNECT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_wifi_connect.py")

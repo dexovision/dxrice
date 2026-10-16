@@ -29,6 +29,23 @@ Item {
 
     onRadioOnChanged: if (radioOn) refresh()
 
+    // One line of `nmcli -t` output, split into fields. Terse mode escapes
+    // ':' and '\\' inside a value with a backslash (nmcli's default
+    // --escape yes): splitting on every ':' cut an SSID like "Cafe: Free" in
+    // two, read its second half as the signal, connected to the wrong name,
+    // and never matched it against the (equally escaped) saved names.
+    function terseFields(line) {
+        const fields = [];
+        let cur = "";
+        for (let i = 0; i < line.length; i++) {
+            const c = line[i];
+            if (c === "\\" && i + 1 < line.length) { cur += line[++i]; continue; }
+            if (c === ":") { fields.push(cur); cur = ""; } else cur += c;
+        }
+        fields.push(cur);
+        return fields;
+    }
+
     function refresh() {
         scanProc.running = true;
         savedNamesProc.running = true;
@@ -38,7 +55,7 @@ Item {
         id: savedNamesProc
         command: ["nmcli", "-t", "-f", "NAME", "connection", "show"]
         stdout: StdioCollector {
-            onStreamFinished: root.savedNames = this.text.split("\n").filter((n) => n.length > 0)
+            onStreamFinished: root.savedNames = this.text.split("\n").filter((n) => n.length > 0).map((n) => root.terseFields(n)[0])
         }
     }
 
@@ -49,7 +66,7 @@ Item {
             onStreamFinished: {
                 const seen = {};
                 for (const line of this.text.split("\n")) {
-                    const parts = line.split(":");
+                    const parts = root.terseFields(line);
                     if (parts.length < 4 || !parts[1]) continue;
                     const ssid = parts[1];
                     const signal = Number(parts[2]) || 0;
@@ -73,7 +90,7 @@ Item {
         command: ["nmcli", "-t", "-f", "NAME", "connection", "show"]
         stdout: StdioCollector {
             onStreamFinished: {
-                const names = this.text.split("\n");
+                const names = this.text.split("\n").map((n) => root.terseFields(n)[0]);
                 if (names.includes(savedCheckProc.ssid)) {
                     root._doConnect(savedCheckProc.ssid);
                 } else {

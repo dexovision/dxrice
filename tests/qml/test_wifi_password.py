@@ -47,5 +47,31 @@ class WifiPassword(unittest.TestCase):
         self.assertEqual(self.s.ev("findNamed('wifiSecretConnect')._secret"), "", "the panel kept the password")
 
 
+
+class WifiTerseParsing(unittest.TestCase):
+    """nmcli -t escapes ':' and '\\' inside values (--escape yes is its
+    default). The scan used to split every line on every ':'."""
+
+    def setUp(self):
+        def setup(b):
+            b.commands.insert(0, ("nmcli -t -f NAME connection show", "Cafe\\: Free\nlo\n"))
+            b.commands.insert(0, ("nmcli -t -f active,ssid,signal,security dev wifi list",
+                                  "no:Cafe\\: Free:71:WPA2\nno:back\\\\slash:40:--\nyes:HomeNet:82:WPA2\n"))
+        self.s = Scene(setup=setup)
+        self.s.ev("panels.open('quicksettings')")
+        self.s.wait(1200)
+
+    def tearDown(self):
+        self.s.close()
+
+    def test_ssids_with_colons_and_backslashes(self):
+        nets = {n["ssid"]: n for n in json.loads(self.s.ev("JSON.stringify(findNamed('wifiBackend').networks)"))}
+        self.assertEqual(sorted(nets), ["Cafe: Free", "HomeNet", "back\\slash"])
+        self.assertEqual(nets["Cafe: Free"]["signal"], 71)
+        self.assertEqual(nets["Cafe: Free"]["security"], "WPA2")
+        self.assertTrue(nets["Cafe: Free"]["known"], "an escaped saved name never matched its network")
+        self.assertFalse(nets["back\\slash"]["known"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
