@@ -51,12 +51,12 @@ SPACING_MIN_KEY = "window_spacing_min"
 SPACING_MAX_KEY = "window_spacing_max"
 # The inner turn's gap: this far into the (min, max) range (~42 px).
 SPACING_TARGET_FRACTION = 0.42
-# How the gap widens outward: target * (1 + GROWTH * p * (1 + p)), p the
-# radial progress in turns (0 where the spiral starts, 1 a turn out, ...),
-# at most CAP * target -- with the default 42 px the gaps run about 42-56 px
-# on the inner turn, 56-80 on the middle one, 80-105 further out.
-SPACING_GROWTH = 0.125
-SPACING_GROWTH_CAP = 2.5
+# How the gap widens outward: target * (1 + GROWTH * p), p the radial
+# progress in turns (0 where the spiral starts, 1 a turn out, ...), at most
+# CAP * target -- with the default 42 px about 42-50 px on the inner turn,
+# 50-59 on the middle one, 59-67 the outer: a gentle, steady widening.
+SPACING_GROWTH = 0.2
+SPACING_GROWTH_CAP = 2.0
 
 
 def read_spacing(path=None):
@@ -88,7 +88,7 @@ def spacing_at(progress, band):
     with the spiral, never under the range's minimum."""
     g0 = target_gap(band)
     p = max(0.0, progress)
-    return max(float(band[0]), g0 * min(SPACING_GROWTH_CAP, 1.0 + SPACING_GROWTH * p * (1.0 + p)))
+    return max(float(band[0]), g0 * min(SPACING_GROWTH_CAP, 1.0 + SPACING_GROWTH * p))
 
 
 def widest_gap(band):

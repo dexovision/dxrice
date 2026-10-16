@@ -412,22 +412,24 @@ def measures_sheet(scripts, out):
 
 def compare_sheet(old_scripts, new_scripts, out, old_label="before", new_label="after"):
     """The same windows opened one by one through each checkout's real
-    place_new_window, clean style, one scale per row: the previous geometry
-    above, this one below."""
+    place_new_window, clean style: each case's before and after side by
+    side at one scale -- uniform and mixed sets at 6, 12 and 16 windows,
+    and the extreme wide and tall ones."""
     names = [f"w{i + 1}" for i in range(16)]
-    cases = (("12 windows, reference proportions", REF_SIZES[:12]), ("16 windows, reference proportions", REF_SIZES),
-             ("16 windows, mixed sizes", MIXED))
-    rows = {lbl: [scenario_rows(d, _opens(names, sz))[-1] for _t, sz in cases]
-            for lbl, d in ((old_label, old_scripts), (new_label, new_scripts))}
-    pw = ph = 580
-    img = Image.new("RGB", (3 * pw + 20, 2 * ph + 70), BG)
-    ImageDraw.Draw(img).text((16, 16), f"{old_label} (top) and {new_label} (bottom): the same windows, "
-                             "opened one by one", font=_font(22, True), fill=INK)
-    for c, (title, _sz) in enumerate(cases):
-        scale = _fit([rows[old_label][c], rows[new_label][c]])
-        for r, lbl in enumerate((old_label, new_label)):
-            x, y = 10 + c * pw, 60 + r * ph
-            clean_panel(img, (x, y, x + pw - 10, y + ph - 10), f"{lbl}: {title}", rows[lbl][c], scale)
+    cases = [(f"{n} windows, reference proportions", REF_SIZES[:n]) for n in (6, 12, 16)]
+    cases += [(f"{n} windows, mixed sizes", MIXED[:n]) for n in (6, 12, 16)]
+    cases += [("12 very wide windows", WIDE), ("12 very tall windows", TALL)]
+    frames = {lbl: [scenario_rows(d, _opens(names, sz))[-1] for _t, sz in cases]
+              for lbl, d in ((old_label, old_scripts), (new_label, new_scripts))}
+    pw = ph = 520
+    img = Image.new("RGB", (4 * pw + 20, ((len(cases) + 1) // 2) * ph + 70), BG)
+    ImageDraw.Draw(img).text((16, 16), f"{old_label} | {new_label}: the same windows, opened one by one, "
+                             "each pair at one scale", font=_font(22, True), fill=INK)
+    for k, (title, _sz) in enumerate(cases):
+        scale = _fit([frames[old_label][k], frames[new_label][k]], size=(pw - 20, ph - 46))
+        for j, lbl in enumerate((old_label, new_label)):
+            x, y = 10 + ((k % 2) * 2 + j) * pw, 60 + (k // 2) * ph
+            clean_panel(img, (x, y, x + pw - 10, y + ph - 10), f"{lbl}: {title}", frames[lbl][k], scale)
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, "before_after.png")
     img.save(path)

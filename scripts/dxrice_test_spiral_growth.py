@@ -354,9 +354,11 @@ class TestGeometryModel(unittest.TestCase):
         self.assertGreater(fits[len(fits) // 10], 0.97)
 
     def test_gaps_widen_turn_by_turn(self):
-        """The gap each window keeps from those before it widens with the
-        spiral: about 42-56 px on the inner turn, 56-80 on the middle one,
-        80+ further out (theme default), the medians in order."""
+        """The gap each window keeps from those before it widens gently with
+        the spiral: about 42-50 px on the inner turn, 50-59 on the middle
+        one, 59-67 further out (theme default), the medians in order. (Was
+        42-56 / 56-80 / 80+ until the user asked for a gentler outward
+        growth with the inner gaps kept.)"""
         import statistics as st
         per_turn = {0: [], 1: [], 2: []}
         for sizes, _ in self.sets(n=120, lo=(240, 120), hi=(300, 160), obstacles=False, count=(20, 40)):
@@ -366,9 +368,10 @@ class TestGeometryModel(unittest.TestCase):
                 if turn in per_turn:
                     per_turn[turn].append(min(sp.dist(rects[i], o) for o in rects[:i]))
         med = {t: st.median(v) for t, v in per_turn.items()}
-        self.assertTrue(44 <= med[0] <= 54, med)
-        self.assertTrue(58 <= med[1] <= 72, med)
-        self.assertTrue(78 <= med[2] <= 100, med)
+        self.assertTrue(44 <= med[0] <= 52, med)
+        self.assertTrue(52 <= med[1] <= 60, med)
+        self.assertTrue(57 <= med[2] <= 66, med)
+        self.assertTrue(med[0] < med[1] < med[2], med)
 
     def test_gap_progression_is_smooth(self):
         """Unobstructed, a window's gap never comes in narrower than the one

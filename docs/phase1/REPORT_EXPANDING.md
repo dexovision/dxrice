@@ -1,5 +1,10 @@
 # Galaxy Spiral: an expanding spiral, not a ring
 
+> **Refined in [REPORT_REFINE.md](REPORT_REFINE.md):** the gap now widens
+> linearly and more gently (about 46 / 50 / 59 px at 0.5 / 1 / 2 turns, at
+> most 2× the target). The geometry below is unchanged; its spacing numbers
+> are the earlier, steeper curve.
+
 Follows [REPORT_GEOMETRY.md](REPORT_GEOMETRY.md), whose fixed-gap geometry
 this replaces. The acceptance criterion: the rendered output, without
 arrows or labels, should read immediately as an airy spiral that winds
