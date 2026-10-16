@@ -197,3 +197,76 @@ Only one commit is affected. Options, from least to most invasive:
    names, but GitHub's contributor graph ignores it.
 
 Nothing here is done without your explicit go-ahead.
+
+## Results (end of the audit)
+
+Branch: `claude/dxrice-engineering-audit-uplvjy`, from `4688761`.
+
+### Finding by finding
+
+| | Status | Commit |
+|---|---|---|
+| C1 layer-fade fix never reached installs | fixed: install/update offer the edit (backup, consent) | 311982b |
+| C1b overview let go while panned windows still moved | fixed: closing zoom runs as long as Hyprland's window move | 8770d2f |
+| C2 no bar without systemd | fixed: `scripts/dxrice_session.sh` supervises without systemd | 770d0d7 |
+| C3 false "placement tests FAILED" | fixed: log in the state dir | 311982b |
+| C4 failed font download aborted the install | fixed | 311982b |
+| K1 `XDG_STATE_HOME` ignored | fixed in the template, the `dx` functions, and by migration | 770d0d7, 311982b |
+| K2 re-exec dropped flags | fixed | 311982b |
+| K3 power actions systemd-only | fixed: `scripts/dxrice_power.sh` (systemd or elogind) | 770d0d7 |
+| K4 update/uninstall as root | refused, like install | 311982b |
+| K5 unquoted wallpaper path | fixed in the template | 770d0d7 |
+| P1 daemon busy-polling | fixed (measured below) | e9c8d66 |
+| P2 top bar `hyprctl` poll | fixed (measured below) | fe65fee |
+| P3 python per focus change | not changed: event-driven, not idle cost | - |
+| P4 clock every second | now once a minute | fe65fee |
+| M1 dead `_dev_` QML | removed | 97a967b |
+| M2 duplicated install.sh Python | atomic-write and rc-strip copies replaced by helpers | 311982b |
+| M3 unused imports/variables | removed (ruff F clean) | 97a967b |
+| M4 comment narration | trimmed only where code was rewritten | - |
+| G1-G3 Gentoo, package lists | `deps/*.list`, emerge backend, docs | e6fbbcc |
+| U1-U3 updater | fetch/preview/ask/fast-forward, refusals change nothing | e6fbbcc |
+| D1-D2 README | rewritten; `dxrice_test_docs.py` checks it | 7f6db89 |
+| Fixed `/tmp` paths (found during the work) | moved to `$XDG_RUNTIME_DIR/dxrice` | b22dc20 |
+| Unattended prompts defaulting to yes (found during the work) | privileged/file-changing prompts need a terminal or `--yes` | 311982b |
+
+(e6fbbcc carries both the Gentoo work and the updater rewrite: install.sh
+went into that commit whole. ba71fc6 adds the updater's test.)
+
+### Measurements
+
+All taken in this audit's container: no Hyprland, no input devices, no
+display. They measure the code paths that run while the desktop is idle.
+They do not measure the whole desktop.
+
+| What | How | Before | After |
+|---|---|---|---|
+| infinite-desktop daemon, idle | `scripts/dxrice_idle_probe.py 60`, 25 s warm-up, 2 runs each | 119.8 / 119.9 wakeups/s, 0.38 % CPU, 18.3–18.6 MiB PSS | 0.3 / 0.3 wakeups/s, 0.00–0.02 % CPU, 18.4–18.6 MiB PSS |
+| top bar processes spawned while idle | QML harness, 5 s idle, count of `hyprctl activewindow` runs | 3 (≈ 2,400/hour) | 0 |
+| overview release after a panning click | QML harness, wall clock from click to the overlay letting go | 340 ms (compositor move: 480 ms) | 520 ms (480 ms + 2 frames) |
+
+**Not measured** (needs the real desktop):
+- Hyprland's and Quickshell's own memory and CPU;
+- the daemon's per-3 s device rescans with real devices;
+- the whole-session idle total.
+
+To get them, run `python3 scripts/dxrice_idle_probe.py 60` on the desktop
+before and after updating. Leave it idle, with the same windows open. It
+reports Hyprland, Quickshell, the DXrice daemons and everything else
+separately.
+
+### Not done, on purpose
+
+- **SUPER+G's resize branch** in `dxrice_auto_arrange.py`. It is dead
+  (sizes are always kept; 2,000 random layouts produced no size change),
+  but a dozen placement tests are built around its API. Removing it is a
+  test rewrite with no behaviour change.
+- **Overview focus timers** (`focusSoon` 30 ms, `focusAgain` after
+  release). They compensate for Hyprland refocusing the window under the
+  pointer when the overlay unmaps. Changing them needs a live compositor
+  to verify, so they're unchanged.
+- **Animation retuning** beyond the overview close. Curves, durations and
+  springs are the visual identity, and judging them needs the real
+  screen. docs/OVERVIEW.md lists the manual checks.
+- **History rewrite** for commit `0d3352e`'s co-author trailer: see the
+  proposal above.
