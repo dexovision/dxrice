@@ -36,7 +36,7 @@ os.environ.setdefault("QT_LOGGING_RULES", "qt.qml.propertyCache.append=false")
 from PySide6.QtCore import QObject, QPointF, QTimer, QUrl, Qt, Slot, Property, QEventLoop, QRect  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlExpression, qmlRegisterSingletonType, QQmlEngine  # noqa: E402
-from PySide6.QtQuick import QQuickView, QQuickItem  # noqa: E402
+from PySide6.QtQuick import QQuickView  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 SHELL_SRC = Path(os.environ.get("DXRICE_SHELL_SRC", REPO / "quickshell"))

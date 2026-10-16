@@ -247,7 +247,7 @@ class TestForceCloseWindow(unittest.TestCase):
         conservative fallback must still actually terminate it -- the
         ORIGINAL bug this file exists to fix must remain fixed."""
         victim = self._spawn("sleep", "300")
-        fake = self._install(FakeHypr(
+        self._install(FakeHypr(
             clients=[{"address": "0xA", "pid": victim.pid}],
             focused_address="0xA",
             honors_close=False,
@@ -266,7 +266,7 @@ class TestForceCloseWindow(unittest.TestCase):
         fallback must refuse to run at all -- "cannot safely close this
         one window" is the correct outcome, not "kill them both.\""""
         shared = self._spawn("sleep", "300")
-        fake = self._install(FakeHypr(
+        self._install(FakeHypr(
             clients=[{"address": "0xA", "pid": shared.pid}, {"address": "0xB", "pid": shared.pid}],
             focused_address="0xA",
             honors_close=False,

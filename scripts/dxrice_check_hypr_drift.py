@@ -148,8 +148,8 @@ def main():
             print(f"  This file is copy-once and yours to hand-edit (see the README), so nothing here "
                   f"was changed automatically -- open {result['path']} and the repo's own "
                   f"{TRACKED[0][0]} side by side and add whatever of the above you actually want.")
-            print(f"  Once you've reviewed it, re-run with --fix-baseline to silence this check "
-                  f"until the repo template changes again.")
+            print("  Once you've reviewed it, re-run with --fix-baseline to silence this check "
+                  "until the repo template changes again.")
     if any_drift:
         sys.exit(1)
 

@@ -427,7 +427,6 @@ class TestCompositorLayerFade(unittest.TestCase):
         return {m.group(1): m.group(0) for m in re.finditer(r'hl\.animation\(\{\s*leaf\s*=\s*"(\w+)"[^\n]*', text)}
 
     def test_the_template_turns_the_layer_fades_off_and_keeps_the_rest(self):
-        import re
         found = self.lines(open(self.TEMPLATE).read())
         for leaf in self.LEAVES:
             self.assertIn(leaf, found)

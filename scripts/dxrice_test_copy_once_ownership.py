@@ -280,7 +280,7 @@ class TestAdversarialRobustness(OwnershipTestBase):
         self.assertEqual(state, ownership.UNKNOWN)
 
     def test_directory_at_snapshot_path_does_not_crash(self):
-        live = self.write_live("waybar/config-dock", {"name": "waybar-dock"})
+        self.write_live("waybar/config-dock", {"name": "waybar-dock"})
         snap = ownership._snapshot_path(self.state_dir, "waybar/config-dock")
         snap.mkdir(parents=True)
         state, detail = self.classify("waybar/config-dock")

@@ -39,7 +39,6 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import dxrice_spiral_bench as bench  # noqa: E402
 import dxrice_spiral  # noqa: E402
 
 BAND = (dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT)

@@ -160,7 +160,6 @@ class InputRegionTest(unittest.TestCase):
         s.ev("panels.closeCurrent()"); self.settle()
 
     def test_07_escape_peels_branch_then_taskbar(self):
-        from PySide6.QtCore import Qt
         s = self.scene
         s.ev("panels.open('taskbar')"); self.settle(700)
         s.ev("findPanel('addPanelOpen').addPanelOpen = true"); self.settle(700)

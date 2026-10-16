@@ -499,7 +499,6 @@ class TestSelectionCentring(unittest.TestCase):
         try:
             lay = o.layout
             target = next(w for w in lay["windows"] if w["address"] == "0xa001")
-            r = lay["reserved"]
             o.call("show")
             o.scene.wait(SETTLE)
             # click the target's tile where nothing else covers it
@@ -536,7 +535,7 @@ class TestSelectionCentring(unittest.TestCase):
                 want = [w["x"] + (dx if moved else 0), w["y"] + (dy if moved else 0), w["w"], w["h"]]
                 for g, e in zip(last[w["address"]], want):
                     self.assertAlmostEqual(g, e, delta=0.6, msg=(w["address"], last[w["address"]], want))
-            self.assertIn(f'hl.dsp.focus({{ window = "address:0xa001" }})', sent)
+            self.assertIn('hl.dsp.focus({ window = "address:0xa001" })', sent)
             return err
         finally:
             o.scene.close()

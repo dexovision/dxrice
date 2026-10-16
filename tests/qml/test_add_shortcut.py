@@ -148,7 +148,6 @@ class AddShortcutTest(unittest.TestCase):
         if side in ("right", "left"):
             self.assertAlmostEqual(by, island_top, delta=1.0, msg="side branch not top-aligned with the panel")
         # follows the panel if it resizes while open (e.g. a shortcut added)
-        old_y = by
         self.s.ev("panels.close('taskbar')"); self.s.wait(60)
         self.assertFalse(self.s.ev(f"{B}.open"), "branch stayed open while the taskbar closed")
 

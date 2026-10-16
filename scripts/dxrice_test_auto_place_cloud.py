@@ -11,7 +11,6 @@ no theme.json outside a temp dir.
 import contextlib
 import io
 import json
-import math
 import os
 import random
 import re

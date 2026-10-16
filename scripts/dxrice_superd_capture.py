@@ -21,7 +21,6 @@ Then just use the desktop normally and press SUPER+D when you're ready to
 reproduce the issue. Ctrl+C to stop. Every press is captured and compared;
 nothing needs to be reproduced in a single run.
 """
-import json
 import struct
 import sys
 import time

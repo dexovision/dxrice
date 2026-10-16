@@ -85,7 +85,6 @@ class TopBarLayoutTest(unittest.TestCase):
                 self.s.ev(f"panels.open('{panel}')")
                 self.sample(panel, 600, f"{panel} opening")
                 self.check_frame(panel, f"{panel} open")
-                owner = self.island(PANELS[panel])
                 for name in ISLANDS:
                     if name == PANELS[panel]:
                         continue

@@ -348,7 +348,6 @@ def next_rect(size, placed, fixed, band):
     # Eight turns out and still blocked (only something enormous does
     # that): step straight outward from there until clear -- still never
     # closer than the gap to anything.
-    theta = theta0 + SPIRAL_TURN * phi
     while True:
         ok, rect = place(phi, radius)
         if ok:

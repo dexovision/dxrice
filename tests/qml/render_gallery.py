@@ -10,7 +10,6 @@ no real fonts beyond what Qt finds, no GPU effects (see README.md).
 """
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 

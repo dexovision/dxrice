@@ -23,7 +23,6 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_auto_place_window as apw
 import dxrice_auto_arrange as arr
-import dxrice_resize_memory
 import dxrice_spiral
 
 
@@ -1772,7 +1771,6 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
         default), not Hyprland's gaps_in: the packed solver's exact 5 px
         became the spiral's spacing range."""
         rects = _arrange([(900, 0, 400, 300), (900, 305, 400, 300), (900, 610, 400, 300)])
-        found_adjacent = False
         for i in range(len(rects)):
             for j in range(len(rects)):
                 if i == j:
@@ -1781,10 +1779,8 @@ class TestRadialCompositionAlgorithmB(unittest.TestCase):
                 xg = apw._axis_gap(ri[0], ri[2], rj[0], rj[2])
                 yg = apw._axis_gap(ri[1], ri[3], rj[1], rj[3])
                 if yg == 0.0 and 0 < xg <= dxrice_spiral.SLIT_MAX:
-                    found_adjacent = True
                     self.assertTrue(dxrice_spiral.SPACING_MIN_DEFAULT <= xg <= WIDEST, xg)
                 if xg == 0.0 and 0 < yg <= dxrice_spiral.SLIT_MAX:
-                    found_adjacent = True
                     self.assertTrue(dxrice_spiral.SPACING_MIN_DEFAULT <= yg <= WIDEST, yg)
 
     def test_no_overlaps_various_sizes(self):

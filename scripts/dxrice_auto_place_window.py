@@ -69,11 +69,12 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dxrice_hypr_ipc import (hyprctl_json, move_window_exact_async, move_window_exact_lua,
+# batch_async and move_window_exact_async are module attributes the tests
+# replace to record dispatches.
+from dxrice_hypr_ipc import (hyprctl_json, move_window_exact_async, move_window_exact_lua,  # noqa: F401
                              batch_async, resize_window_exact_lua, dispatch_async)
 import dxrice_singleton
 import dxrice_xdg
-import dxrice_resize_memory
 import dxrice_window_class
 
 DEFAULT_GAP = 5
