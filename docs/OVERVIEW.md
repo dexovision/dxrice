@@ -56,11 +56,16 @@ snapping.
 
 When the click pans the desktop (below), Hyprland animates the real
 windows to their new places with its own window-move animation (the
-`windowsMove` leaf, else `windows`, else `global`; 480 ms with the
-template's `windows` speed of 4.79). The closing zoom then runs exactly that
+`windowsMove` leaf, else `windows`, else `global`). Its duration is taken
+as the leaf's speed × 100 ms, Hyprland's unit for animation speed: 480 ms
+for the template's `windows` speed of 4.79. That reading of `speed` is
+inferred from Hyprland's documentation, not measured. The template's
+`windows` leaf uses a spring curve, and whether a spring's duration follows
+`speed` exactly can only be confirmed on a real desktop (manual check 3
+below). The closing zoom then runs exactly that
 long instead of 300 ms, so the pictures and the real windows land on the
 same frame. Before this, the overlay let go about 340 ms after the click
-(measured in the harness), while Hyprland's 480 ms move was still running.
+(measured in the harness), while Hyprland's move was still running.
 The real windows visibly slid the rest of the way into place where the
 pictures had just been: the double image on selection. The duration is read from
 `hyprctl -j animations` on the first open and after each config reload.
@@ -211,7 +216,7 @@ Measured on this machine; the window data is read live, read-only.
 | window data | 1st version: `python3 dxrice_overview.py`, 50–52 ms; then 2 × `hyprctl -j`, 5–7 ms | 2 × `hyprctl -j` in parallel, 5–7 ms |
 | geometry | 0.07 ms (16 windows), 1.1 ms (200) | the same |
 | zoom | 420 ms decelerating | 300 ms ease-in-out |
-| close | 360 ms, then a separate 120 ms fade | 300 ms, the fade alongside |
+| close | 360 ms, then a separate 120 ms fade | 300 ms, the fade alongside; after a click that pans the desktop, as long as Hyprland's window move (480 ms with the template) |
 
 `overview_timing.png` plots both. The remaining 30 ms before the shell even
 hears the key is the `qs ipc call` client process. Hyprland's
@@ -273,7 +278,7 @@ key would silently do nothing, so the proven path is kept.
   - **the recording probe**, on synthetic recordings: one frame is clean even
     while the overview darkens, a fade is flagged, one noisy frame doesn't
     split a transition.
-- `tests/qml/test_overview.py` (35 tests, offscreen harness, the real
+- `tests/qml/test_overview.py` (38 tests, offscreen harness, the real
   shell). It covers:
   - opening and closing back exactly;
   - the first and last frames on the real windows;
@@ -305,6 +310,10 @@ key would silently do nothing, so the proven path is kept.
       overlay equals the desktop until it moves;
     - pressing again before the handover, or during the release frames,
       backs out or resumes cleanly;
+  - **closing in step with the compositor** (`TestCloseFollowsTheCompositor`):
+    reading `hyprctl -j animations`, and that the overlay lets go only after
+    the compositor's window move when the click panned the desktop, and at
+    the zoom's own length otherwise;
   - focus always in Lua syntax;
   - fullscreen, pinned and tiled windows focus without a pan;
   - a window that just closed says so;

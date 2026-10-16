@@ -44,7 +44,7 @@ installer warns about it.
 
 | | Arch | Gentoo | Fedora | openSUSE | Debian/Ubuntu |
 |---|---|---|---|---|---|
-| Hyprland ≥ 0.55 | official repos | hyproverlay overlay | third-party COPR | official repos | not packaged (build it) |
+| Hyprland ≥ 0.55 | official repos | hyproverlay overlay | third-party COPR | Tumbleweed repos² | not packaged (build it) |
 | Quickshell | official repos | GURU overlay | third-party COPR | not packaged | not packaged |
 | Everything else | official repos | main tree¹ | official repos¹ | official repos¹ | official repos¹ |
 | Installer installs packages | yes, after asking | yes, `emerge --ask`, after asking | yes, after asking | yes, after asking | yes, after asking |
@@ -52,6 +52,8 @@ installer warns about it.
 
 ¹ cliphist (clipboard history) and nwg-look aren't packaged there. The
 installer tells you where to get them, and DXrice works without them.
+² Tumbleweed packages Hyprland, but whether it has reached 0.55 wasn't
+checked; the installer warns if the installed version is too old.
 
 Each package manager's exact list is in [`deps/`](deps/). The installer
 reads those files and names no packages itself.
@@ -118,7 +120,8 @@ ebuilds are keyworded `~amd64`.
 # 1. the overlays
 sudo emerge --ask app-eselect/eselect-repository
 sudo eselect repository enable hyproverlay guru
-sudo emaint sync -r hyproverlay -r guru
+sudo emaint sync -r hyproverlay
+sudo emaint sync -r guru
 
 # 2. Hyprland and Quickshell; --autounmask proposes the keyword changes,
 #    review them, then apply them with dispatch-conf and run it again
@@ -141,7 +144,8 @@ USE flags that matter:
 in, and it provides `XDG_RUNTIME_DIR`, seat access, `loginctl` and
 `elogind-inhibit`. There are no systemd user units: Hyprland's autostart
 runs `scripts/dxrice_session.sh`, which starts and supervises the bar and
-both daemons. Its logs are in `$XDG_RUNTIME_DIR/dxrice/`.
+both daemons. Its logs are in
+`$XDG_RUNTIME_DIR/dxrice/<hyprland instance>/`.
 `scripts/dxrice_session.sh status` shows what's running. Start Hyprland
 from a TTY or from your display manager, as usual.
 
@@ -250,7 +254,7 @@ All paths follow your `XDG_*` variables when set.
 | `~/.config/hypr/hyprland.lua`, `~/.config/waybar/`, `~/.config/wofi/` | copied once at install, then yours |
 | `~/.local/share/dxrice/backups/` | backups made before a theme migration or an SDDM sync |
 | `~/.local/state/dxrice/` | checkout location (`repo_path`), deploy manifest, `hyprland.lua` backups, update history |
-| `$XDG_RUNTIME_DIR/dxrice/` | pid files, and the session supervisor's logs without systemd |
+| `$XDG_RUNTIME_DIR/dxrice/` | pid files; without systemd, the session supervisor's logs in `<hyprland instance>/` |
 
 `theme.json` is seeded from `theme/theme.json` once. After that, an update
 only adds settings that didn't exist yet, after backing the file up. It

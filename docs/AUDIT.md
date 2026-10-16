@@ -227,6 +227,7 @@ Branch: `claude/dxrice-engineering-audit-uplvjy`, from `4688761`.
 | G1-G3 Gentoo, package lists | `deps/*.list`, emerge backend, docs | e6fbbcc |
 | U1-U3 updater | fetch/preview/ask/fast-forward, refusals change nothing | e6fbbcc |
 | D1-D2 README | rewritten; `dxrice_test_docs.py` checks it | 7f6db89 |
+| Daemons outliving their Hyprland (found in review) | placement and panning daemons exit when their Hyprland instance is gone; the supervisor stops restarting | see below |
 | Fixed `/tmp` paths (found during the work) | moved to `$XDG_RUNTIME_DIR/dxrice` | b22dc20 |
 | Unattended prompts defaulting to yes (found during the work) | privileged/file-changing prompts need a terminal or `--yes` | 311982b |
 
@@ -243,7 +244,15 @@ They do not measure the whole desktop.
 |---|---|---|---|
 | infinite-desktop daemon, idle | `scripts/dxrice_idle_probe.py 60`, 25 s warm-up, 2 runs each | 119.8 / 119.9 wakeups/s, 0.38 % CPU, 18.3–18.6 MiB PSS | 0.3 / 0.3 wakeups/s, 0.00–0.02 % CPU, 18.4–18.6 MiB PSS |
 | top bar processes spawned while idle | QML harness, 5 s idle, count of `hyprctl activewindow` runs | 3 (≈ 2,400/hour) | 0 |
-| overview release after a panning click | QML harness, wall clock from click to the overlay letting go | 340 ms (compositor move: 480 ms) | 520 ms (480 ms + 2 frames) |
+| overview release after a panning click | QML harness, wall clock from click to the overlay letting go | 340 ms | 520 ms (the 480 ms move + 2 frames) |
+
+The 480 ms is Hyprland's window move as the template configures it,
+derived from the `windows` leaf's speed (4.79 × 100 ms). It was not
+measured: that leaf is a spring, and whether `speed` sets a spring's
+duration exactly is unconfirmed. The parser also assumes the
+`hyprctl -j animations` output format. docs/OVERVIEW.md's manual check 3
+confirms both on a real desktop. The message of commit 8770d2f states the
+480 ms as fact; this paragraph is the correction.
 
 **Not measured** (needs the real desktop):
 - Hyprland's and Quickshell's own memory and CPU;
