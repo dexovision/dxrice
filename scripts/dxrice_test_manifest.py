@@ -52,6 +52,28 @@ class TestAtomicWriteBytes(ManifestTestBase):
         dxrice_manifest.atomic_write_bytes(target, b"hello")
         self.assertEqual(target.read_bytes(), b"hello")
 
+    def test_a_symlink_is_written_through_not_replaced(self):
+        """A dotfile manager's link stays a link, and the file it points
+        to (in the user's dotfiles tree) gets the new content, with its
+        permissions."""
+        dotfiles = self.tmp / "dotfiles"
+        dotfiles.mkdir()
+        real = dotfiles / "hyprland.lua"
+        real.write_bytes(b"old")
+        real.chmod(0o640)
+        link = self.live("hyprland.lua")
+        link.symlink_to(real)
+        dxrice_manifest.atomic_write_bytes(link, b"new")
+        self.assertTrue(link.is_symlink(), "the symlink was replaced by a plain file")
+        self.assertEqual(real.read_bytes(), b"new")
+        self.assertEqual(real.stat().st_mode & 0o777, 0o640)
+        self.assertEqual([p.name for p in dotfiles.iterdir()], ["hyprland.lua"], "temp file left behind")
+
+    def test_atomic_write_json(self):
+        target = self.live("theme.json")
+        dxrice_manifest.atomic_write_json(target, {"a": 1})
+        self.assertEqual(target.read_text(), '{\n    "a": 1\n}\n')
+
     def test_replaces_existing_content_completely(self):
         target = self.live("existing")
         target.write_bytes(b"old content, nice and long")

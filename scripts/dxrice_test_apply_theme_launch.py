@@ -65,20 +65,9 @@ class PatchHyprlandLuaTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_failed_write_leaves_the_config_intact(self):
-        real_open = open
-
-        def half_then_fail(path, mode="r", *a, **kw):
-            f = real_open(path, mode, *a, **kw)
-            if "w" in mode:
-                real_write = f.write
-
-                def write(text):
-                    real_write(text[: len(text) // 2])
-                    raise OSError(28, "No space left on device")
-                f.write = write
-            return f
         theme = dict(self.theme, hypr_gaps_in=17)
-        with mock.patch("builtins.open", half_then_fail):
+        # the disk fills up while the new file is being written
+        with mock.patch("os.fsync", side_effect=OSError(28, "No space left on device")):
             with self.assertRaises(OSError):
                 apply_theme.patch_hyprland_lua(theme)
         with open(self.lua) as f:

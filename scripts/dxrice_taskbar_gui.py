@@ -44,6 +44,7 @@ from dxrice_gtk_widgets import (
 )
 from dxrice_list_desktop_apps import list_desktop_apps
 import dxrice_apply_theme as apply_theme
+import dxrice_manifest
 import dxrice_xdg
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,20 +85,7 @@ SYSTEM_MODULE_LABELS = {
 def atomic_write_json(path, data):
     """Same pattern as dxrice_theme_gui: temp file + os.replace so a crash
     mid-write can never leave a truncated, unparseable config on disk."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = f"{path}.tmp{os.getpid()}"
-    try:
-        with open(tmp_path, "w") as f:
-            json.dump(data, f, indent=4)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+    dxrice_manifest.atomic_write_json(path, data, trailing_newline=False)
 
 
 def load_config():

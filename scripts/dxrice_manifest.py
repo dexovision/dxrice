@@ -37,6 +37,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_xdg
 
 
+def atomic_write_json(path, data, trailing_newline=True):
+    """json.dump with indent 4 through atomic_write_bytes."""
+    text = json.dumps(data, indent=4) + ("\n" if trailing_newline else "")
+    atomic_write_bytes(path, text.encode())
+
+
 def atomic_write_bytes(path, data: bytes):
     """Writes data to path via a temp file + atomic rename, so a process
     killed mid-write (crash, OOM, power loss) leaves the ORIGINAL file
@@ -54,7 +60,10 @@ def atomic_write_bytes(path, data: bytes):
     same way a plain `open(path, "w")` would for a brand-new file, so this
     is never an accidental, silent permissions change on top of a content
     update."""
-    path = Path(path)
+    # Through a symlink, to its target: a dotfile manager (stow, a bare
+    # repo) links ~/.config files into its own tree, and replacing the link
+    # with a plain file would silently cut the user's copy loose.
+    path = Path(os.path.realpath(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         existing_mode = path.stat().st_mode & 0o777

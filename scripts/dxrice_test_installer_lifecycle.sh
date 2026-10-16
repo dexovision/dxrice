@@ -119,6 +119,24 @@ DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > "$LOG/norepo.out" 2>&1
 assert "file without the repo variable is not edited" "$(yes_if "cmp -s '$LOG/norepo.lua' '$LUA'")"
 assert "...and the user is told what to change" "$(yes_if "grep -q 'dxrice_polkit_agent.sh' '$LOG/norepo.out'")"
 
+echo "=== dotfiles managed through symlinks ==="
+
+new_home symlinks
+mkdir -p "$H/dotfiles"
+old_template > "$H/dotfiles/hyprland.lua"
+ln -sf "$H/dotfiles/hyprland.lua" "$H/.config/hypr/hyprland.lua"
+printf 'export EDITOR=vim\n' > "$H/dotfiles/bashrc"
+ln -s "$H/dotfiles/bashrc" "$H/.bashrc"
+DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > "$LOG/sym.out" 2>&1
+call install_shell_alias >> "$LOG/sym.out" 2>&1
+call install_shell_alias >> "$LOG/sym.out" 2>&1
+assert "hyprland.lua is still a symlink after a migration" "$(yes_if "[ -L '$H/.config/hypr/hyprland.lua' ]")"
+assert "...and the dotfiles copy got the fix" "$(yes_if "grep -q 'fadeLayersIn' '$H/dotfiles/hyprland.lua'")"
+assert ".bashrc is still a symlink after installing the dx functions twice" "$(yes_if "[ -L '$H/.bashrc' ]")"
+assert "...with exactly one dx block in the dotfiles copy" \
+    "$(yes_if "[ \"\$(grep -c 'BEGIN dxrice shell functions' '$H/dotfiles/bashrc')\" = 1 ]")"
+assert "...and the user's own line kept" "$(yes_if "grep -q 'EDITOR=vim' '$H/dotfiles/bashrc'")"
+
 echo "=== a checkout path hyprland.lua can't use ==="
 
 SPACED="$SANDBOX/my stuff/dxrice"

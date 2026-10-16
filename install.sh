@@ -968,9 +968,11 @@ check_legacy_rice_checkout() {
             done
             [ "${#lines_to_remove[@]}" -eq 0 ] && continue
 
-            local tmp existing_mode
-            tmp="$(mktemp "$(dirname "$rc")/.$(basename "$rc").XXXXXX")"
-            existing_mode="$(stat -c %a "$rc" 2>/dev/null || echo 644)"
+            # write through a symlinked rc (dotfile managers) to its target
+            local tmp existing_mode target
+            target="$(realpath "$rc")"
+            tmp="$(mktemp "$(dirname "$target")/.$(basename "$target").XXXXXX")"
+            existing_mode="$(stat -c %a "$target" 2>/dev/null || echo 644)"
             local out_line keep lr
             : > "$tmp"
             while IFS= read -r out_line || [ -n "$out_line" ]; do
@@ -986,7 +988,7 @@ check_legacy_rice_checkout() {
 
             if ! cmp -s "$rc" "$tmp"; then
                 chmod "$existing_mode" "$tmp"
-                mv "$tmp" "$rc"
+                mv "$tmp" "$target"
                 ok "Removed the stale alias line(s) from $rc"
             else
                 rm -f "$tmp"

@@ -232,23 +232,8 @@ def patch_hyprland_lua(theme):
     if content == original:
         return  # nothing to change: leave the user's file (and its mtime) alone
     # Atomic: this is the user's own Hyprland config, rewritten on every
-    # Apply. open(path, "w") truncated it first, so a crash or full disk
-    # mid-write left Hyprland with an empty or half-written config.
-    tmp = f"{path}.dxrice.{os.getpid()}.tmp"
-    mode = os.stat(path).st_mode & 0o777
-    try:
-        with open(tmp, "w") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp, mode)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    # Apply; a crash mid-write must not leave it empty or half-written.
+    dxrice_manifest.atomic_write_bytes(path, content.encode())
 
 
 def _run_guarded(args, timeout=3):

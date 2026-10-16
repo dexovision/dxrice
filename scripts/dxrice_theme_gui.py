@@ -33,6 +33,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS_DIR)
 import dxrice_apply_theme as apply_theme
+import dxrice_manifest
 import dxrice_xdg
 from dxrice_gtk_widgets import (
     animate_in, label as _label, load_css, make_card, make_debounced, make_row, make_section_title,
@@ -175,20 +176,7 @@ DEFAULT_THEME = {
 def atomic_write_json(path, data):
     """Write via a temp file + os.replace so a crash/kill mid-write can
     never leave a truncated, unparseable theme.json on disk."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = f"{path}.tmp{os.getpid()}"
-    try:
-        with open(tmp_path, "w") as f:
-            json.dump(data, f, indent=4)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+    dxrice_manifest.atomic_write_json(path, data, trailing_newline=False)
 
 
 def load_theme(path):

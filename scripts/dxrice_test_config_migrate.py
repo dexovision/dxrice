@@ -67,11 +67,8 @@ class MigrateFileTest(unittest.TestCase):
         self.write(original)
         before = open(self.path).read()
 
-        def half_write_then_fail(obj, f, **kw):
-            f.write('{"accent": "12')
-            raise OSError(28, "No space left on device")
-
-        with mock.patch.object(migrate.json, "dump", side_effect=half_write_then_fail):
+        # the disk fills up while the new file is being written
+        with mock.patch("os.fsync", side_effect=OSError(28, "No space left on device")):
             with self.assertRaises(OSError):
                 migrate.migrate_file(self.path)
         self.assertEqual(open(self.path).read(), before, "theme.json was damaged by a failed migration write")

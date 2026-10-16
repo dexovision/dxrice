@@ -42,6 +42,7 @@ import sys
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS_DIR)
+import dxrice_manifest
 import dxrice_xdg
 
 REPO = os.path.dirname(SCRIPTS_DIR)
@@ -173,26 +174,7 @@ def migrate_file(live_theme_path: str) -> list:
     # writer of user files in this repo: open(path, "w") truncated the live
     # theme.json before writing it, so a crash or full disk mid-write left
     # the user with an empty or half-written theme.
-    tmp_path = f"{live_theme_path}.dxrice.{os.getpid()}.tmp"
-    try:
-        existing_mode = os.stat(live_theme_path).st_mode & 0o777
-    except OSError:
-        existing_mode = None
-    try:
-        with open(tmp_path, "w") as f:
-            json.dump(migrated, f, indent=4)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        if existing_mode is not None:
-            os.chmod(tmp_path, existing_mode)
-        os.replace(tmp_path, live_theme_path)
-    except BaseException:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+    dxrice_manifest.atomic_write_json(live_theme_path, migrated)
 
     notes.insert(0, f"Backed up your previous configuration to {backup_dir} before migrating.")
     return notes

@@ -68,10 +68,8 @@ class WallpaperThemeTest(unittest.TestCase):
     def test_failed_write_leaves_the_original_intact(self):
         before = open(self.theme).read()
 
-        def boom(obj, f, **kw):
-            f.write('{"acc')
-            raise OSError(28, "No space left on device")
-        with mock.patch.object(wt.json, "dump", side_effect=boom):
+        # the disk fills up while the new file is being written
+        with mock.patch("os.fsync", side_effect=OSError(28, "No space left on device")):
             with self.assertRaises(OSError):
                 self.run_main(self.wall)
         self.assertEqual(open(self.theme).read(), before)

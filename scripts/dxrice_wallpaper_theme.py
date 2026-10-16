@@ -37,6 +37,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dxrice_manifest
 import dxrice_xdg
 
 LIVE_THEME_JSON = os.path.join(dxrice_xdg.config_dir(), "theme.json")
@@ -137,26 +138,7 @@ def write_palette(path, palette):
     with open(path) as f:
         theme = json.load(f)
     theme.update(palette)
-    tmp = f"{path}.dxrice.{os.getpid()}.tmp"
-    try:
-        mode = os.stat(path).st_mode & 0o777
-    except OSError:
-        mode = None
-    try:
-        with open(tmp, "w") as f:
-            json.dump(theme, f, indent=4)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        if mode is not None:
-            os.chmod(tmp, mode)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    dxrice_manifest.atomic_write_json(path, theme)
 
 
 def main(argv=None):
