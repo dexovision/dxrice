@@ -774,7 +774,13 @@ class TestNoGhosting(GhostRig, unittest.TestCase):
         self.o.scene.ev("fakeWindows = " + json.dumps(fake))
         (tx, ty) = moves[self.target["address"]]
         self.target = dict(self.target, x=tx - mx, y=ty - my)   # where the real window now is
-        seen = self.frames(14, 25)
+        # Sample for as long as this close really lasts: after a pan it runs
+        # as long as the compositor's window move (_closeMs, 480 ms by
+        # default), plus the release frames. A fixed 14 x 25 ms only covered
+        # it when frame grabs happened to be slow (the full suite), so the
+        # test failed every time it ran on its own.
+        close_ms = self.o.ov("_closeMs")
+        seen = self.frames(math.ceil((close_ms + 200) / 25), 25)
         self.assertFalse(seen[-1][1], "the overview never gave the screen back")
         for p, covering, img in seen:
             if covering:
