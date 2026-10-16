@@ -71,6 +71,16 @@ PanelWindow {
     // one quick, readable ease-in-out zoom each way (instant under
     // reduce_motion); the dim runs alongside it, never as a stage of its own
     readonly property int zoomMs: Theme.reduceMotion ? 1 : Math.round(Theme.animMs * 2)
+    // How long Hyprland takes to move a window (its `windowsMove` leaf, else
+    // `windows`, else `global`; speed is in 100 ms units), read from
+    // `hyprctl -j animations` on the first open and after a config reload.
+    // A click that pans the desktop moves the real windows under the overlay
+    // with that animation, so the closing zoom runs exactly as long: the
+    // pictures and the real windows land on the same frame, and the overlay
+    // never lets go while a real window is still sliding into place.
+    property int compositorMoveMs: 480
+    property bool _animationsRead: false
+    property int _closeMs: root.zoomMs
     readonly property var zoomCurve: [0.4, 0.0, 0.2, 1.0, 1, 1]
     // settled: zoomed out and not animating -- window changes then glide
     readonly property bool _settled: root.open && root.progress === 1 && !enterAnim.running
@@ -108,6 +118,8 @@ PanelWindow {
         root.open = true;
         root.openedAt = Date.now();
         root._focusAfterClose = "";
+        root._closeMs = root.zoomMs;
+        if (!root._animationsRead) { root._animationsRead = true; animationsProc.running = true; }
         offScreenNote.shown = false;
         PanelManager.closeCurrent();
         // Immediate feedback: the surface comes up now, dimming the real
@@ -226,12 +238,23 @@ PanelWindow {
         command: ["hyprctl", "-j", "monitors"]
         stdout: StdioCollector { onStreamFinished: { root._monitors = root._parse(this.text); root._arrived(); } }
     }
+    Process {
+        id: animationsProc
+        command: ["hyprctl", "-j", "animations"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const ms = Geo.windowMoveMs(root._parse(this.text));
+                if (ms !== null) root.compositorMoveMs = ms;
+            }
+        }
+    }
     // Debounced: one burst of events (a window opening sends several) is
     // one refresh.
     Timer { id: refreshSoon; interval: 60; onTriggered: if (root.open) root.refresh() }
     Connections {
         target: Hyprland
         function onRawEvent(event) {
+            if (event.name === "configreloaded") root._animationsRead = false;
             if (!root.open) return;
             const relevant = ["openwindow", "closewindow", "movewindow", "movewindowv2", "changefloatingmode",
                               "fullscreen", "workspace", "workspacev2", "focusedmon", "focusedmonv2",
@@ -292,7 +315,10 @@ PanelWindow {
         }
         if (t.floating && !t.pinned && !t.fullscreen) {
             const d = root.panDelta(t);
-            if (d[0] || d[1]) root._pan(d);
+            if (d[0] || d[1]) {
+                root._pan(d);
+                root._closeMs = Math.max(root.zoomMs, Theme.reduceMotion ? 0 : root.compositorMoveMs);
+            }
         }
         root._focusAfterClose = t.address;
         root.hide();
@@ -335,10 +361,10 @@ PanelWindow {
         id: exitAnim
         ParallelAnimation {
             NumberAnimation {
-                target: root; property: "progress"; to: 0; duration: root.zoomMs
+                target: root; property: "progress"; to: 0; duration: root._closeMs
                 easing.type: Easing.BezierSpline; easing.bezierCurve: root.zoomCurve
             }
-            NumberAnimation { target: root; property: "fade"; to: 0; duration: root.zoomMs; easing.type: Easing.InQuad }
+            NumberAnimation { target: root; property: "fade"; to: 0; duration: root._closeMs; easing.type: Easing.InQuad }
         }
         // closed: let the tiles (and their capture sessions) go entirely,
         // then give a clicked window its focus once more (see focusLua)

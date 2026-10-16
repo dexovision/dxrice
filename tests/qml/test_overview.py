@@ -27,6 +27,8 @@ from harness import Scene  # noqa: E402
 import dxrice_overview as ov  # noqa: E402
 import dxrice_spiral as sp  # noqa: E402
 
+REPO = Path(__file__).resolve().parents[2]
+
 PAL = ["#5b6fa8", "#7a5ca8", "#3f8f86", "#a8743f", "#a35478", "#5a8f4a", "#9c8a3c", "#3f86a8"]
 MIXED = [(1100, 700), (860, 560), (640, 400), (900, 620), (550, 300), (1000, 650), (820, 560), (480, 320),
          (700, 460), (760, 480), (600, 380), (920, 600), (520, 340), (780, 500), (660, 420), (840, 540)]
@@ -576,6 +578,66 @@ class TestSelectionCentring(unittest.TestCase):
             self.assertEqual(moved_to(o.dispatches()), {})
         finally:
             o.scene.close()
+
+
+class TestCloseFollowsTheCompositor(unittest.TestCase):
+    """Clicking a window that isn't in view pans the real windows, and
+    Hyprland animates that move (its windowsMove/windows leaf). The overlay
+    must not let go before that animation has ended: the pictures would land
+    while the real windows were still sliding in under them, and both would
+    show. The closing zoom therefore runs as long as the compositor's move,
+    read from `hyprctl -j animations`; a close with no pan keeps its own
+    length."""
+
+    def js(self):
+        from PySide6.QtQml import QJSEngine
+        eng = QJSEngine()
+        src = (REPO / "quickshell" / "OverviewGeometry.js").read_text().replace(".pragma library", "")
+        eng.evaluate(src)
+        return lambda reply: eng.evaluate(f"windowMoveMs({json.dumps(reply)})").toVariant()
+
+    def test_reading_the_animations_reply(self):
+        f = self.js()
+        g = {"name": "global", "overridden": True, "enabled": True, "speed": 8.0}
+        w = {"name": "windows", "overridden": True, "enabled": True, "speed": 4.79}
+        mv = {"name": "windowsMove", "overridden": False, "enabled": True, "speed": 2.0}
+        self.assertEqual(f([[g, w, mv], []]), 479)
+        self.assertEqual(f([g, w, dict(mv, overridden=True)]), 200)
+        self.assertEqual(f([[g, dict(w, overridden=False)], []]), 800)
+        self.assertEqual(f([[g, dict(w, enabled=False)], []]), 0)
+        self.assertIsNone(f(None))
+        self.assertIsNone(f([]))
+
+    def release_ms(self, target_rect, move_speed):
+        anchor = (760, 400, 1160, 700)
+        o = OverviewScene(clients_for([anchor, target_rect]))
+        try:
+            leaves = [{"name": "global", "overridden": True, "enabled": True, "speed": 8},
+                      {"name": "windows", "overridden": True, "enabled": True, "speed": move_speed}]
+            o.scene.set_command("hyprctl -j animations", json.dumps([leaves, []]))
+            target = next(w for w in o.layout["windows"] if w["address"] == "0xa001")
+            o.call("show")
+            o.scene.wait(SETTLE)
+            self.assertEqual(o.ov("compositorMoveMs"), round(move_speed * 100))
+            import time
+            o.click(*TestOverview.visible_point(type("X", (), {"o": o})(), target))
+            t0 = time.monotonic()
+            while o.ov("covering") and time.monotonic() - t0 < 3:
+                o.scene.wait(5)
+            return (time.monotonic() - t0) * 1000, bool(moved_to(o.dispatches())), o.ov("zoomMs")
+        finally:
+            o.scene.close()
+
+    def test_a_panned_close_outlasts_the_compositor_move(self):
+        waited, panned, _ = self.release_ms((2600, 200, 3300, 650), 7.0)
+        self.assertTrue(panned)
+        self.assertGreaterEqual(waited, 700)
+        self.assertLess(waited, 700 + 250)
+
+    def test_a_close_without_a_pan_keeps_the_zoom_length(self):
+        waited, panned, zoom = self.release_ms((100, 120, 600, 500), 7.0)
+        self.assertFalse(panned)
+        self.assertLess(waited, zoom + 250)
 
 
 class GhostRig:
