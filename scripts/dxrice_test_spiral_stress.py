@@ -18,7 +18,6 @@ import contextlib
 import io
 import os
 import random
-import re
 import sys
 import unittest
 
@@ -98,7 +97,6 @@ class SpiralStress(cloud._Base):
                 self.assertEqual(moves, [], f"seed {seed} step {step}: a second SUPER+G moved windows ({out.strip()})")
 
     def test_seeds(self):
-        failures = []
         for seed in range(SEEDS):
             self.hypr.clients.clear()
             with self.subTest(seed=seed):
