@@ -31,6 +31,12 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # for this session's.
 RUN_DIR="${XDG_RUNTIME_DIR:-/tmp/dxrice-$(id -u)}/dxrice/${HYPRLAND_INSTANCE_SIGNATURE:-session}"
 
+# The running Hyprland's own runtime directory; it disappears when that
+# compositor exits.
+HYPR_DIR=""
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    HYPR_DIR="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE"
+fi
 UNITS="dxrice-quickshell.service dxrice-auto-place-window.service dxrice-infinite-desktop.service"
 MAX_CRASHES="${DXRICE_SUPERVISE_MAX:-5}"
 WINDOW_S="${DXRICE_SUPERVISE_WINDOW:-30}"
@@ -83,6 +89,8 @@ supervise() {
             "$@"
             status=$?
             [ "$status" = 0 ] && break
+            # its Hyprland is gone: nothing to restart it for
+            [ -z "$HYPR_DIR" ] || [ -d "$HYPR_DIR" ] || break
             now=$(date +%s)
             recent=""
             for t in $crashes; do

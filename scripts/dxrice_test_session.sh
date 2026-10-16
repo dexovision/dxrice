@@ -84,6 +84,7 @@ exit 3
 EOF
 printf '#!/bin/sh\n' > "$BIN/qs"; chmod +x "$BIN/qs"
 rm -f "$BIN/systemctl"
+mkdir -p "$SANDBOX/run/hypr/real" "$SANDBOX/run/hypr/gone"
 env -i HOME="$H" PATH="$BIN:/usr/bin:/bin" XDG_RUNTIME_DIR="$SANDBOX/run" HYPRLAND_INSTANCE_SIGNATURE=real \
     DXRICE_SUPERVISE_DELAY=0.05 DXRICE_SUPERVISE_MAX=3 sh "$STUB/scripts/dxrice_session.sh"
 sleep 2
@@ -106,6 +107,24 @@ for _ in 1 2; do
 done
 sleep 0.5
 assert "starting twice runs one copy of each part" "$(yes_if "[ \$(wc -l < '$SANDBOX/quickshell.starts2') = 1 ]")"
+
+# its Hyprland goes away: a crashed part isn't restarted
+pkill -f "$STUB/scripts/dxrice_session.sh" 2>/dev/null   # earlier supervisors first,
+pkill -f "$STUB/part.sh" 2>/dev/null; sleep 0.3            # so nothing restarts these
+cat > "$STUB/part.sh" <<EOF
+#!/bin/sh
+echo start >> "$SANDBOX/\$1.starts3"
+sleep 0.3
+exit 3
+EOF
+env -i HOME="$H" PATH="$BIN:/usr/bin:/bin" XDG_RUNTIME_DIR="$SANDBOX/run" HYPRLAND_INSTANCE_SIGNATURE=gone \
+    DXRICE_SUPERVISE_DELAY=0.05 DXRICE_SUPERVISE_MAX=5 sh "$STUB/scripts/dxrice_session.sh"
+sleep 0.1
+rmdir "$SANDBOX/run/hypr/gone"
+sleep 1.5
+assert "once its Hyprland is gone, a crashed part is not restarted" \
+    "$(yes_if "[ \$(wc -l < '$SANDBOX/quickshell.starts3') = 1 ]")"
+assert "...and its supervisor has ended" "$(yes_if "[ -z \"\$(ls '$SANDBOX/run/dxrice/gone/'*.pid 2>/dev/null)\" ]")"
 
 echo ""
 if [ "$FAILED" = 0 ]; then echo "All assertions passed."; else echo "FAILED"; exit 1; fi

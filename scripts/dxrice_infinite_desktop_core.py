@@ -391,6 +391,8 @@ def mouse_reader_device(path):
     except Exception:
         pass
 
+_instance_dir = (os.path.join(os.environ["XDG_RUNTIME_DIR"], "hypr", os.environ["HYPRLAND_INSTANCE_SIGNATURE"])
+                 if os.environ.get("XDG_RUNTIME_DIR") and os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") else None)
 _active_kbd_threads = {}
 _active_mouse_threads = {}
 
@@ -416,6 +418,12 @@ def device_manager():
                 print(f"[+] Mouse detected: {path}", flush=True)
         except Exception as e:
             print(f"Error in device_manager: {e}", flush=True)
+
+        # Its Hyprland is gone (logout, or a new compositor instance): exit
+        # rather than keep reading input for a session that no longer exists.
+        if _instance_dir and not os.path.isdir(_instance_dir):
+            print("Hyprland instance gone -- exiting.", flush=True)
+            os._exit(0)
 
         elapsed = time.time() - start_time
         interval = WARMUP_INTERVAL if elapsed < WARMUP_DURATION else DEVICE_RESCAN_INTERVAL

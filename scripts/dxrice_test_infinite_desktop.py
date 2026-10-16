@@ -226,6 +226,18 @@ class TestInfiniteDesktop(unittest.TestCase):
         self.assertEqual(r.hypr.dispatches, [])
 
 
+class TestSessionEnd(unittest.TestCase):
+    def test_exits_when_its_hyprland_is_gone(self):
+        rig = Rig([window("0xa", 0, 0)], active=None)
+        try:
+            os.rename(os.path.join(rig.tmp, "hypr", "testsig"), os.path.join(rig.tmp, "hypr", "old"))
+            # the device rescan notices within its interval (0.5 s while warming up)
+            rig.proc.wait(timeout=5)
+            self.assertEqual(rig.proc.returncode, 0)
+        finally:
+            rig.close()
+
+
 if __name__ == "__main__":
     try:
         import evdev  # noqa: F401  (only to know the real daemon could run)

@@ -2631,6 +2631,14 @@ def main():
                             print(f"DEBUG t={time.time():.3f} line={line!r}", file=sys.stderr, flush=True)
                         listener.handle_line(line)
         except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
+            # The Hyprland this listener belongs to has gone (logout, or a
+            # compositor restart with a new instance signature): nothing will
+            # ever come back on this socket, so stop instead of retrying for
+            # the rest of the login.
+            if not os.path.isdir(os.path.dirname(path)):
+                print("dxrice_auto_place_window: its Hyprland instance is gone -- exiting.",
+                      file=sys.stderr, flush=True)
+                return
             print(f"socket2 unavailable ({type(e).__name__}: {e}) -- retrying in 1s",
                   file=sys.stderr, flush=True)
             time.sleep(1)
