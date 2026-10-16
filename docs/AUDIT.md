@@ -200,39 +200,40 @@ Nothing here is done without your explicit go-ahead.
 
 ## Results (end of the audit)
 
-Branch: `claude/dxrice-engineering-audit-uplvjy`, from `4688761`.
+Branch: `claude/dxrice-engineering-audit-uplvjy`, from `4688761`, since
+rebased onto the rewritten `main` (`22a54da`, the same files).
 
 ### Finding by finding
 
 | | Status | Commit |
 |---|---|---|
-| C1 layer-fade fix never reached installs | fixed: install/update offer the edit (backup, consent) | 311982b |
-| C1b overview let go while panned windows still moved | fixed: closing zoom runs as long as Hyprland's window move | 8770d2f |
-| C2 no bar without systemd | fixed: `scripts/dxrice_session.sh` supervises without systemd | 770d0d7 |
-| C3 false "placement tests FAILED" | fixed: log in the state dir | 311982b |
-| C4 failed font download aborted the install | fixed | 311982b |
-| K1 `XDG_STATE_HOME` ignored | fixed in the template, the `dx` functions, and by migration | 770d0d7, 311982b |
-| K2 re-exec dropped flags | fixed | 311982b |
-| K3 power actions systemd-only | fixed: `scripts/dxrice_power.sh` (systemd or elogind) | 770d0d7 |
-| K4 update/uninstall as root | refused, like install | 311982b |
-| K5 unquoted wallpaper path | fixed in the template | 770d0d7 |
-| P1 daemon busy-polling | fixed (measured below) | e9c8d66 |
-| P2 top bar `hyprctl` poll | fixed (measured below) | fe65fee |
+| C1 layer-fade fix never reached installs | fixed: install/update offer the edit (backup, consent) | d4f785b |
+| C1b overview let go while panned windows still moved | fixed: closing zoom runs as long as Hyprland's window move | 35884d4 |
+| C2 no bar without systemd | fixed: `scripts/dxrice_session.sh` supervises without systemd | 307ab46 |
+| C3 false "placement tests FAILED" | fixed: log in the state dir | d4f785b |
+| C4 failed font download aborted the install | fixed | d4f785b |
+| K1 `XDG_STATE_HOME` ignored | fixed in the template, the `dx` functions, and by migration | 307ab46, d4f785b |
+| K2 re-exec dropped flags | fixed | d4f785b |
+| K3 power actions systemd-only | fixed: `scripts/dxrice_power.sh` (systemd or elogind) | 307ab46 |
+| K4 update/uninstall as root | refused, like install | d4f785b |
+| K5 unquoted wallpaper path | fixed in the template | 307ab46 |
+| P1 daemon busy-polling | fixed (measured below) | 273e663 |
+| P2 top bar `hyprctl` poll | fixed (measured below) | 6abbdb1 |
 | P3 python per focus change | not changed: event-driven, not idle cost | - |
-| P4 clock every second | now once a minute | fe65fee |
-| M1 dead `_dev_` QML | removed | 97a967b |
-| M2 duplicated install.sh Python | atomic-write and rc-strip copies replaced by helpers | 311982b |
-| M3 unused imports/variables | removed (ruff F clean) | 97a967b |
+| P4 clock every second | now once a minute | 6abbdb1 |
+| M1 dead `_dev_` QML | removed | f10f05c |
+| M2 duplicated install.sh Python | atomic-write and rc-strip copies replaced by helpers | d4f785b |
+| M3 unused imports/variables | removed (ruff F clean) | f10f05c |
 | M4 comment narration | trimmed only where code was rewritten | - |
-| G1-G3 Gentoo, package lists | `deps/*.list`, emerge backend, docs | e6fbbcc |
-| U1-U3 updater | fetch/preview/ask/fast-forward, refusals change nothing | e6fbbcc |
-| D1-D2 README | rewritten; `dxrice_test_docs.py` checks it | 7f6db89 |
-| Daemons outliving their Hyprland (found in review) | placement and panning daemons exit when their Hyprland instance is gone; the supervisor stops restarting | 6ac7767 |
-| Fixed `/tmp` paths (found during the work) | moved to `$XDG_RUNTIME_DIR/dxrice` | b22dc20 |
-| Unattended prompts defaulting to yes (found during the work) | privileged/file-changing prompts need a terminal or `--yes` | 311982b |
+| G1-G3 Gentoo, package lists | `deps/*.list`, emerge backend, docs | 4931edc |
+| U1-U3 updater | fetch/preview/ask/fast-forward, refusals change nothing | 4931edc |
+| D1-D2 README | rewritten; `dxrice_test_docs.py` checks it | 04ff6ae |
+| Daemons outliving their Hyprland (found in review) | placement and panning daemons exit when their Hyprland instance is gone; the supervisor stops restarting | 8ab4d14 |
+| Fixed `/tmp` paths (found during the work) | moved to `$XDG_RUNTIME_DIR/dxrice` | 776d527 |
+| Unattended prompts defaulting to yes (found during the work) | privileged/file-changing prompts need a terminal or `--yes` | d4f785b |
 
-(e6fbbcc carries both the Gentoo work and the updater rewrite: install.sh
-went into that commit whole. ba71fc6 adds the updater's test.)
+(4931edc carries both the Gentoo work and the updater rewrite: install.sh
+went into that commit whole. 63ae867 adds the updater's test.)
 
 ### Measurements
 
@@ -251,7 +252,7 @@ derived from the `windows` leaf's speed (4.79 × 100 ms). It was not
 measured: that leaf is a spring, and whether `speed` sets a spring's
 duration exactly is unconfirmed. The parser also assumes the
 `hyprctl -j animations` output format. docs/OVERVIEW.md's manual check 3
-confirms both on a real desktop. The message of commit 8770d2f states the
+confirms both on a real desktop. The message of commit 35884d4 (8770d2f before the rebase) states the
 480 ms as fact; this paragraph is the correction.
 
 **Not measured** (needs the real desktop):
@@ -277,8 +278,10 @@ separately.
 - **Animation retuning** beyond the overview close. Curves, durations and
   springs are the visual identity, and judging them needs the real
   screen. docs/OVERVIEW.md lists the manual checks.
-- **History rewrite** for commit `0d3352e`'s co-author trailer: see the
-  proposal above.
+- **History rewrite** for commit `0d3352e`'s co-author trailer: not part
+  of the audit. Done afterwards at the maintainer's request: `main` was
+  rewritten to `22a54da` (`0d3352e` became `3432ed1`, identical apart from
+  the removed trailer) and pushed with `--force-with-lease`.
 
 ## Second pass (bug hunt), 2026-10-16
 
@@ -290,19 +293,19 @@ fix, and failed there.
 
 | Severity | Where | Finding and evidence | Commit |
 |---|---|---|---|
-| medium | `dxrice_navigate_windows.py`, `dxrice_move_window.py`, `dxrice_infinite_desktop_core.py` | monitor measured in mode pixels, not layout coordinates: on a 2880×1620 panel at 1.5×, "centre" was (1440, 810) and the right edge 960 px too far; the bar and dock were ignored, unlike SUPER+G and the overview. Old code fails the new tests | fa22755 |
-| medium | same three | pans moved pinned (e.g. picture-in-picture) and fullscreen windows, which the overview's own pan leaves alone. Old code fails | fa22755 |
-| low | `dxrice_infinite_desktop_core.py` | the active workspace was cached for 2 s, so a pan right after switching workspace moved the old workspace's windows. Old code fails | fa22755 |
-| medium | `dxrice_auto_place_window.place_new_window` | a window opened on another monitor was placed in the focused monitor's area. The old code put the test window at (560, 282) on the wrong screen | 9b88c3f |
-| medium | `dxrice_floating_tile_toggle.py` | SUPER+D restore moved, then resized, and the resize is centre-anchored, so windows came back offset by half their size change (old: (170, 390) instead of (100, 120)) | 938d840 |
-| medium (suspected) | `TopBar.qml` workspace pills | clicks went through Quickshell's `activate()`, whose dispatch syntax this Lua-config Hyprland may refuse; now sends `hl.dsp.focus({ workspace = N })` like every other DXrice dispatch. Not confirmed live | 85ae57c |
-| low | `TopBar.qml` | special workspaces (negative ids) were shown as ordinary pills | 85ae57c |
-| medium | `install.sh` | a checkout path with a space installed "successfully" with every keybind broken (`hyprland.lua` splices the path unquoted). Now refused. Old installer: rc 0 | 5011baf |
-| low | `install.sh` | update failed for a branch tracking a local branch (`git fetch main`). Old updater: rc 1 | 5011baf |
-| low | `install.sh` `verify_deploy` | didn't check `dxrice_session.sh` and the other new helpers, or the executable bit of the two scripts `hyprland.lua` runs directly | 5011baf |
-| medium | every atomic writer of user files | `os.replace` replaced a dotfiles symlink with a plain file (`hyprland.lua`, `theme.json`, dock config, `.bashrc`/`.zshrc`). Reproduced; old code fails the new tests. Five duplicate writers consolidated | e416001 |
-| medium (security) | `WifiBackend.qml` `connectWithPassword`, `dxrice_quick_settings.connect_wifi` | the Wi-Fi password was an `nmcli` argument (`device wifi connect SSID password SECRET`), readable by any local user in `ps`/`/proc/PID/cmdline` while nmcli ran. Now `scripts/dxrice_wifi_connect.py` takes it on stdin, creates the profile without a secret, and activates it with nmcli's documented `passwd-file` (a 0600 file in `$XDG_RUNTIME_DIR/dxrice`, removed when nmcli exits). `--ask` wasn't used: nmcli documents it as an interactive prompt, and a piped password is reported not to work with it. Test: a fake nmcli scans every `/proc/PID/cmdline` for a throwaway secret during activation (a negative control proves the scan catches an argv leak); the QML harness test fails on the old code | see below |
-| low | `dxrice_navigate_windows.py` | `--to`/`pan_to` was dead code (the overview pans in QML), and its docstring said otherwise | 348871e |
+| medium | `dxrice_navigate_windows.py`, `dxrice_move_window.py`, `dxrice_infinite_desktop_core.py` | monitor measured in mode pixels, not layout coordinates: on a 2880×1620 panel at 1.5×, "centre" was (1440, 810) and the right edge 960 px too far; the bar and dock were ignored, unlike SUPER+G and the overview. Old code fails the new tests | 3ec9c88 |
+| medium | same three | pans moved pinned (e.g. picture-in-picture) and fullscreen windows, which the overview's own pan leaves alone. Old code fails | 3ec9c88 |
+| low | `dxrice_infinite_desktop_core.py` | the active workspace was cached for 2 s, so a pan right after switching workspace moved the old workspace's windows. Old code fails | 3ec9c88 |
+| medium | `dxrice_auto_place_window.place_new_window` | a window opened on another monitor was placed in the focused monitor's area. The old code put the test window at (560, 282) on the wrong screen | 07026d9 |
+| medium | `dxrice_floating_tile_toggle.py` | SUPER+D restore moved, then resized, and the resize is centre-anchored, so windows came back offset by half their size change (old: (170, 390) instead of (100, 120)) | 315e992 |
+| medium (suspected) | `TopBar.qml` workspace pills | clicks went through Quickshell's `activate()`, whose dispatch syntax this Lua-config Hyprland may refuse; now sends `hl.dsp.focus({ workspace = N })` like every other DXrice dispatch. Not confirmed live | b1df545 |
+| low | `TopBar.qml` | special workspaces (negative ids) were shown as ordinary pills | b1df545 |
+| medium | `install.sh` | a checkout path with a space installed "successfully" with every keybind broken (`hyprland.lua` splices the path unquoted). Now refused. Old installer: rc 0 | 56302e4 |
+| low | `install.sh` | update failed for a branch tracking a local branch (`git fetch main`). Old updater: rc 1 | 56302e4 |
+| low | `install.sh` `verify_deploy` | didn't check `dxrice_session.sh` and the other new helpers, or the executable bit of the two scripts `hyprland.lua` runs directly | 56302e4 |
+| medium | every atomic writer of user files | `os.replace` replaced a dotfiles symlink with a plain file (`hyprland.lua`, `theme.json`, dock config, `.bashrc`/`.zshrc`). Reproduced; old code fails the new tests. Five duplicate writers consolidated | 96c5ddb |
+| medium (security) | `WifiBackend.qml` `connectWithPassword`, `dxrice_quick_settings.connect_wifi` | the Wi-Fi password was an `nmcli` argument (`device wifi connect SSID password SECRET`), readable by any local user in `ps`/`/proc/PID/cmdline` while nmcli ran. Now `scripts/dxrice_wifi_connect.py` takes it on stdin, creates the profile without a secret, and activates it with nmcli's documented `passwd-file` (a 0600 file in `$XDG_RUNTIME_DIR/dxrice`, removed when nmcli exits). `--ask` wasn't used: nmcli documents it as an interactive prompt, and a piped password is reported not to work with it. Test: a fake nmcli scans every `/proc/PID/cmdline` for a throwaway secret during activation (a negative control proves the scan catches an argv leak); the QML harness test fails on the old code | 183ba34 |
+| low | `dxrice_navigate_windows.py` | `--to`/`pan_to` was dead code (the overview pans in QML), and its docstring said otherwise | ee00926 |
 
 ### Found, not fixed
 
@@ -335,3 +338,7 @@ for a bare `python3`. `-X importtime` puts most of the difference in the
 standard library's `json` (8-10 ms, via `re` and `enum`), which every script
 needs to parse Hyprland's replies. The remainder is a few milliseconds and
 wasn't worth a change.
+
+Commit hashes above are those of `claude/dxrice-engineering-audit-uplvjy`
+after it was rebased onto the rewritten `main` (2026-10-16); commit messages
+written before the rebase still cite the earlier hashes.
