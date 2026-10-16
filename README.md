@@ -87,7 +87,9 @@ cd ~/dxrice
 ```
 
 Clone the whole repository. The installer needs the `scripts/` and `theme/`
-directories next to it.
+directories next to it. Keep the checkout at a path made of plain characters
+(letters, digits, `. _ - / + @`): `hyprland.lua` runs scripts by that path
+without quoting it, so the installer refuses one with spaces.
 
 The installer:
 
@@ -262,10 +264,17 @@ never changes a value you've set. Rendered files you've edited by hand
 (waybar's stylesheet, say) are recognised from the deploy manifest and
 left alone.
 
+If you keep these files in a dotfiles repository and symlink them into
+`~/.config` (stow, a bare repo), DXrice writes through the links: the file in
+your dotfiles tree is updated and the link stays a link. The same goes for
+`~/.bashrc` and `~/.zshrc`.
+
 ## Troubleshooting
 
 - **No keybinds after installing.** Log out and back in (see the note
   under Installing). Run `Hyprland --version`; it needs 0.55 or newer.
+  `./install.sh update` warns if the checkout's path has spaces in it,
+  which breaks every keybind; move it (e.g. to `~/dxrice`).
 - **No bar.** Check `scripts/dxrice_session.sh status`. Under systemd, also
   run `journalctl --user -u dxrice-quickshell`; without systemd, see
   `$XDG_RUNTIME_DIR/dxrice/<hyprland instance>/quickshell.log`. After 5

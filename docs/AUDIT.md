@@ -279,3 +279,59 @@ separately.
   screen. docs/OVERVIEW.md lists the manual checks.
 - **History rewrite** for commit `0d3352e`'s co-author trailer: see the
   proposal above.
+
+## Second pass (bug hunt), 2026-10-16
+
+An independent pass over the code as it stood after the first one. "Old code
+fails" means the new regression test was also run against the code before the
+fix, and failed there.
+
+### Fixed
+
+| Severity | Where | Finding and evidence | Commit |
+|---|---|---|---|
+| medium | `dxrice_navigate_windows.py`, `dxrice_move_window.py`, `dxrice_infinite_desktop_core.py` | monitor measured in mode pixels, not layout coordinates: on a 2880×1620 panel at 1.5×, "centre" was (1440, 810) and the right edge 960 px too far; the bar and dock were ignored, unlike SUPER+G and the overview. Old code fails the new tests | fa22755 |
+| medium | same three | pans moved pinned (e.g. picture-in-picture) and fullscreen windows, which the overview's own pan leaves alone. Old code fails | fa22755 |
+| low | `dxrice_infinite_desktop_core.py` | the active workspace was cached for 2 s, so a pan right after switching workspace moved the old workspace's windows. Old code fails | fa22755 |
+| medium | `dxrice_auto_place_window.place_new_window` | a window opened on another monitor was placed in the focused monitor's area. The old code put the test window at (560, 282) on the wrong screen | 9b88c3f |
+| medium | `dxrice_floating_tile_toggle.py` | SUPER+D restore moved, then resized, and the resize is centre-anchored, so windows came back offset by half their size change (old: (170, 390) instead of (100, 120)) | 938d840 |
+| medium (suspected) | `TopBar.qml` workspace pills | clicks went through Quickshell's `activate()`, whose dispatch syntax this Lua-config Hyprland may refuse; now sends `hl.dsp.focus({ workspace = N })` like every other DXrice dispatch. Not confirmed live | 85ae57c |
+| low | `TopBar.qml` | special workspaces (negative ids) were shown as ordinary pills | 85ae57c |
+| medium | `install.sh` | a checkout path with a space installed "successfully" with every keybind broken (`hyprland.lua` splices the path unquoted). Now refused. Old installer: rc 0 | 5011baf |
+| low | `install.sh` | update failed for a branch tracking a local branch (`git fetch main`). Old updater: rc 1 | 5011baf |
+| low | `install.sh` `verify_deploy` | didn't check `dxrice_session.sh` and the other new helpers, or the executable bit of the two scripts `hyprland.lua` runs directly | 5011baf |
+| medium | every atomic writer of user files | `os.replace` replaced a dotfiles symlink with a plain file (`hyprland.lua`, `theme.json`, dock config, `.bashrc`/`.zshrc`). Reproduced; old code fails the new tests. Five duplicate writers consolidated | e416001 |
+| low | `dxrice_navigate_windows.py` | `--to`/`pan_to` was dead code (the overview pans in QML), and its docstring said otherwise | this pass |
+
+### Found, not fixed
+
+| Severity | Where | Finding | Why not, and the fix |
+|---|---|---|---|
+| medium (security) | `WifiBackend.qml` `connectWithPassword`, `dxrice_quick_settings.connect_wifi` | the Wi-Fi password is an `nmcli` argument, readable by any local user in `ps`/`/proc/PID/cmdline` while nmcli runs | the fix (`nmcli --ask device wifi connect SSID`, password written to stdin) can't be verified without NetworkManager; if `--ask` doesn't read a non-terminal stdin, joining networks breaks. To verify: `printf 'PASSWORD\n' \| nmcli --ask device wifi connect SSID` on a real system |
+| low (suspected) | `Overview.qml` `refresh()` | restarting a running `hyprctl` process could, if Quickshell still delivers the killed run's `streamFinished`, count one reply twice and close a just-reopened overview | depends on Quickshell's process semantics, which the harness can't model; only reachable when reopening within ~5 ms. Fix if seen: don't restart a running read, re-read once it finishes |
+| low | `dxrice_apply_theme.patch_hyprland_lua` | each regex patches the first match in the file, a commented-out line included | the shipped template has no such comments; a user adding one before the real setting would see Apply edit the comment |
+| low | `dxrice_quick_settings.py` screenshots | `shell=True` with the screenshot path interpolated | the path is built from `$HOME` and a timestamp; only a home path containing `"` or `$` could break it |
+| low | `dxrice_auto_arrange.py` | the resize branch and resize memory are dead (sizes are always kept) | removal means rewriting a dozen placement tests; no behaviour change |
+
+### Stress testing (exercised, not inferred)
+
+`scripts/dxrice_test_spiral_stress.py` drives the real placement and the real
+SUPER+G entry point through the in-memory Hyprland: seeded sequences of opens
+(ordinary, 2400×260, 300×1600, larger than the screen, tiny), closes, pinned
+and fullscreen windows, and SUPER+G presses, each followed by a second press.
+Over 500 seeds: 7,963 placements and 5,924 presses with no invariant broken
+(nothing moved or resized by an open, no overlaps, SUPER+G never resizes or
+moves a pinned/fullscreen window, a second press moves nothing). The suite
+runs 40 seeds (about 3 s).
+
+Not exercised: real multi-monitor layouts beyond the unit tests' fixtures,
+real compositor timing under a burst of opens, and Hyprland's own animations.
+
+### Keypress latency (measured, no change)
+
+Each keybind starts a Python process. Best of 7 runs here, up to the first
+Hyprland call: SUPER+G 48 ms, arrows 28-32 ms, SUPER+C 43 ms, against 14 ms
+for a bare `python3`. `-X importtime` puts most of the difference in the
+standard library's `json` (8-10 ms, via `re` and `enum`), which every script
+needs to parse Hyprland's replies. The remainder is a few milliseconds and
+wasn't worth a change.

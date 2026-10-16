@@ -8,11 +8,6 @@ Navigates between windows in the active workspace using Super+arrows.
 - Tiled dwindle: movefocus left/right/up/down
 
 Usage: python3 dxrice_navigate_windows.py <left|right|up|down>
-       python3 dxrice_navigate_windows.py --to ADDRESS
-         pan (every floating window of the active workspace moved together,
-         the same rigid move the arrow keys make) so that window is centred;
-         the desktop overview (Overview.qml) uses it when you confirm a click
-         on a window that is entirely off screen. Focus is left to the caller.
 """
 
 import sys
@@ -132,32 +127,9 @@ def pan_to_window(floating, target_addr, center_x, center_y):
         focus_window(target_addr)
 
 
-def pan_to(address):
-    """Centre one window of the active workspace on the focused monitor by
-    moving every floating window of that workspace by the same delta (the
-    infinite desktop's camera). Tiled windows are never off screen and are
-    left alone. Returns the delta, or None if the window isn't a floating
-    window of the active workspace."""
-    ws = hyprctl_json(["activeworkspace"])
-    if not ws:
-        return None
-    clients = hyprctl_json(["clients"]) or []
-    floating = [w for w in clients if dxrice_monitor.pans_with_desktop(w, ws["id"])]
-    target = next((w for w in floating if w["address"] == address), None)
-    if target is None:
-        return None
-    center_x, center_y = get_monitor_center()
-    dx = center_x - (target["at"][0] + target["size"][0] // 2)
-    dy = center_y - (target["at"][1] + target["size"][1] // 2)
-    batch_async([move_window_exact_lua(int(w["at"][0] + dx), int(w["at"][1] + dy), w["address"]) for w in floating])
-    return dx, dy
-
-
 def main():
-    if len(sys.argv) == 3 and sys.argv[1] == "--to":
-        sys.exit(0 if pan_to(sys.argv[2]) is not None else 1)
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
-        print("Usage: dxrice_navigate_windows.py <left|right|up|down> | --to ADDRESS")
+        print("Usage: dxrice_navigate_windows.py <left|right|up|down>")
         sys.exit(1)
 
     direction = sys.argv[1]

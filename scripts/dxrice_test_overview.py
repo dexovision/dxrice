@@ -272,39 +272,6 @@ class TestReadOnly(unittest.TestCase):
         self.assertIsNone(json.loads(buf.getvalue())["monitor"])
 
 
-class TestPanTo(unittest.TestCase):
-    def test_pan_to_centres_one_window_by_moving_all_floating_ones_together(self):
-        """dxrice_navigate_windows.py --to ADDRESS (the overview's confirmed
-        click on an off-screen window): every floating window of the active
-        workspace moves by the same delta, the target ends up centred on the
-        focused monitor, tiled windows and other workspaces are untouched,
-        nothing but moves is sent."""
-        import dxrice_navigate_windows as nav
-        cl = spiral_clients(MIXED)
-        cl.append(client(80, (100, 100, 900, 700), floating=False))
-        cl.append(client(81, (100, 100, 900, 700), ws=2))
-        sent = []
-        saved = (nav.hyprctl_json, nav.batch_async, nav.focus_window)
-
-        def fake(args, timeout=2):
-            return {"activeworkspace": {"id": 1}, "clients": cl, "monitors": [monitor()]}[args[0]]
-        nav.hyprctl_json, nav.batch_async = fake, sent.extend
-        nav.focus_window = lambda *a: self.fail("pan_to focused something (the caller does)")
-        try:
-            target = cl[12]
-            dx, dy = nav.pan_to(target["address"])
-            self.assertIsNone(nav.pan_to("0xdead"))
-        finally:
-            nav.hyprctl_json, nav.batch_async, nav.focus_window = saved
-        floating = [c for c in cl if c["workspace"]["id"] == 1 and c["floating"]]
-        self.assertEqual(len(sent), len(floating))
-        for c, expr in zip(floating, sent):
-            self.assertIn(f'address:{c["address"]}', expr)
-            self.assertIn(f'x = {int(c["at"][0] + dx)}, y = {int(c["at"][1] + dy)}', expr)
-        self.assertEqual((target["at"][0] + target["size"][0] // 2 + dx, target["at"][1] + target["size"][1] // 2 + dy),
-                         (960, 540))
-
-
 class TestKeybinds(unittest.TestCase):
     """The overview's keys in the hyprland.lua template: present, unique,
     accepted by Hyprland's own parser, and visible to the drift checker
