@@ -69,13 +69,16 @@ STATE_DIR="$STATE_HOME/dxrice"
 
 # First non-flag argument is the mode (default: install); --dry-run and
 # --purge are flags that can appear anywhere alongside it.
+ORIG_ARGS=("$@")
 MODE=""
 DRY_RUN=0
 PURGE=0
+ASSUME_YES="${DXRICE_ASSUME_YES:-0}"
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
         --purge) PURGE=1 ;;
+        --yes|-y) ASSUME_YES=1 ;;
         *) [ -z "$MODE" ] && MODE="$arg" ;;
     esac
 done
@@ -172,6 +175,7 @@ usage() {
 }
 
 # ask_yes_no "prompt" DEFAULT   (DEFAULT is Y or N)
+# For routine questions. Without a terminal it takes the default.
 ask_yes_no() {
     local prompt="$1" default="$2" suffix reply
     if [ "$default" = "Y" ]; then suffix="[Y/n]"; else suffix="[y/N]"; fi
@@ -183,6 +187,23 @@ ask_yes_no() {
         reply="${reply:-$default}"
     fi
     [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# confirm "prompt"
+# For anything privileged (sudo, package installs, group changes) or anything
+# that changes or moves the user's own files. Defaults to yes at a terminal.
+# Without one it answers no, unless --yes was given: nothing is installed or
+# edited because a script happened to run unattended.
+confirm() {
+    if [ "$ASSUME_YES" = "1" ]; then
+        info "$1 [Y/n] -> yes (--yes)"
+        return 0
+    fi
+    if [ ! -t 0 ]; then
+        info "$1 [Y/n] -> no terminal attached, skipping (re-run with --yes to accept)"
+        return 1
+    fi
+    ask_yes_no "$1" Y
 }
 
 # ---------------------------------------------------------------------------
@@ -259,11 +280,11 @@ install_shell_alias() {
     block=$(cat <<'BLOCK'
 # BEGIN dxrice shell functions (added by DXrice's install.sh)
 dxrice-update() {
-    "$(cat "$HOME/.local/state/dxrice/repo_path" 2>/dev/null || echo "$HOME/dxrice")/install.sh" update
+    "$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/dxrice/repo_path" 2>/dev/null || echo "$HOME/dxrice")/install.sh" update
 }
 dx() {
     local repo
-    repo="$(cat "$HOME/.local/state/dxrice/repo_path" 2>/dev/null || echo "$HOME/dxrice")"
+    repo="$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/dxrice/repo_path" 2>/dev/null || echo "$HOME/dxrice")"
     case "$1" in
         update)
             "$repo/install.sh" update ;;
@@ -318,59 +339,7 @@ BLOCK
         # single-function form, or a previous begin/end-bracketed form --
         # so re-running this always leaves exactly one, current copy
         # instead of silently going stale after the first install.
-        DXRICE_RC_PATH="$rc" python3 - <<'PYEOF'
-import os, re
-path = os.environ["DXRICE_RC_PATH"]
-with open(path) as f:
-    content = f.read()
-
-bracketed = re.compile(
-    r"\n?# BEGIN dxrice shell functions \(added by DXrice's install\.sh\)\n"
-    r"(?:.*\n)*?"
-    r"# END dxrice shell functions\n?"
-)
-content = bracketed.sub("\n", content, count=1)
-
-legacy_v1 = re.compile(
-    r"\n?# dxrice-update \(added by DXrice's install\.sh\)\n"
-    r"dxrice-update\(\) \{\n(?:.*\n)*?\}\n"
-)
-content = legacy_v1.sub("\n", content, count=1)
-
-# The brief window before this got begin/end markers: same "/ dx" marker
-# text as the current block, but no brackets, and both functions inline.
-legacy_v2 = re.compile(
-    r"\n?# dxrice-update / dx \(added by DXrice's install\.sh\)\n"
-    r"dxrice-update\(\) \{\n(?:.*\n)*?\}\n"
-    r"dx\(\) \{\n(?:.*\n)*?\}\n"
-)
-content = legacy_v2.sub("\n", content, count=1)
-
-# Each \n? above only ever eats ONE of the newlines adjoining a stripped
-# block, not the whole blank-line gap left behind -- across repeated
-# install/update runs that stacks into an ever-growing run of blank lines
-# before the re-appended block (confirmed live: 1 blank line after the
-# first run, 2 after the second, 3 after the third, unbounded). Collapsing
-# to a single trailing newline here, right before the block is
-# re-appended below, caps the gap at exactly one blank line forever.
-content = content.rstrip("\n") + "\n"
-
-# Atomic write: a process killed mid-write must never leave a truncated
-# shell rc file behind -- write to a temp file in the same directory, then
-# rename, so the original survives intact if anything goes wrong.
-tmp_path = path + f".dxrice.{os.getpid()}.tmp"
-try:
-    existing_mode = os.stat(path).st_mode & 0o777
-except OSError:
-    existing_mode = None
-with open(tmp_path, "w") as f:
-    f.write(content)
-    f.flush()
-    os.fsync(f.fileno())
-if existing_mode is not None:
-    os.chmod(tmp_path, existing_mode)
-os.replace(tmp_path, path)
-PYEOF
+        python3 "$REPO_DIR/scripts/dxrice_rc_block.py" strip "$rc"
 
         after="$(cat "$rc" 2>/dev/null)"
         printf '\n%s\n' "$block" >> "$rc"
@@ -395,53 +364,7 @@ remove_shell_alias() {
         [ -f "$rc" ] || continue
         local before after
         before="$(cat "$rc" 2>/dev/null)"
-        DXRICE_RC_PATH="$rc" python3 - <<'PYEOF'
-import os, re
-path = os.environ["DXRICE_RC_PATH"]
-with open(path) as f:
-    content = f.read()
-
-bracketed = re.compile(
-    r"\n?# BEGIN dxrice shell functions \(added by DXrice's install\.sh\)\n"
-    r"(?:.*\n)*?"
-    r"# END dxrice shell functions\n?"
-)
-content = bracketed.sub("\n", content, count=1)
-
-legacy_v1 = re.compile(
-    r"\n?# dxrice-update \(added by DXrice's install\.sh\)\n"
-    r"dxrice-update\(\) \{\n(?:.*\n)*?\}\n"
-)
-content = legacy_v1.sub("\n", content, count=1)
-
-legacy_v2 = re.compile(
-    r"\n?# dxrice-update / dx \(added by DXrice's install\.sh\)\n"
-    r"dxrice-update\(\) \{\n(?:.*\n)*?\}\n"
-    r"dx\(\) \{\n(?:.*\n)*?\}\n"
-)
-content = legacy_v2.sub("\n", content, count=1)
-
-# Same blank-line-gap normalization as install_shell_alias -- leaves the
-# file exactly as if the block had never been there, not with a stray
-# trailing blank line from the strip.
-content = content.rstrip("\n") + "\n"
-
-# Atomic write: a process killed mid-write must never leave a truncated
-# shell rc file behind -- write to a temp file in the same directory, then
-# rename, so the original survives intact if anything goes wrong.
-tmp_path = path + f".dxrice.{os.getpid()}.tmp"
-try:
-    existing_mode = os.stat(path).st_mode & 0o777
-except OSError:
-    existing_mode = None
-with open(tmp_path, "w") as f:
-    f.write(content)
-    f.flush()
-    os.fsync(f.fileno())
-if existing_mode is not None:
-    os.chmod(tmp_path, existing_mode)
-os.replace(tmp_path, path)
-PYEOF
+        python3 "$REPO_DIR/scripts/dxrice_rc_block.py" strip "$rc"
         after="$(cat "$rc" 2>/dev/null)"
         if [ "$before" != "$after" ]; then
             ok "Removed the 'dx' and 'dxrice-update' commands from $rc"
@@ -495,7 +418,7 @@ choose_install_location() {
     info "Moving checkout to $answer ..."
     mkdir -p "$(dirname "$answer")"
     mv "$REPO_DIR" "$answer"
-    DXRICE_LOCATION_CONFIRMED=1 exec "$answer/install.sh" "$MODE"
+    DXRICE_LOCATION_CONFIRMED=1 exec "$answer/install.sh" "${ORIG_ARGS[@]}"
 }
 
 # ---------------------------------------------------------------------------
@@ -540,7 +463,7 @@ check_dependencies() {
     done
     if [ "${#missing[@]}" -gt 0 ]; then
         warn "Missing: ${missing[*]}"
-        if ask_yes_no "Install them now?" Y; then
+        if confirm "Install them now?"; then
             _pkg_install "${missing[@]}" || warn "Install failed or was cancelled; continuing anyway."
         fi
     else
@@ -604,7 +527,7 @@ install_hypr_ecosystem() {
     case "$PKG_MANAGER" in
         pacman|zypper)
             warn "Missing Hyprland packages: ${missing[*]}"
-            if ask_yes_no "Install them now?" Y; then
+            if confirm "Install them now?"; then
                 _pkg_install "${missing[@]}" || warn "Install failed or was cancelled; continuing anyway."
             fi
             ;;
@@ -645,7 +568,7 @@ install_quickshell() {
 
     case "$PKG_MANAGER" in
         pacman)
-            if ask_yes_no "Install Quickshell (Theme/Taskbar/Quick Settings UI)?" Y; then
+            if confirm "Install Quickshell (Theme/Taskbar/Quick Settings UI)?"; then
                 _pkg_install quickshell || warn "Install failed or was cancelled; the GTK apps will be used instead."
             else
                 info "Skipped -- the older GTK apps will be used instead. Install 'quickshell' any time."
@@ -688,28 +611,33 @@ install_nerd_font_fallback() {
         info "$NERD_FONT_RELEASE_URL into ~/.local/share/fonts yourself."
         return
     fi
-    if ! ask_yes_no "JetBrainsMono Nerd Font isn't packaged here -- download and install it now?" Y; then
+    if ! confirm "JetBrainsMono Nerd Font isn't packaged here -- download and install it now?"; then
         return
     fi
 
     local tmp
     tmp="$(mktemp -d)"
     info "Downloading JetBrainsMono Nerd Font..."
+    local fetched=0
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$NERD_FONT_RELEASE_URL" -o "$tmp/JetBrainsMono.zip"
+        curl -fsSL --connect-timeout 15 "$NERD_FONT_RELEASE_URL" -o "$tmp/JetBrainsMono.zip" && fetched=1
     else
-        wget -q "$NERD_FONT_RELEASE_URL" -O "$tmp/JetBrainsMono.zip"
+        wget -q --timeout=15 "$NERD_FONT_RELEASE_URL" -O "$tmp/JetBrainsMono.zip" && fetched=1
     fi
-    if [ ! -s "$tmp/JetBrainsMono.zip" ]; then
+    if [ "$fetched" != 1 ] || [ ! -s "$tmp/JetBrainsMono.zip" ]; then
         warn "Download failed -- install the font yourself from $NERD_FONT_RELEASE_URL"
         rm -rf "$tmp"
         return
     fi
 
     mkdir -p "$DATA_HOME/fonts"
-    unzip -oq "$tmp/JetBrainsMono.zip" -d "$DATA_HOME/fonts/JetBrainsMonoNerdFont"
+    if ! unzip -oq "$tmp/JetBrainsMono.zip" -d "$DATA_HOME/fonts/JetBrainsMonoNerdFont"; then
+        warn "The downloaded font archive couldn't be unpacked -- install it yourself from $NERD_FONT_RELEASE_URL"
+        rm -rf "$tmp"
+        return
+    fi
     rm -rf "$tmp"
-    command -v fc-cache >/dev/null 2>&1 && fc-cache -f "$DATA_HOME/fonts" >/dev/null 2>&1
+    if command -v fc-cache >/dev/null 2>&1; then fc-cache -f "$DATA_HOME/fonts" >/dev/null 2>&1 || true; fi
     ok "Installed JetBrainsMono Nerd Font."
 }
 
@@ -718,7 +646,7 @@ check_input_group() {
     if id -nG "$USER" | grep -qw input; then
         ok "Already in the 'input' group."
     else
-        if ask_yes_no "Add $USER to the 'input' group now?" Y; then
+        if confirm "Add $USER to the 'input' group now?"; then
             if sudo usermod -aG input "$USER"; then
                 ok "Added. You must log out and back in (or reboot) for this to take effect."
                 INPUT_GROUP_JUST_ADDED=1
@@ -790,29 +718,30 @@ reconcile_copy_once_ownership() {
                     # down via set -e over something that was never going
                     # to touch the user's file in the first place.
                     if python3 "$ownership_py" claim-snapshot "$rel" "$CONFIG_HOME" "$STATE_DIR" "$REPO_DIR"; then
-                        ok "~/.config/$rel recognized as your existing DXrice deployment -- left exactly as it is."
+                        ok "$CONFIG_HOME/$rel recognized as your existing DXrice deployment -- left exactly as it is."
                     else
-                        warn "Couldn't record ~/.config/$rel as a known DXrice deployment (non-fatal) --"
+                        warn "Couldn't record $CONFIG_HOME/$rel as a known DXrice deployment (non-fatal) --"
                         info "the file itself is untouched; this will be retried on the next run."
                     fi
                     continue
                 fi
                 # old-shaped: a genuine pre-Quickshell DXrice file. Same
                 # upgrade offer the old per-file checks used.
-                warn "~/.config/$rel is from a much older version of this rice."
+                warn "$CONFIG_HOME/$rel is from a much older version of this rice."
                 info "It predates the current layout, so it won't pick that up on its own."
                 if [ -L "$CONFIG_HOME/$rel" ]; then
                     info "Note: this path is currently a symlink -- replacing it backs up and"
                     info "preserves whatever it points to, but points this path at a plain file"
                     info "afterward instead of your symlink."
                 fi
-                if ask_yes_no "Back it up and let the current version deploy instead?" Y; then
+                if confirm "Back it up and let the current version deploy instead?"; then
                     mkdir -p "$STATE_DIR/backups"
-                    local backup="$STATE_DIR/backups/${rel//\//_}.$(date +%s).bak"
+                    local backup
+                    backup="$STATE_DIR/backups/${rel//\//_}.$(date +%s).bak"
                     if ! cp "$CONFIG_HOME/$rel" "$backup"; then
-                        warn "Backup to $backup failed -- leaving ~/.config/$rel exactly as it is."
+                        warn "Backup to $backup failed -- leaving $CONFIG_HOME/$rel exactly as it is."
                     elif ! cmp -s "$CONFIG_HOME/$rel" "$backup"; then
-                        warn "Backup at $backup doesn't match the original -- leaving ~/.config/$rel"
+                        warn "Backup at $backup doesn't match the original -- leaving $CONFIG_HOME/$rel"
                         info "exactly as it is rather than risk deleting it on an unverified backup."
                         rm -f "$backup"
                     else
@@ -820,16 +749,16 @@ reconcile_copy_once_ownership() {
                         ok "Backed up to $backup and removed the live copy -- deploying the current version next."
                     fi
                 else
-                    warn "Leaving ~/.config/$rel as-is -- it'll keep looking like the old rice until"
+                    warn "Leaving $CONFIG_HOME/$rel as-is -- it'll keep looking like the old rice until"
                     info "you either edit it by hand or re-run install and say yes here."
                 fi
                 ;;
             FOREIGN)
-                info "~/.config/$rel exists but looks like it belongs to a different setup --"
+                info "$CONFIG_HOME/$rel exists but looks like it belongs to a different setup --"
                 info "left completely alone; DXrice's own version won't deploy over it."
                 ;;
             UNKNOWN)
-                info "~/.config/$rel already exists and DXrice can't positively tell whose it is --"
+                info "$CONFIG_HOME/$rel already exists and DXrice can't positively tell whose it is --"
                 info "left completely alone (never guessed at) until you move it yourself."
                 ;;
             DXRICE_OWNED_UNCHANGED|DXRICE_OWNED_MODIFIED)
@@ -840,22 +769,6 @@ reconcile_copy_once_ownership() {
                 ;;
         esac
     done < <(python3 "$ownership_py" classify "$CONFIG_HOME" "$STATE_DIR")
-}
-
-# Narrower companion to reconcile_copy_once_ownership: a hyprland.lua
-# already recognized as current-shaped (so that check leaves it alone) can
-# still predate a later change to one specific bind -- e.g. the taskbar
-# manager moving from a kitty-terminal script to a GUI. Patches just that
-# one line in place, leaving every other keybind/customization untouched.
-migrate_taskbar_bind() {
-    local f="$CONFIG_HOME/hypr/hyprland.lua"
-    [ -f "$f" ] || return 0
-    grep -q "dxrice-manage-taskbar.sh" "$f" 2>/dev/null || return 0
-
-    info "Updating your SUPER+SHIFT+A bind to the new taskbar GUI..."
-    sed -i -E \
-        's#hl\.dsp\.exec_cmd\("kitty -e " \.\. repo \.\. "/scripts/dxrice-manage-taskbar\.sh"\)#hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_taskbar_gui.py")#' \
-        "$f"
 }
 
 # Quickshell and the two always-on Python daemons (new-window placement,
@@ -927,63 +840,6 @@ EOF
     systemctl --user daemon-reload 2>/dev/null || true
 }
 
-# Narrower companion to migrate_taskbar_bind, same pattern: an already-
-# deployed hyprland.lua (so reconcile_copy_once_ownership left it alone)
-# can still predate the systemd-supervision change above. Patches just
-# those three specific exec_cmd lines in place -- matched against this
-# installer's own exact previous template text, verified against this
-# session's real deployed file before being written -- leaving every
-# other keybind/customization completely untouched.
-migrate_exec_to_systemd_units() {
-    local f="$CONFIG_HOME/hypr/hyprland.lua"
-    [ -f "$f" ] || return 0
-    grep -q "dxrice-quickshell.service" "$f" 2>/dev/null && return 0  # already migrated
-
-    grep -q 'qs -p " .. repo .. "/quickshell/shell.qml -d -n' "$f" 2>/dev/null || return 0
-
-    info "Updating your Quickshell/placement/panning autostart to use systemd"
-    info "supervision (so a crash recovers on its own instead of staying dead)..."
-    python3 - "$f" <<'PYEOF'
-import os
-import re
-import sys
-
-path = sys.argv[1]
-with open(path) as fh:
-    content = fh.read()
-
-content = content.replace(
-    '"qs -p " .. repo .. "/quickshell/shell.qml -d -n; else "',
-    '"systemctl --user restart dxrice-quickshell.service; else "',
-)
-content = re.sub(
-    r'hl\.exec_cmd\("python3 " \.\. repo \.\. "/scripts/dxrice_infinite_desktop_core\.py 1\.6[^"]*"\)',
-    'hl.exec_cmd("systemctl --user restart dxrice-infinite-desktop.service")',
-    content,
-)
-content = re.sub(
-    r'hl\.exec_cmd\("python3 " \.\. repo \.\. "/scripts/dxrice_auto_place_window\.py[^"]*"\)',
-    'hl.exec_cmd("systemctl --user restart dxrice-auto-place-window.service")',
-    content,
-)
-
-# Atomic write -- this rewrites a live, user-customized hyprland.lua in
-# place; a process killed mid-write must never leave it truncated.
-tmp_path = path + f".dxrice.{os.getpid()}.tmp"
-try:
-    existing_mode = os.stat(path).st_mode & 0o777
-except OSError:
-    existing_mode = None
-with open(tmp_path, "w") as fh:
-    fh.write(content)
-    fh.flush()
-    os.fsync(fh.fileno())
-if existing_mode is not None:
-    os.chmod(tmp_path, existing_mode)
-os.replace(tmp_path, path)
-PYEOF
-}
-
 # A machine that ran a much older, pre-dxrice version of this exact rice
 # (before the dxrice_ prefix, before Quickshell, back when the taskbar
 # manager was a plain bash script) can have that ENTIRE OLD CHECKOUT still
@@ -1052,7 +908,7 @@ check_legacy_rice_checkout() {
         info "  $fl"
     done
 
-    if ask_yes_no "Remove those stale alias lines and move the old checkout(s) out of the way?" Y; then
+    if confirm "Remove those stale alias lines and move the old checkout(s) out of the way?"; then
         # Remove EXACTLY the lines found_lines recorded above -- the ones
         # that already passed every check (alias-shaped, names a legacy
         # script, resolves to a real existing checkout directory) -- by
@@ -1104,7 +960,8 @@ check_legacy_rice_checkout() {
         done
         mkdir -p "$STATE_DIR/backups"
         for d in "${uniq_dirs[@]}"; do
-            local dest="$STATE_DIR/backups/$(basename "$d").$(date +%s)"
+            local dest
+            dest="$STATE_DIR/backups/$(basename "$d").$(date +%s)"
             if mv "$d" "$dest"; then
                 ok "Moved $d to $dest (not deleted -- safe to remove by hand once you've confirmed you don't need anything from it)"
             else
@@ -1129,66 +986,53 @@ check_hypr_drift() {
     python3 "$REPO_DIR/scripts/dxrice_check_hypr_drift.py" 2>/dev/null || true
 }
 
-# Same narrow, line-level pattern as migrate_exec_to_systemd_units: an
-# already-deployed hyprland.lua is the user's file (copy-once), so a fixed
-# template never reaches it on its own. Replaces exactly the one line the
-# shipped template used to contain -- a hard-coded polkit agent path no
-# package installs (Arch's polkit-kde-agent ships
-# /usr/lib/polkit-kde-authentication-agent-1), so no password prompt could
-# ever appear -- with the repo helper that probes for the agent actually
-# installed. A line the user has changed is left alone, and a file without
-# the template's `repo` variable is not edited at all (the new line needs
-# it); the user is told what to change by hand instead.
-migrate_polkit_agent_line() {
-    local f="$CONFIG_HOME/hypr/hyprland.lua"
-    [ -f "$f" ] || return 0
-    grep -q "dxrice_polkit_agent.sh" "$f" 2>/dev/null && return 0  # already migrated
-    grep -qF 'hl.exec_cmd("/usr/lib/polkit-kde-agent-1")' "$f" 2>/dev/null || return 0
+# hyprland.lua is the user's file after the first deploy, so template fixes
+# never reach it on their own. scripts/dxrice_hypr_migrate.py knows each
+# fix as an exact edit of text an earlier template shipped; this shows the
+# ones that apply, asks, backs the file up, and applies them. Lines the user
+# has changed don't match and are left alone.
+migrate_hyprland_lua() {
+    local f="$CONFIG_HOME/hypr/hyprland.lua" helper="$REPO_DIR/scripts/dxrice_hypr_migrate.py"
+    [ -f "$f" ] && [ -f "$helper" ] || return 0
+    local plan
+    plan="$(python3 "$helper" plan "$f" 2>/dev/null)" || return 0
+    [ -n "$plan" ] || return 0
 
-    if ! grep -q 'local repo = dxrice_repo()' "$f" 2>/dev/null; then
-        warn "Your hyprland.lua starts a polkit agent from a path that doesn't exist"
-        info "(/usr/lib/polkit-kde-agent-1). Replace that line with:"
-        info "  hl.exec_cmd(\"$REPO_DIR/scripts/dxrice_polkit_agent.sh\")"
+    local id desc automatic=0
+    info "Your hyprland.lua predates these fixes from the current template:"
+    while IFS=$'\t' read -r id desc; do
+        if [ "$id" = manual ]; then
+            info "  - (by hand) $desc"
+        else
+            info "  - $desc"
+            automatic=1
+        fi
+    done <<<"$plan"
+    if [ "$DRY_RUN" = "1" ] || [ "$automatic" = 0 ]; then
         return 0
     fi
-
-    info "Fixing your polkit agent autostart (the old path didn't exist, so"
-    info "password prompts for system actions could never appear)..."
-    python3 - "$f" <<'PYEOF'
-import os
-import sys
-
-path = sys.argv[1]
-with open(path) as fh:
-    content = fh.read()
-
-content = content.replace(
-    'hl.exec_cmd("/usr/lib/polkit-kde-agent-1")',
-    'hl.exec_cmd(repo .. "/scripts/dxrice_polkit_agent.sh")',
-)
-
-tmp_path = path + f".dxrice.{os.getpid()}.tmp"
-try:
-    existing_mode = os.stat(path).st_mode & 0o777
-except OSError:
-    existing_mode = None
-with open(tmp_path, "w") as fh:
-    fh.write(content)
-    fh.flush()
-    os.fsync(fh.fileno())
-if existing_mode is not None:
-    os.chmod(tmp_path, existing_mode)
-os.replace(tmp_path, path)
-PYEOF
+    if ! confirm "Apply them (the file is backed up first)?"; then
+        info "Left as it is. Apply them later with: ./install.sh update"
+        return 0
+    fi
+    local backup
+    if backup="$(python3 "$helper" apply "$f" "$STATE_DIR/backups")"; then
+        ok "Updated hyprland.lua (backup: $backup). Hyprland reloads it on save."
+    else
+        warn "Couldn't update hyprland.lua -- it was left unchanged."
+    fi
 }
 
 detect_monitor() {
     local target="$CONFIG_HOME/hypr/hyprland.lua"
     command -v hyprctl >/dev/null 2>&1 || { warn "hyprctl not found (Hyprland not running yet) -- skipping monitor auto-detect, edit hypr/hyprland.lua's eDP-1/resolution by hand."; return; }
-    python3 - "$target" <<'PYEOF'
-import json, os, re, subprocess, sys
+    python3 - "$target" "$REPO_DIR/scripts" <<'PYEOF'
+import json, re, subprocess, sys
 
 target = sys.argv[1]
+sys.path.insert(0, sys.argv[2])
+from dxrice_manifest import atomic_write_bytes
+
 try:
     monitors = json.loads(subprocess.run(
         ["hyprctl", "monitors", "-j"], capture_output=True, text=True, timeout=2
@@ -1209,20 +1053,7 @@ with open(target) as f:
 content = re.sub(r'output\s*=\s*"[^"]*"', f'output = "{name}"', content, count=1)
 content = re.sub(r'mode\s*=\s*"[^"]*"', f'mode = "{mode}"', content, count=1)
 content = re.sub(r'position\s*=\s*"[^"]*"', f'position = "{pos}"', content, count=1)
-# Atomic write -- same reasoning as migrate_exec_to_systemd_units: this is
-# a live, user-customized file, never safe to truncate mid-write.
-tmp_path = target + f".dxrice.{os.getpid()}.tmp"
-try:
-    existing_mode = os.stat(target).st_mode & 0o777
-except OSError:
-    existing_mode = None
-with open(tmp_path, "w") as f:
-    f.write(content)
-    f.flush()
-    os.fsync(f.fileno())
-if existing_mode is not None:
-    os.chmod(tmp_path, existing_mode)
-os.replace(tmp_path, target)
+atomic_write_bytes(target, content.encode())
 print(f"Detected monitor {name} ({mode} at {pos}) and wrote it into hyprland.lua")
 PYEOF
 }
@@ -1318,10 +1149,12 @@ verify_deploy() {
     # so it's reported distinctly rather than folded into the file-presence
     # check above.
     if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_DIR/scripts/dxrice_test_placement.py" ]; then
-        if python3 "$REPO_DIR/scripts/dxrice_test_placement.py" >/tmp/dxrice-verify-tests.log 2>&1; then
+        local test_log="$STATE_DIR/verify-tests.log"
+        mkdir -p "$STATE_DIR"
+        if python3 "$REPO_DIR/scripts/dxrice_test_placement.py" >"$test_log" 2>&1; then
             ok "Window placement/arrangement tests passed."
         else
-            warn "Window placement/arrangement tests FAILED -- see /tmp/dxrice-verify-tests.log"
+            warn "Window placement/arrangement tests FAILED -- see $test_log"
             info "SUPER+G and new-window auto-placement may not behave correctly."
         fi
     fi
@@ -1361,9 +1194,7 @@ do_install() {
 
     step "Step 4/4 -- Deploying your rice"
     reconcile_copy_once_ownership
-    migrate_taskbar_bind
-    migrate_exec_to_systemd_units
-    migrate_polkit_agent_line
+    migrate_hyprland_lua
     check_legacy_rice_checkout
     local hypr_existed=0
     [ -f "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
@@ -1529,7 +1360,7 @@ remove_systemd_units() {
     fi
 
     local lua="$CONFIG_HOME/hypr/hyprland.lua"
-    if [ -f "$lua" ] && grep -q 'dxrice-[a-z-]*\.service' "$lua" 2>/dev/null; then
+    if [ -f "$lua" ] && grep -qE 'dxrice-[a-z-]*\.service|dxrice_session\.sh' "$lua" 2>/dev/null; then
         info "Your hyprland.lua still has DXrice's autostart lines. With the services removed"
         info "they no longer start anything; delete them yourself if you want them gone."
     fi
@@ -1537,6 +1368,7 @@ remove_systemd_units() {
 
 do_uninstall() {
     banner
+    check_not_root
     local purge="$PURGE"
 
     step "Removing DXrice integration"
@@ -1549,7 +1381,7 @@ do_uninstall() {
     fi
 
     if [ -d /usr/share/sddm/themes/dxrice ] || [ -f /etc/sddm.conf.d/dxrice.conf ]; then
-        if ask_yes_no "The DXrice SDDM login theme is installed -- remove it too? (needs sudo)" Y; then
+        if confirm "The DXrice SDDM login theme is installed -- remove it too? (needs sudo)"; then
             sudo rm -f /etc/sddm.conf.d/dxrice.conf
             sudo rm -rf /usr/share/sddm/themes/dxrice
             ok "SDDM theme and config removed -- SDDM will use its default theme on the next login."
@@ -1702,6 +1534,7 @@ do_dry_run() {
 
 do_update() {
     banner
+    check_not_root
     require_repo_layout
     cd "$REPO_DIR"
 
@@ -1761,9 +1594,7 @@ do_update() {
 
     step "Redeploying"
     reconcile_copy_once_ownership
-    migrate_taskbar_bind
-    migrate_exec_to_systemd_units
-    migrate_polkit_agent_line
+    migrate_hyprland_lua
     check_legacy_rice_checkout
     local hypr_existed=0
     [ -s "$CONFIG_HOME/hypr/hyprland.lua" ] && hypr_existed=1
@@ -1796,7 +1627,7 @@ do_update() {
     if command -v sddm >/dev/null 2>&1; then
         echo ""
         if [ -f /etc/sddm.conf.d/dxrice.conf ]; then
-            if ask_yes_no "Re-sync the DXrice SDDM login theme with your current wallpaper/colors? (needs sudo)" Y; then
+            if confirm "Re-sync the DXrice SDDM login theme with your current wallpaper/colors? (needs sudo)"; then
                 do_sddm_theme || warn "SDDM theme re-sync failed -- re-run './install.sh sddm-theme' to retry (the rest of your update is unaffected)."
             fi
         elif ask_yes_no "SDDM is installed -- set up the matching DXrice login theme too? (needs sudo)" N; then

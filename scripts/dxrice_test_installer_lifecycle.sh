@@ -54,7 +54,7 @@ new_home() {
 run_env() {
     env -i HOME="$H" USER="${USER:-tester}" PATH="$BIN:/usr/bin:/bin" TERM=dumb \
         XDG_CONFIG_HOME="$H/.config" XDG_DATA_HOME="$H/.local/share" XDG_STATE_HOME="$H/.local/state" \
-        DXRICE_LOCATION_CONFIRMED=1 DXRICE_CGROUP_ROOT="$SANDBOX/cg" DXRICE_PROC_ROOT="$SANDBOX/proc" "$@"
+        DXRICE_ASSUME_YES="${DXRICE_ASSUME_YES:-0}" DXRICE_LOCATION_CONFIRMED=1 DXRICE_CGROUP_ROOT="$SANDBOX/cg" DXRICE_PROC_ROOT="$SANDBOX/proc" "$@"
 }
 # Defines install.sh's functions without running it (see its source guard).
 call() {
@@ -64,41 +64,58 @@ call() {
 OLD_LINE='    hl.exec_cmd("/usr/lib/polkit-kde-agent-1")'
 NEW_LINE='    hl.exec_cmd(repo .. "/scripts/dxrice_polkit_agent.sh")'
 
-echo "=== polkit autostart migration ==="
+echo "=== hyprland.lua migrations ==="
 
-new_home polkit
+# The pre-fix template, as installs deployed it: an old polkit path, the
+# autostart before dxrice_session.sh, and no layer-fade lines.
+old_template() {
+    git -C "$REPO_DIR" show 36ece7d:hypr/hyprland.lua 2>/dev/null \
+        || sed "s#hl.exec_cmd(repo .. \"/scripts/dxrice_polkit_agent.sh\")#hl.exec_cmd(\"/usr/lib/polkit-kde-agent-1\")#" \
+            "$REPO_DIR/hypr/hyprland.lua"
+}
+
+new_home migrate
 LUA="$H/.config/hypr/hyprland.lua"
-# The pre-fix template, as installs deployed it.
-git -C "$REPO_DIR" show 36ece7d:hypr/hyprland.lua > "$LUA" 2>/dev/null \
-    || sed "s#hl.exec_cmd(repo .. \"/scripts/dxrice_polkit_agent.sh\")#hl.exec_cmd(\"/usr/lib/polkit-kde-agent-1\")#" \
-        "$REPO_DIR/hypr/hyprland.lua" > "$LUA"
+old_template > "$LUA"
 printf '\n-- my own keybind\nhl.bind("SUPER + Y", hl.dsp.exec_cmd("foot"))\n' >> "$LUA"
 chmod 640 "$LUA"
 grep -qF "$OLD_LINE" "$LUA"; assert "fixture has the old line" "$([ $? = 0 ] && echo 1 || echo 0)"
 cp "$LUA" "$LOG/before.lua"
-call migrate_polkit_agent_line > "$LOG/mig1.out" 2>&1
+
+call migrate_hyprland_lua < /dev/null > "$LOG/mig0.out" 2>&1
+assert "unattended without --yes: file untouched" "$(yes_if "cmp -s '$LOG/before.lua' '$LUA'")"
+assert "...and the pending fixes were listed" "$(yes_if "grep -q 'polkit agent' '$LOG/mig0.out'")"
+
+DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > "$LOG/mig1.out" 2>&1
 assert "old polkit path is gone" "$(yes_if "! grep -qF '/usr/lib/polkit-kde-agent-1' '$LUA'")"
 assert "helper line is in its place" "$(yes_if "grep -qF '$NEW_LINE' '$LUA'")"
-assert "nothing else in the file changed" "$(yes_if "diff <(grep -vF 'polkit' '$LOG/before.lua') <(grep -vF 'polkit' '$LUA') >/dev/null")"
+assert "layer fades turned off" "$(yes_if "grep -q 'leaf = \"fadeLayersIn\",  enabled = false' '$LUA'")"
+assert "the result is exactly the migration of the old file" \
+    "$(yes_if "python3 -c 'import sys; sys.path.insert(0, \"$REPO_DIR/scripts\"); import dxrice_hypr_migrate as m; sys.exit(m.migrate(open(\"$LOG/before.lua\").read()) != open(\"$LUA\").read())'")"
 assert "user's own keybind kept" "$(yes_if "grep -q 'SUPER + Y' '$LUA'")"
 assert "permissions kept (640)" "$(yes_if "[ \"\$(stat -c %a '$LUA')\" = 640 ]")"
 assert "no temp files left" "$(yes_if "[ -z \"\$(find '$H/.config/hypr' -name '*.tmp')\" ]")"
+backup="$(ls "$H/.local/state/dxrice/backups/"hyprland.lua.*.bak 2>/dev/null | head -1)"
+assert "a backup of the original was made" "$(yes_if "[ -n '$backup' ] && cmp -s '$LOG/before.lua' '$backup'")"
+assert "the backup is reported" "$(yes_if "grep -q 'backup:' '$LOG/mig1.out'")"
+assert "migrated file is valid Lua" "$(yes_if "! command -v luac5.4 >/dev/null || luac5.4 -p '$LUA'")"
 cp "$LUA" "$LOG/after1.lua"
-call migrate_polkit_agent_line > "$LOG/mig2.out" 2>&1
+DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > "$LOG/mig2.out" 2>&1
 assert "second run changes nothing" "$(yes_if "cmp -s '$LOG/after1.lua' '$LUA'")"
+assert "...and makes no second backup" "$(yes_if "[ \"\$(ls '$H/.local/state/dxrice/backups/' | wc -l)\" = 1 ]")"
 
 new_home polkit-custom
 LUA="$H/.config/hypr/hyprland.lua"
 sed "s#$NEW_LINE#    hl.exec_cmd(\"/usr/lib/my-own-agent\")#" "$REPO_DIR/hypr/hyprland.lua" > "$LUA"
 cp "$LUA" "$LOG/custom.lua"
-call migrate_polkit_agent_line > /dev/null 2>&1
+DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > /dev/null 2>&1
 assert "a polkit line the user changed is left alone" "$(yes_if "cmp -s '$LOG/custom.lua' '$LUA'")"
 
 new_home polkit-norepo
 LUA="$H/.config/hypr/hyprland.lua"
 printf 'hl.on("hyprland.start", function()\n%s\nend)\n' "$OLD_LINE" > "$LUA"
 cp "$LUA" "$LOG/norepo.lua"
-call migrate_polkit_agent_line > "$LOG/norepo.out" 2>&1
+DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > "$LOG/norepo.out" 2>&1
 assert "file without the repo variable is not edited" "$(yes_if "cmp -s '$LOG/norepo.lua' '$LUA'")"
 assert "...and the user is told what to change" "$(yes_if "grep -q 'dxrice_polkit_agent.sh' '$LOG/norepo.out'")"
 

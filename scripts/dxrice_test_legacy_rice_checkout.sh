@@ -66,10 +66,10 @@ EOF
 chmod 644 "$SANDBOX/home/.bashrc"
 
 env -i \
-    HOME="$SANDBOX/home" USER="$USER" PATH="$SANDBOX/bin:/usr/bin:/bin" \
+    HOME="$SANDBOX/home" USER="${USER:-tester}" PATH="$SANDBOX/bin:/usr/bin:/bin" \
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" HYPRLAND_INSTANCE_SIGNATURE="${HYPRLAND_INSTANCE_SIGNATURE:-}" \
     DXRICE_LOCATION_CONFIRMED=1 TERM="${TERM:-dumb}" \
-    bash "$REPO_DIR/install.sh" install < /dev/null > "$SANDBOX/log/install.out" 2>&1
+    bash "$REPO_DIR/install.sh" install --yes < /dev/null > "$SANDBOX/log/install.out" 2>&1
 install_exit=$?
 
 RC="$SANDBOX/home/.bashrc"

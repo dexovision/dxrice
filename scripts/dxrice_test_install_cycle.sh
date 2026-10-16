@@ -50,7 +50,8 @@ printf '#!/bin/sh\necho "HYPRLAND_INSTANCE_SIGNATURE not set!" >&2\nexit 1\n' > 
 printf '#!/bin/sh\nexit 1\n' > "$BIN/pgrep"
 chmod +x "$BIN"/*
 
-git clone -q "$SRC" "$SANDBOX/repo"
+# the working tree as it is on disk, uncommitted changes included
+cp -a "$SRC" "$SANDBOX/repo"
 git -C "$SANDBOX/repo" branch -q --unset-upstream 2>/dev/null || true
 REPO="$SANDBOX/repo"
 
@@ -60,7 +61,7 @@ run() {  # run MODE [ARGS...] -- the real installer, in the sandbox
         DXRICE_LOCATION_CONFIRMED=1 bash "$REPO/install.sh" "$@" < /dev/null > "$LOG/out-$1-$RANDOM" 2>&1
 }
 snapshot() {  # every file under HOME with its content hash, sorted
-    (cd "$H" && find . -type f ! -path './.cache/*' -print0 | sort -z | xargs -0 sha256sum)
+    (cd "$H" && find . -type f ! -path './.cache/*' ! -name '*.log' -print0 | sort -z | xargs -0 sha256sum)
 }
 
 echo "=== install into an empty home ==="
