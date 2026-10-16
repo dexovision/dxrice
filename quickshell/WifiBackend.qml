@@ -83,8 +83,12 @@ Item {
         }
     }
 
+    // ssid -> nmcli SECURITY column, for the password step
+    property var _security: ({})
+
     function connectTo(ssid, security) {
         const isOpen = !security || security === "--" || security === "";
+        root._security[ssid] = security || "";
         if (isOpen) {
             root._doConnect(ssid);
         } else {
@@ -93,9 +97,31 @@ Item {
         }
     }
 
+    // The password never goes on a command line (where any local user could
+    // read it in `ps`): dxrice_wifi_connect.py reads it on stdin and hands it
+    // to nmcli through a private passwd-file.
+    Process {
+        id: secretConnectProc
+        objectName: "wifiSecretConnect"
+        property string _secret: ""
+        stdinEnabled: true
+        onRunningChanged: {
+            if (running) {
+                write(secretConnectProc._secret + "\n");
+                secretConnectProc._secret = "";
+                stdinEnabled = false;  // EOF
+            } else {
+                refreshTimer.restart();
+            }
+        }
+    }
     function connectWithPassword(ssid, password) {
-        Quickshell.execDetached(["nmcli", "device", "wifi", "connect", ssid, "password", password]);
-        refreshTimer.restart();
+        if (secretConnectProc.running) return;
+        secretConnectProc.command = ["python3", Quickshell.shellDir + "/../scripts/dxrice_wifi_connect.py",
+                                     ssid, root._security[ssid] || "WPA2"];
+        secretConnectProc._secret = password;
+        secretConnectProc.stdinEnabled = true;
+        secretConnectProc.running = true;
     }
 
     function _doConnect(ssid) {

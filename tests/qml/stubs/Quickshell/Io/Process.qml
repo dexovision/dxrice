@@ -13,7 +13,10 @@ QtObject {
     property bool stdinEnabled: false
     signal exited(int exitCode, int exitStatus)
     signal started()
-    function write(data) {}
+    // what was written to stdin, for tests (only while stdinEnabled, as in
+    // Quickshell)
+    property var written: []
+    function write(data) { if (root.stdinEnabled) root.written = root.written.concat([data]); }
     function signal(sig) {}
     // Mirrors quickshell src/io/process.cpp: a start request made while a
     // process is live is remembered (targetRunning) and honoured once it

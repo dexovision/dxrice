@@ -172,9 +172,19 @@ def has_saved_connection(ssid):
     return bool(r and ssid in r.stdout.splitlines())
 
 
-def connect_wifi(ssid, password=None):
+_WIFI_CONNECT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_wifi_connect.py")
+
+
+def connect_wifi(ssid, password=None, security="WPA2"):
     if password:
-        return run_ok(["nmcli", "device", "wifi", "connect", ssid, "password", password], timeout=15)
+        # Never on a command line, where any local user could read it in
+        # `ps`: the helper takes it on stdin (see dxrice_wifi_connect.py).
+        try:
+            r = subprocess.run([sys.executable, _WIFI_CONNECT, ssid, security or "WPA2"],
+                               input=password + "\n", capture_output=True, text=True, timeout=30)
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        return r.returncode == 0
     return run_ok(["nmcli", "device", "wifi", "connect", ssid], timeout=15)
 
 
@@ -989,13 +999,14 @@ class QuickSettingsWindow(Adw.ApplicationWindow):
     def _on_wifi_connect_clicked(self, ssid, security):
         needs_password = bool(security and security != "--") and not has_saved_connection(ssid)
         if needs_password:
-            PasswordDialog(self, ssid, self._connect_wifi_with_password).present()
+            PasswordDialog(self, ssid,
+                           lambda s, p, sec=security: self._connect_wifi_with_password(s, p, sec)).present()
         else:
             connect_wifi(ssid)
             GLib.timeout_add(1000, self._rebuild_wifi_card_once)
 
-    def _connect_wifi_with_password(self, ssid, password):
-        connect_wifi(ssid, password)
+    def _connect_wifi_with_password(self, ssid, password, security):
+        connect_wifi(ssid, password, security)
         GLib.timeout_add(1000, self._rebuild_wifi_card_once)
 
     # ---- bluetooth ----

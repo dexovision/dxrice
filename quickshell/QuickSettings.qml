@@ -1602,6 +1602,7 @@ Item {
 
     WifiBackend {
         id: wifiBackend
+        objectName: "wifiBackend"
         radioOn: root.wifiEnabled
         onPasswordNeeded: (ssid) => {
             // Clicking "Connect" on a second network before resolving the

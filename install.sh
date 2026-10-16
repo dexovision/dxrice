@@ -1155,6 +1155,7 @@ verify_deploy() {
         "$REPO_DIR/scripts/dxrice_power.sh"
         "$REPO_DIR/scripts/dxrice_polkit_agent.sh"
         "$REPO_DIR/scripts/dxrice_monitor.py"
+        "$REPO_DIR/scripts/dxrice_wifi_connect.py"
         "$REPO_DIR/quickshell/shell.qml"
         "$REPO_DIR/quickshell/qmldir"
         "$REPO_DIR/quickshell/Theme.qml"
