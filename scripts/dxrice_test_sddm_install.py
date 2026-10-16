@@ -52,7 +52,9 @@ class InstallThemeDirTest(unittest.TestCase):
             return real_copyfile(src, dst, *a, **kw)
         before = self.contents()
         with mock.patch.object(shutil, "copyfile", copy_then_fail):
-            with self.assertRaises(Exception):
+            # OSError (shutil.Error is one), not just any exception: a bug
+            # like a NameError must not pass for a handled full disk
+            with self.assertRaises(OSError):
                 sddm.install_theme_dir(self.staging, self.target)
         self.assertEqual(self.contents(), before, "the live theme was damaged by a failed install")
         self.assertEqual(sorted(os.listdir(os.path.dirname(self.target))), ["dxrice"], "temp dirs left behind")

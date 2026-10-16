@@ -27,7 +27,8 @@ def list_desktop_apps():
     for d in dirs:
         for path in sorted(glob.glob(os.path.join(d, "*.desktop"))):
             try:
-                text = open(path, encoding="utf-8", errors="ignore").read()
+                with open(path, encoding="utf-8", errors="ignore") as f:
+                    text = f.read()
             except OSError:
                 continue
             if "NoDisplay=true" in text:
