@@ -54,6 +54,17 @@ the whole story: see "The double image" below.)
 Toggling while it's still moving eases out of wherever it is, never
 snapping.
 
+When the click pans the desktop (below), Hyprland animates the real
+windows to their new places with its own window-move animation (the
+`windowsMove` leaf, else `windows`, else `global`; 480 ms with the
+template's `windows` speed of 4.79). The closing zoom then runs exactly that
+long instead of 300 ms, so the pictures and the real windows land on the
+same frame. Before this, the overlay let go about 340 ms after the click
+(measured in the harness), while Hyprland's 480 ms move was still running.
+The real windows visibly slid the rest of the way into place where the
+pictures had just been: the double image on selection. The duration is read from
+`hyprctl -j animations` on the first open and after each config reload.
+
 ### Clicking a window
 
 One click focuses exactly that window, by its Hyprland address, and the
@@ -324,9 +335,37 @@ crossfade only; the compositor's is `overview_compositor_fade.png`.
 
 ## Activation
 
-`git -C ~/dxrice merge --ff-only origin/claude/task-kcttpa`, then
-`systemctl --user restart dxrice-quickshell.service`. The restart makes the
-bar and dock blink once. Then, in `~/.config/hypr/hyprland.lua`, add the two
-`hl.animation({ leaf = "fadeLayersIn"/"fadeLayersOut", enabled = false })`
-lines from the template (after the `workspaces` animation); Hyprland reloads
-the file when it's saved. SUPER+Tab is already the overview's only bind.
+`./install.sh update` (or `dx update`) brings in the new shell code and
+offers the edits an existing `~/.config/hypr/hyprland.lua` needs. That
+includes the two `fadeLayersIn` / `fadeLayersOut` lines, after a backup and
+only if you accept. The running bar picks up the new `Overview.qml` at your
+next login. Nothing restarts it for you.
+
+## Manual check on a real desktop
+
+The harness has no compositor, so check these on the real desktop. They
+need no special setup.
+
+1. **Opening.** Put a terminal and a browser on a workspace and press
+   SUPER+Tab. The screen dims at once, then the windows shrink toward the
+   centre in one movement. Watch any window's edges: there must never be a
+   second, fading copy of a window at its old size.
+2. **Selecting a window in view.** Click a window that is fully on screen.
+   It zooms back to exactly where it was, with keyboard focus (type into
+   it). Nothing else moves.
+3. **Selecting a window off screen** (the case that ghosted). Press SUPER+G
+   with five or more windows so the spiral runs past the screen edge, then
+   SUPER+Tab and click an outer window. The view zooms back in while the
+   desktop pans so that window ends centred. When the overview disappears,
+   the windows must already be in their final places, with no slide
+   afterwards. That window has focus.
+4. **Interrupting.** Press SUPER+Tab twice quickly, and again mid-zoom. It
+   reverses from wherever it is, with no jump.
+5. **Esc / empty space** close it without changing focus or moving
+   anything.
+
+If step 1 still shows a double image, your `hyprland.lua` lacks the
+layer-fade lines; `hyprctl animations` shows whether `fadeLayersIn` is
+overridden. If step 3 shows a slide after the overview disappears, report
+your `windows` / `windowsMove` animation settings. The overview reads them
+from `hyprctl -j animations` to time that close.
