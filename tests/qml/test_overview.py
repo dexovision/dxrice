@@ -10,6 +10,7 @@ compositor.
     python3 tests/qml/test_overview.py
 """
 import json
+import math
 import sys
 import unittest
 from pathlib import Path
@@ -68,7 +69,9 @@ class OverviewScene:
     def __init__(self, clients, mon=None, uncapturable=()):
         mon = mon or monitor()
         self.mon = mon
-        self.scene = Scene("OverviewDesktop.qml", width=mon["width"], height=mon["height"])
+        # the surface is the monitor's LOGICAL size, as Quickshell gives it
+        sc = mon.get("scale", 1) or 1
+        self.scene = Scene("OverviewDesktop.qml", width=round(mon["width"] / sc), height=round(mon["height"] / sc))
         self.load(clients, uncapturable)
 
     def load(self, clients, uncapturable=()):
@@ -249,28 +252,21 @@ class TestOverview(unittest.TestCase):
         return w["x"] >= 0 and w["y"] >= 0 and w["x"] + w["w"] <= W and w["y"] + w["h"] <= H
 
     def expected_pan(self, w):
-        """Overview.qml's panDelta: the smallest shift bringing w 24 px
-        inside the usable area (centred if bigger), per axis."""
+        """Overview.qml's panDelta: nothing if w is entirely in view, else
+        the one delta that centres it in the usable area."""
         W, H = self.o.layout["monitor"]["width"], self.o.layout["monitor"]["height"]
-
-        def axis(p, size, span, m=24):
-            if p >= 0 and p + size <= span:
-                return 0
-            if size + 2 * m > span:
-                return round((span - size) / 2 - p)
-            if p < m:
-                return round(m - p)
-            return round((span - m) - (p + size))
-        return axis(w["x"], w["w"], W), axis(w["y"], w["h"], H)
+        if self.fully_visible(w):
+            return 0, 0
+        return round((W - w["w"]) / 2 - w["x"]), round((H - w["h"]) / 2 - w["y"])
 
     def test_one_click_on_every_window_focuses_exactly_that_window(self):
         """Every thumbnail -- on screen or not -- in ONE click: the overview
         closes and every focus request names that window's own Hyprland
         address (sent after the keyboard is released and once more after the
         overlay is gone). A window not entirely in view is brought there
-        first by panning the whole desktop: every floating window moved by
-        the same smallest delta (the spiral keeps its shape); a window
-        already in view moves nothing at all."""
+        first by panning the whole desktop so it is centred: every floating
+        window moved by that one delta (the spiral keeps its shape); a
+        window already in view moves nothing at all."""
         mx, my = self.o.layout["monitor"]["x"], self.o.layout["monitor"]["y"]
         panned = still = 0
         for w in self.o.layout["windows"]:
@@ -443,6 +439,340 @@ class TestOverview(unittest.TestCase):
         self.o.call("show")
         self.o.scene.wait(SETTLE)
         self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
+
+
+MAGENTA = "#ff00ff"
+
+
+def max_diff(a, b, step=7):
+    """Largest per-channel difference between two frames, sampled."""
+    d = 0
+    for x in range(0, min(a.width(), b.width()), step):
+        for y in range(0, min(a.height(), b.height()), step):
+            p, q = a.pixelColor(x, y), b.pixelColor(x, y)
+            d = max(d, abs(p.red() - q.red()), abs(p.green() - q.green()), abs(p.blue() - q.blue()))
+    return d
+
+
+def moved_to(dispatches):
+    """{address: (x, y)} from the hl.dsp.window.move requests sent."""
+    import re
+    out = {}
+    for d in dispatches:
+        m = re.search(r'window\.move\(\{ window = "address:([^"]+)", x = (-?\d+), y = (-?\d+)', d)
+        if m:
+            out[m.group(1)] = (int(m.group(2)), int(m.group(3)))
+    return out
+
+
+class TestSelectionCentring(unittest.TestCase):
+    """Bug report: a window clicked in the overview ended up off centre,
+    toward the side of the screen it had been on (the pan only nudged it
+    24 px inside the nearest edge). It must land centred in the usable area
+    -- bar, dock and the monitor's own position accounted for -- within
+    2 px, by ONE delta applied to every movable window."""
+
+    def run_case(self, target_rect, mon, extra=()):
+        anchor = (mon["x"] + 760, mon["y"] + 400, mon["x"] + 1160, mon["y"] + 700)
+        rects = [anchor, target_rect] + list(extra)
+        cl = clients_for(rects)
+        cl.append({"address": "0xp1n", "at": [mon["x"] + 1500, mon["y"] + 90], "size": [300, 200],
+                   "workspace": {"id": 4}, "monitor": 0, "mapped": True, "floating": True, "pinned": True,
+                   "focusHistoryID": 50, "class": "pin", "title": "Pinned"})
+        o = OverviewScene(cl, mon)
+        try:
+            lay = o.layout
+            target = next(w for w in lay["windows"] if w["address"] == "0xa001")
+            r = lay["reserved"]
+            o.call("show")
+            o.scene.wait(SETTLE)
+            # click the target's tile where nothing else covers it
+            pt = TestOverview.visible_point(type("X", (), {"o": o})(), target)
+            self.assertIsNotNone(pt)
+            o.click(*pt)
+            o.scene.wait(SETTLE)
+            sent = o.dispatches()
+            moves = moved_to(sent)
+            ux, uy, uw, uh = lay["monitor"]["x"], lay["monitor"]["y"], lay["monitor"]["width"], lay["monitor"]["height"]
+            tx, ty = moves["0xa001"]
+            err = math.hypot(tx + target["w"] / 2 - (ux + uw / 2), ty + target["h"] / 2 - (uy + uh / 2))
+            # and against the usable area worked out from the raw monitor
+            # alone (logical size, offset, reserved strips) -- not from the
+            # layout code this is testing
+            sc = mon.get("scale", 1) or 1
+            res = mon["reserved"]
+            cx = mon["x"] + res[0] + (mon["width"] / sc - res[0] - res[2]) / 2
+            cy = mon["y"] + res[1] + (mon["height"] / sc - res[1] - res[3]) / 2
+            raw = math.hypot(tx + (target_rect[2] - target_rect[0]) / 2 - cx, ty + (target_rect[3] - target_rect[1]) / 2 - cy)
+            self.assertLessEqual(raw, 2, ("centre vs the raw monitor", raw, (tx, ty), (cx, cy)))
+            err = max(err, raw)
+            # one delta for every movable window; the pinned one stays
+            deltas = {(x - (w["x"] + ux), y - (w["y"] + uy))
+                      for a, (x, y) in moves.items() for w in lay["windows"] if w["address"] == a}
+            self.assertEqual(len(deltas), 1, deltas)
+            self.assertNotIn("0xp1n", moves)
+            self.assertEqual(set(moves), {w["address"] for w in lay["windows"] if w["floating"] and not w["pinned"]})
+            # the closing animation's last frame is exactly the panned desktop
+            (dx, dy), = deltas
+            last = json.loads(o.scene.ev("JSON.stringify(findNamed('overview').lastCloseRects)"))
+            for w in lay["windows"]:
+                moved = w["floating"] and not w["pinned"] and not w["fullscreen"]
+                want = [w["x"] + (dx if moved else 0), w["y"] + (dy if moved else 0), w["w"], w["h"]]
+                for g, e in zip(last[w["address"]], want):
+                    self.assertAlmostEqual(g, e, delta=0.6, msg=(w["address"], last[w["address"]], want))
+            self.assertIn(f'hl.dsp.focus({{ window = "address:0xa001" }})', sent)
+            return err
+        finally:
+            o.scene.close()
+
+    def test_targets_in_every_direction_land_centred(self):
+        mon = monitor()
+        errors = {}
+        for name, rect in (("left", (-1400, 300, -800, 700)), ("right", (2600, 200, 3300, 650)),
+                           ("above", (700, -1300, 1300, -900)), ("below", (500, 1500, 1200, 1950)),
+                           ("left and below", (-900, 1300, -300, 1700)), ("half off the right", (1600, 300, 2300, 700))):
+            errors[name] = self.run_case(rect, mon)
+        for name, e in errors.items():
+            self.assertLessEqual(e, 2, (name, errors))
+
+    def test_a_monitor_not_at_the_origin_with_a_bar_and_a_dock_on_the_side(self):
+        mon = {"id": 0, "name": "HDMI-A-1", "x": 1920, "y": 120, "width": 2560, "height": 1440, "scale": 1,
+               "transform": 0, "focused": True, "activeWorkspace": {"id": 1}, "specialWorkspace": {"id": 0},
+               "reserved": [64, 40, 0, 0]}
+        for rect in ((1920 - 1500, 300, 1920 - 700, 800), (1920 + 3100, 900, 1920 + 3800, 1300)):
+            self.assertLessEqual(self.run_case(rect, mon), 2, rect)
+
+    def test_a_scaled_monitor(self):
+        mon = monitor(w=2880, h=1620)
+        mon["scale"] = 1.5  # logical 1920x1080
+        self.assertLessEqual(self.run_case((2400, 500, 3000, 900), mon), 2)
+
+    def test_a_target_larger_than_the_screen_is_centred(self):
+        self.assertLessEqual(self.run_case((2200, -200, 2200 + 2400, -200 + 1300), monitor()), 2)
+
+    def test_a_window_already_in_view_moves_nothing(self):
+        cl = clients_for([(760, 400, 1160, 700), (100, 120, 600, 500)])
+        o = OverviewScene(cl)
+        try:
+            w = next(x for x in o.layout["windows"] if x["address"] == "0xa001")
+            o.call("show")
+            o.scene.wait(SETTLE)
+            o.click(*TestOverview.visible_point(type("X", (), {"o": o})(), w))
+            o.scene.wait(SETTLE)
+            self.assertEqual(moved_to(o.dispatches()), {})
+        finally:
+            o.scene.close()
+
+
+class TestNoGhosting(unittest.TestCase):
+    """Bug report: during the zoom the real window and its picture were both
+    visible -- two copies tweening (the wallpaper used to fade in over the
+    first sixth of the zoom and out over the last, so the real windows
+    showed through it while their pictures moved). Now the overview takes
+    over in one frame, pictures exactly over the real windows, and gives
+    the screen back the same way: checked on the rendered frames."""
+
+    def setUp(self):
+        self.rects = sp.arrange(MIXED[:8], [], (0, 52, 1920, 1012), (32, 56))
+        self.o = OverviewScene(clients_for(self.rects))
+        # paint one real window (and its picture) a colour nothing else has
+        fake = json.loads(self.o.scene.ev("JSON.stringify(fakeWindows)"))
+        self.target = self.o.layout["windows"][0]
+        fake[0]["color"] = MAGENTA
+        self.o.scene.ev("fakeWindows = " + json.dumps(fake))
+        tl = json.loads(self.o.scene.ev("JSON.stringify(hypr.toplevels.values)"))
+        tl[0]["wayland"]["color"] = MAGENTA
+        self.o.scene.ev("hypr.toplevels = ({ values: " + json.dumps(tl) + " })")
+
+    def tearDown(self):
+        self.o.scene.close()
+
+    def magenta_outside_tiles(self, img, tiles=None):
+        """Pixels of the real target window's colour where no tile is: a
+        second, ghost copy of it."""
+        r = self.o.layout["reserved"]
+        tiles = self.o.tiles() if tiles is None else tiles
+        w = self.target
+        hits = 0
+        for i in range(2, int(w["w"]) - 1, 4):
+            for j in range(2, int(w["h"]) - 1, 4):
+                x = w["x"] + r[0] + i
+                y = w["y"] + r[1] + j
+                if not (0 <= x < img.width() and 0 <= y < img.height()):
+                    continue
+                if any(t[0] - 2 <= x <= t[0] + t[2] + 2 and t[1] - 2 <= y <= t[1] + t[3] + 2 for t in tiles.values()):
+                    continue
+                c = img.pixelColor(int(x), int(y))
+                # magenta at any strength: a half-faded ghost counts too
+                if c.red() - c.green() > 40 and c.blue() - c.green() > 40:
+                    hits += 1
+        return hits
+
+    def frames(self, n=10, every=30):
+        """(progress, covering, frame) every few ms. While the overview is
+        not covering, the screen is the real desktop alone (checked by
+        test_nothing_is_drawn_before_the_handover); while it is, any of the
+        real window's colour outside the pictures is a second copy."""
+        out = []
+        for _ in range(n):
+            self.o.scene.wait(every)
+            img = self.o.scene.view.grabWindow()
+            out.append((self.o.ov("progress"), self.o.ov("covering"), (img, self.o.tiles())))
+        return out
+
+    def test_opening_never_shows_the_real_window_and_its_picture_together(self):
+        self.o.call("show")
+        seen = self.frames(14, 25)
+        self.assertTrue(any(0.05 < p < 0.95 for p, _c, _i in seen), [p for p, _c, _i in seen])
+        for p, covering, img in seen:
+            if covering:
+                self.assertEqual(self.magenta_outside_tiles(*img), 0, f"ghost at progress {p:.2f} {img[1]}")
+            else:
+                self.assertEqual(p, 0, "zooming before the overview covers the desktop")
+
+    STEPS = (0.0, 0.02, 0.05, 0.08, 0.12, 0.16, 0.25, 0.4, 0.6, 0.8, 0.95, 1.0)
+
+    def test_every_zoom_frame_has_one_copy_of_each_window(self):
+        """The zoom stepped frame by frame (both directions draw the same
+        frames): at no point does the real window show beside its moving
+        picture. The old crossfade failed exactly here, for p < 1/6."""
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        bad = {}
+        for p in self.STEPS:
+            self.o.scene.ev(f"findNamed('overview').progress = {p}")
+            self.o.scene.wait(1)
+            img = self.o.scene.view.grabWindow()
+            hits = self.magenta_outside_tiles(img, self.o.tiles())
+            if hits:
+                bad[p] = hits
+        self.assertEqual(bad, {}, "progress: ghost pixels")
+
+    def test_nothing_is_drawn_before_the_handover(self):
+        """Until the pictures are ready the overlay draws nothing but the
+        keypress's dim: the screen is exactly the desktop under a uniform
+        black veil (here: held at that point by a window with no picture
+        yet) -- no picture, no wallpaper, nothing moved."""
+        tl = json.loads(self.o.scene.ev("JSON.stringify(hypr.toplevels.values)"))
+        tl[0]["wayland"]["noContent"] = True
+        self.o.scene.ev("hypr.toplevels = ({ values: " + json.dumps(tl) + " })")
+        desk = self.o.scene.view.grabWindow()
+        self.o.call("show")
+        self.o.scene.wait(60)
+        self.assertFalse(self.o.ov("covering"))
+        self.assertTrue(self.o.ov("visible"))
+        a = 0.22 * self.o.ov("fade") * (1 - self.o.ov("progress"))
+        self.assertGreater(a, 0)
+        now = self.o.scene.view.grabWindow()
+        worst = 0
+        for x in range(0, desk.width(), 7):
+            for y in range(0, desk.height(), 7):
+                d, g = desk.pixelColor(x, y), now.pixelColor(x, y)
+                worst = max(worst, *(abs(c0 * (1 - a) - c1) for c0, c1 in
+                                     ((d.red(), g.red()), (d.green(), g.green()), (d.blue(), g.blue()))))
+        self.assertLessEqual(worst, 2, "something besides the dim is drawn before the handover")
+
+    def test_closing_never_shows_two_copies_even_after_a_pan(self):
+        """Closing after a click that pans: the real windows are moved at
+        once (here: the compositor applying the moves to the scene), the
+        pictures travel to them, and no real window shows until the
+        pictures are exactly on them."""
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        off = next(w for w in reversed(self.o.layout["windows"])
+                   if w["x"] + w["w"] < 0 or w["x"] > 1920 or w["y"] + w["h"] < 0 or w["y"] > 960)
+        pt = TestOverview.visible_point(type("X", (), {"o": self.o})(), off)
+        self.o.click(*pt)
+        self.o.scene.wait(1)
+        moves = moved_to(self.o.dispatches())
+        r, mx, my = self.o.layout["reserved"], self.o.layout["monitor"]["x"], self.o.layout["monitor"]["y"]
+        fake = json.loads(self.o.scene.ev("JSON.stringify(fakeWindows)"))
+        for fw, w in zip(fake, self.o.layout["windows"]):
+            if w["address"] in moves:
+                fw["x"], fw["y"] = moves[w["address"]][0] - mx + r[0], moves[w["address"]][1] - my + r[1]
+        self.o.scene.ev("fakeWindows = " + json.dumps(fake))
+        (tx, ty) = moves[self.target["address"]]
+        self.target = dict(self.target, x=tx - mx, y=ty - my)   # where the real window now is
+        seen = self.frames(14, 25)
+        self.assertFalse(seen[-1][1], "the overview never gave the screen back")
+        for p, covering, img in seen:
+            if covering:
+                self.assertEqual(self.magenta_outside_tiles(*img), 0, f"ghost at progress {p:.2f} {img[1]}")
+
+    def test_the_handover_frames_are_the_desktop_itself(self):
+        """The first frame the overview covers, and the last before it goes,
+        are pixel for pixel the desktop it replaces (the usable area: the bar
+        and dock strips are the one thing the overlay hides)."""
+        from PySide6.QtCore import QRect
+        r = self.o.layout["reserved"]
+        area = QRect(r[0], r[1], self.o.layout["monitor"]["width"], self.o.layout["monitor"]["height"])
+        desk = self.o.scene.view.grabWindow().copy(area)
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        self.o.scene.ev("findNamed('overview').progress = 0")
+        self.o.scene.ev("findNamed('overview').fade = 0")
+        self.o.scene.wait(60)
+        self.assertTrue(self.o.ov("covering"))
+        cover = self.o.scene.view.grabWindow().copy(area)
+        self.assertLessEqual(max_diff(desk, cover), 2, "the covered frame differs from the desktop")
+
+    def test_the_last_frame_drawn_on_closing_is_the_desktop(self):
+        """Closing for real (not stepped): the overview lets go only after
+        the frame with every picture back on its window and no dim has been
+        drawn, so the last frame it shows and the first without it match."""
+        from PySide6.QtCore import QRect
+        r = self.o.layout["reserved"]
+        area = QRect(r[0], r[1], self.o.layout["monitor"]["width"], self.o.layout["monitor"]["height"])
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        self.o.call("hide")
+        last = None
+        for _ in range(400):
+            self.o.scene.wait(3)
+            if not self.o.ov("covering"):
+                break
+            last = self.o.scene.view.grabWindow().copy(area)
+        self.assertIsNotNone(last)
+        self.assertFalse(self.o.ov("covering"))
+        after = self.o.scene.view.grabWindow().copy(area)
+        self.assertLessEqual(max_diff(last, after, 3), 2, "the overlay vanished before its final frame was drawn")
+
+    def test_reopening_in_the_release_frames_resumes(self):
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        self.o.call("hide")
+        for _ in range(400):
+            self.o.scene.wait(2)
+            if self.o.ov("progress") == 0:
+                break
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        self.assertEqual(self.o.state(), (True, 1.0, 1.0, True))
+        self.assertTrue(self.o.ov("covering"))
+        self.assertEqual(len(self.o.tiles()), len(self.o.layout["windows"]))
+
+    def test_the_handover_waits_for_the_pictures(self):
+        """The overview doesn't take over while a visible window has no
+        picture yet -- that window would vanish for a frame or two; it waits
+        (150 ms at most, then that window shows its card)."""
+        tl = json.loads(self.o.scene.ev("JSON.stringify(hypr.toplevels.values)"))
+        tl[0]["wayland"]["noContent"] = True
+        self.o.scene.ev("hypr.toplevels = ({ values: " + json.dumps(tl) + " })")
+        self.o.call("show")
+        self.o.scene.wait(60)
+        self.assertFalse(self.o.ov("covering"))
+        self.assertEqual(self.o.ov("progress"), 0)
+        self.o.scene.wait(400)
+        self.assertTrue(self.o.ov("covering"))
+
+    def test_pressing_again_before_the_handover_backs_out_cleanly(self):
+        self.o.call("show")
+        self.o.scene.wait(5)
+        self.o.call("toggle")
+        self.o.scene.wait(SETTLE)
+        self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
+        self.assertFalse(self.o.ov("covering"))
+        self.assertEqual(self.o.dispatches(), [])
 
 
 class TestGeometryParity(unittest.TestCase):

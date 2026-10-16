@@ -162,6 +162,7 @@ def main(out):
     timelines(out)
     one_click_sequence(out)
     timing_chart(out)
+    print("handover max diff (open, close):", ghost_check(out))
 
 
 def _bezier(x1, y1, x2, y2, u):
@@ -176,23 +177,26 @@ def _bezier(x1, y1, x2, y2, u):
 
 # The shipped motion at the theme's default speed (anim_duration_ms 150):
 # the dim fades in over 150 ms (OutCubic) from the keypress; the window data
-# lands ~10 ms in; the zoom (300 ms, cubic-bezier 0.4 0 0.2 1) starts then.
-# Closing: zoom back and fade out together, 300 ms.
-ZOOM_MS, DATA_MS, FADE_MS = 300, 10, 150
+# lands ~10 ms in and the pictures a frame or two later -- the handover,
+# where the overview takes the screen over in one frame -- and the zoom
+# (300 ms, cubic-bezier 0.4 0 0.2 1) starts then. Closing: zoom back and
+# fade out together, 300 ms; on the last frame the overview lets go.
+ZOOM_MS, DATA_MS, FADE_MS, HANDOVER_MS = 300, 10, 150, 26
 
 
 def open_state(t):
     fade = 1 - (1 - min(1.0, t / FADE_MS)) ** 3
-    prog = _bezier(0.4, 0.0, 0.2, 1.0, min(1.0, max(0.0, (t - DATA_MS) / ZOOM_MS)))
-    return fade, prog
+    prog = _bezier(0.4, 0.0, 0.2, 1.0, min(1.0, max(0.0, (t - HANDOVER_MS) / ZOOM_MS)))
+    return fade, prog, t >= HANDOVER_MS
 
 
 def close_state(t):
     u = min(1.0, t / ZOOM_MS)
-    return 1 - u * u, 1 - _bezier(0.4, 0.0, 0.2, 1.0, u)
+    return 1 - u * u, 1 - _bezier(0.4, 0.0, 0.2, 1.0, u), t < ZOOM_MS
 
 
-def _set(s, fade, prog):
+def _set(s, fade, prog, covering=True):
+    s.ev(f"findNamed('overview').covering = {'true' if covering else 'false'}")
     s.ev(f"findNamed('overview').fade = {fade}")
     s.ev(f"findNamed('overview').progress = {prog}")
     s.wait(50)
@@ -203,26 +207,77 @@ def timelines(out):
     times after the keypress (the real curves, stepped by hand so the
     offscreen renderer's pacing doesn't blur them)."""
     rows = []
-    for name, fn, times in (("open", open_state, (0, 16, 60, 120, 180, 310)),
-                            ("close", close_state, (0, 60, 120, 180, 240, 300))):
+    for name, fn, times in (("open", open_state, (8, 25, 26, 90, 180, 330)),
+                            ("close", close_state, (0, 90, 180, 240, 299, 300))):
         s, layout = load(cases()[3][1], monitor())
         s.ev("findNamed('overview').show()")
         s.wait(SETTLE)
         row = []
         for t in times:
-            if name == "open" and t == 0:
-                s.ev("findNamed('overview').progress = 0")
-                s.ev("findNamed('overview').fade = 0.05")
-                s.wait(50)
-                row.append(label(s.grab(out / "_tmp.png"), "keypress + 1 frame: the dim begins"))
-                continue
-            fade, prog = fn(t)
-            _set(s, fade, prog)
-            row.append(label(s.grab(out / "_tmp.png"), f"{name} +{t} ms", f"zoom {prog * 100:.0f}%"))
+            fade, prog, covering = fn(t)
+            _set(s, fade, prog, covering)
+            what = {(True, 25): "the real desktop, dimmed", (True, 26): "handover: the overview, same picture",
+                    (False, 299): "last overview frame", (False, 300): "overlay gone: the real desktop"}
+            sub_ = what.get((name == "open", t), f"zoom {prog * 100:.0f}%")
+            row.append(label(s.grab(out / "_tmp.png"), f"{name} +{t} ms", sub_))
         rows.append(row)
         s.close()
     (out / "_tmp.png").unlink(missing_ok=True)
     sheet([rows[0][:3], rows[0][3:], rows[1][:3], rows[1][3:]], out / "overview_timeline.png", scale=0.3)
+
+
+def diff_image(a, b, gain=8):
+    """|a - b| per channel, amplified, and the largest raw difference."""
+    from PySide6.QtGui import QColor as C
+    out = QImage(a.width(), a.height(), QImage.Format_RGB32)
+    worst = 0
+    for y in range(a.height()):
+        for x in range(a.width()):
+            p, q = a.pixelColor(x, y), b.pixelColor(x, y)
+            d = (abs(p.red() - q.red()), abs(p.green() - q.green()), abs(p.blue() - q.blue()))
+            worst = max(worst, *d)
+            out.setPixelColor(x, y, C(*(min(255, v * gain) for v in d)))
+    return out, worst
+
+
+def ghost_check(out, scale=0.25):
+    """The two hard moments, as actual rendered frames: the frame before
+    the overview takes over vs. the first it draws, and the last it draws
+    on closing (the real exit animation, grabbed until it lets go) vs. the
+desktop after it -- with their pixel difference
+    (amplified 8x; black = identical). Both the bar and dock are hidden
+    under the overlay while it covers, so the comparison is over the usable
+    area; the keypress's dim is set to 0 for the comparison."""
+    s, layout = load(cases()[1][1], monitor())
+    r, W, H = layout["reserved"], layout["monitor"]["width"], layout["monitor"]["height"]
+    from PySide6.QtCore import QRect
+    area = QRect(r[0], r[1], W, H)
+    grab = lambda: s.view.grabWindow().copy(area)  # noqa: E731
+    desk = grab()
+    s.ev("findNamed('overview').show()")
+    s.wait(SETTLE)
+    _set(s, 0, 0, True)
+    first = grab()
+    d1, w1 = diff_image(desk, first)
+    # closing for real: the last frame drawn while it still covers
+    s.ev("findNamed('overview').fade = 1")
+    s.ev("findNamed('overview').progress = 1")
+    s.ev("findNamed('overview').hide()")
+    last = None
+    for _ in range(400):
+        s.wait(3)
+        if not s.ev("findNamed('overview').covering"):
+            break
+        last = grab()
+    after = grab()
+    d2, w2 = diff_image(last, after)
+    s.close()
+    rows = [[label(desk, "open: desktop before the handover"), label(first, "first overview frame"),
+             label(d1, "difference x8", f"max {w1}/255")],
+            [label(last, "close: last overview frame"), label(after, "the desktop after it"),
+             label(d2, "difference x8", f"max {w2}/255")]]
+    sheet(rows, out / "overview_ghost_check.png", scale=scale)
+    return w1, w2
 
 
 def one_click_sequence(out):
@@ -265,7 +320,21 @@ def one_click_sequence(out):
     s.wait(60)
     frames.append(label(s.grab(out / "_tmp.png"), "closing onto the panned desktop"))
     s.wait(SETTLE)
-    frames.append(label(s.grab(out / "_tmp.png"), "done: panned as one piece, the window in view (highlighted)"))
+    done = s.grab(out / "_tmp.png")
+    # the usable area's centre, and the window's: they coincide
+    ax, ay = moved[target["address"]]
+    cx = ax - layout["monitor"]["x"] + r[0] + target["w"] / 2
+    cy = ay - layout["monitor"]["y"] + r[1] + target["h"] / 2
+    ux, uy = r[0] + W / 2, r[1] + H / 2
+    p = QPainter(done)
+    p.setPen(QColor("#ff4d6d"))
+    p.drawLine(int(ux) - 40, int(uy), int(ux) + 40, int(uy))
+    p.drawLine(int(ux), int(uy) - 40, int(ux), int(uy) + 40)
+    p.setPen(QColor("#101216"))
+    p.drawEllipse(int(cx) - 10, int(cy) - 10, 20, 20)
+    p.end()
+    err = ((cx - ux) ** 2 + (cy - uy) ** 2) ** 0.5
+    frames.append(label(done, "done: the window centred (cross: screen centre)", f"centre error {err:.1f} px"))
     s.close()
     (out / "_tmp.png").unlink(missing_ok=True)
     sheet([frames[:2], frames[2:]], out / "overview_one_click.png", scale=0.36)

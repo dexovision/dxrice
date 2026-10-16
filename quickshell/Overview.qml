@@ -22,17 +22,24 @@ import "OverviewGeometry.js" as Geo
 //                geometry is OverviewGeometry.js, the same as
 //                dxrice_overview.py) puts each window's picture exactly over
 //                the real window
-//   then      -> the composition zooms out to fit the usable area; the
-//                wallpaper fades in under it over the first third
-// Closing plays it back: the last frames are the real desktop again.
+//   then      -> once every visible window's live picture is ready (a frame
+//                or two; 150 ms at most), the overview takes over in ONE
+//                frame -- wallpaper, pictures exactly over the real windows,
+//                the same dim: identical to the desktop it replaces, bar and
+//                dock aside -- and only then zooms out. Never a crossfade:
+//                the real windows and their pictures are never both
+//                visible, so nothing is ever seen twice.
+// Closing plays it back fully covered, and the overlay lets go only after
+// the frame with every picture exactly over its real window (and no dim)
+// has been drawn -- the last thing it shows is the desktop under it.
 //
 // One click on any window focuses exactly that window (by its Hyprland
 // address) and closes. A window not entirely inside the visible area is
-// first brought into view by panning the whole desktop -- every floating
-// window of the workspace moved by the same, smallest delta, so the Galaxy
-// Spiral keeps its shape -- and the overview closes onto the windows in
-// their new places. Esc, a click on empty space or SUPER+Tab again closes
-// without changing anything.
+// first brought into view by panning the whole desktop so it lands centred
+// in the usable area -- every floating window of the workspace moved by
+// that one delta, so the Galaxy Spiral keeps its shape -- and the overview
+// closes onto the windows in their new places. Esc, a click on empty space
+// or SUPER+Tab again closes without changing anything.
 //
 // Hyprland itself cannot zoom the desktop out (see dxrice_overview.py's
 // docstring for why its magnifier, a monitor-scale change and the overview
@@ -65,7 +72,15 @@ PanelWindow {
     property real dataAt: 0
     property int tilesBuilt: 0   // tile delegates ever created (tests: in-place updates)
 
-    readonly property bool showing: root.open || root.fade > 0
+    readonly property bool showing: root.open || root.fade > 0 || root.covering
+    // The overview has taken over the screen: its wallpaper and pictures are
+    // drawn, opaque. False before the handover (the real desktop shows,
+    // dimmed) and again from the final, aligned frame of closing.
+    property bool covering: false
+    property real _waitStart: 0
+    // the tiles' on-screen rects in the last frame before the overlay went
+    // (tests: closing lands exactly on the real windows, panned or not)
+    property var lastCloseRects: ({})
     readonly property var windows: root.layout && root.layout.windows ? root.layout.windows : []
     readonly property bool hasFullscreen: root.windows.some(w => w.fullscreen)
     // the usable area (the monitor minus the bar's and dock's strips) the
@@ -86,6 +101,7 @@ PanelWindow {
         // Immediate feedback: the surface comes up now, dimming the real
         // desktop, while the window data is read.
         exitAnim.stop();
+        release.stop();
         scrimIn.restart();
         root._pendingEnter = true;
         root.refresh();
@@ -94,6 +110,7 @@ PanelWindow {
         if (!root.open) return;
         root.open = false;
         root._pendingEnter = false;
+        handover.stop();
         scrimIn.stop();
         enterAnim.stop();
         exitAnim.start();
@@ -135,8 +152,31 @@ PanelWindow {
         root.dataAt = Date.now();
         if (root._pendingEnter) {
             root._pendingEnter = false;
+            if (root.covering) { enterAnim.restart(); return; }   // reopened mid-close
+            root._waitStart = Date.now();
+            handover.start();
+        }
+    }
+    // Hand the screen over to the overview once every window whose real
+    // pixels are visible has its live picture (a frame or two); a window
+    // that can't be captured within 150 ms shows its card instead.
+    Timer {
+        id: handover
+        interval: 8; repeat: true
+        onTriggered: {
+            if (!root.open) { stop(); return; }
+            if (!root._capturesReady() && Date.now() - root._waitStart < 150) return;
+            stop();
+            root.covering = true;
             enterAnim.restart();
         }
+    }
+    function _capturesReady() {
+        for (let i = 0; i < tiles.count; i++) {
+            const t = tiles.itemAt(i);
+            if (t && t.onScreen && !t.hasPicture) return false;
+        }
+        return true;
     }
     function _parse(text) {
         try { return JSON.parse(text); } catch (e) { return null; }
@@ -202,19 +242,15 @@ PanelWindow {
         const a = String(address).startsWith("0x") ? String(address) : "0x" + address;
         return 'hl.dsp.focus({ window = "address:' + a + '" })';
     }
-    // How far the whole desktop must pan for window w (usable-area rect) to
-    // be entirely in view: on each axis zero if it already is, else the
-    // smallest shift that brings it PAN_MARGIN inside the edge (centred if
-    // it is bigger than the area).
-    readonly property int panMargin: 24
+    // How far the whole desktop must pan for window w (a usable-area rect,
+    // logical layout coordinates: bar, dock and monitor scale already taken
+    // out) to be shown. Zero if it is entirely in view already -- nothing
+    // moves; otherwise the one delta that centres it in the usable area (a
+    // window larger than the area is centred too, overhanging evenly).
     function panDelta(w) {
-        function axis(p, size, span) {
-            if (p >= 0 && p + size <= span) return 0;
-            if (size + 2 * root.panMargin > span) return Math.round((span - size) / 2 - p);
-            if (p < root.panMargin) return Math.round(root.panMargin - p);
-            return Math.round((span - root.panMargin) - (p + size));
-        }
-        return [axis(w.rx, w.rw, root.usableWidth), axis(w.ry, w.rh, root.usableHeight)];
+        if (w.rx >= 0 && w.ry >= 0 && w.rx + w.rw <= root.usableWidth && w.ry + w.rh <= root.usableHeight)
+            return [0, 0];
+        return [Math.round((root.usableWidth - w.rw) / 2 - w.rx), Math.round((root.usableHeight - w.rh) / 2 - w.ry)];
     }
     // The desktop's camera, as SUPER+arrow navigation moves it: every
     // floating window of the workspace by the same delta, so the spiral keeps
@@ -295,9 +331,32 @@ PanelWindow {
         // then give a clicked window its focus once more (see focusLua)
         ScriptAction {
             script: {
-                if (!root.open) { root.layout = null; tileModel.clear(); }
-                if (root._focusAfterClose) focusAgain.restart();
+                if (root.open) return;
+                // the final frame: every picture exactly over its real window
+                const rects = {};
+                for (let i = 0; i < tiles.count; i++) {
+                    const t = tiles.itemAt(i);
+                    if (t) rects[t.address] = [t.x, t.y, t.width, t.height];
+                }
+                root.lastCloseRects = rects;
+                release.restart();
             }
+        }
+    }
+    // The animation ends on the value it was heading to, but the frame
+    // showing that value hasn't been drawn yet: let go of the screen only
+    // once it has (two frames on), so the last thing the overview shows is
+    // exactly the desktop it uncovers -- no pop of dim or position.
+    FrameAnimation {
+        id: release
+        onTriggered: {
+            if (root.open) { stop(); return; }
+            if (currentFrame < 2) return;
+            stop();
+            root.covering = false;
+            root.layout = null;
+            tileModel.clear();
+            if (root._focusAfterClose) focusAgain.restart();
         }
     }
 
@@ -334,16 +393,13 @@ PanelWindow {
         focus: true
         Keys.onEscapePressed: root.hide()
 
-        // The real wallpaper, drawn as hyprpaper draws it (cover). It fades
-        // in over the first sixth of the zoom -- covering the real windows
-        // while their pictures have barely left them, so there is no double
-        // image -- and out over the last sixth of the way back, so the final
-        // frames are the real desktop.
+        // The real wallpaper, drawn as hyprpaper draws it (cover): opaque
+        // the whole time the overview is covering, absent otherwise -- the
+        // real windows are never seen through it.
         Item {
             id: backdrop
             anchors.fill: parent
-            opacity: Math.min(1, root.progress * 6)
-            visible: opacity > 0
+            visible: root.covering
         Rectangle { anchors.fill: parent; color: "#0d0f13" }
         Image {
             anchors.fill: parent
@@ -369,9 +425,16 @@ PanelWindow {
             x: root.reserved[0]; y: root.reserved[1]
             width: root.usableWidth; height: root.usableHeight
         Repeater {
+            id: tiles
             model: tileModel
             delegate: Item {
                 id: tile
+                visible: root.covering
+                // whether any of the real window shows on screen right now,
+                // and whether its live picture is in (the handover waits)
+                readonly property bool onScreen: tile.rx < root.usableWidth + root.reserved[2] && tile.rx + tile.rw > -root.reserved[0]
+                                                 && tile.ry < root.usableHeight + root.reserved[3] && tile.ry + tile.rh > -root.reserved[1]
+                readonly property bool hasPicture: capture.hasContent
                 required property string address
                 required property real rx
                 required property real ry
@@ -411,12 +474,12 @@ PanelWindow {
 
                 // Placeholder when a window can't be captured (no live
                 // picture yet, or the compositor declines): its card, title
-                // and class, never an empty hole. Not before the zoom is
-                // under way -- until then the real window shows through.
+                // and class, never an empty hole. Drawn only once the
+                // overview covers (the handover waits up to 150 ms for it).
                 Rectangle {
                     objectName: "overviewPlaceholder"
                     anchors.fill: parent
-                    visible: !capture.hasContent && tile.p > 0.15
+                    visible: !capture.hasContent
                     color: Theme.panel
                     radius: 6 * tile.p
                     border.color: Theme.border
