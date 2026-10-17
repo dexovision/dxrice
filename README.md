@@ -284,9 +284,9 @@ your dotfiles tree is updated and the link stays a link. The same goes for
   crashes in 30 s a part stops being restarted until the next login.
 - **Windows show twice while the overview zooms.** Your `hyprland.lua`
   predates the fix. Run `./install.sh update` and accept the
-  "turn off Hyprland's layer fade" edit, or add these two lines yourself:
-  `hl.animation({ leaf = "fadeLayersIn",  enabled = false })` and
-  `hl.animation({ leaf = "fadeLayersOut", enabled = false })`.
+  "stop Hyprland fading the SUPER+Tab overview" edit, or add this line
+  yourself, after the other `hl.layer_rule` lines:
+  `hl.layer_rule({ name = "overview-no-anim", match = { namespace = "^dxrice-overview$" }, no_anim = true })`.
 - **A new window landed far from the others.** Every placement decision is
   logged without window titles: `journalctl --user -u dxrice-auto-place-window`
   (without systemd: `$XDG_RUNTIME_DIR/dxrice/<hyprland instance>/auto-place-window.log`).

@@ -36,9 +36,10 @@ import "OverviewGeometry.js" as Geo
 //
 // Hyprland fades every layer surface in and out as a whole (fadeLayersIn /
 // fadeLayersOut), however opaque it paints: on a real desktop that showed
-// every window twice while the pictures moved. The hyprland.lua template
-// turns those two leaves off; the empty frames before the unmap keep the
-// closing clean even without them (see docs/OVERVIEW.md).
+// every window twice while the pictures moved. The hyprland.lua template's
+// layer rule `overview-no-anim` turns that off for this namespace only
+// (WlrLayershell.namespace below); the empty frames before the unmap keep
+// the closing clean even without it (see docs/OVERVIEW.md).
 //
 // One click on any window focuses exactly that window (by its Hyprland
 // address) and closes. A window not entirely inside the visible area is

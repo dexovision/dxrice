@@ -96,16 +96,6 @@ hl.animation({ leaf = "windowsOut", enabled = true, speed = 1.49, bezier = "line
 hl.animation({ leaf = "border", enabled = true, speed = 5.39, bezier = "easeOutQuint" })
 hl.animation({ leaf = "fade", enabled = true, speed = 3.03, bezier = "quick" })
 hl.animation({ leaf = "workspaces", enabled = true, speed = 1.94, bezier = "linear", style = "fade" })
--- Layer-shell surfaces (the desktop overview, launchers, notifications) must
--- not be faded by the compositor. The `fade` animation above also drives
--- fadeLayersIn/fadeLayersOut, and Hyprland applies them to the WHOLE surface
--- as it maps and unmaps: the desktop overview, however opaque it paints, was
--- composited at 0..100% over the real windows for ~300 ms while its window
--- pictures moved, so every window showed twice. (No per-layer rule exists:
--- layer_rule's no_anim only skips the unmap snapshot.) Shell panels animate
--- themselves in QML.
-hl.animation({ leaf = "fadeLayersIn",  enabled = false })
-hl.animation({ leaf = "fadeLayersOut", enabled = false })
 
 hl.config({
     dwindle = { preserve_split = true },
@@ -123,6 +113,14 @@ hl.layer_rule({ name = "theme-blur", match = { namespace = "dxrice-theme" }, blu
 -- so bar-top-blur/bar-dock-blur below already cover them.
 hl.layer_rule({ name = "bar-top-blur", match = { namespace = "dxrice-bar-top" }, blur = true, ignore_alpha = 0.6 })
 hl.layer_rule({ name = "bar-dock-blur", match = { namespace = "dxrice-bar-dock" }, blur = true, ignore_alpha = 0.6 })
+-- The desktop overview (SUPER+Tab) only, unanimated by the compositor. The
+-- `fade` animation above also fades every layer surface in and out as a
+-- whole (fadeLayersIn/Out); over the overview, which animates itself, that
+-- composited it at 0..100% over the real windows while its window pictures
+-- moved, so every window showed twice. no_anim ends this surface's fade on
+-- its first frame and skips its fade-out; the bar, dock, notifications and
+-- launchers keep theirs.
+hl.layer_rule({ name = "overview-no-anim", match = { namespace = "^dxrice-overview$" }, no_anim = true })
 
 hl.config({
     input = {

@@ -67,7 +67,7 @@ NEW_LINE='    hl.exec_cmd(repo .. "/scripts/dxrice_polkit_agent.sh")'
 echo "=== hyprland.lua migrations ==="
 
 # The pre-fix template, as installs deployed it: an old polkit path, the
-# autostart before dxrice_session.sh, and no layer-fade lines.
+# autostart before dxrice_session.sh, and no overview layer rule.
 old_template() {
     git -C "$REPO_DIR" show 36ece7d:hypr/hyprland.lua 2>/dev/null \
         || sed "s#hl.exec_cmd(repo .. \"/scripts/dxrice_polkit_agent.sh\")#hl.exec_cmd(\"/usr/lib/polkit-kde-agent-1\")#" \
@@ -89,7 +89,8 @@ assert "...and the pending fixes were listed" "$(yes_if "grep -q 'polkit agent' 
 DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > "$LOG/mig1.out" 2>&1
 assert "old polkit path is gone" "$(yes_if "! grep -qF '/usr/lib/polkit-kde-agent-1' '$LUA'")"
 assert "helper line is in its place" "$(yes_if "grep -qF '$NEW_LINE' '$LUA'")"
-assert "layer fades turned off" "$(yes_if "grep -q 'leaf = \"fadeLayersIn\",  enabled = false' '$LUA'")"
+assert "the overview's layer rule added" "$(yes_if "grep -q 'name = \"overview-no-anim\"' '$LUA'")"
+assert "...and no global layer-fade line" "$(yes_if "! grep -q 'fadeLayers' '$LUA'")"
 assert "the result is exactly the migration of the old file" \
     "$(yes_if "python3 -c 'import sys; sys.path.insert(0, \"$REPO_DIR/scripts\"); import dxrice_hypr_migrate as m; sys.exit(m.migrate(open(\"$LOG/before.lua\").read()) != open(\"$LUA\").read())'")"
 assert "user's own keybind kept" "$(yes_if "grep -q 'SUPER + Y' '$LUA'")"
@@ -131,7 +132,7 @@ DXRICE_ASSUME_YES=1 call migrate_hyprland_lua > "$LOG/sym.out" 2>&1
 call install_shell_alias >> "$LOG/sym.out" 2>&1
 call install_shell_alias >> "$LOG/sym.out" 2>&1
 assert "hyprland.lua is still a symlink after a migration" "$(yes_if "[ -L '$H/.config/hypr/hyprland.lua' ]")"
-assert "...and the dotfiles copy got the fix" "$(yes_if "grep -q 'fadeLayersIn' '$H/dotfiles/hyprland.lua'")"
+assert "...and the dotfiles copy got the fix" "$(yes_if "grep -q 'overview-no-anim' '$H/dotfiles/hyprland.lua'")"
 assert ".bashrc is still a symlink after installing the dx functions twice" "$(yes_if "[ -L '$H/.bashrc' ]")"
 assert "...with exactly one dx block in the dotfiles copy" \
     "$(yes_if "[ \"\$(grep -c 'BEGIN dxrice shell functions' '$H/dotfiles/bashrc')\" = 1 ]")"

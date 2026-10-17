@@ -17,12 +17,13 @@ terms, what the repo's template has gained since your copy was seeded that
 your live file doesn't seem to reference anywhere, so you can decide for
 yourself whether to add it by hand.
 
-Heuristic, not a full Lua parse: identifies three kinds of line the repo
+Heuristic, not a full Lua parse: identifies four kinds of line the repo
 template's hyprland.start block and top-level bind table actually contain
 today --
   - hl.exec_cmd("...scripts/dxrice_X.py...")  (an autostart entry)
   - hl.bind(mods .. " + KEY", ...)            (a keybind)
   - hl.animation({ leaf = "NAME", ... })      (an animation setting)
+  - hl.layer_rule({ name = "NAME", ... })     (a layer rule)
 -- by their referenced script basename / key combo, and reports any such
 identity that's new in the repo template since the snapshot taken at your
 original install but doesn't appear ANYWHERE (verbatim substring) in your
@@ -57,6 +58,7 @@ TRACKED = [
 _EXEC_RE = re.compile(r'hl\.exec_cmd\([^)]*?scripts/([\w.\-]+\.py)')
 _BIND_RE = re.compile(r'hl\.bind\(\s*\w+\s*\.\.\s*"([^"]+)"')
 _ANIM_RE = re.compile(r'hl\.animation\(\{\s*leaf\s*=\s*"(\w+)"')
+_LAYER_RULE_RE = re.compile(r'hl\.layer_rule\(\{\s*name\s*=\s*"([^"]+)"')
 
 
 def _identities(text: str):
@@ -69,6 +71,8 @@ def _identities(text: str):
         ids.add(f"bind:{m.group(1)}")
     for m in _ANIM_RE.finditer(text):
         ids.add(f"animation:{m.group(1)}")
+    for m in _LAYER_RULE_RE.finditer(text):
+        ids.add(f"layer_rule:{m.group(1)}")
     return ids
 
 

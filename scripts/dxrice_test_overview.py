@@ -9,6 +9,7 @@ import io
 import json
 import os
 import random
+import re
 import sys
 import time
 import unittest
@@ -383,24 +384,31 @@ class TestCompositorLayerFade(unittest.TestCase):
     """The double image seen on a real recording of SUPER+Tab: Hyprland fades
     every layer surface in and out (fadeLayersIn/Out, inherited from `fade`),
     so the opaque overview was composited at 0..100% over the real windows
-    while its pictures moved. The template turns those two leaves off, and an
-    install that predates the lines is told about them."""
+    while its pictures moved. The template stops that for the overview's own
+    namespace only (a layer rule with no_anim: in Hyprland 0.56 the animation
+    tick finishes every animated value of such a layer at once, and its unmap
+    takes no snapshot to fade); every other surface keeps its fade. Installs
+    are brought forward by dxrice_hypr_migrate.py, which also takes out the
+    global lines an earlier fix wrote."""
 
     TEMPLATE = TestKeybinds.TEMPLATE
-    LEAVES = ("fadeLayersIn", "fadeLayersOut")
+    OVERVIEW_QML = os.path.join(os.path.dirname(TEMPLATE), "..", "quickshell", "Overview.qml")
+    RULE = re.compile(r'hl\.layer_rule\(\{\s*name\s*=\s*"overview-no-anim",\s*'
+                      r'match\s*=\s*\{\s*namespace\s*=\s*"([^"]+)"\s*\},\s*no_anim\s*=\s*true\s*\}\)')
 
-    def lines(self, text):
-        import re
-        return {m.group(1): m.group(0) for m in re.finditer(r'hl\.animation\(\{\s*leaf\s*=\s*"(\w+)"[^\n]*', text)}
+    def test_the_rule_matches_the_overview_and_nothing_else(self):
+        text = open(self.TEMPLATE).read()
+        m = self.RULE.search(text)
+        self.assertIsNotNone(m, "no overview-no-anim layer rule in the template")
+        ns = re.search(r'WlrLayershell\.namespace:\s*"([^"]+)"', open(self.OVERVIEW_QML).read()).group(1)
+        self.assertRegex(ns, m.group(1))
+        for other in ("dxrice-bar-top", "dxrice-bar-dock", "dxrice-theme", "dxrice-osd", "wofi", "notifications"):
+            self.assertIsNone(re.search(m.group(1), other), other)
 
-    def test_the_template_turns_the_layer_fades_off_and_keeps_the_rest(self):
-        found = self.lines(open(self.TEMPLATE).read())
-        for leaf in self.LEAVES:
-            self.assertIn(leaf, found)
-            self.assertRegex(found[leaf], r"enabled\s*=\s*false")
-        # the window/border/workspace animations are the user's look: untouched
-        for leaf in ("windows", "windowsOut", "border", "fade", "workspaces"):
-            self.assertRegex(found[leaf], r"enabled\s*=\s*true", leaf)
+    def test_every_other_surface_keeps_its_fade(self):
+        text = open(self.TEMPLATE).read()
+        self.assertNotIn("fadeLayers", re.sub(r"--[^\n]*", "", text), "a global layer-fade setting is back")
+        self.assertRegex(text, r'hl\.animation\(\{ leaf = "fade", enabled = true')
 
     def verify(self, text):
         import shutil
@@ -418,43 +426,60 @@ class TestCompositorLayerFade(unittest.TestCase):
                                timeout=60, env=env)
         return r.stdout + r.stderr
 
-    def test_hyprland_accepts_the_leaf_names(self):
+    def test_hyprland_accepts_the_rule(self):
         """Hyprland's own parser (nothing started or executed): the template
-        is fine, and a made-up leaf in a copy is refused -- so the two names
-        are real, not silently ignored."""
+        is fine, and a made-up field in a copy is refused -- so no_anim is a
+        real layer-rule field, not silently ignored."""
         text = open(self.TEMPLATE).read()
         self.assertIn("config ok", self.verify(text))
-        bad = text.replace('leaf = "fadeLayersIn"', 'leaf = "fadeLayersInn"')
-        self.assertIn("fadeLayersInn", self.verify(bad))
+        self.assertIn("no_animm", self.verify(text.replace("no_anim = true", "no_animm = true")))
 
-    def test_an_existing_install_is_told_about_the_lines(self):
-        import tempfile
-        from pathlib import Path
+    def test_an_existing_install_is_told_about_the_rule(self):
         import dxrice_check_hypr_drift as drift
-        text = open(self.TEMPLATE).read()
-        ids = drift._identities(text)
-        for leaf in self.LEAVES:
-            self.assertIn(f"animation:{leaf}", ids)
-        old = "".join(l for l in text.splitlines(True) if not any(f'"{x}"' in l for x in self.LEAVES))
-        saved = drift.REPO, drift.SNAPSHOT_DIR
-        with tempfile.TemporaryDirectory() as d:
-            d = Path(d)
-            (d / "repo" / "hypr").mkdir(parents=True)
-            (d / "repo" / "hypr" / "hyprland.lua").write_text(text)
-            (d / "snap").mkdir()
-            (d / "snap" / "hypr_hyprland.lua").write_text(old)
-            live = d / "live.lua"
-            live.write_text(old)
-            drift.REPO, drift.SNAPSHOT_DIR = d / "repo", d / "snap"
-            try:
-                before = drift.check_one("hypr/hyprland.lua", live, "hypr_hyprland.lua")
-                live.write_text(text)
-                after = drift.check_one("hypr/hyprland.lua", live, "hypr_hyprland.lua")
-            finally:
-                drift.REPO, drift.SNAPSHOT_DIR = saved
-        self.assertEqual(before["status"], "drift")
-        self.assertEqual(set(before["detail"]), {f"animation:{x}" for x in self.LEAVES})
-        self.assertEqual(after["status"], "clean")
+        self.assertIn("layer_rule:overview-no-anim", drift._identities(open(self.TEMPLATE).read()))
+
+
+class TestLayerRuleMigration(unittest.TestCase):
+    """dxrice_hypr_migrate.py's overview-no-anim: adds the rule, and removes
+    the global layer-fade lines only in the exact forms DXrice wrote them."""
+
+    def setUp(self):
+        import dxrice_hypr_migrate as m
+        self.m = m
+        self.base = re.sub(r'hl\.layer_rule\(\{ name = "overview-no-anim"[^\n]*\n', "",
+                           open(TestKeybinds.TEMPLATE).read())
+
+    def with_global(self, comment):
+        anchor = 'hl.animation({ leaf = "workspaces"'
+        i = self.base.index(anchor)
+        j = self.base.index("\n", i) + 1
+        return self.base[:j] + comment + self.m._GLOBAL_FADE_PAIR + self.base[j:]
+
+    def migrated(self, text):
+        return self.m.migrate(text, {"overview-no-anim"})
+
+    def test_each_form_dxrice_wrote_is_replaced_by_the_rule(self):
+        for comment in self.m._GLOBAL_FADE_COMMENTS + ("",):
+            out = self.migrated(self.with_global(comment))
+            self.assertNotIn("fadeLayers", re.sub(r"--[^\n]*", "", out), "a global line survived")
+            self.assertEqual(out.count('namespace = "^dxrice-overview$" }, no_anim = true'), 1)
+            self.assertEqual(out, self.migrated(self.base), "anything but the global lines changed")
+
+    def test_a_global_line_the_user_changed_stays(self):
+        text = self.with_global("").replace('"fadeLayersOut", enabled = false', '"fadeLayersOut", enabled = true')
+        out = self.migrated(text)
+        self.assertIn('"fadeLayersIn",  enabled = false', out)
+        self.assertIn('"fadeLayersOut", enabled = true', out)
+        self.assertIn("overview-no-anim", out)
+
+    def test_twice_is_once(self):
+        once = self.migrated(self.with_global(self.m._GLOBAL_FADE_COMMENTS[0]))
+        self.assertEqual(self.migrated(once), once)
+        self.assertNotIn("overview-no-anim", [mid for mid, _d in self.m.pending(once)])
+
+    def test_hyprland_accepts_the_migrated_file(self):
+        out = self.migrated(self.with_global(self.m._GLOBAL_FADE_COMMENTS[1]))
+        self.assertIn("config ok", TestCompositorLayerFade.verify(self, out))
 
 
 class TestRecordingProbe(unittest.TestCase):

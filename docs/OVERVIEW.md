@@ -140,8 +140,17 @@ however opaque the shell paints it, so the overview was composited at 0..100%
 over the real windows for about 300 ms while its pictures moved. The recording
 shows the top bar's clock fading out over 9 frames (125 ms) opening and 4
 closing (55 ms); a one-frame handover would be 1. `hyprctl animations`
-confirms `fadeLayersIn` / `fadeLayersOut` are not overridden. Hyprland has no
-per-layer switch: `layer_rule`'s `no_anim` only skips the unmap snapshot.
+confirms `fadeLayersIn` / `fadeLayersOut` are not overridden.
+
+A first version of this fix turned those two leaves off for *every* layer
+surface, on the belief that Hyprland has no per-layer switch. That was wrong.
+In Hyprland 0.56's source, the animation tick checks each layer's `no_anim`
+rule for every animated value of that layer, alpha included
+(`AnimationManager.cpp`), and finishes it on the first tick; on unmap a
+`no_anim` layer takes no snapshot, and with no snapshot no fade-out is
+created (`LayerSurface.cpp`, `LayerFadeout.cpp`). So the fix is scoped to
+the overview, and the bar, dock, notifications and launchers keep their
+fades.
 
 A synthetic harness has no compositor, so nothing there could show it.
 `PanelWindow.qml`'s test stub now fades a surface in on map the same way
@@ -150,31 +159,49 @@ recording's frames: `overview_compositor_fade.png`.
 
 **The fix has two parts:**
 
-1. `hypr/hyprland.lua` turns the two layer fades off:
+1. `hypr/hyprland.lua` stops the compositor animating the overview's
+   surface, and only that one:
 
    ```lua
-   hl.animation({ leaf = "fadeLayersIn",  enabled = false })
-   hl.animation({ leaf = "fadeLayersOut", enabled = false })
+   hl.layer_rule({ name = "overview-no-anim", match = { namespace = "^dxrice-overview$" }, no_anim = true })
    ```
 
-   This is global to layer surfaces (the overview, launchers, notifications,
-   the theme window): they appear and go at once. The bar and the shell's
-   panels animate themselves in QML. The window, border and workspace
-   animations are untouched. **Your deployed `hyprland.lua` is copy-once and
-   never merged, so add the two lines to it by hand**; `dxrice_check_hypr_drift.py`
-   now reports them as missing. Hyprland reloads the file when it's saved.
+   Every other surface keeps Hyprland's fade. The deployed `hyprland.lua`
+   is copy-once, so `install.sh update` offers this as the
+   `overview-no-anim` edit (backup first, only with your consent). That edit
+   also takes out the two global `fadeLayersIn` / `fadeLayersOut` lines an
+   earlier version added -- only if they are exactly as DXrice wrote them.
+   `dxrice_check_hypr_drift.py` reports the rule as missing until it's in.
+   Hyprland reloads the file when it's saved.
 2. `Overview.qml` no longer unmaps from a drawn frame. Hyprland fades a
    surface out from a snapshot of its last frame, so the overview now commits
    two frames of nothing (the surface mapped, drawing nothing) before it
-   unmaps. That makes the closing clean even without the config lines. The
+   unmaps. That makes the closing clean even without the layer rule. The
    opening can't be fixed from the shell: whatever alpha the compositor has the
-   surface at, only the config removes it. Without the lines the overview
+   surface at, only the config removes it. Without the rule the overview
    still looks correct at the handover (the first covered frame is the
    desktop, so any alpha over it is invisible) but doubles while it zooms.
 
 To check a real recording, `python3 scripts/dxrice_overview_probe.py
 RECORDING.mp4` measures how many frames the bar's clock takes to go: 1 or 2 is
 a clean handover, 3 or more is a compositor fade.
+
+What that number means: the probe correlates the clock's box in every frame
+with the first frame (a uniform dim doesn't change a correlation), and counts
+the frames between "the clock is there" and "the clock is covered" (and back).
+The compositor's alpha applies to the whole overview surface at once, so the
+clock is a fair sample of it: a surface that goes from 0 to fully opaque in
+one compositor frame covers the clock between two recorded frames, and one
+extra frame is allowed for an encoder or recorder frame that straddles the
+change. It says nothing about the windows' own pictures (their alignment is
+what the harness tests check), and it can't judge a transition in which
+something covers the clock -- a window over it reads as a slow transition.
+On the recording that found the bug it read 9 frames opening and 4 closing.
+
+To record one: with the bar's clock visible and nothing over it,
+`wf-recorder -f ~/Videos/overview.mp4`, then SUPER+Tab, wait, SUPER+Tab,
+Ctrl+C in the terminal, and
+`python3 ~/dxrice/scripts/dxrice_overview_probe.py ~/Videos/overview.mp4`.
 
 ## How it works, and why not a "real" zoom
 
@@ -271,10 +298,15 @@ key would silently do nothing, so the proven path is kept.
     - no IpcHandler function is named after a `qs ipc` subcommand
       (`qs ipc call overview show` used to run `qs ipc show` instead);
     - the bind calls a function that exists;
-  - **the compositor layer fade:** the template turns `fadeLayersIn` and
-    `fadeLayersOut` off and keeps the other animations, Hyprland's parser
-    accepts the leaf names (and refuses a made-up one), and an install that
-    predates the lines is told by the drift checker;
+  - **the compositor layer fade:** the template's layer rule matches the
+    overview's namespace (read from `Overview.qml`) and no other DXrice
+    surface, no global layer-fade setting is left, Hyprland's parser accepts
+    `no_anim` (and refuses a made-up field), and an install that predates the
+    rule is told by the drift checker;
+  - **the migration** (`TestLayerRuleMigration`): both forms of the old
+    global lines DXrice wrote are replaced by the rule and nothing else
+    changes; a global line the user edited stays; a second run changes
+    nothing; Hyprland accepts the migrated file;
   - **the recording probe**, on synthetic recordings: one frame is clean even
     while the overview darkens, a fade is flagged, one noisy frame doesn't
     split a transition.
@@ -346,8 +378,9 @@ crossfade only; the compositor's is `overview_compositor_fade.png`.
 
 `./install.sh update` (or `dx update`) brings in the new shell code and
 offers the edits an existing `~/.config/hypr/hyprland.lua` needs. That
-includes the two `fadeLayersIn` / `fadeLayersOut` lines, after a backup and
-only if you accept. The running bar picks up the new `Overview.qml` at your
+includes the `overview-no-anim` layer rule (and taking out the earlier global
+`fadeLayersIn` / `fadeLayersOut` lines), after a backup and only if you
+accept. The running bar picks up the new `Overview.qml` at your
 next login. Nothing restarts it for you.
 
 ## Manual check on a real desktop
@@ -374,7 +407,8 @@ need no special setup.
    anything.
 
 If step 1 still shows a double image, your `hyprland.lua` lacks the
-layer-fade lines; `hyprctl animations` shows whether `fadeLayersIn` is
-overridden. If step 3 shows a slide after the overview disappears, report
+`overview-no-anim` layer rule (`hyprctl layers` names the overview's
+namespace while it's open; `grep overview-no-anim ~/.config/hypr/hyprland.lua`
+shows the rule). If step 3 shows a slide after the overview disappears, report
 your `windows` / `windowsMove` animation settings. The overview reads them
 from `hyprctl -j animations` to time that close.

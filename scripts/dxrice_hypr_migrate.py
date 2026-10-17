@@ -89,24 +89,51 @@ def _units_apply(text):
     return text
 
 
-_LAYER_FADE_LINES = (
+# An earlier fix turned Hyprland's layer fade off for EVERY layer surface to
+# stop the overview's double image. The overview alone needs it off, so that
+# is now a layer rule for its namespace, and the two global lines go -- but
+# only in the exact forms DXrice wrote them (the template's, with its comment,
+# or the bare pair the old migration inserted); anything else is the user's.
+_OVERVIEW_RULE = ('hl.layer_rule({ name = "overview-no-anim", match = { namespace = "^dxrice-overview$" }, '
+                  'no_anim = true })\n')
+_GLOBAL_FADE_PAIR = (
     'hl.animation({ leaf = "fadeLayersIn",  enabled = false })\n'
     'hl.animation({ leaf = "fadeLayersOut", enabled = false })\n'
 )
+_GLOBAL_FADE_COMMENTS = (
+    # the template's comment above the pair (4688761 .. f20ced5)
+    '-- Layer-shell surfaces (the desktop overview, launchers, notifications) must\n'
+    '-- not be faded by the compositor. The `fade` animation above also drives\n'
+    '-- fadeLayersIn/fadeLayersOut, and Hyprland applies them to the WHOLE surface\n'
+    '-- as it maps and unmaps: the desktop overview, however opaque it paints, was\n'
+    '-- composited at 0..100% over the real windows for ~300 ms while its window\n'
+    '-- pictures moved, so every window showed twice. (No per-layer rule exists:\n'
+    "-- layer_rule's no_anim only skips the unmap snapshot.) Shell panels animate\n"
+    '-- themselves in QML.\n',
+    # the shorter one written by hand into a live config on 2026-10-15
+    '-- Layer-shell surfaces (the desktop overview, launchers, notifications) must\n'
+    '-- not be faded by the compositor: Hyprland applies fadeLayersIn/Out to the\n'
+    '-- WHOLE surface as it maps and unmaps, so the opaque desktop overview was\n'
+    '-- composited at 0..100% over the real windows while its pictures moved.\n',
+)
 
 
-def _layer_fade_applies(text):
-    return "fadeLayersIn" not in text and "fadeLayersOut" not in text and "hl.animation(" in text
+def _overview_rule_applies(text):
+    return 'namespace = "^dxrice-overview$" }, no_anim = true' not in text and (
+        "hl.layer_rule(" in text or "hl.animation(" in text)
 
 
-def _layer_fade_apply(text):
-    # After the last animation line, so it overrides the `fade` leaf the two
-    # layer leaves would otherwise inherit.
+def _overview_rule_apply(text):
+    for comment in _GLOBAL_FADE_COMMENTS:
+        text = text.replace(comment + _GLOBAL_FADE_PAIR, "")
+    text = text.replace(_GLOBAL_FADE_PAIR, "")
     lines = text.splitlines(keepends=True)
-    last = max(i for i, line in enumerate(lines) if line.lstrip().startswith("hl.animation("))
-    if not lines[last].endswith("\n"):
-        lines[last] += "\n"
-    lines.insert(last + 1, _LAYER_FADE_LINES)
+    rules = [i for i, line in enumerate(lines) if line.lstrip().startswith("hl.layer_rule(")]
+    anims = [i for i, line in enumerate(lines) if line.lstrip().startswith("hl.animation(")]
+    after = max(rules) if rules else max(anims)
+    if not lines[after].endswith("\n"):
+        lines[after] += "\n"
+    lines.insert(after + 1, _OVERVIEW_RULE)
     return "".join(lines)
 
 
@@ -125,9 +152,10 @@ MIGRATIONS = [
     ("session-script",
      "start the shell and daemons through scripts/dxrice_session.sh (works with or without systemd)",
      _session_applies, _session_apply),
-    ("layer-fade-off",
-     "turn off Hyprland's layer fade, which showed every window twice in the SUPER+Tab overview",
-     _layer_fade_applies, _layer_fade_apply),
+    ("overview-no-anim",
+     "stop Hyprland fading the SUPER+Tab overview (it showed every window twice); "
+     "other layer surfaces keep their fade",
+     _overview_rule_applies, _overview_rule_apply),
     ("xdg-state-home",
      "find the checkout through $XDG_STATE_HOME when it's set",
      *_replace('    local f = io.open(home .. "/.local/state/dxrice/repo_path", "r")',
