@@ -21,7 +21,10 @@ never touches them.
 - **Window placement.** New floating windows join a spiral around the first
   one instead of piling up in the middle. `SUPER+G` re-arranges the
   workspace into that spiral. Window sizes are never changed, and windows
-  already in place don't move.
+  already in place don't move. The one exception is an app whose launcher,
+  updater or splash window closes right after its real window appeared
+  (within 4 s). That window is moved once, to where it would have gone
+  without the launcher, unless you've already moved it.
 - **An infinite desktop.** `SUPER+ALT` and moving the mouse pans every
   window together. Dragging a window (`SUPER` + left mouse) into the screen
   edge pushes the others along.
@@ -284,6 +287,12 @@ your dotfiles tree is updated and the link stays a link. The same goes for
   "turn off Hyprland's layer fade" edit, or add these two lines yourself:
   `hl.animation({ leaf = "fadeLayersIn",  enabled = false })` and
   `hl.animation({ leaf = "fadeLayersOut", enabled = false })`.
+- **A new window landed far from the others.** Every placement decision is
+  logged without window titles: `journalctl --user -u dxrice-auto-place-window`
+  (without systemd: `$XDG_RUNTIME_DIR/dxrice/<hyprland instance>/auto-place-window.log`).
+  Each line names the window's class, size, where it was and where it was
+  put, and the spiral window it followed. Those lines, from just before
+  until just after it happened, show which window the placement followed.
 - **Panning doesn't work.** You need to be in the `input` group
   (`id -nG`), and that only takes effect after logging in again.
 - **A theme change didn't apply.** Run `python3 scripts/dxrice_apply_theme.py`.

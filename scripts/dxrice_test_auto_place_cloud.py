@@ -693,5 +693,162 @@ class TestRealListenerAgainstFakeHyprland(_Base):
         self.assert_no_overlap()
 
 
+class TestLauncherHandoff(_Base):
+    """Bug report: the first three windows were placed right, the fourth
+    landed far lower, and SUPER+G put it back. The sequence that does that:
+    an app's launcher/updater/splash window is mapped first (and placed, as
+    any window is), the real window maps while it is still up and is placed
+    one step further along the spiral -- after the launcher -- and then the
+    launcher closes. The real window kept a place reckoned from a window
+    that no longer exists; SUPER+G replays the spiral without it. (Discord's
+    updater window giving way to the main window is one documented case.)
+
+    Driven through the real PlacementListener and place_new_window."""
+
+    SIZES = [(1280, 720), (945, 521), (1065, 867)]
+
+    def setUp(self):
+        super().setUp()
+        self.listener = apw.PlacementListener(apw.ThemeSettings(os.path.join(self._tmp.name, "none.json")))
+        apw.PLACED.clear()
+        self._err = contextlib.redirect_stderr(io.StringIO())
+        self._err.__enter__()
+
+    def tearDown(self):
+        self._err.__exit__(None, None, None)
+        super().tearDown()
+
+    def open(self, addr, w, h, **kw):
+        self.hypr.open(addr, w, h, **kw)
+        return self.listener.handle_line(f"openwindow>>{addr[2:]},1,{kw.get('cls', 'app')},x")
+
+    def close(self, addr):
+        del self.hypr.clients[addr]
+        return self.listener.handle_line(f"closewindow>>{addr[2:]}")
+
+    def press(self):
+        """SUPER+G; returns how far it moved each window."""
+        before = {a: tuple(c["at"]) for a, c in self.hypr.clients.items()}
+        with contextlib.redirect_stdout(io.StringIO()):
+            arr.main()
+        return {a: (c["at"][0] - before[a][0], c["at"][1] - before[a][1]) for a, c in self.hypr.clients.items()}
+
+    def without_launcher(self, last):
+        """Where `last` goes when there never was a launcher (control)."""
+        saved = (dict(self.hypr.clients), dict(apw.PLACED))
+        self.hypr.clients.clear()
+        apw.PLACED.clear()
+        for i, (w, h) in enumerate(self.SIZES):
+            self.open(f"0xc{i}", w, h, cls=f"app{i}")
+        self.open("0xcz", *last, cls="game")
+        at = tuple(self.hypr.clients["0xcz"]["at"])
+        self.hypr.clients.clear()
+        self.hypr.clients.update(saved[0])
+        apw.PLACED.clear()
+        apw.PLACED.update(saved[1])
+        return at
+
+    def three(self):
+        for i, (w, h) in enumerate(self.SIZES):
+            self.assertEqual(self.open(f"0xw{i}", w, h, cls=f"app{i}"), "placed")
+
+    def test_the_fourth_window_after_a_launcher_that_closes(self):
+        want = self.without_launcher((924, 512))
+        self.three()
+        self.open("0xla", 945, 521, cls="launcher")
+        self.open("0xw3", 924, 512, cls="game")
+        status = self.close("0xla")
+        self.assertEqual(tuple(self.hypr.clients["0xw3"]["at"]), want)
+        self.assertEqual(set(self.press().values()), {(0, 0)}, "SUPER+G still had to fix the layout")
+        self.assert_no_overlap()
+        self.assertEqual(status, "reflowed")
+
+    def test_launcher_closing_before_the_real_window_needs_nothing(self):
+        want = self.without_launcher((924, 512))
+        self.three()
+        self.open("0xla", 945, 521, cls="launcher")
+        self.assertEqual(self.close("0xla"), "closed")
+        self.open("0xw3", 924, 512, cls="game")
+        self.assertEqual(tuple(self.hypr.clients["0xw3"]["at"]), want)
+        self.assertEqual(set(self.press().values()), {(0, 0)})
+
+    def test_a_splash_that_was_the_first_window(self):
+        """The splash was the anchor at the centre; the real window was put
+        beside it. Once the splash goes, the real window is the anchor."""
+        self.open("0xsp", 300, 350, cls="discord", pid=77)
+        self.open("0xd", 1280, 720, cls="discord", pid=77)
+        status = self.close("0xsp")
+        for i, (w, h) in enumerate(self.SIZES[1:], 1):
+            self.open(f"0xw{i}", w, h, cls=f"app{i}")
+        self.assertEqual(set(self.press().values()), {(0, 0)})
+        self.assert_no_overlap()
+        self.assertEqual(status, "reflowed")
+
+    def test_two_windows_after_the_launcher(self):
+        self.three()
+        self.open("0xla", 945, 521, cls="launcher")
+        self.open("0xw3", 924, 512, cls="game")
+        self.open("0xw4", 640, 400, cls="tool")
+        status = self.close("0xla")
+        self.assertEqual(set(self.press().values()), {(0, 0)})
+        self.assert_no_overlap()
+        self.assertEqual(status, "reflowed")
+
+    def test_a_window_the_user_moved_stays_put(self):
+        self.three()
+        self.open("0xla", 945, 521, cls="launcher")
+        self.open("0xw3", 924, 512, cls="game")
+        self.hypr.clients["0xw3"]["at"] = [100, 100]   # dragged it already
+        self.hypr.dispatched.clear()
+        self.close("0xla")
+        self.assertEqual(self.hypr.clients["0xw3"]["at"], [100, 100])
+        self.assertEqual(self.hypr.dispatched, [])
+
+    def test_an_old_window_closing_moves_nothing(self):
+        """Closing any window later is not a hand-off: the windows opened
+        after it stay where they are (holes are SUPER+G's job)."""
+        self.three()
+        clock = [apw._now()]
+        real_now = apw._now
+        apw._now = lambda: clock[0]
+        try:
+            self.open("0xw3", 924, 512, cls="game")
+            clock[0] += self.listener.HANDOFF_S + 0.5
+            self.hypr.dispatched.clear()
+            self.assertEqual(self.close("0xw2"), "closed")
+        finally:
+            apw._now = real_now
+        self.assertEqual(self.hypr.dispatched, [])
+
+    def test_a_window_on_another_workspace_is_not_affected(self):
+        self.three()
+        self.open("0xla", 945, 521, cls="launcher")
+        self.hypr.open("0xo", 700, 500, cls="other", workspace={"id": 2})
+        self.listener.handle_line("openwindow>>o,2,other,x")
+        at = tuple(self.hypr.clients["0xo"]["at"])
+        self.close("0xla")
+        self.assertEqual(tuple(self.hypr.clients["0xo"]["at"]), at)
+
+    def test_off_when_switched_off(self):
+        self.three()
+        self.open("0xla", 945, 521, cls="launcher")
+        self.open("0xw3", 924, 512, cls="game")
+        theme = os.path.join(self._tmp.name, "off.json")
+        with open(theme, "w") as f:
+            json.dump({"auto_place_windows": False}, f)
+        self.listener.settings = apw.ThemeSettings(theme)
+        self.hypr.dispatched.clear()
+        self.assertEqual(self.close("0xla"), "closed")
+        self.assertEqual(self.hypr.dispatched, [])
+
+    def test_the_journal_names_no_titles(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            self.hypr.open("0xs", 900, 600, cls="kitty", title="secret-document.pdf - Viewer")
+            self.listener.handle_line("openwindow>>s,1,kitty,x")
+        self.assertIn("placement placed 0xs class='kitty' size=900x600", buf.getvalue())
+        self.assertNotIn("secret", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

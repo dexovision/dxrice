@@ -2171,7 +2171,45 @@ def _settle_moves(expected, timeout=2.0, poll=0.01):
         print(f"DEBUG _settle_moves timed out waiting for: {remaining}", file=sys.stderr, flush=True)
 
 
-def place_new_window(address, workspace_id, gap):
+# Every window this daemon placed, for a few seconds: where it put it and
+# which windows of the spiral's arm that position was computed from (see
+# PlacementListener's closewindow handling). {address: {"t", "rect", "ws", "after"}}
+PLACED = {}
+
+
+def _now():
+    return time.monotonic()
+
+
+def _created_before(clients, address):
+    """Addresses of the clients created before `address` (Hyprland's
+    creation order: stableId, else the client list's own order)."""
+    order = [c["address"] for _i, c in sorted(enumerate(clients), key=lambda ic: (_creation_key(ic[1]), ic[0]))]
+    return set(order[:order.index(address)]) if address in order else set(order)
+
+
+def _journal(status, win, target=None, arm=(), note=""):
+    """One line per decision on stderr (the user journal under systemd), so
+    a misplacement can be reconstructed afterwards. Geometry and class only:
+    window titles can hold chat names, URLs or document names."""
+    if win is None:
+        print(f"placement {status}{(' ' + note) if note else ''}", file=sys.stderr, flush=True)
+        return
+    size = win.get("size") or (0, 0)
+    at = win.get("at") or (0, 0)
+    to = f" -> ({target[0]}, {target[1]})" if target is not None else ""
+    print(f"placement {status} {win.get('address')} class={win.get('class', '')!r} size={size[0]}x{size[1]} "
+          f"at=({at[0]}, {at[1]}){to} arm={len(arm)}{(' tip=' + arm[-1]) if arm else ''}"
+          f"{(' ' + note) if note else ''}", file=sys.stderr, flush=True)
+
+
+def place_new_window(address, workspace_id, gap, reflow=None):
+    """Place a newly mapped window. `reflow` (used by PlacementListener when
+    a window of the arm closes, see there) re-places an already placed
+    window instead: {"expect": (x, y, w, h) where this daemon put it,
+    "ignore": addresses that are about to be re-placed themselves}. It is
+    placed as if it had just opened after the windows created before it,
+    and left alone if it is no longer exactly where it was put."""
     # The window may not be immediately queryable the instant openwindow
     # fires -- give Hyprland a couple of ticks to finish mapping it.
     #
@@ -2238,6 +2276,11 @@ def place_new_window(address, workspace_id, gap):
     # (poll_elapsed above is relative to this function's 2.0s existence-poll deadline)
     if not new_win:
         return "gone"
+    if reflow is not None:
+        now_rect = (new_win["at"][0], new_win["at"][1], new_win["size"][0], new_win["size"][1])
+        if now_rect != tuple(reflow["expect"]):
+            _journal("reflow-skipped", new_win, note=f"moved or resized since placed at {tuple(reflow['expect'])}")
+            return "user-moved"
     # Before anything else: is this an application window at all? A
     # tooltip, a context menu or a browser's link/tab hover card opened by
     # an XWayland app arrives here exactly like a real window (see
@@ -2254,15 +2297,14 @@ def place_new_window(address, workspace_id, gap):
     dxrice_window_class.settle_unknown(kinds, clients, (mx1 - mx0) * (my1 - my0))
     kind = kinds.get(address, dxrice_window_class.NORMAL)
     if not dxrice_window_class.is_arrangeable(kind) or new_win.get("pinned"):
-        if _DEBUG:
-            print(f"DEBUG address={address} ignored: kind={kind} pinned={new_win.get('pinned')}",
-                  file=sys.stderr, flush=True)
+        _journal("ignored", new_win, note=f"kind={kind} pinned={bool(new_win.get('pinned'))}")
         return "ignored"
 
     if not new_win.get("floating"):
         # Tiled right now. It may become floating later (see main()'s
         # changefloatingmode handling) -- say so rather than silently
         # dropping it forever.
+        _journal("deferred", new_win, note="tiled")
         return "not-floating"
 
     # Hyprland's own real fullscreen state (0 = normal, 2 = fullscreen,
@@ -2272,11 +2314,19 @@ def place_new_window(address, workspace_id, gap):
     # false-positived on any large-but-intentionally-sized normal window
     # and false-negatived on a fullscreen window on a small/scaled output.
     if new_win.get("fullscreen", 0) != 0:
-        if _DEBUG:
-            print(f"DEBUG address={address} skipped: fullscreen={new_win.get('fullscreen')}", file=sys.stderr, flush=True)
+        _journal("deferred", new_win, note=f"fullscreen={new_win.get('fullscreen')}")
         return "fullscreen"
 
-    eligible, fixed = dxrice_window_class.partition(clients, workspace_id, kinds, exclude=address)
+    ignore = set(reflow["ignore"]) if reflow else set()
+
+    def split(clients):
+        eligible, fixed = dxrice_window_class.partition(clients, workspace_id, kinds, exclude=address)
+        if ignore:
+            eligible = [c for c in eligible if c["address"] not in ignore]
+            fixed = [c for c in fixed if c["address"] not in ignore]
+        return eligible, fixed
+
+    eligible, fixed = split(clients)
     same_ws = eligible + fixed
     if _DEBUG:
         print(f"DEBUG eligible={len(eligible)} fixed={len(fixed)} workspace_id={workspace_id}",
@@ -2294,7 +2344,7 @@ def place_new_window(address, workspace_id, gap):
     # or resizes the window.
     parent_geom = dxrice_window_class.x11_parent_geometry(new_win, x11, _scales_for_matching())
     # A window the X server says is a dialog is small on purpose.
-    if kind == dxrice_window_class.DIALOG:
+    if kind == dxrice_window_class.DIALOG or reflow is not None:
         want_w, want_h = new_win["size"][0], new_win["size"][1]
     else:
         want_w, want_h = comfortable_startup_size(new_win, same_ws, mx1 - mx0, my1 - my0)
@@ -2315,7 +2365,7 @@ def place_new_window(address, workspace_id, gap):
             if size_now == stable_since:
                 break
             stable_since = size_now
-        eligible, fixed = dxrice_window_class.partition(clients, workspace_id, kinds, exclude=address)
+        eligible, fixed = split(clients)
         same_ws = eligible + fixed
 
     new_w, new_h = new_win["size"][0], new_win["size"][1]
@@ -2333,11 +2383,14 @@ def place_new_window(address, workspace_id, gap):
     # name the parent outright (WM_TRANSIENT_FOR), which beats any guess.
     target = None
     family_anchor = None
+    arm = ()
+    if reflow is not None:
+        parent_geom = None   # a re-placed window rejoins the arm, nothing else
     if parent_geom:
         scales = _scales_for_matching()
         family_anchor = next((w for w in same_ws if dxrice_window_class.same_window(
             parent_geom, (w["at"][0], w["at"][1], w["size"][0], w["size"][1]), scales)), None)
-    if family_anchor is None:
+    if family_anchor is None and reflow is None:
         family_anchor = _find_family_anchor(new_win, same_ws)
     if family_anchor is not None:
         # beside its parent at the composition spacing, like any neighbour
@@ -2371,10 +2424,16 @@ def place_new_window(address, workspace_id, gap):
         # Only when none of it is on screen (the user panned away) does a
         # new window start a new anchor at the centre instead of being
         # pulled off screen to join it.
-        members = [(e["at"][0], e["at"][1], e["size"][0], e["size"][1])
-                   for e in sorted(eligible, key=_creation_key) if e["address"] not in attached]
+        arm_wins = [e for e in sorted(eligible, key=_creation_key) if e["address"] not in attached]
+        if reflow is not None:
+            # where it would have gone had it opened just now after the
+            # windows that existed before it (and are still here)
+            earlier = _created_before(clients, address)
+            arm_wins = [e for e in arm_wins if e["address"] in earlier]
+        members = [(e["at"][0], e["at"][1], e["size"][0], e["size"][1]) for e in arm_wins]
         on_screen = any(x < mx1 and x + w > mx0 and y < my1 and y + h > my0 for x, y, w, h in members)
         visible = members if on_screen else []
+        arm = tuple(e["address"] for e in arm_wins) if on_screen else ()
         target = dxrice_auto_arrange.join_composition((new_w, new_h), visible, obstacles,
                                                      (mx0, my0, mx1, my1), gap)
         if _DEBUG:
@@ -2393,9 +2452,13 @@ def place_new_window(address, workspace_id, gap):
         if _DEBUG:
             print(f"DEBUG address={address} moved by someone else ({seen_at} -> {latest['at']}) -- left alone",
                   file=sys.stderr, flush=True)
+        _journal("user-moved", latest)
         return "user-moved"
 
     tx, ty = _px(target[0]), _px(target[1])
+    PLACED[address] = {"t": _now(), "rect": (tx, ty, new_w, new_h), "ws": workspace_id, "after": arm}
+    _journal("reflowed" if reflow is not None else "placed", latest, (tx, ty), arm,
+             note=f"beside {family_anchor.get('address')}" if family_anchor is not None else "")
     if (tx, ty) == tuple(latest["at"]):
         return "placed"  # already exactly there (a first window mapped centred)
     dispatch_async(move_window_exact_lua(tx, ty, address))
@@ -2489,14 +2552,29 @@ class PlacementListener:
 
     Each window is handled at most once per mapping: a repeated
     `openwindow>>` for an address already handled is ignored until that
-    window's `closewindow>>`. The one exception is a window mapped
+    window's `closewindow>>`.
+
+    A window's place on the spiral is computed after the windows that exist
+    when it opens. When one of those closes within HANDOFF_S of a later
+    window being placed after it -- an app's launcher, updater or splash
+    window giving way to the real one, which mapped while it was still up --
+    that later window would keep a place reckoned from a window that no
+    longer exists, out of line with the rest of the spiral (and with what
+    SUPER+G then replays). So, if it is still exactly where it was put, it
+    is placed again as if the closed window had never been there. The one exception is a window mapped
     fullscreen or tiled, which can't be placed yet: it is remembered and
     retried when a fullscreen/floating state change is reported, and placed
     at most once when it becomes an ordinary floating window."""
 
-    def __init__(self, settings=None, place=None):
+    # A launcher's real window maps and the launcher goes within moments.
+    # A window older than this has been looked at and used where it is, and
+    # moving it because some other window closed would be the surprise.
+    HANDOFF_S = 4.0
+
+    def __init__(self, settings=None, place=None, reflow=None):
         self.settings = settings or ThemeSettings()
         self._place = place or place_new_window
+        self._reflow = reflow or (lambda addr, ws, gap, info: place_new_window(addr, ws, gap, reflow=info))
         self.handled = set()
         self.deferred = {}  # {address: workspace_id}
 
@@ -2524,6 +2602,9 @@ class PlacementListener:
                 return None
             if addr in self.handled or addr in self.deferred:
                 return "duplicate"
+            now = _now()
+            for a in [a for a, r in PLACED.items() if now - r["t"] > self.HANDOFF_S]:
+                del PLACED[a]
             if not self.settings.refresh().enabled:
                 self.handled.add(addr)  # opened while off: not placed later either
                 return "disabled"
@@ -2537,7 +2618,23 @@ class PlacementListener:
             addr = "0x" + line[len("closewindow>>"):].strip()
             self.handled.discard(addr)
             self.deferred.pop(addr, None)
-            return "closed"
+            PLACED.pop(addr, None)
+            now = _now()
+            for a in [a for a, r in PLACED.items() if now - r["t"] > self.HANDOFF_S]:
+                del PLACED[a]
+            followers = sorted((a for a, r in PLACED.items() if addr in r["after"]), key=lambda a: PLACED[a]["t"])
+            if not followers or not self.settings.refresh().enabled:
+                return "closed"
+            for i, a in enumerate(followers):
+                rec = PLACED.get(a)
+                if rec is None:
+                    continue
+                try:
+                    self._reflow(a, rec["ws"], self.settings.gap,
+                                 {"expect": rec["rect"], "ignore": set(followers[i + 1:])})
+                except Exception as e:
+                    print(f"re-placement failed for {a}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+            return "reflowed"
         if line.startswith("fullscreen>>") or line.startswith("changefloatingmode>>"):
             # An application that MAPS fullscreen or tiled and only later
             # becomes an ordinary floating window used to be lost: it was
