@@ -595,6 +595,19 @@ class TestSlideAfterClose(unittest.TestCase):
         self.assertGreater(n, self.probe.SLIDE_MAX_FRAMES)
         self.assertAlmostEqual(dist, xs[0] * self.probe.SLIDE_SCALE, delta=4 * self.probe.SLIDE_SCALE)
 
+    def test_the_next_open_ends_the_measurement(self):
+        xs = [60 - 3 * k for k in range(20)]
+        frames = [self.crop(v, 40) for v in xs]
+        n, _dist = self.probe.slide_after(frames, 0, stop=4)
+        self.assertLessEqual(n, 4)
+
+    def test_a_pan_under_the_clock_is_told_from_the_overview(self):
+        sliding = [self.crop(60 - 6 * k, 40) for k in range(10)]
+        self.assertGreaterEqual(self.probe.slid_during(sliding, 2, 6), 3)
+        base = self.crop(20, 20)
+        covered = [base] * 4 + [base * 0.3] * 6      # the overlay taking over, in place
+        self.assertLess(self.probe.slid_during(covered, 3, 4), 3)
+
     def test_a_fade_or_moving_content_is_not_a_slide(self):
         base = self.crop(20, 20)
         fading = [base * (0.6 + 0.04 * k) for k in range(10)]

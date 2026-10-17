@@ -69,15 +69,22 @@ def bezier(x1, y1, x2, y2, u):
 class OverviewScene:
     """The OverviewDesktop scene with a workspace loaded into it."""
 
-    def __init__(self, clients, mon=None, uncapturable=(), layer_fade_ms=0):
+    def __init__(self, clients, mon=None, uncapturable=(), layer_fade_ms=0, wallpaper=None):
         mon = mon or monitor()
         self.mon = mon
         # the surface is the monitor's LOGICAL size, as Quickshell gives it;
         # layer_fade_ms > 0 makes the stub surface fade in on map the way
         # Hyprland's fadeLayersIn does
         sc = mon.get("scale", 1) or 1
+        def setup(b):
+            b.layer_fade_ms = layer_fade_ms
+            if wallpaper:        # a real image file as the theme's wallpaper
+                t = b.config_home / "dxrice" / "theme.json"
+                d = json.loads(t.read_text())
+                d["wallpaper"] = wallpaper
+                t.write_text(json.dumps(d))
         self.scene = Scene("OverviewDesktop.qml", width=round(mon["width"] / sc), height=round(mon["height"] / sc),
-                           setup=lambda b: setattr(b, "layer_fade_ms", layer_fade_ms))
+                           setup=setup)
         self.load(clients, uncapturable)
 
     def load(self, clients, uncapturable=()):
@@ -192,17 +199,18 @@ class TestOverview(unittest.TestCase):
             self.o.scene.wait(40)
             seen.append(((time.perf_counter() - t0) * 1000, self.o.ov("progress")))
         # monotonic all the way back, ending exactly on the real view, and
-        # never ahead of the zoom's own ease-in-out curve (cubic-bezier
-        # 0.4, 0, 0.2, 1) for the time actually elapsed -- the reversal eases
+        # never ahead of the zoom's own curve (Overview.qml zoomCurve) for
+        # the time actually elapsed -- the reversal eases
         # out of the current position rather than snapping. Judged against
         # measured time, not sample counts: the offscreen software renderer's
         # frames are irregular.
         ps = [p for _t, p in seen]
         self.assertTrue(all(b <= a + 1e-6 for a, b in zip(ps, ps[1:])), seen)
         self.assertEqual(ps[-1], 0.0)
+        c = json.loads(self.o.scene.ev("JSON.stringify(findNamed('overview').zoomCurve)"))
         for t, p in seen[1:]:
             u = min(1.0, t / T)
-            self.assertLessEqual(p0 - p, p0 * bezier(0.4, 0.0, 0.2, 1.0, u) + 0.06, (t, p, seen))
+            self.assertLessEqual(p0 - p, p0 * bezier(c[0], c[1], c[2], c[3], u) + 0.06, (t, p, seen))
 
     def test_show_and_hide_are_idempotent(self):
         self.o.call("show"); self.o.call("show")
@@ -1034,6 +1042,95 @@ class TestUnderTheCompositorFade(GhostRig, unittest.TestCase):
         # not bit-exact: the flattened surface's texture resamples the
         # anti-aliased edges of text -- a handful of pixels in tens of thousands
         self.assertLess(diff_fraction(desk, self.o.scene.view.grabWindow().copy(area)), 0.001)
+
+
+class TestOpeningDoesNoHeavyWork(unittest.TestCase):
+    """Bug report: SUPER+Tab felt delayed and the zoom's first frames rough.
+    The overview decoded the wallpaper on every open, synchronously, at full
+    size, on the thread that runs the animation: the user's 3840x2160 PNG
+    (16.6 MB) takes ~400 ms. Now it is decoded once, in the background, at
+    the screen's width, and kept; opening only shows it."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        from PySide6.QtGui import QImage
+        cls.tmp = tempfile.TemporaryDirectory()
+        # a 4K PNG that doesn't compress, like a photo wallpaper, and what
+        # decoding it costs on this machine (the user's took ~400 ms)
+        import os
+        import time
+        from PySide6.QtGui import QImageReader
+        buf = bytearray(os.urandom(3840 * 2160 * 4))
+        img = QImage(buf, 3840, 2160, 3840 * 4, QImage.Format_RGB32).copy()
+        cls.wall = cls.tmp.name + "/wall.png"
+        assert img.save(cls.wall, "PNG", 0)
+        t = time.perf_counter()
+        QImageReader(cls.wall).read()
+        cls.decode_ms = (time.perf_counter() - t) * 1000
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def scene(self):
+        rects = sp.arrange(MIXED[:6], [], (0, 52, 1920, 1012), (32, 56))
+        return OverviewScene(clients_for(rects), wallpaper=self.wall)
+
+    def img(self, o, expr):
+        return o.scene.ev(f"(function() {{ const ov = findNamed('overview'); const st = [ov]; "
+                          f"while (st.length) {{ const it = st.pop(); if (!it) continue; "
+                          f"if (it.sourceSize !== undefined && it.fillMode !== undefined && String(it.source).indexOf('wall') >= 0) "
+                          f"return {expr}; const k = it.data !== undefined ? it.data : []; "
+                          f"for (let i = 0; i < k.length; i++) st.push(k[i]); }} return null; }})()")
+
+    def test_the_wallpaper_is_ready_before_any_open_and_stays(self):
+        import time
+        o = self.scene()
+        try:
+            t0 = time.monotonic()
+            while self.img(o, "it.status") != 1 and time.monotonic() - t0 < 10:   # Image.Ready
+                o.scene.wait(20)
+            self.assertEqual(self.img(o, "it.status"), 1, "never decoded while closed")
+            self.assertTrue(self.img(o, "it.asynchronous"), "decoded on the GUI thread")
+            self.assertEqual(self.img(o, "it.sourceSize.width"), 1920, "kept at 4K")
+            src = self.img(o, "String(it.source)")
+            for _ in range(2):
+                o.call("show"); o.scene.wait(SETTLE)
+                o.call("hide"); o.scene.wait(SETTLE)
+            self.assertEqual(self.img(o, "String(it.source)"), src)
+            self.assertEqual(self.img(o, "it.status"), 1, "the decoded wallpaper was let go")
+        finally:
+            o.scene.close()
+
+    def test_opening_doesnt_decode_the_wallpaper(self):
+        """The keypress's own work (show(), which runs on the GUI thread and
+        blocks the animation while it runs) costs far less than decoding
+        the wallpaper: it no longer includes it. Old code: show() took the
+        whole decode, every time."""
+        import time
+        o = self.scene()
+        try:
+            t0 = time.monotonic()
+            while self.img(o, "it.status") != 1 and time.monotonic() - t0 < 10:
+                o.scene.wait(20)
+            blocked, covered = [], []
+            for _ in range(3):
+                t1 = time.perf_counter()
+                o.call("show")
+                blocked.append((time.perf_counter() - t1) * 1000)
+                while not o.ov("covering") and time.perf_counter() - t1 < 3:
+                    o.scene.wait(2)
+                covered.append((time.perf_counter() - t1) * 1000)
+                o.scene.wait(SETTLE)
+                o.call("hide")
+                o.scene.wait(SETTLE)
+        finally:
+            o.scene.close()
+        self.assertGreater(self.decode_ms, 40, "the test wallpaper decodes too fast to tell")
+        self.assertLess(max(blocked), self.decode_ms / 2,
+                        f"show() blocked {max(blocked):.0f} ms; decoding the wallpaper takes {self.decode_ms:.0f} ms")
+        self.assertLess(max(covered), 150, f"{max(covered):.0f} ms from the key to the overview covering")
 
 
 class TestGeometryParity(unittest.TestCase):

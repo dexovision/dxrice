@@ -102,13 +102,15 @@ def global_shift(f0, f1):
     return -x * SLIDE_SCALE, -y * SLIDE_SCALE, float(c.max())
 
 
-def slide_after(frames, start):
+def slide_after(frames, start, stop=None):
     """How many frames after `start` (the first frame without the overlay)
     the desktop keeps sliding, and the total distance (px): windows still
     being moved by the compositor after the overview let go. Ends at the
-    first SETTLED_PAIRS still pairs in a row."""
+    first SETTLED_PAIRS still pairs in a row, or at `stop` (the next
+    transition: an overview opening again isn't a slide)."""
     still, moving, last_moving, dist = 0, 0, start, 0.0
-    for i in range(start, min(start + SLIDE_LOOK, len(frames) - 1)):
+    end = min(start + SLIDE_LOOK, len(frames) - 1, stop if stop is not None else len(frames))
+    for i in range(start, end):
         dx, dy, _peak = global_shift(frames[i], frames[i + 1])
         if dx or dy:
             moving += 1
@@ -120,6 +122,18 @@ def slide_after(frames, start):
             if still >= SETTLED_PAIRS:
                 break
     return (last_moving - start if moving else 0), dist
+
+
+def slid_during(frames, a, b):
+    """Frame pairs in which the whole picture shifted between frames a-2 and
+    b+3. The overview takes the screen over and gives it back in place; a
+    "transition" during which everything slides is a window or the desktop
+    moving under the clock (a SUPER+arrow pan, a window dragged over it)."""
+    n = 0
+    for i in range(max(0, a - 2), min(b + 3, len(frames) - 1)):
+        dx, dy, _peak = global_shift(frames[i], frames[i + 1])
+        n += bool(dx or dy)
+    return n
 
 
 def load_frames(path, skip_top=56):
@@ -164,13 +178,18 @@ def main(argv):
         print("no overview transition found (the bar strip never left the desktop's look).")
         return 1
     worst, worst_slide = 0, 0
-    frames_all = load_frames(argv[1]) if any(k == "uncovers" for k, *_ in found) else None
-    for kind, a, b, frames, ms in found:
+    frames_all = load_frames(argv[1])
+    for k, (kind, a, b, frames, ms) in enumerate(found):
+        if slid_during(frames_all, a, b) >= 3:
+            print(f"{'(slide)':9s} t={times[a]:6.3f}s  something slid over the clock -- a pan or a window, "
+                  f"not the overview; not judged")
+            continue
         verdict = "clean handover" if frames <= CLEAN_MAX_FRAMES else "COMPOSITOR FADE (two copies on screen)"
         worst = max(worst, frames)
         print(f"{kind:9s} t={times[a]:6.3f}s  {frames:3d} frames  {ms:6.0f} ms   {verdict}")
         if kind == "uncovers":
-            n, dist = slide_after(frames_all, b)
+            nxt = found[k + 1][1] if k + 1 < len(found) else None
+            n, dist = slide_after(frames_all, b, nxt)
             end = min(b + n, len(times) - 1)
             worst_slide = max(worst_slide, n)
             what = ("settled" if n <= SLIDE_MAX_FRAMES else

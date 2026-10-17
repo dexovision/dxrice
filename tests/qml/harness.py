@@ -153,6 +153,10 @@ class HarnessBridge(QObject):
         for key, out in self.commands:
             if key in joined:
                 return out
+        # `test -f PATH`: answered from the real filesystem (a missing file
+        # exits 1), so a check for a file that isn't there reads as one
+        if len(argv) == 3 and str(argv[0]) == "test" and str(argv[1]) == "-f":
+            return "" if Path(str(argv[2])).is_file() else "__EXIT__1\n"
         return ""
 
     @Slot(str, result="QVariant")

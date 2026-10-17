@@ -69,13 +69,16 @@ PanelWindow {
     property bool _pendingEnter: false
     // a clicked window to focus once the overview has let go of the keyboard
     property string _focusAfterClose: ""
-    // one quick, readable ease-in-out zoom each way (instant under
+    // one quick, readable decelerating zoom each way (instant under
     // reduce_motion); the dim runs alongside it, never as a stage of its own
     readonly property int zoomMs: Theme.reduceMotion ? 1 : Math.round(Theme.animMs * 2)
     // Windows a panning click moved with their compositor animation turned
     // off (see _pan); it's turned back on once the overview has let go.
     property var _unanimated: []
-    readonly property var zoomCurve: [0.4, 0.0, 0.2, 1.0, 1, 1]
+    // Decelerating: it moves on the first frame and settles gently. (An
+    // ease-in-out, 0.4 0 0.2 1, barely moved for its first ~60 ms, which on
+    // top of the keypress's own latency read as a delay.)
+    readonly property var zoomCurve: [0.2, 0.0, 0.0, 1.0, 1, 1]
     // settled: zoomed out and not animating -- window changes then glide
     readonly property bool _settled: root.open && root.progress === 1 && !enterAnim.running
     // when the last open began (ms since epoch), for the latency test
@@ -189,6 +192,9 @@ PanelWindow {
         }
     }
     function _capturesReady() {
+        // the backdrop too: covering before the wallpaper is decoded would
+        // flash the dark fill (only right after login or a wallpaper change)
+        if (wallpaperImage.status === Image.Loading) return false;
         for (let i = 0; i < tiles.count; i++) {
             const t = tiles.itemAt(i);
             if (t && t.onScreen && !t.hasPicture) return false;
@@ -347,7 +353,7 @@ PanelWindow {
     }
 
     // ---- motion ----
-    // One ease-in-out zoom each way, the dim alongside it. Every animation
+    // One decelerating zoom each way, the dim alongside it. Every animation
     // runs from wherever the value is, so toggling mid-way reverses with no
     // jump: the curve eases back out of the current position.
     NumberAnimation {
@@ -463,12 +469,19 @@ PanelWindow {
             visible: root.covering
         Rectangle { anchors.fill: parent; color: "#0d0f13" }
         Image {
+            id: wallpaperImage
             anchors.fill: parent
-            // loaded only while the overview is up: a closed overview costs
-            // the shell nothing, not even the decoded wallpaper
-            source: root.showing ? root.wallpaperUrl : ""
+            // Decoded once, off the GUI thread, when the shell starts or the
+            // wallpaper changes, and kept: at the screen's width (a 4K
+            // wallpaper is ~8 MB decoded instead of ~33). It used to be
+            // decoded on every SUPER+Tab, synchronously, at full size -- a
+            // 3840x2160 PNG took ~400 ms, on the thread that runs the zoom:
+            // the delay after the key, and the stalled first frames.
+            source: root._wallpaperExists ? root.wallpaperUrl : ""
+            sourceSize.width: Math.max(1, Math.round((root.screen && root.screen.width ? root.screen.width : 1920)
+                                                     * (root.screen && root.screen.devicePixelRatio ? root.screen.devicePixelRatio : 1)))
             fillMode: Image.PreserveAspectCrop
-            asynchronous: false
+            asynchronous: true
             cache: false
         }
         // Dims as it zooms out, so the windows stand forward.
@@ -632,9 +645,26 @@ PanelWindow {
         }
     }
 
-    readonly property string wallpaperUrl: {
+    readonly property string wallpaperPath: {
         let p = Theme.wallpaper || "";
         if (p.startsWith("~/")) p = Quickshell.env("HOME") + p.substring(1);
-        return p ? "file://" + p : "";
+        return p;
+    }
+    readonly property string wallpaperUrl: root.wallpaperPath ? "file://" + root.wallpaperPath : ""
+    // The wallpaper is loaded only once it's known to exist, so a theme
+    // naming a missing file costs a dark backdrop, not a warning at every
+    // shell start. Checked again whenever the theme's wallpaper changes.
+    property bool _wallpaperExists: false
+    onWallpaperPathChanged: root._checkWallpaper()
+    Component.onCompleted: root._checkWallpaper()
+    function _checkWallpaper() {
+        root._wallpaperExists = false;
+        if (!root.wallpaperPath) return;
+        wallpaperCheck.command = ["test", "-f", root.wallpaperPath];
+        wallpaperCheck.running = true;
+    }
+    Process {
+        id: wallpaperCheck
+        onExited: (exitCode, exitStatus) => root._wallpaperExists = exitCode === 0
     }
 }

@@ -27,7 +27,7 @@ toggle` does the same.
 | about 30 ms | The keypress reaches the shell. On the next frame the screen starts to dim. The real desktop still shows through, so nothing stale is ever drawn. |
 | about 6 ms later | Fresh window positions arrive (two parallel `hyprctl -j` reads). Each window's live picture is placed exactly over the real window, not yet drawn. |
 | a frame or two later | **The handover.** Once every window that shows on screen has its live picture (at most 150 ms; a window still without one shows its card), the overview takes the screen over in one frame: wallpaper, dim and pictures, opaque, each picture exactly where its window is. That frame is the desktop you were looking at, so nothing visibly changes. |
-| over the next 300 ms | One ease-in-out zoom (cubic-bezier 0.4, 0, 0.2, 1). Only the pictures move; the real windows are hidden under the opaque overview the whole time. |
+| over the next 300 ms | One decelerating zoom (cubic-bezier 0.2, 0, 0, 1): it moves on the first frame and settles gently. Only the pictures move; the real windows are hidden under the opaque overview the whole time. |
 
 At the end, every window is in the usable area (the screen minus the bar and
 dock) with a 48 px margin, centred. They all scale and move by one
@@ -241,8 +241,10 @@ So the overview is a **view**: an overlay drawn by Quickshell
   for the window you click, and the pan when that window wasn't in view.
 
 No background service, timer or dependency is involved. A closed overview
-holds no surface, no window pictures, no capture sessions and no decoded
-wallpaper.
+holds no surface, no window pictures and no capture sessions. It does keep
+the wallpaper decoded (at the screen's width, ~8 MB for 1920x1080): decoding
+it on every open, as it once did, put ~400 ms of work for a 4K PNG between
+the key and the first frame of the zoom.
 
 ## Measured latency
 
@@ -254,7 +256,8 @@ Measured on this machine; the window data is read live, read-only.
 | first visible feedback after that | the next frame | the next frame |
 | window data | 1st version: `python3 dxrice_overview.py`, 50–52 ms; then 2 × `hyprctl -j`, 5–7 ms | 2 × `hyprctl -j` in parallel, 5–7 ms |
 | geometry | 0.07 ms (16 windows), 1.1 ms (200) | the same |
-| zoom | 420 ms decelerating | 300 ms ease-in-out |
+| zoom | 420 ms decelerating | 300 ms decelerating (cubic-bezier 0.2, 0, 0, 1) |
+| wallpaper | decoded on every open, on the GUI thread, at full size: ~400 ms for a 3840x2160 PNG | decoded once in the background at the screen's width, kept (~8 MB) |
 | close | 360 ms, then a separate 120 ms fade | 300 ms, the fade alongside, also after a click that pans the desktop (the windows are already in place) |
 
 `overview_timing.png` plots both. The remaining 30 ms before the shell even
