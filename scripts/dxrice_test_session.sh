@@ -21,8 +21,21 @@ H="$SANDBOX/home"
 BIN="$SANDBOX/bin"
 mkdir -p "$H/.local/state/dxrice" "$H/.config/systemd/user" "$BIN" "$SANDBOX/run"
 
+# The system's commands minus Quickshell (and waybar), so "not installed"
+# below means not installed even on a machine that has them in /usr/bin.
+SYS="$SANDBOX/sysbin"
+mkdir -p "$SYS"
+for d in /usr/local/bin /usr/bin /bin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+        n="${f##*/}"
+        case "$n" in qs|quickshell|waybar) continue ;; esac
+        [ -e "$SYS/$n" ] || ln -s "$f" "$SYS/$n"
+    done
+done
+
 run() {  # the session script, dry-run, with a fake PATH
-    env -i HOME="$H" PATH="$BIN:/usr/bin:/bin" XDG_RUNTIME_DIR="$SANDBOX/run" \
+    env -i HOME="$H" PATH="$BIN:$SYS" XDG_RUNTIME_DIR="$SANDBOX/run" \
         HYPRLAND_INSTANCE_SIGNATURE=test DXRICE_SESSION_DRY_RUN=1 sh "$SESSION"
 }
 fake() {  # fake NAME EXIT_STATUS
