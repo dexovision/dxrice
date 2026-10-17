@@ -804,6 +804,15 @@ class TestLauncherHandoff(_Base):
         self.assertEqual(self.hypr.clients["0xw3"]["at"], [100, 100])
         self.assertEqual(self.hypr.dispatched, [])
 
+    def test_a_window_sent_to_another_workspace_stays_put(self):
+        self.three()
+        self.open("0xla", 945, 521, cls="launcher")
+        self.open("0xw3", 924, 512, cls="game")
+        self.hypr.clients["0xw3"]["workspace"] = {"id": 3}   # SUPER+SHIFT+3 right after it opened
+        self.hypr.dispatched.clear()
+        self.close("0xla")
+        self.assertEqual(self.hypr.dispatched, [])
+
     def test_an_old_window_closing_moves_nothing(self):
         """Closing any window later is not a hand-off: the windows opened
         after it stay where they are (holes are SUPER+G's job)."""

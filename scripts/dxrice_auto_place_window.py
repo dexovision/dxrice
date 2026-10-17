@@ -2281,6 +2281,9 @@ def place_new_window(address, workspace_id, gap, reflow=None):
         if now_rect != tuple(reflow["expect"]):
             _journal("reflow-skipped", new_win, note=f"moved or resized since placed at {tuple(reflow['expect'])}")
             return "user-moved"
+        if (new_win.get("workspace") or {}).get("id") != workspace_id:
+            _journal("reflow-skipped", new_win, note="now on another workspace")
+            return "user-moved"
     # Before anything else: is this an application window at all? A
     # tooltip, a context menu or a browser's link/tab hover card opened by
     # an XWayland app arrives here exactly like a real window (see
