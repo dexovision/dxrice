@@ -845,7 +845,6 @@ class TestNoGhosting(GhostRig, unittest.TestCase):
         while the surface exists is one of those (the old code unmapped
         straight from the drawn overview, which then faded over the real
         windows on a real compositor)."""
-        desk = self.o.scene.view.grabWindow()
         self.o.call("show")
         self.o.scene.wait(SETTLE)
         self.o.call("hide")
@@ -858,11 +857,16 @@ class TestNoGhosting(GhostRig, unittest.TestCase):
             covering = self.o.ov("covering")
             last_visible_covering = covering
             if not covering and not self.o.ov("open"):
-                empty_frames.append(max_diff(desk, self.o.scene.view.grabWindow(), 5))
+                empty_frames.append(self.o.scene.view.grabWindow())
+        # The desktop right after the unmap, not from before the open: the
+        # bar's clock may have changed minute in between (it did, in 4 of 12
+        # concurrent runs that crossed the same minute).
+        desk = self.o.scene.view.grabWindow()
         self.assertFalse(self.o.ov("visible"), "the overview never unmapped")
         self.assertFalse(last_visible_covering, "unmapped straight from a drawn frame")
         self.assertGreaterEqual(len(empty_frames), 1, "no empty frame before the unmap")
-        self.assertLessEqual(max(empty_frames), 2, empty_frames)
+        diffs = [max_diff(desk, f, 5) for f in empty_frames]
+        self.assertLessEqual(max(diffs), 2, diffs)
 
     def test_the_handover_waits_for_the_pictures(self):
         """The overview doesn't take over while a visible window has no
@@ -899,16 +903,28 @@ class TestUnderTheCompositorFade(GhostRig, unittest.TestCase):
     LAYER_FADE_MS = 303
 
     def test_control_the_recorded_double_image_is_reproduced(self):
-        """With the fade on (a config without the two fadeLayers lines) the
-        real window shows through while its picture moves. This is the
-        control: it proves these frames can see the artifact, so the
-        ghost-free results with the fade off (TestNoGhosting) mean something."""
+        """With the fade on (no overview-no-anim rule) the real window shows
+        through while its picture moves. This is the control: it proves these
+        frames can see the artifact, so the ghost-free results with the fade
+        off (TestNoGhosting) mean something.
+
+        Held, not sampled in real time: a frame mid-zoom with the surface
+        mid-fade (the moment the recording caught). Sampling the running fade
+        was the intermittent failure: under load each frame grab took so long
+        that the 303 ms fade was over before the zoom had moved anything."""
         self.o.call("show")
-        worst = 0
-        for p, covering, (img, tiles) in self.frames(16, 20):
-            if p > 0.03:
-                worst = max(worst, self.magenta_outside_tiles(img, tiles))
-        self.assertGreater(worst, 200, "the fade emulation no longer shows the double image")
+        self.o.scene.wait(SETTLE)
+        for p, alpha in ((0.2, 0.5), (0.35, 0.7)):
+            self.o.scene.ev(f"findNamed('overview').progress = {p}")
+            self.o.scene.ev(f"findNamed('overview').layerAlpha = {alpha}")
+            self.o.scene.wait(60)
+            img = self.o.scene.view.grabWindow()
+            self.assertGreater(self.magenta_outside_tiles(img, self.o.tiles()), 200,
+                               f"no second copy at zoom {p}, surface alpha {alpha}")
+        # and the same frame with the surface opaque has none
+        self.o.scene.ev("findNamed('overview').layerAlpha = 1")
+        self.o.scene.wait(60)
+        self.assertEqual(self.magenta_outside_tiles(self.o.scene.view.grabWindow(), self.o.tiles()), 0)
 
     def test_the_overlay_equals_the_desktop_until_it_moves(self):
         """The one thing the shell controls: the surface's content, from the
