@@ -410,3 +410,48 @@ compositor blur, live Quickshell memory.
    the mouse still and type: the keys must reach the clicked window.
    Repeat while moving the mouse across another window during the slide.
    If focus lands wrong, the `focusAgain` retry is the place to look.
+
+## Fourth pass (placement, overview fade, consolidation), 2026-10-16
+
+Baseline: `main` = `f20ced5`. The live desktop ran the pre-rewrite `4688761`
+(same files as the rewritten history up to it; every one of its 148 local
+commits has a patch-equivalent in `main`, checked with `git cherry`).
+
+### Fixed
+
+| Severity | Where | Finding and evidence | Commit |
+|---|---|---|---|
+| high (reported) | `dxrice_auto_place_window.py` | "three windows placed right, the fourth far lower, SUPER+G puts it back". A new window joins the spiral one step after the newest window that exists when it maps. When an app's launcher/updater/splash window is still up as its real window maps, the real window is placed after the launcher; when the launcher then closes, the window keeps a place reckoned from a window that no longer exists, while SUPER+G replays the spiral without it. Reproduced through the real listener and placement: the fourth window at (746, 1521) instead of (1733, 1093), and SUPER+G moves it. In the ideal model (every window maps at its final size, nothing closes) incremental placement and SUPER+G agree exactly: 62 sequences, 0 px. Fix: a window placed after an arm window that closes within 4 s is placed again, from the windows created before it, if it is still exactly where it was put and on the same workspace. Old code fails the three hand-off tests on the layout itself | ea63ca5, 34fbda7 |
+| medium (visual) | `hypr/hyprland.lua`, `dxrice_hypr_migrate.py` | the overview's double-image fix turned Hyprland's layer fade off for every layer surface (launchers, notifications, the theme window lost theirs), on the belief that no per-layer switch existed. Wrong: in Hyprland 0.56.2's source the animation tick checks each layer's `no_anim` for every animated value, alpha included (`AnimationManager.cpp`), and a `no_anim` layer's unmap takes no snapshot, so no fade-out is created (`LayerSurface.cpp`, `LayerFadeout.cpp`). Now one layer rule for `^dxrice-overview$`; the migration removes the global lines only in the forms DXrice wrote | 3f625d8 |
+| test | `dxrice_test_session.sh` | the "no Quickshell" case put `/usr/bin` on PATH, so wherever Quickshell is installed it found `/usr/bin/qs`: 2 failures here, a pass only in a container without Quickshell | 683f45f |
+| test | `dxrice_test_gentoo.sh` | same class: it fakes `emerge` but ran the installer with `/usr/bin` on PATH, and the installer takes the first package manager it finds (pacman before emerge), so on Arch every emerge assertion failed (10 here); Quickshell, Hyprland or cliphist being installed hid the "not installed" paths. Earlier sweeps reported it as passing because the runner printed `$?` after a command substitution | 2a2492c |
+| test | `tests/qml/test_overview.py` | **the open intermittent above, named**: `TestUnderTheCompositorFade.test_control_the_recorded_double_image_is_reproduced`. It sampled the emulated 303 ms fade in real time; under load each frame grab took so long that the fade was over before the zoom moved anything, so it saw no second copy. 6 failures in 12 runs, 4 concurrent, and no other test failed. Now holds the zoom and the surface alpha at fixed values | 602e7b0 |
+| test | `tests/qml/test_overview.py` | a second one, found by the next 12 runs: `test_the_surface_draws_nothing_in_its_last_frames` compared closing frames with a desktop grabbed seconds earlier; 4 runs that crossed the same minute saw the bar's clock change. Reproduced by starting it at second 58 (only the clock's digits differ); now compares with the desktop right after the unmap | 602e7b0 |
+
+After both fixes: 16 runs of `test_overview.py`, 4 at a time and alongside
+the full QML and Python sweeps, all 38/38. Every suite now keeps its own log
+(`<suite>.log`), and the runner reports each suite's real exit status.
+
+### Evidence not available, and what would settle it
+
+The fourth-window report happened before this pass, and nothing recorded
+it: the placement daemon logged nothing, and Hyprland's log at its default
+level has no window events (checked: 7,151 lines, none about windows). The
+mechanism above produces exactly the reported symptom and is fixed, but
+which app's launcher it was can't be shown. Placement now writes one
+journal line per decision (class, size, from/to, the arm window it
+followed; no titles). If it recurs: `journalctl --user -u
+dxrice-auto-place-window --since "10 min ago"` from just before it happened.
+
+### Checked, nothing to change
+
+- Overview input mask: input only while `open`, so the closing zoom and the
+  two empty frames before the unmap take no clicks.
+- Wi-Fi secret: stdin only, cleared once written. If the helper can't start
+  at all, the string stays in that QML property until the next attempt
+  (never logged, never in argv).
+- Visual pass over the gallery at 1920x1080 and 1024x768: no inconsistency
+  worth a change. The taskbar manager scrolls at 768 px height (the
+  "screens physically too short" exception) and fits at 1080.
+- Static: ruff (F, E9), shellcheck `-S warning`, `luac -p`, `py_compile`,
+  `bash -n`, qmllint errors: all clean.
