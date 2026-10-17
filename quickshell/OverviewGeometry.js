@@ -124,25 +124,3 @@ function onScreen(w, layout) {
     var x0 = w.x + r[0], y0 = w.y + r[1];
     return x0 < W && x0 + w.w > 0 && y0 < H && y0 + w.h > 0;
 }
-
-// How long Hyprland's window-move animation runs, in ms, from
-// `hyprctl -j animations` ([[leaf...], [bezier...]] or a flat leaf list).
-// The most specific overridden leaf wins: windowsMove, then windows, then
-// global. A disabled leaf moves windows at once (0). Speed is in units of
-// 100 ms. null when the reply can't be read.
-function windowMoveMs(reply) {
-    if (!reply || !reply.length) return null;
-    const leaves = Array.isArray(reply[0]) ? reply[0] : reply;
-    const byName = {};
-    for (let i = 0; i < leaves.length; i++)
-        if (leaves[i] && leaves[i].name) byName[leaves[i].name] = leaves[i];
-    const order = ["windowsMove", "windows", "global"];
-    for (let i = 0; i < order.length; i++) {
-        const leaf = byName[order[i]];
-        if (!leaf || (order[i] !== "global" && leaf.overridden === false)) continue;
-        if (leaf.enabled === false) return 0;
-        const speed = Number(leaf.speed);
-        return isFinite(speed) && speed >= 0 ? Math.round(speed * 100) : null;
-    }
-    return null;
-}

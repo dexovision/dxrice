@@ -455,3 +455,9 @@ dxrice-auto-place-window --since "10 min ago"` from just before it happened.
   "screens physically too short" exception) and fits at 1080.
 - Static: ruff (F, E9), shellcheck `-S warning`, `luac -p`, `py_compile`,
   `bash -n`, qmllint errors: all clean.
+
+## Fifth pass (the ghost after picking another window), 2026-10-16
+
+| Severity | Where | Finding and evidence | Commit |
+|---|---|---|---|
+| high (reported) | `Overview.qml` | "picking a different window in the overview, a ghost slides in from the side a moment after it closes; picking the window I was on, never". A different window is usually off screen, so picking it pans the desktop, and Hyprland animated the real windows' moves with the `windows` leaf -- a spring in the template. C1b's fix (above) kept the overlay up for that leaf's `speed` x 100 ms = 480 ms, but hyprutils 0.14.2 runs springs on their own physics and ignores `speed` (`AnimatedVariable.cpp`, `Spring.cpp`): the template's `easy` spring finishes after ~1 s and is 4-6 % short at 480 ms. The original recording, measured frame to frame after each close: 180 px of sliding over 306 ms after one close, none after a close without a pan. `hyprctl clients` reports a window's destination, not its animated position, so the overview can't watch the move. Fix: the pan moves each window with `no_anim` set first, in the same request, so it lands under the overlay at once; `no_anim` is unset once the overview has let go; the close is the usual 300 ms. `windowMoveMs` and the `hyprctl -j animations` read are gone. Old code fails the new tests (no `set_prop`, a 513 ms close after a pan) | see git log |

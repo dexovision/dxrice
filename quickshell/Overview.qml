@@ -72,16 +72,9 @@ PanelWindow {
     // one quick, readable ease-in-out zoom each way (instant under
     // reduce_motion); the dim runs alongside it, never as a stage of its own
     readonly property int zoomMs: Theme.reduceMotion ? 1 : Math.round(Theme.animMs * 2)
-    // How long Hyprland takes to move a window (its `windowsMove` leaf, else
-    // `windows`, else `global`; speed is in 100 ms units), read from
-    // `hyprctl -j animations` on the first open and after a config reload.
-    // A click that pans the desktop moves the real windows under the overlay
-    // with that animation, so the closing zoom runs exactly as long: the
-    // pictures and the real windows land on the same frame, and the overlay
-    // never lets go while a real window is still sliding into place.
-    property int compositorMoveMs: 480
-    property bool _animationsRead: false
-    property int _closeMs: root.zoomMs
+    // Windows a panning click moved with their compositor animation turned
+    // off (see _pan); it's turned back on once the overview has let go.
+    property var _unanimated: []
     readonly property var zoomCurve: [0.4, 0.0, 0.2, 1.0, 1, 1]
     // settled: zoomed out and not animating -- window changes then glide
     readonly property bool _settled: root.open && root.progress === 1 && !enterAnim.running
@@ -119,8 +112,6 @@ PanelWindow {
         root.open = true;
         root.openedAt = Date.now();
         root._focusAfterClose = "";
-        root._closeMs = root.zoomMs;
-        if (!root._animationsRead) { root._animationsRead = true; animationsProc.running = true; }
         offScreenNote.shown = false;
         PanelManager.closeCurrent();
         // Immediate feedback: the surface comes up now, dimming the real
@@ -239,23 +230,12 @@ PanelWindow {
         command: ["hyprctl", "-j", "monitors"]
         stdout: StdioCollector { onStreamFinished: { root._monitors = root._parse(this.text); root._arrived(); } }
     }
-    Process {
-        id: animationsProc
-        command: ["hyprctl", "-j", "animations"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const ms = Geo.windowMoveMs(root._parse(this.text));
-                if (ms !== null) root.compositorMoveMs = ms;
-            }
-        }
-    }
     // Debounced: one burst of events (a window opening sends several) is
     // one refresh.
     Timer { id: refreshSoon; interval: 60; onTriggered: if (root.open) root.refresh() }
     Connections {
         target: Hyprland
         function onRawEvent(event) {
-            if (event.name === "configreloaded") root._animationsRead = false;
             if (!root.open) return;
             const relevant = ["openwindow", "closewindow", "movewindow", "movewindowv2", "changefloatingmode",
                               "fullscreen", "workspace", "workspacev2", "focusedmon", "focusedmonv2",
@@ -293,17 +273,41 @@ PanelWindow {
     // floating window of the workspace by the same delta, so the spiral keeps
     // its shape. Pinned and fullscreen windows belong to the screen, not the
     // desktop, and stay put; tiled windows are always in view.
+    // The pan moves the real windows while the overview covers them, so the
+    // move needn't animate -- and mustn't: Hyprland animates a window move
+    // with the `windows` leaf, here a spring, and a spring runs on its own
+    // physics (hyprutils ignores `speed` for springs): about 1 s for this
+    // one, where the overlay used to let go after 480 ms.
+    // Still sliding when the overlay let go, the windows came in from the
+    // side for a few hundred ms after it: the "ghost" after picking another
+    // window. So each window's move is sent together with no_anim (one
+    // request: set_prop, then the move -- order matters, and separate
+    // requests needn't arrive in order), and it lands on the next frame.
+    // no_anim is unset again once the overview has let go (_restoreAnimations).
+    function _noAnimLua(address, value) {
+        return 'hl.dsp.window.set_prop({ prop = "no_anim", value = "' + value + '", window = "address:' + address + '" })';
+    }
     function _pan(d) {
         const mx = root.layout.monitor.x, my = root.layout.monitor.y;
+        const moved = root._unanimated.slice();
         for (let i = 0; i < tileModel.count; i++) {
             const t = tileModel.get(i);
             if (!t.floating || t.pinned || t.fullscreen) continue;
-            Hyprland.dispatch('hl.dsp.window.move({ window = "address:' + t.address + '", x = '
-                + Math.round(t.rx + mx + d[0]) + ', y = ' + Math.round(t.ry + my + d[1]) + ', relative = false })');
+            const move = 'hl.dsp.window.move({ window = "address:' + t.address + '", x = '
+                + Math.round(t.rx + mx + d[0]) + ', y = ' + Math.round(t.ry + my + d[1]) + ', relative = false })';
+            Hyprland.dispatch('(function() hl.dispatch(' + root._noAnimLua(t.address, "1") + '); return ' + move + ' end)()');
+            if (moved.indexOf(t.address) < 0) moved.push(t.address);
             tileModel.setProperty(i, "rx", t.rx + d[0]);
             tileModel.setProperty(i, "ry", t.ry + d[1]);
         }
+        root._unanimated = moved;
     }
+    function _restoreAnimations() {
+        for (let i = 0; i < root._unanimated.length; i++)
+            Hyprland.dispatch(root._noAnimLua(root._unanimated[i], "unset"));
+        root._unanimated = [];
+    }
+    Component.onDestruction: root._restoreAnimations()
     function activate(t) {
         if (!root.open || !t) return;
         if (!root.toplevelFor(t.address) && Hyprland.toplevels && Hyprland.toplevels.values.length) {
@@ -316,10 +320,7 @@ PanelWindow {
         }
         if (t.floating && !t.pinned && !t.fullscreen) {
             const d = root.panDelta(t);
-            if (d[0] || d[1]) {
-                root._pan(d);
-                root._closeMs = Math.max(root.zoomMs, Theme.reduceMotion ? 0 : root.compositorMoveMs);
-            }
+            if (d[0] || d[1]) root._pan(d);
         }
         root._focusAfterClose = t.address;
         root.hide();
@@ -362,10 +363,10 @@ PanelWindow {
         id: exitAnim
         ParallelAnimation {
             NumberAnimation {
-                target: root; property: "progress"; to: 0; duration: root._closeMs
+                target: root; property: "progress"; to: 0; duration: root.zoomMs
                 easing.type: Easing.BezierSpline; easing.bezierCurve: root.zoomCurve
             }
-            NumberAnimation { target: root; property: "fade"; to: 0; duration: root._closeMs; easing.type: Easing.InQuad }
+            NumberAnimation { target: root; property: "fade"; to: 0; duration: root.zoomMs; easing.type: Easing.InQuad }
         }
         // closed: let the tiles (and their capture sessions) go entirely,
         // then give a clicked window its focus once more (see focusLua)
@@ -404,6 +405,7 @@ PanelWindow {
             if (currentFrame < 4) return;
             stop();
             root._lingering = false;
+            root._restoreAnimations();
             if (root._focusAfterClose) focusAgain.restart();
         }
     }
@@ -411,10 +413,10 @@ PanelWindow {
     // ---- the surface ----
     visible: root.showing
     // Input only while open. The surface stays mapped through the closing
-    // zoom (and a compositor-length move after a panning click) and the
-    // release frames; without a mask it took the pointer over the whole
-    // monitor all that time, so a click on the application underneath right
-    // after Esc or a click on empty space was swallowed by the stage.
+    // zoom and the release frames; without a mask it took the pointer over
+    // the whole monitor all that time, so a click on the application
+    // underneath right after Esc or a click on empty space was swallowed by
+    // the stage.
     // Closed, the region is empty: Quickshell then makes the surface
     // input-transparent outright.
     mask: Region {

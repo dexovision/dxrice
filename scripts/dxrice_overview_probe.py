@@ -19,8 +19,15 @@ transition; a clean handover is 1-2 frames, a compositor fade is 3 or more
 
     python3 scripts/dxrice_overview_probe.py RECORDING.mp4 [--box X0,Y0,X1,Y1]
 
-Exit 0 when every transition is a clean handover, 3 when one is a compositor
-fade, 1 when none was found. The desktop at the start of the recording must
+After each close it also measures how long the desktop keeps sliding once
+the overlay has gone (a phase-correlation estimate of how far the whole
+picture moves from frame to frame, the top bar left out): windows the
+compositor is still moving into place after a panning click -- what showed
+as a ghost sliding in from the side after picking another window.
+
+Exit 0 when every transition is a clean handover and nothing slides after
+a close, 3 when one is a compositor fade, 4 when the desktop keeps sliding
+after a close, 1 when no transition was found. The desktop at the start of the recording must
 show the bar's clock, and nothing else may cover it during a transition (a
 window over the clock reads as a slow "transition" that isn't one).
 
@@ -71,6 +78,60 @@ def transitions(r, times):
     return out
 
 
+SLIDE_SCALE = 4             # frames are compared at 1/4 size: shifts in 4 px steps
+SETTLED_PAIRS = 3           # this many still frame pairs in a row: it has settled
+SLIDE_MAX_FRAMES = 2        # sliding longer than this after the overlay went is the ghost
+SLIDE_LOOK = 60             # frames examined after each close
+
+
+def global_shift(f0, f1):
+    """(dx, dy) in full-size px by which the picture moved from f0 to f1, by
+    phase correlation (a uniform fade or changing content inside a window
+    doesn't read as a shift), and how clear the peak is (0..1)."""
+    import numpy as np
+    a, b = np.fft.fft2(f0 - f0.mean()), np.fft.fft2(f1 - f1.mean())
+    r = a * np.conj(b)
+    r /= np.abs(r) + 1e-9
+    c = np.fft.ifft2(r).real
+    y, x = np.unravel_index(np.argmax(c), c.shape)
+    h, w = c.shape
+    if y > h // 2:
+        y -= h
+    if x > w // 2:
+        x -= w
+    return -x * SLIDE_SCALE, -y * SLIDE_SCALE, float(c.max())
+
+
+def slide_after(frames, start):
+    """How many frames after `start` (the first frame without the overlay)
+    the desktop keeps sliding, and the total distance (px): windows still
+    being moved by the compositor after the overview let go. Ends at the
+    first SETTLED_PAIRS still pairs in a row."""
+    still, moving, last_moving, dist = 0, 0, start, 0.0
+    for i in range(start, min(start + SLIDE_LOOK, len(frames) - 1)):
+        dx, dy, _peak = global_shift(frames[i], frames[i + 1])
+        if dx or dy:
+            moving += 1
+            last_moving = i + 1
+            dist += (dx * dx + dy * dy) ** 0.5
+            still = 0
+        else:
+            still += 1
+            if still >= SETTLED_PAIRS:
+                break
+    return (last_moving - start if moving else 0), dist
+
+
+def load_frames(path, skip_top=56):
+    """Every frame, grey, at 1/SLIDE_SCALE size, without the top bar (its
+    clock changes on its own)."""
+    import numpy as np
+    w, h = 1920 // SLIDE_SCALE, 1080 // SLIDE_SCALE
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-fps_mode", "passthrough", "-vf", f"scale={w}:{h}",
+                          "-pix_fmt", "gray", "-f", "rawvideo", "-"], capture_output=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, h, w)[:, skip_top // SLIDE_SCALE:, :].astype(float)
+
+
 def load(path, box):
     import numpy as np
     p = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
@@ -102,12 +163,23 @@ def main(argv):
     if not found:
         print("no overview transition found (the bar strip never left the desktop's look).")
         return 1
-    worst = 0
+    worst, worst_slide = 0, 0
+    frames_all = load_frames(argv[1]) if any(k == "uncovers" for k, *_ in found) else None
     for kind, a, b, frames, ms in found:
         verdict = "clean handover" if frames <= CLEAN_MAX_FRAMES else "COMPOSITOR FADE (two copies on screen)"
         worst = max(worst, frames)
         print(f"{kind:9s} t={times[a]:6.3f}s  {frames:3d} frames  {ms:6.0f} ms   {verdict}")
-    return 0 if worst <= CLEAN_MAX_FRAMES else 3
+        if kind == "uncovers":
+            n, dist = slide_after(frames_all, b)
+            end = min(b + n, len(times) - 1)
+            worst_slide = max(worst_slide, n)
+            what = ("settled" if n <= SLIDE_MAX_FRAMES else
+                    "WINDOWS STILL SLIDING after the overview closed (the ghost)")
+            print(f"          then {n:3d} frames {(times[end] - times[b]) * 1000:6.0f} ms of sliding, "
+                  f"{dist:5.0f} px   {what}")
+    if worst > CLEAN_MAX_FRAMES:
+        return 3
+    return 4 if worst_slide > SLIDE_MAX_FRAMES else 0
 
 
 if __name__ == "__main__":

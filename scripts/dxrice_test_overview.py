@@ -439,6 +439,35 @@ class TestCompositorLayerFade(unittest.TestCase):
         self.assertIn("layer_rule:overview-no-anim", drift._identities(open(self.TEMPLATE).read()))
 
 
+class TestPanDispatchShapes(unittest.TestCase):
+    """The overview's pan sends hl.dsp.window.set_prop({ prop = "no_anim",
+    value = ..., window = ... }) around each window move (Overview.qml
+    _noAnimLua). Hyprland's parser checks a dispatcher's table when it is
+    built, so binding the exact shapes in a copy of the template and running
+    --verify-config (nothing started or executed) proves Hyprland accepts
+    them; one without `value` is refused, proving the check is real. (The
+    prop name itself is only read when it runs: no_anim is in Hyprland
+    0.56.2's ConfigActions setProp list.)"""
+
+    def bound(self, *exprs):
+        text = open(TestKeybinds.TEMPLATE).read()
+        keys = ["F9", "F10", "F11", "F12"]
+        return text + "".join(f'hl.bind(mainMod .. " + SHIFT + {k}", {e})\n' for k, e in zip(keys, exprs))
+
+    def test_hyprland_accepts_the_set_prop_shapes(self):
+        qml = open(TestCompositorLayerFade.OVERVIEW_QML).read()
+        self.assertIn("'hl.dsp.window.set_prop({ prop = \"no_anim\", value = \"' + value + '\", window = \"address:' "
+                      "+ address + '\" })'", qml)
+        out = TestCompositorLayerFade.verify(self, self.bound(
+            'hl.dsp.window.set_prop({ prop = "no_anim", value = "1", window = "address:0x5a5a" })',
+            'hl.dsp.window.set_prop({ prop = "no_anim", value = "unset", window = "address:0x5a5a" })'))
+        self.assertIn("config ok", out)
+        bad = TestCompositorLayerFade.verify(self, self.bound(
+            'hl.dsp.window.set_prop({ prop = "no_anim", window = "address:0x5a5a" })'))
+        self.assertNotIn("config ok", bad)
+        self.assertIn("set_prop", bad)
+
+
 class TestLayerRuleMigration(unittest.TestCase):
     """dxrice_hypr_migrate.py's overview-no-anim: adds the rule, and removes
     the global layer-fade lines only in the exact forms DXrice wrote them."""
@@ -533,6 +562,50 @@ class TestRecordingProbe(unittest.TestCase):
         found = self.run_probe(alphas, [0.0] * len(alphas))
         self.assertEqual(len(found), 1)
         self.assertGreater(found[0][3], self.probe.CLEAN_MAX_FRAMES)
+
+
+class TestSlideAfterClose(unittest.TestCase):
+    """dxrice_overview_probe.slide_after: the ghost after picking another
+    window was the desktop still sliding once the overlay had gone. On
+    synthetic 1/4-size frames: a slide that decays over ~20 frames is
+    measured; a uniform fade, or a video playing inside a window, is not a
+    slide."""
+
+    def setUp(self):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest("numpy not installed")
+        import dxrice_overview_probe as probe
+        self.np, self.probe = numpy, probe
+        rng = numpy.random.RandomState(3)
+        self.scene = rng.randint(0, 255, (300, 520)).astype(float)
+
+    def crop(self, x, y):
+        return self.scene[y:y + 200, x:x + 400].copy()
+
+    def test_a_decaying_slide_is_measured(self):
+        xs, x = [], 60.0
+        for k in range(20):                 # 60 -> ~0 quarter-px, like a spring settling
+            xs.append(round(x))
+            x *= 0.8
+        xs += [0] * 10
+        frames = [self.crop(int(v), 40) for v in xs]
+        n, dist = self.probe.slide_after(frames, 0)
+        self.assertGreater(n, self.probe.SLIDE_MAX_FRAMES)
+        self.assertAlmostEqual(dist, xs[0] * self.probe.SLIDE_SCALE, delta=4 * self.probe.SLIDE_SCALE)
+
+    def test_a_fade_or_moving_content_is_not_a_slide(self):
+        base = self.crop(20, 20)
+        fading = [base * (0.6 + 0.04 * k) for k in range(10)]
+        self.assertEqual(self.probe.slide_after(fading, 0)[0], 0)
+        rng = self.np.random.RandomState(9)
+        video = []
+        for k in range(10):
+            f = base.copy()
+            f[50:120, 80:220] = rng.randint(0, 255, (70, 140))   # a playing video
+            video.append(f)
+        self.assertEqual(self.probe.slide_after(video, 0)[0], 0)
 
 
 class TestPerformance(unittest.TestCase):

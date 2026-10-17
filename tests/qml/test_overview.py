@@ -10,6 +10,7 @@ compositor.
     python3 tests/qml/test_overview.py
 """
 import json
+import re
 import math
 import sys
 import unittest
@@ -285,7 +286,8 @@ class TestOverview(unittest.TestCase):
             self.o.click(*pt)
             self.o.scene.wait(SETTLE)
             sent = self.o.dispatches()[before:]
-            moves = [d for d in sent if d.startswith("hl.dsp.window.move")]
+            move_reqs = [d for d in sent if "hl.dsp.window.move(" in d]
+            moves = [re.search(r'hl\.dsp\.window\.move\(\{[^}]*\}\)', d).group(0) for d in move_reqs]
             focus = [d for d in sent if d.startswith("hl.dsp.focus")]
             self.assertTrue(focus, w["address"])
             self.assertEqual(set(focus), {self.lua(w["address"])}, (w["address"], sent))
@@ -299,7 +301,7 @@ class TestOverview(unittest.TestCase):
                     f'y = {round(o["y"] + my + dy)}, relative = false }})'
                     for o in self.o.layout["windows"] if o["floating"] and not o["pinned"] and not o["fullscreen"]}
             self.assertEqual(set(moves), want, w["address"])
-            self.assertLess(sent.index(moves[0]), sent.index(focus[0]), "moved after focusing")
+            self.assertLess(sent.index(move_reqs[0]), sent.index(focus[0]), "moved after focusing")
             panned += 1
         self.assertGreaterEqual(still, 1)
         self.assertGreaterEqual(panned, 8)
@@ -579,64 +581,139 @@ class TestSelectionCentring(unittest.TestCase):
             o.scene.close()
 
 
-class TestCloseFollowsTheCompositor(unittest.TestCase):
-    """Clicking a window that isn't in view pans the real windows, and
-    Hyprland animates that move (its windowsMove/windows leaf). The overlay
-    must not let go before that animation has ended: the pictures would land
-    while the real windows were still sliding in under them, and both would
-    show. The closing zoom therefore runs as long as the compositor's move,
-    read from `hyprctl -j animations`; a close with no pan keeps its own
-    length."""
+LUA_MOCK = r"""
+local calls = {}
+hl = { dsp = { window = {} } }
+local function need(t, k) assert(type(t[k]) == "string" or type(t[k]) == "number", "missing " .. k); return t[k] end
+function hl.dsp.window.set_prop(t)
+    local p, v, w = need(t, "prop"), need(t, "value"), need(t, "window")
+    return function() calls[#calls + 1] = "set_prop " .. p .. " " .. v .. " " .. w end
+end
+function hl.dsp.window.move(t)
+    local w, x, y = need(t, "window"), need(t, "x"), need(t, "y")
+    return function() calls[#calls + 1] = "move " .. w .. " " .. x .. " " .. y end
+end
+function hl.dsp.focus(t) return function() calls[#calls + 1] = "focus " .. need(t, "window") end end
+function hl.dispatch(f) f(); return "ok" end
+for line in io.lines() do
+    -- what Hyprland does with `dispatch <line>` in a Lua config
+    assert(load("return hl.dispatch(" .. line .. ")"))()
+end
+for _, c in ipairs(calls) do print(c) end
+"""
 
-    def js(self):
-        from PySide6.QtQml import QJSEngine
-        eng = QJSEngine()
-        src = (REPO / "quickshell" / "OverviewGeometry.js").read_text().replace(".pragma library", "")
-        eng.evaluate(src)
-        return lambda reply: eng.evaluate(f"windowMoveMs({json.dumps(reply)})").toVariant()
 
-    def test_reading_the_animations_reply(self):
-        f = self.js()
-        g = {"name": "global", "overridden": True, "enabled": True, "speed": 8.0}
-        w = {"name": "windows", "overridden": True, "enabled": True, "speed": 4.79}
-        mv = {"name": "windowsMove", "overridden": False, "enabled": True, "speed": 2.0}
-        self.assertEqual(f([[g, w, mv], []]), 479)
-        self.assertEqual(f([g, w, dict(mv, overridden=True)]), 200)
-        self.assertEqual(f([[g, dict(w, overridden=False)], []]), 800)
-        self.assertEqual(f([[g, dict(w, enabled=False)], []]), 0)
-        self.assertIsNone(f(None))
-        self.assertIsNone(f([]))
+def run_in_lua(dispatches):
+    """The calls Hyprland makes for these dispatch strings, in order, with
+    `hl.dsp` and `hl.dispatch` mocked (real Lua: syntax and evaluation order
+    are the real thing)."""
+    import shutil
+    import subprocess
+    lua = shutil.which("lua") or shutil.which("luajit")
+    if not lua:
+        raise unittest.SkipTest("no lua interpreter")
+    r = subprocess.run([lua, "-e", LUA_MOCK], input="\n".join(dispatches) + "\n",
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.split("\n")[:-1]
 
-    def release_ms(self, target_rect, move_speed):
+
+class TestPanWithoutCompositorAnimation(unittest.TestCase):
+    """Bug report: picking a DIFFERENT window in the overview, a ghost slid in
+    from the side a moment after the overview closed; picking the window you
+    started on, never. A different window is usually off screen, so picking
+    it pans the desktop: every floating window is moved, and Hyprland
+    animated those moves with its `windows` leaf -- a spring here, which
+    runs on its own physics (hyprutils ignores `speed` for springs: ~1 s for
+    the template's). The overlay let go after 480 ms (read from that speed),
+    with the windows still 4-6 % short of their places, and they finished
+    sliding in front of the user (a screen recording showed 350-720 ms of
+    sliding after the overlay went). Now each window's move is sent with
+    no_anim set first, in the same request, so it lands at once under the
+    overlay; no_anim is unset again once the overview has let go."""
+
+    def scene(self, target_rect):
         anchor = (760, 400, 1160, 700)
-        o = OverviewScene(clients_for([anchor, target_rect]))
+        return OverviewScene(clients_for([anchor, target_rect, (200, 150, 600, 380)]))
+
+    def click(self, o, address="0xa001"):
+        target = next(w for w in o.layout["windows"] if w["address"] == address)
+        o.call("show")
+        o.scene.wait(SETTLE)
+        before = len(o.dispatches())
+        o.click(*TestOverview.visible_point(type("X", (), {"o": o})(), target))
+        return before
+
+    def test_each_window_lands_at_once_then_animates_again(self):
+        o = self.scene((2600, 200, 3300, 650))     # off screen: a pan
         try:
-            leaves = [{"name": "global", "overridden": True, "enabled": True, "speed": 8},
-                      {"name": "windows", "overridden": True, "enabled": True, "speed": move_speed}]
-            o.scene.set_command("hyprctl -j animations", json.dumps([leaves, []]))
-            target = next(w for w in o.layout["windows"] if w["address"] == "0xa001")
-            o.call("show")
+            before = self.click(o)
+            o.scene.wait(2)
+            during = o.dispatches()[before:]
             o.scene.wait(SETTLE)
-            self.assertEqual(o.ov("compositorMoveMs"), round(move_speed * 100))
-            import time
-            o.click(*TestOverview.visible_point(type("X", (), {"o": o})(), target))
-            t0 = time.monotonic()
-            while o.ov("covering") and time.monotonic() - t0 < 3:
-                o.scene.wait(5)
-            return (time.monotonic() - t0) * 1000, bool(moved_to(o.dispatches())), o.ov("zoomMs")
+            after = o.dispatches()[before:]
+            calls = run_in_lua(after)
         finally:
             o.scene.close()
+        moved = [c.split()[1] for c in calls if c.startswith("move ")]   # "address:0x..."
+        self.assertEqual(len(moved), 3, calls)
+        for w in moved:
+            i_off = calls.index(f"set_prop no_anim 1 {w}")
+            i_move = next(i for i, c in enumerate(calls) if c.startswith(f"move {w} "))
+            i_on = calls.index(f"set_prop no_anim unset {w}")
+            self.assertLess(i_off, i_move, "moved before its animation was off")
+            self.assertLess(i_move, i_on)
+        # the same request carries both: nothing can reorder them in transit
+        for d in during:
+            if "window.move(" in d:
+                self.assertLess(d.index('prop = "no_anim", value = "1"'), d.index("window.move("))
+        # not turned back on while the overview still covers the screen
+        self.assertFalse(any('value = "unset"' in d for d in during))
+        self.assertEqual(sum('value = "unset"' in d for d in after), 3)
 
-    def test_a_panned_close_outlasts_the_compositor_move(self):
-        waited, panned, _ = self.release_ms((2600, 200, 3300, 650), 7.0)
-        self.assertTrue(panned)
-        self.assertGreaterEqual(waited, 700)
-        self.assertLess(waited, 700 + 250)
+    def test_a_click_without_a_pan_touches_no_animation(self):
+        o = self.scene((100, 120, 600, 500))       # entirely in view
+        try:
+            before = self.click(o)
+            o.scene.wait(SETTLE)
+            sent = o.dispatches()[before:]
+        finally:
+            o.scene.close()
+        self.assertFalse(any("set_prop" in d or "window.move(" in d for d in sent), sent)
+        self.assertTrue(any(d.startswith("hl.dsp.focus") for d in sent))
 
-    def test_a_close_without_a_pan_keeps_the_zoom_length(self):
-        waited, panned, zoom = self.release_ms((100, 120, 600, 500), 7.0)
-        self.assertFalse(panned)
-        self.assertLess(waited, zoom + 250)
+    def test_the_close_is_the_zoom_length_even_after_a_pan(self):
+        import time
+        for rect in ((2600, 200, 3300, 650), (100, 120, 600, 500)):
+            o = self.scene(rect)
+            try:
+                self.click(o)
+                t0 = time.monotonic()
+                while o.ov("covering") and time.monotonic() - t0 < 3:
+                    o.scene.wait(5)
+                waited = (time.monotonic() - t0) * 1000
+                zoom = o.ov("zoomMs")
+            finally:
+                o.scene.close()
+            # the zoom plus the release frames; the old 480 ms wait after a
+            # pan exceeds it
+            self.assertLess(waited, zoom + 150, (rect, waited))
+
+    def test_reopening_mid_close_still_turns_animations_back_on(self):
+        o = self.scene((2600, 200, 3300, 650))
+        try:
+            before = self.click(o)
+            o.scene.wait(40)
+            o.call("show")                          # SUPER+Tab again, mid-close
+            o.scene.wait(SETTLE)
+            self.assertTrue(o.ov("open"))
+            self.assertFalse(any('value = "unset"' in d for d in o.dispatches()[before:]))
+            o.call("hide")
+            o.scene.wait(SETTLE)
+            sent = o.dispatches()[before:]
+        finally:
+            o.scene.close()
+        self.assertEqual(sum('value = "unset"' in d for d in sent), 3)
 
 
 class GhostRig:
@@ -774,12 +851,10 @@ class TestNoGhosting(GhostRig, unittest.TestCase):
         self.o.scene.ev("fakeWindows = " + json.dumps(fake))
         (tx, ty) = moves[self.target["address"]]
         self.target = dict(self.target, x=tx - mx, y=ty - my)   # where the real window now is
-        # Sample for as long as this close really lasts: after a pan it runs
-        # as long as the compositor's window move (_closeMs, 480 ms by
-        # default), plus the release frames. A fixed 14 x 25 ms only covered
-        # it when frame grabs happened to be slow (the full suite), so the
-        # test failed every time it ran on its own.
-        close_ms = self.o.ov("_closeMs")
+        # Sample for as long as this close really lasts (the zoom, plus the
+        # release frames). A fixed 14 x 25 ms only covered it when frame
+        # grabs happened to be slow (the full suite).
+        close_ms = self.o.ov("zoomMs")
         seen = self.frames(math.ceil((close_ms + 200) / 25), 25)
         self.assertFalse(seen[-1][1], "the overview never gave the screen back")
         for p, covering, img in seen:

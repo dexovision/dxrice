@@ -54,21 +54,25 @@ the whole story: see "The double image" below.)
 Toggling while it's still moving eases out of wherever it is, never
 snapping.
 
-When the click pans the desktop (below), Hyprland animates the real
-windows to their new places with its own window-move animation (the
-`windowsMove` leaf, else `windows`, else `global`). Its duration is taken
-as the leaf's speed × 100 ms, Hyprland's unit for animation speed: 480 ms
-for the template's `windows` speed of 4.79. That reading of `speed` is
-inferred from Hyprland's documentation, not measured. The template's
-`windows` leaf uses a spring curve, and whether a spring's duration follows
-`speed` exactly can only be confirmed on a real desktop (manual check 3
-below). The closing zoom then runs exactly that
-long instead of 300 ms, so the pictures and the real windows land on the
-same frame. Before this, the overlay let go about 340 ms after the click
-(measured in the harness), while Hyprland's move was still running.
-The real windows visibly slid the rest of the way into place where the
-pictures had just been: the double image on selection. The duration is read from
-`hyprctl -j animations` on the first open and after each config reload.
+When the click pans the desktop (below), the real windows are moved while
+the overview covers them, so that move isn't animated: each window's move
+is sent with Hyprland's per-window `no_anim` property set first, in the same
+request (`hl.dsp.window.set_prop`), so it lands on the next frame, and
+`no_anim` is unset again once the overview has let go. The close is the
+same 300 ms zoom as any other.
+
+This is the fix for the "ghost" after picking a *different* window. An
+earlier version let Hyprland animate the move and kept the overlay up for
+the move's length, read as the `windows` leaf's speed × 100 ms (480 ms with
+the template). But the template's `windows` leaf is a spring, and hyprutils
+runs a spring on its own physics until its value and velocity settle,
+ignoring `speed` (`AnimatedVariable.cpp`, `Spring.cpp` in hyprutils
+0.14.2): about 1 s for the template's `easy` spring, with 4-6 % of the pan
+still to go at 480 ms. The windows finished sliding in from the side after
+the overview had gone. A screen recording showed it: 180 px over 306 ms
+after one close. Picking the window you started on never pans, which is why
+that never ghosted. (`hyprctl` can't be asked how far a window has got:
+`clients` reports where it is going, not where it is.)
 
 ### Clicking a window
 
@@ -198,6 +202,14 @@ what the harness tests check), and it can't judge a transition in which
 something covers the clock -- a window over it reads as a slow transition.
 On the recording that found the bug it read 9 frames opening and 4 closing.
 
+After each close the probe also reports how long the desktop keeps sliding
+once the overlay has gone: a phase-correlation estimate of how far the whole
+picture moves between frames, with the top bar left out (a fade, or a video
+playing inside a window, doesn't read as a slide). More than 2 frames is the
+ghost after picking another window: windows the compositor is still moving.
+On the same recording, one close slid 180 px over 306 ms. Exit status 4 means
+it found that.
+
 To record one: with the bar's clock visible and nothing over it,
 `wf-recorder -f ~/Videos/overview.mp4`, then SUPER+Tab, wait, SUPER+Tab,
 Ctrl+C in the terminal, and
@@ -243,7 +255,7 @@ Measured on this machine; the window data is read live, read-only.
 | window data | 1st version: `python3 dxrice_overview.py`, 50–52 ms; then 2 × `hyprctl -j`, 5–7 ms | 2 × `hyprctl -j` in parallel, 5–7 ms |
 | geometry | 0.07 ms (16 windows), 1.1 ms (200) | the same |
 | zoom | 420 ms decelerating | 300 ms ease-in-out |
-| close | 360 ms, then a separate 120 ms fade | 300 ms, the fade alongside; after a click that pans the desktop, as long as Hyprland's window move (480 ms with the template) |
+| close | 360 ms, then a separate 120 ms fade | 300 ms, the fade alongside, also after a click that pans the desktop (the windows are already in place) |
 
 `overview_timing.png` plots both. The remaining 30 ms before the shell even
 hears the key is the `qs ipc call` client process. Hyprland's
@@ -342,10 +354,13 @@ key would silently do nothing, so the proven path is kept.
       overlay equals the desktop until it moves;
     - pressing again before the handover, or during the release frames,
       backs out or resumes cleanly;
-  - **closing in step with the compositor** (`TestCloseFollowsTheCompositor`):
-    reading `hyprctl -j animations`, and that the overlay lets go only after
-    the compositor's window move when the click panned the desktop, and at
-    the zoom's own length otherwise;
+  - **a pan that doesn't animate** (`TestPanWithoutCompositorAnimation`):
+    every dispatched request run through real Lua with `hl` mocked shows
+    no_anim set before each window's move, in the same request, and unset
+    after the overlay has gone (never while it covers); a click without a
+    pan touches no animation; the close is the zoom's length after a pan
+    too (the old 480 ms wait fails it); a reopen mid-close still turns the
+    animations back on;
   - focus always in Lua syntax;
   - fullscreen, pinned and tiled windows focus without a pan;
   - a window that just closed says so;
@@ -395,7 +410,8 @@ need no special setup.
 2. **Selecting a window in view.** Click a window that is fully on screen.
    It zooms back to exactly where it was, with keyboard focus (type into
    it). Nothing else moves.
-3. **Selecting a window off screen** (the case that ghosted). Press SUPER+G
+3. **Selecting a window off screen** (the case that ghosted, compare with
+   step 2). Press SUPER+G
    with five or more windows so the spiral runs past the screen edge, then
    SUPER+Tab and click an outer window. The view zooms back in while the
    desktop pans so that window ends centred. When the overview disappears,
@@ -409,6 +425,5 @@ need no special setup.
 If step 1 still shows a double image, your `hyprland.lua` lacks the
 `overview-no-anim` layer rule (`hyprctl layers` names the overview's
 namespace while it's open; `grep overview-no-anim ~/.config/hypr/hyprland.lua`
-shows the rule). If step 3 shows a slide after the overview disappears, report
-your `windows` / `windowsMove` animation settings. The overview reads them
-from `hyprctl -j animations` to time that close.
+shows the rule). If step 3 shows a slide after the overview disappears, the
+probe below measures it; send its output.
