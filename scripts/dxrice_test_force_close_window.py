@@ -93,6 +93,7 @@ class TestForceCloseWindow(unittest.TestCase):
         # Never a real notification from a test.
         self.notes = []
         fcw._notify = lambda summary, body: self.notes.append((summary, body))
+        fcw.query_overview = lambda: None   # no overview open unless a test says so
         self._procs = []
 
     def tearDown(self):
@@ -423,6 +424,57 @@ while True:
 """
 
 
+class TestOverviewTarget(TestForceCloseWindow):
+    """SUPER+C with the overview open closes the window whose picture is
+    under the pointer -- never the focused window behind the overview --
+    through the same per-window close and the same refusals."""
+
+    def clients(self, *pids):
+        return [{"address": f"0x{i + 1}", "pid": pid, "class": f"app{i + 1}"} for i, pid in enumerate(pids)]
+
+    def test_the_hovered_window_closes_not_the_focused_one(self):
+        a, b = self._spawn("sleep", "60"), self._spawn("sleep", "60")
+        fake = self._install(FakeHypr(self.clients(a.pid, b.pid), focused_address="0x1"))
+        fcw.query_overview = lambda: "0x2\tapp2"
+        fcw.main()
+        self.assertEqual(fake.close_calls, ["0x2"])
+        self.assertEqual([c["address"] for c in fake.clients], ["0x1"])
+        self.assertIsNone(a.poll())
+
+    def test_overview_open_with_nothing_hovered_does_nothing(self):
+        a = self._spawn("sleep", "60")
+        fake = self._install(FakeHypr(self.clients(a.pid), focused_address="0x1"))
+        fcw.query_overview = lambda: ""
+        fcw.main()
+        self.assertEqual(fake.close_calls, [])
+        self.assertIsNone(a.poll())
+
+    def test_a_stale_hovered_window_does_nothing(self):
+        a = self._spawn("sleep", "60")
+        fake = self._install(FakeHypr(self.clients(a.pid), focused_address="0x1"))
+        for stale in ("0x9\tapp9", "0x1\tsomething-else"):   # gone; address now another window
+            fcw.query_overview = lambda stale=stale: stale
+            fcw.main()
+        self.assertEqual(fake.close_calls, [])
+        self.assertIsNone(a.poll())
+
+    def test_a_hovered_window_sharing_its_process_is_not_force_quit(self):
+        a = self._spawn("sleep", "60")
+        fake = self._install(FakeHypr(self.clients(a.pid, a.pid), focused_address="0x1", honors_close=False))
+        fcw.query_overview = lambda: "0x2\tapp2"
+        fcw.main()
+        self.assertEqual(fake.close_calls, ["0x2"])
+        self.assertIsNone(a.poll(), "a process shared with another window was killed")
+        self.assertTrue(self.notes)
+
+    def test_overview_closed_means_the_focused_window(self):
+        a, b = self._spawn("sleep", "60"), self._spawn("sleep", "60")
+        fake = self._install(FakeHypr(self.clients(a.pid, b.pid), focused_address="0x1"))
+        fcw.query_overview = lambda: None
+        fcw.main()
+        self.assertEqual(fake.close_calls, ["0x1"])
+
+
 class TestTermination(unittest.TestCase):
     """The force-quit fallback itself: graceful first, pid-reuse safe,
     validated against the live window list, never touching the desktop's
@@ -449,12 +501,14 @@ class TestTermination(unittest.TestCase):
 
     def setUp(self):
         importlib.reload(fcw)
+        fcw.query_overview = lambda: None
         fcw.CLOSE_WAIT_TIMEOUT = 0.1
         fcw.CLOSE_WAIT_POLL = 0.02
         fcw.TERM_GRACE = 0.6
         fcw.KILL_WAIT = 0.5
         self.notes = []
         fcw._notify = lambda summary, body: self.notes.append((summary, body))
+        fcw.query_overview = lambda: None   # no overview open unless a test says so
         self._procs = []
 
     def tearDown(self):

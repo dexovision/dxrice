@@ -160,5 +160,7 @@ ShellRoot {
     IpcHandler {
         target: "overview"
         function toggle(): void { overview.toggle(); }
+        // SUPER+C asks this first: see Overview.hoveredTarget
+        function hovered(): string { return overview.hoveredTarget(); }
     }
 }

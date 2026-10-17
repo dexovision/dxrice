@@ -1133,6 +1133,40 @@ class TestOpeningDoesNoHeavyWork(unittest.TestCase):
         self.assertLess(max(covered), 150, f"{max(covered):.0f} ms from the key to the overview covering")
 
 
+class TestHoveredWindowForSuperC(unittest.TestCase):
+    """SUPER+C in the overview closes the window under the pointer: the
+    overview reports it (hoveredTarget, the `overview hovered` IPC call)."""
+
+    def test_hover_reports_that_window_and_nothing_else(self):
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
+        rects = sp.arrange(MIXED[:6], [], (0, 52, 1920, 1012), (32, 56))
+        o = OverviewScene(clients_for(rects))
+        try:
+            self.assertEqual(o.scene.ev("findNamed('overview').hoveredTarget()"), "closed")
+            o.call("show")
+            o.scene.wait(SETTLE)
+            w = o.layout["windows"][2]
+            x, y = TestOverview.visible_point(type("X", (), {"o": o})(), w)
+            QTest.mouseMove(o.scene.view, QPoint(int(x), int(y)))
+            o.scene.wait(80)
+            self.assertEqual(o.scene.ev("findNamed('overview').hoveredTarget()"), f"{w['address']}\t{w['class']}")
+            QTest.mouseMove(o.scene.view, QPoint(6, o.mon["height"] // 2))      # empty margin
+            o.scene.wait(80)
+            self.assertEqual(o.scene.ev("findNamed('overview').hoveredTarget()"), "")
+            # hovered, then closed (SUPER+C did its job): no stale target
+            QTest.mouseMove(o.scene.view, QPoint(int(x), int(y)))
+            o.scene.wait(80)
+            o.load([c for c in o.clients if c["address"] != w["address"]])
+            o.scene.ev(f"hypr.rawEvent({{ name: 'closewindow', data: '{w['address'][2:]}' }})")
+            o.scene.wait(800)
+            self.assertNotIn(w["address"], o.tiles())
+            self.assertNotIn(w["address"], o.scene.ev("findNamed('overview').hoveredTarget()"))
+            self.assertTrue(o.ov("open"))
+        finally:
+            o.scene.close()
+
+
 class TestGeometryParity(unittest.TestCase):
     """The shell's geometry (OverviewGeometry.js) and the reference
     (dxrice_overview.py) agree on hundreds of random workspaces: monitors of

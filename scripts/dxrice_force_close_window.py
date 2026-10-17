@@ -421,8 +421,43 @@ def _windows_sharing(subtree, exclude_address):
                if c.get("address") != exclude_address and c.get("pid") in subtree_set)
 
 
+def _query_overview():
+    """What the desktop overview says SUPER+C should close: None when it
+    isn't open (or can't be asked), "" when it is open but no window
+    picture is under the pointer, else "<address>\t<class>"."""
+    repo = _quickshell_repo_dir()
+    try:
+        r = subprocess.run(["qs", "-p", f"{repo}/quickshell/shell.qml", "ipc", "call", "overview", "hovered"],
+                           timeout=1.5, capture_output=True, text=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    out = r.stdout.strip() if r.returncode == 0 else "closed"
+    return None if out == "closed" else out
+
+
+# Test seam.
+query_overview = _query_overview
+
+
+def _target_window():
+    """The window SUPER+C is about: with the overview open, the one whose
+    picture is under the pointer -- re-read from Hyprland now, and only if
+    it still has the class the overview showed (else None: nothing to do);
+    otherwise the focused window."""
+    hovered = query_overview()
+    if hovered is None:
+        return hyprctl_json(["activewindow"])
+    if not hovered:
+        return None
+    address, _, cls = hovered.partition("\t")
+    window = _client(address)
+    if window is None or window.get("class", "") != cls:
+        return None
+    return window
+
+
 def main():
-    window = hyprctl_json(["activewindow"])
+    window = _target_window()
     if not window:
         return
     address = window.get("address")

@@ -69,6 +69,20 @@ PanelWindow {
     property bool _pendingEnter: false
     // a clicked window to focus once the overview has let go of the keyboard
     property string _focusAfterClose: ""
+    // the window whose picture the pointer is over (SUPER+C closes it, see
+    // hoveredTarget); "" when none
+    property string hoveredAddress: ""
+    // For SUPER+C (dxrice_force_close_window.py, through the shell's IPC):
+    // "closed" when the overview isn't open, "" when it is but no picture
+    // is under the pointer, else "<address>\t<class>" of that window.
+    function hoveredTarget() {
+        if (!root.open) return "closed";
+        for (let i = 0; i < tileModel.count; i++) {
+            const t = tileModel.get(i);
+            if (t.address === root.hoveredAddress) return t.address + "\t" + t.cls;
+        }
+        return "";
+    }
     // one quick, readable decelerating zoom each way (instant under
     // reduce_motion); the dim runs alongside it, never as a stage of its own
     readonly property int zoomMs: Theme.reduceMotion ? 1 : Math.round(Theme.animMs * 2)
@@ -591,6 +605,11 @@ PanelWindow {
                     hoverEnabled: true
                     enabled: root.open
                     onClicked: root.activate(tile)
+                    onContainsMouseChanged: {
+                        if (containsMouse) root.hoveredAddress = tile.address;
+                        else if (root.hoveredAddress === tile.address) root.hoveredAddress = "";
+                    }
+                    Component.onDestruction: if (root.hoveredAddress === tile.address) root.hoveredAddress = ""
                 }
             }
         }
