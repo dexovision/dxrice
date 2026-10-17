@@ -398,18 +398,30 @@ class TestOverview(unittest.TestCase):
         self.o.scene.wait(SETTLE)
         self.assertEqual(self.o.state(), (False, 0.0, 0.0, False))
 
+    def settle_tiles(self, timeout_ms=3000):
+        """Wait until the tiles have stopped gliding (a refresh is debounced,
+        read, then animated; a fixed wait was 0.65 px short once under load)."""
+        last, waited = None, 0
+        while waited < timeout_ms:
+            self.o.scene.wait(40)
+            waited += 40
+            now = self.o.tiles()
+            if now == last and waited >= 400:
+                return
+            last = now
+
     def test_windows_opening_and_closing_while_open(self):
         self.o.call("show")
         self.o.scene.wait(SETTLE)
         extra = clients_for(self.rects + [(2300, 900, 2900, 1300)])
         self.o.load(extra)
         self.o.scene.ev("hypr.rawEvent({ name: 'openwindow', data: 'a010,1,app,new' })")
-        self.o.scene.wait(400)
+        self.settle_tiles()
         self.assertTrue(self.o.ov("open"))
         self.assert_tiles_at("target")
         self.o.load(extra[:5])
         self.o.scene.ev("hypr.rawEvent({ name: 'closewindow', data: 'a010' })")
-        self.o.scene.wait(400)
+        self.settle_tiles()
         self.assertEqual(len(self.o.tiles()), 5)
         self.assert_tiles_at("target")
         # an unrelated event is ignored (no refresh: the stale fixture stays)
