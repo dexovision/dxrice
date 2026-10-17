@@ -21,10 +21,12 @@ never touches them.
 - **Window placement.** New floating windows join a spiral around the first
   one instead of piling up in the middle. `SUPER+G` re-arranges the
   workspace into that spiral. Window sizes are never changed, and windows
-  already in place don't move. The one exception is an app whose launcher,
-  updater or splash window closes right after its real window appeared
-  (within 4 s). That window is moved once, to where it would have gone
-  without the launcher, unless you've already moved it.
+  already in place don't move. The one exception is what an app's
+  launcher, updater or splash window does: a window opened less than a
+  minute before the next one, closing within 4 s after that next one
+  appeared. The next window is then moved once, to where it would have gone
+  without it, unless you've already moved it. Closing any other window, or
+  an older one, moves nothing.
 - **An infinite desktop.** `SUPER+ALT` and moving the mouse pans every
   window together. Dragging a window (`SUPER` + left mouse) into the screen
   edge pushes the others along.

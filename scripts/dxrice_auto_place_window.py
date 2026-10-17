@@ -2171,9 +2171,10 @@ def _settle_moves(expected, timeout=2.0, poll=0.01):
         print(f"DEBUG _settle_moves timed out waiting for: {remaining}", file=sys.stderr, flush=True)
 
 
-# Every window this daemon placed, for a few seconds: where it put it and
-# which windows of the spiral's arm that position was computed from (see
-# PlacementListener's closewindow handling). {address: {"t", "rect", "ws", "after"}}
+# Every window this daemon placed in the last minute: when, where it put it,
+# and the window of the spiral's arm it was placed directly after (its tip)
+# with how long before it that one had been placed (see PlacementListener's
+# closewindow handling). {address: {"t", "rect", "ws", "tip", "tip_age"}}
 PLACED = {}
 
 
@@ -2459,7 +2460,10 @@ def place_new_window(address, workspace_id, gap, reflow=None):
         return "user-moved"
 
     tx, ty = _px(target[0]), _px(target[1])
-    PLACED[address] = {"t": _now(), "rect": (tx, ty, new_w, new_h), "ws": workspace_id, "after": arm}
+    now = _now()
+    tip = arm[-1] if arm else None
+    PLACED[address] = {"t": now, "rect": (tx, ty, new_w, new_h), "ws": workspace_id, "tip": tip,
+                       "tip_age": now - PLACED[tip]["t"] if tip in PLACED else None}
     _journal("reflowed" if reflow is not None else "placed", latest, (tx, ty), arm,
              note=f"beside {family_anchor.get('address')}" if family_anchor is not None else "")
     if (tx, ty) == tuple(latest["at"]):
@@ -2557,14 +2561,17 @@ class PlacementListener:
     `openwindow>>` for an address already handled is ignored until that
     window's `closewindow>>`.
 
-    A window's place on the spiral is computed after the windows that exist
-    when it opens. When one of those closes within HANDOFF_S of a later
-    window being placed after it -- an app's launcher, updater or splash
-    window giving way to the real one, which mapped while it was still up --
-    that later window would keep a place reckoned from a window that no
-    longer exists, out of line with the rest of the spiral (and with what
-    SUPER+G then replays). So, if it is still exactly where it was put, it
-    is placed again as if the closed window had never been there. The one exception is a window mapped
+    A window's place on the spiral is one step after the newest window of
+    the arm when it opens (its tip). An app's launcher, updater or splash
+    window giving way to the real one looks like this: the launcher was
+    placed shortly before (within LAUNCHER_S), the real window is placed
+    right after it, and the launcher closes moments later (within
+    HANDOFF_S). The real window would then keep a place reckoned from a
+    window that no longer exists, out of line with the rest of the spiral
+    (and with what SUPER+G then replays). So, if it is still exactly where
+    it was put, it is placed again as if the launcher had never been there
+    -- and so is a window placed right after it in the same way. Closing
+    any other window, or an older one, moves nothing. The one exception is a window mapped
     fullscreen or tiled, which can't be placed yet: it is remembered and
     retried when a fullscreen/floating state change is reported, and placed
     at most once when it becomes an ordinary floating window."""
@@ -2573,6 +2580,10 @@ class PlacementListener:
     # A window older than this has been looked at and used where it is, and
     # moving it because some other window closed would be the surprise.
     HANDOFF_S = 4.0
+    # A launcher, updater or splash screen is up for seconds, perhaps while
+    # it downloads an update; a window that had been open longer than this
+    # when the next one appeared is not one.
+    LAUNCHER_S = 60.0
 
     def __init__(self, settings=None, place=None, reflow=None):
         self.settings = settings or ThemeSettings()
@@ -2606,7 +2617,7 @@ class PlacementListener:
             if addr in self.handled or addr in self.deferred:
                 return "duplicate"
             now = _now()
-            for a in [a for a, r in PLACED.items() if now - r["t"] > self.HANDOFF_S]:
+            for a in [a for a, r in PLACED.items() if now - r["t"] > self.LAUNCHER_S]:
                 del PLACED[a]
             if not self.settings.refresh().enabled:
                 self.handled.add(addr)  # opened while off: not placed later either
@@ -2623,9 +2634,21 @@ class PlacementListener:
             self.deferred.pop(addr, None)
             PLACED.pop(addr, None)
             now = _now()
-            for a in [a for a, r in PLACED.items() if now - r["t"] > self.HANDOFF_S]:
+            for a in [a for a, r in PLACED.items() if now - r["t"] > self.LAUNCHER_S]:
                 del PLACED[a]
-            followers = sorted((a for a, r in PLACED.items() if addr in r["after"]), key=lambda a: PLACED[a]["t"])
+
+            def handed_over(r, prev):
+                return (r["tip"] == prev and r["tip_age"] is not None and r["tip_age"] <= self.LAUNCHER_S
+                        and now - r["t"] <= self.HANDOFF_S)
+            # the window placed right after the closed one, then the one
+            # placed right after that, and so on
+            followers, prev = [], addr
+            while True:
+                nxt = next((a for a, r in PLACED.items() if a not in followers and handed_over(r, prev)), None)
+                if nxt is None:
+                    break
+                followers.append(nxt)
+                prev = nxt
             if not followers or not self.settings.refresh().enabled:
                 return "closed"
             for i, a in enumerate(followers):

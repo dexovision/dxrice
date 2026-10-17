@@ -813,6 +813,42 @@ class TestLauncherHandoff(_Base):
         self.close("0xla")
         self.assertEqual(self.hypr.dispatched, [])
 
+    def test_closing_another_window_right_after_opening_one_moves_nothing(self):
+        """Not a hand-off: the window closed isn't the one the new window
+        was placed after, so the new window stays where it is (and the
+        windows placed after the closed one were placed long ago)."""
+        clock = [apw._now()]
+        real_now = apw._now
+        apw._now = lambda: clock[0]
+        try:
+            self.three()
+            clock[0] += 30.0                       # the desktop has been in use a while
+            self.open("0xw3", 924, 512, cls="term")
+            clock[0] += 1.0
+            self.hypr.dispatched.clear()
+            self.assertEqual(self.close("0xw0"), "closed")   # the anchor, a second later
+            self.assertEqual(self.close("0xw1"), "closed")
+        finally:
+            apw._now = real_now
+        self.assertEqual(self.hypr.dispatched, [])
+
+    def test_closing_an_old_window_the_new_one_followed_moves_nothing(self):
+        """The window just before it, but opened long before (not a launcher
+        handing over): closing it moves nothing either."""
+        clock = [apw._now()]
+        real_now = apw._now
+        apw._now = lambda: clock[0]
+        try:
+            self.three()
+            clock[0] += 120.0                      # w2 has been open two minutes
+            self.open("0xw3", 924, 512, cls="term")
+            clock[0] += 1.0
+            self.hypr.dispatched.clear()
+            self.assertEqual(self.close("0xw2"), "closed")
+        finally:
+            apw._now = real_now
+        self.assertEqual(self.hypr.dispatched, [])
+
     def test_an_old_window_closing_moves_nothing(self):
         """Closing any window later is not a hand-off: the windows opened
         after it stay where they are (holes are SUPER+G's job)."""
