@@ -49,9 +49,25 @@ cp -a "$SRC" "$SANDBOX/repo"
 H="$SANDBOX/home"
 mkdir -p "$H"
 
+# The system's commands minus the other distributions' package managers,
+# Quickshell, Hyprland and the "manual" packages (all faked here or meant to
+# be absent), so the installer finds the fake emerge and sees what's missing
+# even on a machine that has pacman (it takes the first one it finds) or
+# Quickshell installed.
+SYS="$SANDBOX/sysbin"
+mkdir -p "$SYS"
+for d in /usr/local/bin /usr/bin /bin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+        n="${f##*/}"
+        case "$n" in pacman|dnf|apt|apt-get|zypper|emerge|portageq|sudo|hyprctl|pgrep|qs|quickshell|Hyprland|hyprland|cliphist|nwg-look) continue ;; esac
+        [ -e "$SYS/$n" ] || ln -s "$f" "$SYS/$n"
+    done
+done
+
 run() {  # run ARGS... -- the real installer
     : > "$LOG/emerge.log"; : > "$LOG/sudo.log"
-    env -i HOME="$H" USER="${USER:-tester}" PATH="$BIN:/usr/bin:/bin" TERM=dumb SHELL=/bin/bash \
+    env -i HOME="$H" USER="${USER:-tester}" PATH="$BIN:$SYS" TERM=dumb SHELL=/bin/bash \
         XDG_CONFIG_HOME="$H/.config" XDG_DATA_HOME="$H/.local/share" XDG_STATE_HOME="$H/.local/state" \
         DXRICE_VDB="$VDB" DXRICE_LOCATION_CONFIRMED=1 \
         bash "$SANDBOX/repo/install.sh" "$@" < /dev/null > "$LOG/out" 2>&1
