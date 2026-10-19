@@ -48,10 +48,13 @@ class FakeHypr:
     hyprctl's own client list once it closes, without needing a second
     real IPC layer underneath."""
 
-    def __init__(self, clients, focused_address, honors_close=True):
+    def __init__(self, clients, focused_address, honors_close=True, app_quits=True):
         self.clients = list(clients)
         self.focused_address = focused_address
         self.honors_close = honors_close
+        # a well-behaved app's process exits with its last window; a tray
+        # app (app_quits=False) lets the window go and keeps running
+        self.app_quits = app_quits
         self.close_calls = []
 
     def hyprctl_json(self, args):
@@ -64,7 +67,15 @@ class FakeHypr:
     def close_window(self, address, timeout=2):
         self.close_calls.append(address)
         if self.honors_close:
+            gone = [c for c in self.clients if c.get("address") == address]
             self.clients = [c for c in self.clients if c.get("address") != address]
+            if self.app_quits:
+                for c in gone:
+                    if c.get("pid") and not any(o.get("pid") == c["pid"] for o in self.clients):
+                        try:
+                            os.kill(c["pid"], signal.SIGTERM)
+                        except OSError:
+                            pass
 
 
 class TestForceCloseWindow(unittest.TestCase):
@@ -94,6 +105,11 @@ class TestForceCloseWindow(unittest.TestCase):
         self.notes = []
         fcw._notify = lambda summary, body: self.notes.append((summary, body))
         fcw.query_overview = lambda: None   # no overview open unless a test says so
+        # what the script itself chose to end (an app exiting on its own isn't)
+        self.terminated = []
+        real_terminate = fcw._terminate
+        fcw._terminate = lambda targets: (self.terminated.extend(p for p, _s in targets), real_terminate(targets))[1]
+        fcw.LINGER_WAIT = 0.3
         self._procs = []
 
     def tearDown(self):
@@ -151,7 +167,7 @@ class TestForceCloseWindow(unittest.TestCase):
         fcw.main()
 
         self.assertEqual(fake.close_calls, ["0xA"], "did not close via the per-window address dispatch")
-        self.assertIsNone(victim.poll(), "a process was killed even though the window honored the close request")
+        self.assertEqual(self.terminated, [], "the script force-ended a process")
 
     # ------------------------------------------------------------------
     # Test matrix cases 2-3, 5-6: shared PID, multiple windows -- the
@@ -205,8 +221,8 @@ class TestForceCloseWindow(unittest.TestCase):
 
         fcw.main()
 
-        self.assertIsNone(app1.poll())
-        self.assertIsNone(app2.poll())
+        self.assertEqual(self.terminated, [], "the script force-ended a process")
+        self.assertEqual(self.terminated, [], "the script force-ended a process")
         self.assertNotIn("0xA", [c["address"] for c in fake.clients])
         self.assertIn("0xB", [c["address"] for c in fake.clients])
 
@@ -333,7 +349,7 @@ class TestForceCloseWindow(unittest.TestCase):
 
         fcw.main()  # must not raise
 
-        self.assertIsNone(victim.poll(), "a real process was touched for a window that had already closed")
+        self.assertEqual(self.terminated, [], "the script force-ended a process")
 
     def test_10_stale_address_is_a_safe_noop_not_a_process_kill(self):
         """hyprctl reports a focused window whose address no longer
@@ -373,7 +389,7 @@ class TestForceCloseWindow(unittest.TestCase):
         fcw.main()
 
         self.assertEqual(fake.close_calls, ["0xA"])
-        self.assertIsNone(victim.poll())
+        self.assertEqual(self.terminated, [], "the script force-ended a process")
 
     def test_12_fullscreen_window_closes_normally(self):
         victim = self._spawn("sleep", "300")
@@ -385,7 +401,7 @@ class TestForceCloseWindow(unittest.TestCase):
         fcw.main()
 
         self.assertEqual(fake.close_calls, ["0xA"])
-        self.assertIsNone(victim.poll())
+        self.assertEqual(self.terminated, [], "the script force-ended a process")
 
     def test_no_active_window_is_a_safe_noop(self):
         fcw.hyprctl_json = lambda args: None
@@ -422,6 +438,56 @@ with open(marker + ".ready", "w") as f:
 while True:
     time.sleep(0.05)
 """
+
+
+class TestTrayApps(TestForceCloseWindow):
+    """An app that hides to the tray: the close request makes its window go
+    away, and the app keeps running with no window. That is the bug SUPER+C
+    exists for (Discord, Steam)."""
+
+    def test_a_tray_app_with_no_window_left_is_ended(self):
+        v = self._spawn("sleep", "300")
+        self._install(FakeHypr([{"address": "0xA", "pid": v.pid}], "0xA", app_quits=False))
+        fcw.main()
+        self.assertEqual(self.terminated, [v.pid])
+        v.wait(timeout=3)
+        self.assertIsNotNone(v.poll())
+
+    def test_a_tray_app_that_still_has_another_window_is_left_running(self):
+        v = self._spawn("sleep", "300")
+        self._install(FakeHypr([{"address": "0xA", "pid": v.pid}, {"address": "0xB", "pid": v.pid}],
+                               "0xA", app_quits=False))
+        fcw.main()
+        self.assertEqual(self.terminated, [])
+        self.assertIsNone(v.poll(), "an app still showing another window was ended")
+
+    def test_an_app_that_exits_by_itself_is_not_signalled(self):
+        v = self._spawn("sleep", "300")
+        self._install(FakeHypr([{"address": "0xA", "pid": v.pid}], "0xA", app_quits=True))
+        fcw.main()
+        self.assertEqual(self.terminated, [])
+
+    def test_a_protected_process_is_never_ended_when_its_window_goes(self):
+        v = self._spawn(self.fake_qs, "300")
+        self._install(FakeHypr([{"address": "0xA", "pid": v.pid}], "0xA", app_quits=False))
+        fcw.main()
+        self.assertEqual(self.terminated, [])
+        self.assertIsNone(v.poll())
+
+    def test_a_recycled_pid_is_not_ended(self):
+        v = self._spawn("sleep", "300")
+        fake = self._install(FakeHypr([{"address": "0xA", "pid": v.pid}], "0xA", app_quits=False))
+        real = fcw._read_starttime
+        closed = []
+        real_close = fake.close_window
+        fake.close_window = lambda a, timeout=2: (real_close(a, timeout), closed.append(a))[0]
+        fcw.close_window = fake.close_window
+        # after the close, the pid answers with a different start time
+        fcw._read_starttime = lambda pid: (real(pid) or 0) + (1 if closed and pid == v.pid else 0)
+        fcw.main()
+        fcw._read_starttime = real
+        self.assertEqual(self.terminated, [])
+        self.assertIsNone(v.poll())
 
 
 class TestOverviewTarget(TestForceCloseWindow):
@@ -692,12 +758,16 @@ class TestTermination(unittest.TestCase):
         app = self._fake_app("normal")
         fake = self._ignores_close(app.pid)
         real_collect = fcw._collect_subtree
+        calls = []
 
         def collect_then_window_closes(root):
             # The app honours the close just as the fallback is working out
-            # what to kill: by the final check, the window is gone.
+            # what to kill (the second look; the first is the snapshot taken
+            # before the close): by the final check, the window is gone.
             out = real_collect(root)
-            fake.clients = []
+            calls.append(root)
+            if len(calls) >= 2:
+                fake.clients = []
             return out
         fcw._collect_subtree = collect_then_window_closes
         fcw.main()

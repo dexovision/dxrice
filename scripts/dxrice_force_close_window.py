@@ -101,6 +101,11 @@ from dxrice_hypr_ipc import hyprctl_json, close_window
 CLOSE_WAIT_TIMEOUT = 0.5
 CLOSE_WAIT_POLL = 0.05
 
+# A window that went away on the close request, from an app that then
+# keeps running with no window at all, hid to the tray (Discord, Steam):
+# the app gets this long to exit on its own before it is ended.
+LINGER_WAIT = 1.0
+
 # After SIGTERM, how long an app gets to exit on its own (save state, flush
 # files) before whatever is left is SIGKILLed.
 TERM_GRACE = 1.5
@@ -456,6 +461,29 @@ def _target_window():
     return window
 
 
+def _end_if_hidden(hide_targets, address):
+    """The window went away. If the app it belonged to then keeps running
+    with no window left anywhere (all workspaces, hidden ones included), it
+    hid to the tray instead of closing: end it, the same way the fallback
+    below does. An app with another window open is in use and is left
+    alone; one that exits by itself within LINGER_WAIT needs nothing."""
+    root, targets = hide_targets
+    if not targets:
+        return
+    pinned = [p for p in (_Pinned(pid, start) for pid, start in targets) if p.valid]
+    try:
+        root_pin = next((p for p in pinned if p.pid == root), None)
+        if root_pin is None or not _wait_exit([root_pin], LINGER_WAIT):
+            return                                   # it quit on its own
+        pids = {p.pid for p in pinned if p.alive()}
+        if any(c.get("pid") in pids for c in hyprctl_json(["clients"]) or []):
+            return                                   # it still shows a window
+    finally:
+        for p in pinned:
+            p.close()
+    _terminate([(pid, start) for pid, start in targets if pid in pids])
+
+
 def main():
     window = _target_window()
     if not window:
@@ -489,8 +517,17 @@ def main():
     # this is also what makes "window whose PID is unavailable" (the
     # test matrix's own case 8) still closable.
     if address:
+        # what would be ended if the app only hides: snapshotted before the
+        # close, while the window still identifies it (pid + start time)
+        hide_targets = None
+        if pid and not _protection_reason(pid):
+            root = _find_root(pid)
+            if not _protection_reason(root):
+                hide_targets = (root, _kill_targets(_collect_subtree(root), root))
         close_window(address)
         if _wait_for_window_gone(address):
+            if hide_targets:
+                _end_if_hidden(hide_targets, address)
             return
 
     # FALLBACK: the app ignored the close request entirely (genuine
