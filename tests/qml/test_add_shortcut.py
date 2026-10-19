@@ -31,6 +31,104 @@ def center(scene, name):
     return v[0], v[1]
 
 
+def drag_handle(test, modid, to_modid, steps=12):
+    """Press the grip of `modid`, drag it over `to_modid`'s row in small
+    steps, release -- real mouse events into the offscreen shell."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    s = test.s
+    x0, y0 = center(s, f"shortcutDragHandle:{modid}")
+    _x1, y1 = center(s, f"shortcutDragHandle:{to_modid}")
+    if y1 != y0:
+        # the item trails the pointer by Qt's drag threshold; go that much
+        # past the target's centre, as a hand does
+        y1 += 14 if y1 > y0 else -14
+    QTest.mousePress(s.view, Qt.LeftButton, Qt.NoModifier, QPoint(int(x0), int(y0)))
+    for i in range(1, steps + 1):
+        QTest.mouseMove(s.view, QPoint(int(x0), int(y0 + (y1 - y0) * i / steps)))
+        s.wait(15)
+    QTest.mouseRelease(s.view, Qt.LeftButton, Qt.NoModifier, QPoint(int(x0), int(y1)))
+    s.wait(300)
+
+
+class TaskbarOrderAndCommandTest(unittest.TestCase):
+    """The Taskbar Manager's rows: drag to reorder (it never moved before:
+    the grip was anchored, and Qt ignores a drag target while it is
+    anchored), and the command each shortcut runs."""
+
+    def setUp(self):
+        self.s = Scene(width=1920, height=1080)
+        self.s.ev("panels.open('taskbar')")
+        self.s.wait(800)
+
+    def tearDown(self):
+        self.s.close()
+
+    def order(self):
+        return json.loads((self.s.bridge.config_home / "waybar" / "config-dock").read_text())["modules-left"]
+
+    def test_dragging_a_row_down_moves_it_and_saves_the_order(self):
+        before = self.order()
+        movable = [m for m in before if m != "custom/launcher"][:3]
+        a, b = movable[0], movable[2]
+        drag_handle(self, a, b)
+        after = self.order()
+        self.assertNotEqual(after, before, "the drag changed nothing")
+        self.assertEqual(sorted(after), sorted(before), "an item was lost or duplicated")
+        self.assertEqual(after.index(a), before.index(b), (before, after))
+
+    def test_dragging_up_and_dropping_on_itself(self):
+        before = self.order()
+        movable = [m for m in before if m != "custom/launcher"]
+        drag_handle(self, movable[-1], movable[0])
+        self.assertEqual(self.order()[before.index(movable[0])], movable[-1])
+        again = self.order()
+        drag_handle(self, movable[1], movable[1])       # onto itself: nothing
+        self.assertEqual(self.order(), again)
+
+    def test_the_pinned_launcher_stays_first(self):
+        before = self.order()
+        launcher = [m for m in before if m == "custom/launcher"]
+        if not launcher:
+            self.skipTest("this fixture has no pinned launcher")
+        movable = [m for m in before if m != "custom/launcher"]
+        drag_handle(self, movable[1], launcher[0])
+        self.assertEqual(self.order().index("custom/launcher"), before.index("custom/launcher"))
+
+    def test_rapid_repeated_drags_keep_every_item(self):
+        before = self.order()
+        movable = [m for m in before if m != "custom/launcher"]
+        for i in range(4):
+            drag_handle(self, movable[i % len(movable)], movable[(i + 2) % len(movable)], steps=6)
+        after = self.order()
+        self.assertEqual(sorted(after), sorted(before))
+
+    def test_editing_a_command_is_saved_and_the_dock_runs_it(self):
+        mod = [m for m in self.order() if m != "custom/launcher"][0]
+        tm = "findPanel('addPanelOpen')"
+        self.s.ev(f"{tm}.setShortcutCmd('{mod}', \"sh -c 'echo \\\"hi there\\\"' --x 'a b'\", (m) => {{ }})")
+        self.s.wait(1500)
+        cfg = json.loads((self.s.bridge.config_home / "waybar" / "config-dock").read_text())
+        self.assertEqual(cfg[mod]["dxrice_cmd"], "sh -c 'echo \"hi there\"' --x 'a b'")
+        import re
+        m = re.match(r"^sh -c '(.*) >/dev/null 2>&1 &'$", cfg[mod]["on-click"])
+        self.assertIsNotNone(m, cfg[mod]["on-click"])
+        # what the dock runs, run for real: arguments with spaces survive
+        out = subprocess.run(["sh", "-c", m.group(1).replace("'\\''", "'")], capture_output=True, text=True)
+        self.assertEqual(out.stdout.strip(), "hi there")
+
+    def test_a_bad_command_is_refused_with_a_reason_and_not_saved(self):
+        mod = [m for m in self.order() if m != "custom/launcher"][0]
+        before = json.loads((self.s.bridge.config_home / "waybar" / "config-dock").read_text())[mod]["dxrice_cmd"]
+        tm = "findPanel('addPanelOpen')"
+        # what dxrice_check_command.py answers for it (the harness stubs processes)
+        self.s.set_command("dxrice_check_command.py", "no-such-program-xyz isn't installed (not found in your PATH).")
+        self.s.ev(f"{tm}.setShortcutCmd('{mod}', 'no-such-program-xyz', (m) => {{ }})")
+        self.s.wait(1200)
+        after = json.loads((self.s.bridge.config_home / "waybar" / "config-dock").read_text())[mod]["dxrice_cmd"]
+        self.assertEqual(after, before)
+
+
 class AddShortcutTest(unittest.TestCase):
     size = (1920, 1080)
 

@@ -326,18 +326,54 @@ Item {
         root.commit();
     }
 
+    // Changes what a saved shortcut runs. The command is checked first
+    // (scripts/dxrice_check_command.py); `done("")` on success, else the
+    // sentence to show. The dock reads on-click, so it is rebuilt from the
+    // new command and saved like any other edit.
+    Process {
+        id: checkProc
+        property var onDone: null
+        stdout: StdioCollector {
+            onStreamFinished: { const cb = checkProc.onDone; checkProc.onDone = null; if (cb) cb(this.text.trim()); }
+        }
+    }
+    function setShortcutCmd(modid, cmd, done) {
+        const meta = root.cfg[modid];
+        const c = String(cmd || "").trim();
+        if (!meta || c === meta.dxrice_cmd) { done(""); return; }
+        if (checkProc.running) { done("Still checking the last command."); return; }
+        checkProc.onDone = (msg) => {
+            if (msg) { done(msg); return; }
+            meta.dxrice_cmd = c;
+            root.resolveIcon(meta.dxrice_label, c, (glyph) => {
+                root.rebuildModule(modid, glyph);
+                root.commit();
+                done("");
+            });
+        };
+        checkProc.command = ["python3", root.repoDir + "/scripts/dxrice_check_command.py", c];
+        checkProc.running = true;
+    }
+
+    // The row being dragged (a drop's own text came through empty).
+    property string draggingModid: ""
+
     function moveShortcutTo(draggedModid, targetModid) {
+        root.draggingModid = "";
         if (draggedModid === targetModid) return;
         const mods = root.cfg["modules-left"];
         const targetIdx = mods.indexOf(targetModid);
         if (targetIdx < 0) return;
         const draggedIdx = mods.indexOf(draggedModid);
         if (draggedIdx < 0) return;
+        const movingDown = draggedIdx < targetIdx;
         mods.splice(draggedIdx, 1);
-        // Re-find the target's index after removal, and never let a drop
-        // land before the pinned launcher.
+        // Re-find the target's index after removal: dropped on a row it
+        // takes that row's place (below it when dragged down, above when
+        // dragged up), and never lands before the pinned launcher.
         let insertAt = mods.indexOf(targetModid);
         if (insertAt < 0) insertAt = mods.length;
+        else if (movingDown) insertAt += 1;
         const launcherIdx = mods.indexOf(root.launcherId);
         if (launcherIdx >= 0 && insertAt <= launcherIdx) insertAt = launcherIdx + 1;
         mods.splice(insertAt, 0, draggedModid);
@@ -636,6 +672,8 @@ Item {
                                 property bool expanded: false
                                 property bool pinned: modid === root.launcherId
                                 property bool dropHighlighted: false
+                                // the row being dragged stays above its neighbours
+                                z: dragHandleMouse.drag.active ? 10 : 0
 
                                 Item {
                                     id: rowVisual
@@ -650,7 +688,7 @@ Item {
                                         onExited: shortcutRow.dropHighlighted = false
                                         onDropped: (drop) => {
                                             shortcutRow.dropHighlighted = false;
-                                            root.moveShortcutTo(drop.text, shortcutRow.modid);
+                                            if (root.draggingModid) root.moveShortcutTo(root.draggingModid, shortcutRow.modid);
                                         }
                                     }
 
@@ -679,22 +717,58 @@ Item {
                                             opacity: dragHandleMouse.drag.active ? 0.9 : (rowHover.hovered ? 0.55 : 0.22)
                                             Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                                         }
-                                        Drag.active: dragHandleMouse.drag.active
-                                        Drag.keys: ["dxrice-shortcut"]
-                                        Drag.mimeData: { "text/plain": shortcutRow.modid }
+                                        objectName: "shortcutDragHandle:" + shortcutRow.modid
+                                        // The handle is anchored to its row, and Qt
+                                        // ignores a drag target's x/y while it is
+                                        // anchored: the old drag never moved anything,
+                                        // so no row ever saw it arrive. The pointer
+                                        // drags this free-floating copy of the row.
                                         MouseArea {
                                             id: dragHandleMouse
                                             anchors.fill: parent
-                                            drag.target: parent
+                                            drag.target: dragGhost
+                                            drag.axis: Drag.YAxis
+                                            preventStealing: true
                                             cursorShape: Qt.SizeAllCursor
-                                            onReleased: {
-                                                parent.Drag.drop();
-                                                // The handle briefly owns its own x/y while
-                                                // dragged; hand control back to its normal
-                                                // anchored position immediately.
-                                                parent.x = 0;
-                                                parent.y = 0;
+                                            onPressed: { dragGhost.x = 0; dragGhost.y = 0; }
+                                            // Drag.active must stay on until the drop has been
+                                            // delivered: binding it straight to drag.active turned
+                                            // it off at release, before drop() could run.
+                                            drag.onActiveChanged: {
+                                                if (drag.active) {
+                                                    root.draggingModid = shortcutRow.modid;
+                                                    dragGhost.Drag.active = true;
+                                                } else {
+                                                    // Last: a drop that reorders rebuilds every
+                                                    // row, this one included. drop() also ends
+                                                    // the drag; the manager clears draggingModid.
+                                                    dragGhost.Drag.drop();
+                                                }
                                             }
+                                        }
+                                    }
+                                    Rectangle {
+                                        id: dragGhost
+                                        objectName: "shortcutDragGhost:" + shortcutRow.modid
+                                        width: rowVisual.width
+                                        height: rowVisual.height
+                                        radius: Theme.roundingSm
+                                        color: Theme.mix(Theme.layer1, Theme.accent, 0.22)
+                                        border.color: Theme.accent
+                                        border.width: 1
+                                        visible: dragHandleMouse.drag.active
+                                        z: 50
+                                        Drag.keys: ["dxrice-shortcut"]
+                                        Drag.mimeData: { "text/plain": shortcutRow.modid }
+                                        Drag.hotSpot.x: width / 2
+                                        Drag.hotSpot.y: height / 2
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            x: Theme.padSm + 18 + Theme.padSm + 20 + Theme.padSm
+                                            text: shortcutRow.meta.dxrice_label || shortcutRow.meta["tooltip-format"] || shortcutRow.modid
+                                            color: Theme.textActive
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeNormal
                                         }
                                     }
                                     Text {
@@ -796,6 +870,44 @@ Item {
                                         font.pixelSize: Theme.fontSizeSmall
                                         elide: Text.ElideMiddle
                                         width: parent.width
+                                    }
+                                    SettingRow {
+                                        width: parent.width
+                                        title: "Runs"
+                                        Column {
+                                            spacing: 2
+                                            InputField {
+                                                width: 220
+                                                compact: true
+                                                placeholder: "Command"
+                                                input: cmdEditInput
+                                                TextInput {
+                                                    id: cmdEditInput
+                                                    objectName: "shortcutCmdInput:" + shortcutRow.modid
+                                                    anchors.fill: parent
+                                                    clip: true
+                                                    text: shortcutRow.meta.dxrice_cmd || ""
+                                                    color: Theme.textActive
+                                                    font.family: Theme.fontMono
+                                                    font.pixelSize: Theme.fontSizeSmaller
+                                                    verticalAlignment: TextInput.AlignVCenter
+                                                    onEditingFinished: root.setShortcutCmd(shortcutRow.modid, text, (msg) => {
+                                                        cmdError.text = msg;
+                                                        if (!msg) text = Qt.binding(() => shortcutRow.meta.dxrice_cmd || "");
+                                                    })
+                                                }
+                                            }
+                                            Text {
+                                                id: cmdError
+                                                objectName: "shortcutCmdError:" + shortcutRow.modid
+                                                visible: text.length > 0
+                                                width: 220
+                                                wrapMode: Text.WordWrap
+                                                color: Theme.dangerTint
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSizeSmall
+                                            }
+                                        }
                                     }
                                     Item { width: 1; height: Theme.padXs }
                                 }
