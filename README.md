@@ -19,14 +19,12 @@ never touches them.
   shortcut manager, and a theme editor. One process, started with your
   session.
 - **Window placement.** New floating windows join a spiral around the first
-  one instead of piling up in the middle. `SUPER+G` re-arranges the
-  workspace into that spiral. Window sizes are never changed, and windows
-  already in place don't move. The one exception is what an app's
-  launcher, updater or splash window does: a window opened less than a
-  minute before the next one, closing within 4 s after that next one
-  appeared. The next window is then moved once, to where it would have gone
-  without it, unless you've already moved it. Closing any other window, or
-  an older one, moves nothing.
+  one instead of piling up in the middle. `SUPER+G` re-arranges the whole
+  workspace into that spiral. Windows keep their sizes, and opening a new
+  one doesn't move the others. The one exception is apps that open a
+  launcher or splash window first (Discord's updater, for example): when
+  that window closes right after the real one opens, the real window is
+  moved once to where it would have gone anyway.
 - **An infinite desktop.** `SUPER+ALT` and moving the mouse pans every
   window together. Dragging a window (`SUPER` + left mouse) into the screen
   edge pushes the others along.
@@ -170,7 +168,7 @@ is a one-line change in that file.
 | `SUPER + SHIFT + E` | yazi in kitty |
 | `SUPER + W` | Firefox |
 | `SUPER + SHIFT + D` | Discord (native Wayland, so screen sharing works) |
-| `SUPER + C` | close the window, and force-quit its app if it only hides to the tray |
+| `SUPER + C` | close the window (in the overview: the one under the mouse); an app that only hides to the tray is force-quit |
 | `SUPER + SHIFT + K` | `hyprctl kill` (click a window to kill it) |
 | `SUPER + V` | toggle floating for the window |
 | `SUPER + D` | toggle the whole workspace between floating and tiled |
@@ -289,12 +287,10 @@ your dotfiles tree is updated and the link stays a link. The same goes for
   "stop Hyprland fading the SUPER+Tab overview" edit, or add this line
   yourself, after the other `hl.layer_rule` lines:
   `hl.layer_rule({ name = "overview-no-anim", match = { namespace = "^dxrice-overview$" }, no_anim = true })`.
-- **A new window landed far from the others.** Every placement decision is
-  logged without window titles: `journalctl --user -u dxrice-auto-place-window`
-  (without systemd: `$XDG_RUNTIME_DIR/dxrice/<hyprland instance>/auto-place-window.log`).
-  Each line names the window's class, size, where it was and where it was
-  put, and the spiral window it followed. Those lines, from just before
-  until just after it happened, show which window the placement followed.
+- **A new window landed in a strange place.** Every placement is logged
+  (class, size, where it was, where it went; no window titles):
+  `journalctl --user -u dxrice-auto-place-window`. Without systemd the log is
+  in `$XDG_RUNTIME_DIR/dxrice/<hyprland instance>/auto-place-window.log`.
 - **Panning doesn't work.** You need to be in the `input` group
   (`id -nG`), and that only takes effect after logging in again.
 - **A theme change didn't apply.** Run `python3 scripts/dxrice_apply_theme.py`.
