@@ -470,6 +470,20 @@ PanelWindow {
     // border tones from what's actually in the image (see the script's own
     // comment for why this needs no PIL/numpy). Applies to the draft only,
     // same as a preset button -- still needs Apply to take effect. ----
+    // The pictures offered in Wallpaper (scripts/dxrice_list_wallpapers.py:
+    // ~/Pictures/Wallpapers and the folder of the one in use).
+    property var wallpaperChoices: []
+    function loadWallpaperChoices() { if (!listWallpapersProc.running) listWallpapersProc.running = true; }
+    Process {
+        id: listWallpapersProc
+        command: ["python3", root.repoDir + "/scripts/dxrice_list_wallpapers.py", root.wallpaper]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { root.wallpaperChoices = JSON.parse(this.text.trim()); }
+                catch (e) { root.wallpaperChoices = []; }
+            }
+        }
+    }
     property bool generatingFromWallpaper: false
     property string wallpaperGenerateError: ""
     Process {
@@ -1941,6 +1955,7 @@ PanelWindow {
         Column {
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
+            Component.onCompleted: root.loadWallpaperChoices()
 
             Text { text: "Wallpaper"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
 
@@ -2012,6 +2027,72 @@ PanelWindow {
                             color: Theme.accent
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmaller
+                        }
+                    }
+                }
+            }
+
+            // Every picture found in the wallpaper folders, as real thumbnails
+            // (decoded small, off the UI thread). Clicking one makes it the
+            // draft's wallpaper, exactly as Choose... does; Apply keeps it.
+            Card {
+                visible: root.wallpaperChoices.length > 0
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Your wallpapers"
+                Flow {
+                    id: wallFlow
+                    objectName: "wallpaperChoices"
+                    width: parent.width
+                    spacing: Theme.padMd
+                    readonly property int columns: Math.max(2, Math.floor((width + spacing) / (176 + spacing)))
+                    readonly property real cellWidth: (width - (columns - 1) * spacing) / columns
+                    Repeater {
+                        model: root.wallpaperChoices
+                        delegate: Item {
+                            id: wall
+                            required property var modelData
+                            required property int index
+                            readonly property bool picked: root.wallpaper === wall.modelData.path
+                            objectName: "wallpaperChoice:" + wall.modelData.name
+                            width: wallFlow.cellWidth
+                            height: width * 9 / 16 + 22
+                            scale: wallHover.hovered && !wall.picked ? 1.02 : 1
+                            Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                            HoverHandler { id: wallHover; cursorShape: Qt.PointingHandCursor }
+                            Rectangle {
+                                id: thumbFrame
+                                width: parent.width; height: width * 9 / 16
+                                radius: Theme.roundingSm
+                                color: Theme.layer1
+                                border.width: wall.picked ? 2 : 1
+                                border.color: wall.picked ? Theme.accent : Theme.borderIdle
+                                Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                                Image {
+                                    objectName: "wallpaperThumb"
+                                    anchors.fill: parent; anchors.margins: 2
+                                    source: "file://" + wall.modelData.path
+                                    sourceSize: Qt.size(320, 180)
+                                    fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
+                                    opacity: status === Image.Ready ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                                }
+                            }
+                            Text {
+                                y: thumbFrame.height + 4
+                                width: parent.width
+                                text: wall.modelData.name
+                                elide: Text.ElideRight
+                                color: wall.picked ? Theme.textActive : Theme.text
+                                opacity: wall.picked ? 1 : Theme.opacityMuted
+                                font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
+                                font.weight: wall.picked ? Font.DemiBold : Font.Normal
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: { root.wallpaper = wall.modelData.path; root.dirty = true; }
+                            }
                         }
                     }
                 }

@@ -35,6 +35,9 @@ never touches them.
   now-playing card shows whatever MPRIS player is open (and isn't there when
   nothing is), with a seekable bar. The system monitor reads `/proc` and sysfs
   and only measures while it is on; a GPU it can't read shows as n/a.
+- **Wallpaper browser.** Settings > Wallpaper shows thumbnails of the pictures
+  in `~/Pictures/Wallpapers` (and the folder of the wallpaper in use); click
+  one and Apply.
 - **An infinite desktop.** `SUPER+ALT` and moving the mouse pans every
   window together. Dragging a window (`SUPER` + left mouse) into the screen
   edge pushes the others along.
