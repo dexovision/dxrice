@@ -1269,6 +1269,32 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
         finally:
             o.scene.close()
 
+    def test_a_selected_window_leaves_no_caption_on_the_last_closing_frame(self):
+        """The caption and ring ease in, but must never outlast the zoom: the
+        last frame the overlay draws is the desktop, selected window or not."""
+        from PySide6.QtCore import QRect, Qt
+        o = self.scene(n=5, focused=0)
+        try:
+            self.key(o, Qt.Key_Tab)
+            o.scene.wait(400)
+            rs = o.layout["reserved"]
+            area = QRect(rs[0], rs[1], o.layout["monitor"]["width"], o.layout["monitor"]["height"])
+            o.call("hide")
+            last = None
+            for _ in range(1500):
+                o.scene.wait(1)
+                if not o.ov("visible"):
+                    break
+                if not o.ov("covering") and not o.ov("open"):
+                    last = o.scene.view.grabWindow().copy(area)
+                    break
+            self.assertIsNotNone(last, "never reached the released frame")
+            o.scene.wait(300)
+            desk = o.scene.view.grabWindow().copy(area)
+            self.assertLessEqual(max_diff(desk, last, 3), 2)
+        finally:
+            o.scene.close()
+
     def test_no_layout_chips_for_one_window_or_none(self):
         o = self.scene(n=1, focused=0)
         try:

@@ -700,8 +700,12 @@ PanelWindow {
                     radius: 6 * tile.p
                     color: Qt.rgba(0, 0, 0, 0.62)
                     visible: opacity > 0.01
-                    opacity: tile.p * (tile.isSelected ? 1 : (tile.isFocused && root.open ? 0.55 : 0))
-                    Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    // how much of the caption this window earns (it eases),
+                    // times the zoom's own progress (it never lags it: on the
+                    // last frame of closing there is nothing left to see)
+                    property real level: tile.isSelected ? 1 : (tile.isFocused && root.open ? 0.55 : 0)
+                    Behavior on level { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    opacity: tile.p * caption.level
                     Text {
                         id: captionText
                         anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
