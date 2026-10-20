@@ -10,6 +10,7 @@ import QtQuick
 // navigation and the day grid -- in the space the island leaves for it.
 Item {
     id: root
+    objectName: "calendarPanel"
     // See the identical comment in QuickSettings.qml/TaskbarManager.qml: a
     // Loader with an explicit width/height does not resize its loaded item
     // to match on its own.
@@ -45,8 +46,31 @@ Item {
         return rows;
     }
 
-    function prevMonth() { root.viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); }
-    function nextMonth() { root.viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); }
+    // Changing month: the label and the grid slide out the way you're going,
+    // the month swaps while they're invisible, and they slide in from the
+    // other side. `shift` is that one number (-1 out to the left ... 1 in from
+    // the right); clicking again mid-way just moves the month it lands on.
+    property real shift: 0
+    readonly property alias monthGrid: grid
+    property int direction: 1
+    property var pendingDate: root.viewDate
+    function go(delta) {
+        const base = monthChange.running ? root.pendingDate : root.viewDate;
+        root.pendingDate = new Date(base.getFullYear(), base.getMonth() + delta, 1);
+        if (monthChange.running) return;
+        root.direction = delta;
+        monthChange.restart();
+    }
+    function prevMonth() { root.go(-1); }
+    function nextMonth() { root.go(1); }
+    SequentialAnimation {
+        id: monthChange
+        NumberAnimation { target: root; property: "shift"; to: -root.direction; duration: Math.round(Theme.durationFast * 0.6); easing.type: Easing.InQuad }
+        ScriptAction { script: { root.viewDate = root.pendingDate; root.shift = root.direction; } }
+        NumberAnimation { target: root; property: "shift"; to: 0; duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel }
+        // a click that came in after the swap: land on it now
+        ScriptAction { script: if (root.viewDate.getTime() !== root.pendingDate.getTime()) root.viewDate = root.pendingDate }
+    }
 
     Column {
         id: body
@@ -66,12 +90,14 @@ Item {
             height: ShellSurface.navHeight
 
             Text {
+                objectName: "calendarMonth"
+                x: root.shift * 14
+                opacity: 1 - Math.abs(root.shift)
                 text: root.monthNames[root.viewDate.getMonth()] + " " + root.viewDate.getFullYear()
                 color: Theme.textActive
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeNormal
                 font.weight: Font.DemiBold
-                anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
             }
             Rectangle {
@@ -108,37 +134,46 @@ Item {
             }
         }
 
-        Repeater {
-            model: root.weeks
-            delegate: Row {
-                width: body.width
-                Repeater {
-                    model: modelData
-                    delegate: Item {
-                        width: body.width / 7
-                        height: 30
-                        readonly property bool isToday: modelData !== null && root.isSameDay(modelData, root.today)
+        Column {
+            id: grid
+            objectName: "calendarGrid"
+            width: parent.width
+            spacing: body.spacing
+            x: root.shift * 14
+            opacity: 1 - Math.abs(root.shift)
+            Repeater {
+                model: root.weeks
+                delegate: Row {
+                    width: body.width
+                    Repeater {
+                        model: modelData
+                        delegate: Item {
+                            width: body.width / 7
+                            height: 30
+                            readonly property bool isToday: modelData !== null && root.isSameDay(modelData, root.today)
 
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: 26
-                            height: 26
-                            radius: Theme.roundingFull
-                            visible: parent.isToday
-                            color: Theme.accent
-                        }
-                        Text {
-                            anchors.centerIn: parent
-                            visible: modelData !== null
-                            text: modelData ? modelData.getDate() : ""
-                            color: parent.isToday ? Theme.textActive : Theme.text
-                            font.family: Theme.fontFamily
-                            font.weight: parent.isToday ? Font.DemiBold : Font.Normal
-                            font.pixelSize: Theme.fontSizeNormal
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 26
+                                height: 26
+                                radius: Theme.roundingFull
+                                visible: parent.isToday
+                                color: Theme.accent
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                visible: modelData !== null
+                                text: modelData ? modelData.getDate() : ""
+                                color: parent.isToday ? Theme.textActive : Theme.text
+                                font.family: Theme.fontFamily
+                                font.weight: parent.isToday ? Font.DemiBold : Font.Normal
+                                font.pixelSize: Theme.fontSizeNormal
+                            }
                         }
                     }
                 }
             }
+
         }
 
         Item { width: 1; height: Theme.padSm }
