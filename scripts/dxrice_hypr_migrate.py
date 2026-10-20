@@ -137,6 +137,13 @@ def _overview_rule_apply(text):
     return "".join(lines)
 
 
+_OLD_MENU_BIND = 'hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu))'
+_NEW_MENU_BIND = (
+    '-- The shell\'s own launcher; wofi if the shell isn\'t running.\n'
+    'hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(\n'
+    '    "sh -c \'qs -p " .. repo .. "/quickshell/shell.qml ipc call launcher toggle 2>/dev/null || " .. menu .. "\'"))')
+
+
 MIGRATIONS = [
     ("taskbar-gui",
      "SUPER+SHIFT+A opens the taskbar manager GUI instead of the old terminal script",
@@ -156,6 +163,9 @@ MIGRATIONS = [
      "stop Hyprland fading the SUPER+Tab overview (it showed every window twice); "
      "other layer surfaces keep their fade",
      _overview_rule_applies, _overview_rule_apply),
+    ("launcher-bind",
+     "SUPER+R opens the shell's own launcher (wofi is still the fallback)",
+     *_replace(_OLD_MENU_BIND, _NEW_MENU_BIND)),
     ("xdg-state-home",
      "find the checkout through $XDG_STATE_HOME when it's set",
      *_replace('    local f = io.open(home .. "/.local/state/dxrice/repo_path", "r")',
@@ -165,7 +175,7 @@ MIGRATIONS = [
 
 # polkit-agent's and the old taskbar line's replacements need the template's
 # `repo` variable; a file without it is reported instead of edited.
-_NEEDS_REPO = {"taskbar-gui", "polkit-agent", "session-script"}
+_NEEDS_REPO = {"taskbar-gui", "polkit-agent", "session-script", "launcher-bind"}
 
 
 def pending(text):

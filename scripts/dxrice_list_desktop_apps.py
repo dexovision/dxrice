@@ -50,4 +50,6 @@ def list_desktop_apps():
 
 
 if __name__ == "__main__":
-    print(json.dumps([{"name": n, "cmd": c, "icon": i} for n, c, i in list_desktop_apps()]))
+    import dxrice_launcher_history
+    uses = dxrice_launcher_history.load()
+    print(json.dumps([{"name": n, "cmd": c, "icon": i, "uses": uses.get(n, 0)} for n, c, i in list_desktop_apps()]))

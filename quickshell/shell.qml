@@ -146,6 +146,7 @@ ShellRoot {
     Dock {
         id: dock
         onTaskbarRequested: PanelManager.toggle("taskbar")
+        onLauncherRequested: appLauncher.toggle()
     }
 
     // Desktop overview (SUPER+Tab, which also closes it): the current
@@ -156,6 +157,15 @@ ShellRoot {
     Overview {
         id: overview
         objectName: "overview"
+    }
+    // The application launcher (SUPER+R): an overlay that opens in place.
+    AppLauncher {
+        id: appLauncher
+        objectName: "launcher"
+    }
+    IpcHandler {
+        target: "launcher"
+        function toggle(): void { appLauncher.toggle(); }
     }
     IpcHandler {
         target: "overview"

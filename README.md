@@ -167,7 +167,7 @@ is a one-line change in that file.
 | Keys | Action |
 |---|---|
 | `SUPER + Q` | terminal (`$TERMINAL`, else kitty) |
-| `SUPER + R` | app launcher (wofi) |
+| `SUPER + R` | application launcher (type to search, arrows to move, Enter to launch) |
 | `SUPER + E` | file manager (Nautilus) |
 | `SUPER + SHIFT + E` | yazi in kitty |
 | `SUPER + W` | Firefox |

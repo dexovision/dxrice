@@ -8,4 +8,6 @@ QtObject {
     readonly property var screens: []
     function env(name) { return Harness.env(name); }
     function execDetached(argv) { Harness.exec(argv); }
+    // icons: none are installed in the harness, so the launcher shows its lettered tiles
+    function iconPath(name, check) { return ""; }
 }

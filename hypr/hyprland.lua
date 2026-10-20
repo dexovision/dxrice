@@ -144,7 +144,9 @@ hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal))
 hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("python3 " .. repo .. "/scripts/dxrice_force_close_window.py"))
 hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager))
 hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }))
-hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu))
+-- The shell's own launcher; wofi if the shell isn't running.
+hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(
+    "sh -c 'qs -p " .. repo .. "/quickshell/shell.qml ipc call launcher toggle 2>/dev/null || " .. menu .. "'"))
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo())
 hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit"))
 hl.bind(mainMod .. " + F", hl.dsp.window.fullscreen({ action = "toggle", mode = "fullscreen" }))

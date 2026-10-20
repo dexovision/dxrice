@@ -25,6 +25,8 @@ PanelWindow {
     id: root
 
     signal taskbarRequested()
+    // the launcher tile ("wofi --show drun" as shipped) opens the shell's own launcher
+    signal launcherRequested()
 
     // Same geometry system as the top bar (ShellSurface.qml): the dock slab
     // is one `unit` tall plus a gap above and below, and its icon tiles are
@@ -242,6 +244,7 @@ PanelWindow {
                             // shell syntax error instead of running.
                             const m = /^sh -c '(.*) >\/dev\/null 2>&1 &'$/.exec(shortcutTile.modelData.onClick);
                             const cmd = m ? m[1].replace(/'\\''/g, "'") : shortcutTile.modelData.onClick;
+                            if (cmd === "wofi --show drun") { root.launcherRequested(); return; }
                             if (cmd) Launcher.launch("dock", ["sh", "-c", cmd]);
                         }
                     }
