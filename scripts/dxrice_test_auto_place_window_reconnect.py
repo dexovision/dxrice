@@ -95,6 +95,9 @@ class TestReconnectResetsState(unittest.TestCase):
             # The listener reads theme.json (gap, on/off switch): never the real one.
             unittest.mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.fake.path + ".config"}),
             unittest.mock.patch.object(apw, "place_new_window", side_effect=fake_place_new_window),
+            # Expansion is the default now; what is tested here is the same
+            unittest.mock.patch.object(apw, "place_in_layout",
+                                       side_effect=lambda address, ws, mode: fake_place_new_window(address, ws, 5)),
             unittest.mock.patch.object(apw.dxrice_singleton, "claim_single_instance",
                                         return_value=unittest.mock.MagicMock()),
         ]

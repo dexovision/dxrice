@@ -20,6 +20,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_auto_place_window as apw
+import dxrice_layout_apply as lap
 import dxrice_auto_arrange as arr
 import dxrice_window_class as wc
 
@@ -124,10 +125,11 @@ class _Base(unittest.TestCase):
         self._saved = (apw.hyprctl_json, apw.dispatch_async, apw.batch_async, apw.move_window_exact_async,
                        apw.get_monitor_bounds, apw.time.sleep, apw.classify_clients,
                        arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds,
-                       wc.x11_windows)
+                       wc.x11_windows, lap.hyprctl_json, lap.batch_async)
         h = self.hypr
         apw.hyprctl_json, apw.dispatch_async, apw.batch_async = h.hyprctl_json, h.dispatch_async, h.batch_async
         apw.move_window_exact_async = h.move_window_exact_async
+        lap.hyprctl_json, lap.batch_async = h.hyprctl_json, h.batch_async
         apw.get_monitor_bounds = lambda *_: MON
         apw.time.sleep = lambda s: None
         arr.hyprctl_json, arr.batch_async = h.hyprctl_json, h.batch_async
@@ -139,7 +141,7 @@ class _Base(unittest.TestCase):
         (apw.hyprctl_json, apw.dispatch_async, apw.batch_async, apw.move_window_exact_async,
          apw.get_monitor_bounds, apw.time.sleep, apw.classify_clients,
          arr.hyprctl_json, arr.batch_async, arr.live_gap, arr.get_monitor_bounds,
-         wc.x11_windows) = self._saved
+         wc.x11_windows, lap.hyprctl_json, lap.batch_async) = self._saved
         for k, v in self._env.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -709,7 +711,12 @@ class TestLauncherHandoff(_Base):
 
     def setUp(self):
         super().setUp()
-        self.listener = apw.PlacementListener(apw.ThemeSettings(os.path.join(self._tmp.name, "none.json")))
+        # these test the classic (Galaxy Spiral) placement and its launcher hand-off
+        classic = os.path.join(self._tmp.name, "classic.json")
+        with open(classic, "w") as f:
+            json.dump({"layout_auto_place": "galaxy"}, f)
+        self.listener = apw.PlacementListener(apw.ThemeSettings(classic))
+        self.listener.settings.refresh()
         apw.PLACED.clear()
         self._err = contextlib.redirect_stderr(io.StringIO())
         self._err.__enter__()
@@ -893,6 +900,124 @@ class TestLauncherHandoff(_Base):
             self.listener.handle_line("openwindow>>s,1,kitty,x")
         self.assertIn("placement placed 0xs class='kitty' size=900x600", buf.getvalue())
         self.assertNotIn("secret", buf.getvalue())
+
+
+class TestLayoutModes(_Base):
+    """Expansion (the default), Spiral and Compact, through the real
+    listener, the real planner and the fake Hyprland."""
+
+    def theme(self, data):
+        path = os.path.join(self._tmp.name, "theme.json")
+        with open(path, "w") as f:
+            json.dump(data, f)
+        return path
+
+    def listener(self, data=None):
+        L = apw.PlacementListener(apw.ThemeSettings(self.theme(data or {})))
+        L.settings.refresh()
+        return L
+
+    def open(self, L, addr, w=900, h=600, **kw):
+        self.hypr.open(addr, w, h, **kw)
+        return L.handle_line(f"openwindow>>{addr[2:]},1,app,x")
+
+    def rects(self):
+        return {a: tuple(c["at"]) + tuple(c["size"]) for a, c in self.hypr.clients.items()}
+
+    def stage(self, mode_data, n=4):
+        L = self.listener(mode_data)
+        for i in range(n):
+            self.assertEqual(self.open(L, f"0xw{i}"), "placed")
+        return L
+
+    def test_a_fresh_config_uses_expansion(self):
+        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "none.json")), "expansion")
+        self.stage({}, 3)
+        r = self.rects()
+        newest = r["0xw2"]
+        for a in ("0xw0", "0xw1"):
+            self.assertGreater(newest[2] * newest[3], 1.5 * r[a][2] * r[a][3])
+        self.assert_no_overlap()
+
+    def test_each_mode_places_windows_differently_and_without_overlap(self):
+        seen = {}
+        for mode in ("expansion", "spiral", "compact"):
+            self.hypr.clients.clear()
+            self.stage({"layout_auto_place": mode}, 4)
+            self.assert_no_overlap()
+            seen[mode] = tuple(sorted(self.rects().items()))
+        self.assertEqual(len(set(seen.values())), 3)
+
+    def test_unknown_and_missing_values_fall_back_to_expansion(self):
+        for bad in ({"layout_auto_place": "grid"}, {"layout_auto_place": 7}, {"layout_auto_place": None}, {}):
+            self.assertEqual(lap.setting("auto_place", self.theme(bad)), "expansion", bad)
+        self.assertEqual(lap.setting("auto_place", self.theme({"layout_auto_place": "galaxy"})), "galaxy")
+        with open(os.path.join(self._tmp.name, "torn.json"), "w") as f:
+            f.write('{"layout_auto_p')
+        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "torn.json")), "expansion")
+
+    def test_auto_place_and_super_g_are_separate_settings(self):
+        t = self.theme({"layout_auto_place": "compact", "layout_super_g": "spiral"})
+        self.assertEqual((lap.setting("auto_place", t), lap.setting("super_g", t)), ("compact", "spiral"))
+
+    def test_closing_a_window_lays_the_rest_out_again(self):
+        L = self.stage({"layout_auto_place": "compact"}, 4)
+        before = self.rects()
+        del self.hypr.clients["0xw1"]
+        self.assertEqual(L.handle_line("closewindow>>w1"), "relaid")
+        after = self.rects()
+        self.assertEqual(set(after), {"0xw0", "0xw2", "0xw3"})
+        self.assertNotEqual({a: after[a] for a in after}, {a: before[a] for a in after})
+        self.assert_no_overlap()
+
+    def test_repeating_the_layout_changes_nothing(self):
+        self.stage({"layout_auto_place": "spiral"}, 4)
+        self.hypr.dispatched.clear()
+        moved, unplaced = lap.apply("spiral", 1, newest_is_primary=True)
+        self.assertEqual((moved, unplaced), (0, []))
+        self.assertEqual(self.hypr.dispatched, [])
+
+    def test_super_g_expands_the_focused_window(self):
+        self.stage({"layout_auto_place": "compact"}, 4)
+        lap.apply("expansion", 1, primary_address="0xw1", newest_is_primary=False)
+        r = self.rects()
+        big = r["0xw1"]
+        for a in ("0xw0", "0xw2", "0xw3"):
+            self.assertGreater(big[2] * big[3], 1.5 * r[a][2] * r[a][3])
+        self.assert_no_overlap()
+
+    def test_pinned_fullscreen_and_hidden_windows_are_left_alone(self):
+        L = self.listener({})
+        self.open(L, "0xa")
+        self.hypr.add("0xpin", 1500, 80, 380, 220, pinned=True)
+        self.hypr.add("0xfs", 0, 0, 1920, 1080, fullscreen=2, workspace={"id": 2})
+        self.hypr.add("0xhid", 10, 10, 400, 300, hidden=True)
+        keep = {a: (tuple(self.hypr.clients[a]["at"]), tuple(self.hypr.clients[a]["size"])) for a in ("0xpin", "0xfs", "0xhid")}
+        self.open(L, "0xb")
+        for a, v in keep.items():
+            self.assertEqual((tuple(self.hypr.clients[a]["at"]), tuple(self.hypr.clients[a]["size"])), v, a)
+
+    def test_a_window_that_vanished_before_it_was_laid_out_is_a_safe_no_op(self):
+        L = self.listener({})
+        self.hypr.dispatched.clear()
+        self.assertEqual(L.handle_line("openwindow>>dead,1,app,x"), "gone")
+        self.assertEqual(self.hypr.dispatched, [])
+
+    def test_two_monitors_each_get_their_own_area(self):
+        monitors = [{"id": 0, "x": 0, "y": 0, "width": 1920, "height": 1080, "scale": 1, "transform": 0,
+                     "reserved": [0, 52, 0, 0], "focused": True},
+                    {"id": 1, "x": 1920, "y": 0, "width": 2560, "height": 1440, "scale": 1, "transform": 0,
+                     "reserved": [0, 0, 0, 0], "focused": False}]
+        clients = [{"address": f"0x{i}", "at": [10, 10], "size": [600, 400], "floating": True, "workspace": {"id": 1},
+                    "monitor": i % 2, "class": f"c{i}", "pid": 100 + i, "stableId": f"{i:x}", "mapped": True,
+                    "hidden": False, "fullscreen": 0, "pinned": False, "xwayland": False} for i in range(1, 5)]
+        moves, unplaced = lap.plan("compact", clients, monitors, 1, 5)
+        self.assertEqual(unplaced, [])
+        by = dict(moves)
+        for a, (x, y, w, h) in by.items():
+            mon = clients[int(a[2:]) - 1]["monitor"]
+            x0, y0, x1, y1 = (0, 52, 1920, 1080) if mon == 0 else (1920, 0, 4480, 1440)
+            self.assertTrue(x >= x0 and y >= y0 and x + w <= x1 and y + h <= y1, (a, by[a], mon))
 
 
 if __name__ == "__main__":

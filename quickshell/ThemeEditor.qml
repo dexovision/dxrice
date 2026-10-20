@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Dialogs
 import QtQuick.Effects
+import "LayoutPreviews.js" as Prev
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -190,6 +191,10 @@ PanelWindow {
     // file, one Apply, one Revert), but nothing a preset or "Generate from
     // wallpaper" touches -- those only carry colour keys.
     property bool auto_place_windows: true
+    // Window layout (Expansion, Spiral or Compact), chosen separately for
+    // windows opening on their own and for SUPER+G; see scripts/dxrice_layouts.py.
+    property string layout_auto_place: "expansion"
+    property string layout_super_g: "expansion"
     property bool reduce_motion: false
 
     property string font_family: "JetBrainsMono Nerd Font"
@@ -303,6 +308,7 @@ PanelWindow {
         for (const f of fontSizeFields) keys.push(f.key);
         for (const f of experienceFields) keys.push(f.key);
         for (const f of behaviorFields) keys.push(f.key);
+        keys.push("layout_auto_place", "layout_super_g");
         return keys;
     }
 
@@ -612,6 +618,95 @@ PanelWindow {
 
     // On/off settings: a title, a sentence that says what it does
     // (wrapped, never elided -- these are the explanations), the switch.
+    // One of the three layouts as a card: the picture is the real layout
+    // (LayoutPreviews.js is generated from it), drawn for four windows.
+    component LayoutPicker: Column {
+        id: picker
+        property string settingKey: ""
+        property string title: ""
+        property string sub: ""
+        property string idPrefix: ""
+        width: parent.width
+        spacing: Theme.padMd
+        Column {
+            width: parent.width
+            spacing: Theme.padXs
+            Text { text: picker.title; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium }
+            Text { width: parent.width; text: picker.sub; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; wrapMode: Text.WordWrap }
+        }
+        Row {
+            spacing: Theme.padMd
+            Repeater {
+                model: Prev.modes
+                delegate: Item {
+                    id: card
+                    required property string modelData
+                    required property int index
+                    readonly property bool picked: root[picker.settingKey] === card.modelData
+                    objectName: picker.idPrefix + card.modelData
+                    width: (picker.width - 2 * Theme.padMd) / 3
+                    height: 204
+                    scale: cardHover.hovered && !card.picked ? 1.025 : 1
+                    Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.roundingSm
+                        color: Theme.mix(Theme.layer1, Theme.accent, card.picked ? 0.14 : (cardHover.hovered ? 0.06 : 0))
+                        border.width: card.picked ? 2 : 1
+                        border.color: card.picked ? Theme.accent : Theme.borderIdle
+                        Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                        Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    }
+                    Item {
+                        id: stage
+                        x: Theme.padMd; y: Theme.padMd
+                        width: parent.width - 2 * Theme.padMd
+                        height: width * 0.625
+                        Repeater {
+                            model: Prev.rects[card.modelData][4]
+                            delegate: Rectangle {
+                                id: pane
+                                required property var modelData
+                                required property int index
+                                readonly property bool lead: index === 3 && card.modelData === "expansion" || index === 0 && card.modelData === "spiral"
+                                x: modelData[0] * stage.width; y: modelData[1] * stage.height
+                                width: modelData[2] * stage.width; height: modelData[3] * stage.height
+                                radius: 3
+                                color: lead ? Theme.mix(Theme.layer1, Theme.accent, card.picked ? 0.85 : 0.5)
+                                            : Theme.mix(Theme.layer1, Theme.textActive, card.picked ? 0.3 : 0.18)
+                                Behavior on color { ColorAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                                // the layout draws itself in once, window by window
+                                opacity: 0
+                                scale: 0.8
+                                Component.onCompleted: entrance.start()
+                                SequentialAnimation {
+                                    id: entrance
+                                    PauseAnimation { duration: Theme.reduceMotion ? 0 : pane.index * 55 }
+                                    ParallelAnimation {
+                                        NumberAnimation { target: pane; property: "opacity"; to: 1; duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+                                        NumberAnimation { target: pane; property: "scale"; to: 1; duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Column {
+                        x: Theme.padMd; y: stage.y + stage.height + Theme.padSm
+                        width: parent.width - 2 * Theme.padMd
+                        spacing: 2
+                        Text { text: Prev.names[card.modelData]; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: card.picked ? Font.DemiBold : Font.Medium }
+                        Text { width: parent.width; text: Prev.blurbs[card.modelData]; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { root[picker.settingKey] = card.modelData; root.dirty = true; }
+                    }
+                }
+            }
+        }
+    }
+
     component SwitchList: Column {
         property var fields: []
         width: parent.width
@@ -1730,6 +1825,26 @@ PanelWindow {
                 padding: Theme.pad2xl
                 title: "Windows and motion"
                 SwitchList { width: parent.width; fields: root.behaviorFields }
+            }
+
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Window layout"
+                Column {
+                    width: parent.width
+                    spacing: Theme.pad2xl
+                    LayoutPicker {
+                        settingKey: "layout_auto_place"; idPrefix: "layoutAuto:"
+                        title: "Windows opening on their own"
+                        sub: "How the desktop arranges itself when you open or close a window."
+                    }
+                    LayoutPicker {
+                        settingKey: "layout_super_g"; idPrefix: "layoutSuperG:"
+                        title: "SUPER+G"
+                        sub: "The arrangement the shortcut gives the current workspace (the focused window is the one Expansion enlarges)."
+                    }
+                }
             }
         }
     }

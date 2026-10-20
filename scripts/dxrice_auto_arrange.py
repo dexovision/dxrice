@@ -274,4 +274,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # SUPER+G: the saved layout mode (Expansion unless set otherwise);
+    # "galaxy" runs the classic arrangement above.
+    import dxrice_layout_apply
+    sys.exit(dxrice_layout_apply.main())

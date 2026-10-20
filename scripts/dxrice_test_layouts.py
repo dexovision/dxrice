@@ -39,8 +39,7 @@ class Invariants(unittest.TestCase):
                 self.assertGreater(r[3], 0)
                 self.assertTrue(inside(r, area), (mode, area, gap, n, r))
             for a, b in itertools.combinations(placed, 2):
-                # integer rounding of two edges may take a pixel off the gap
-                self.assertGreaterEqual(sep(a, b), gap - 1, (mode, area, gap, n, a, b))
+                self.assertGreaterEqual(sep(a, b), gap, (mode, area, gap, n, a, b))
 
     def test_a_window_is_unmanaged_not_shrunk_to_nothing(self):
         for mode, area, gap, n in self.cases():
@@ -133,6 +132,14 @@ class Shapes(unittest.TestCase):
         self.assertLessEqual(L.capacity(small, 5), 6)
         rects = L.expansion(40, small, 5)
         self.assertGreater(len([r for r in rects if r is None]), 20)
+
+
+class Previews(unittest.TestCase):
+    def test_the_settings_cards_draw_the_real_layouts(self):
+        """quickshell/LayoutPreviews.js is generated from the layout code;
+        a change to either without the other fails here."""
+        import dxrice_gen_layout_previews as g
+        self.assertEqual(g.main(["--check"]), 0)
 
 
 class Settings(unittest.TestCase):

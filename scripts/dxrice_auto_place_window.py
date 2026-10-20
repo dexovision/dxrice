@@ -76,6 +76,7 @@ from dxrice_hypr_ipc import (hyprctl_json, move_window_exact_async, move_window_
 import dxrice_singleton
 import dxrice_xdg
 import dxrice_window_class
+import dxrice_layout_apply
 import dxrice_monitor
 from dxrice_monitor import usable_bounds  # noqa: F401  (imported from here by other scripts and tests)
 
@@ -2473,6 +2474,61 @@ def place_new_window(address, workspace_id, gap, reflow=None):
     return "placed"
 
 
+def place_in_layout(address, workspace_id, mode, clients=None):
+    """Auto Place for Expansion, Spiral and Compact: wait for the window to
+    exist and settle, judge it exactly as place_new_window does, then lay the
+    whole workspace out with it as the newest window. Returns the same
+    statuses ("placed", "ignored", "not-floating", "fullscreen", "gone")."""
+    new_win = None
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        clients = hyprctl_json(["clients"])
+        new_win = find_window(clients or [], address)
+        if new_win:
+            break
+        time.sleep(0.03)
+    if not new_win:
+        return "gone"
+    stable = tuple(new_win.get("size", ()))
+    for _ in range(6):
+        time.sleep(0.012)
+        clients = hyprctl_json(["clients"]) or clients
+        probe = find_window(clients, address)
+        if not probe:
+            return "gone"
+        new_win = probe
+        if tuple(probe.get("size", ())) == stable:
+            break
+        stable = tuple(probe.get("size", ()))
+    kinds, x11 = classify_clients(clients)
+    mx0, my0, mx1, my1 = get_monitor_bounds(new_win.get("monitor"))
+    dxrice_window_class.settle_unknown(kinds, clients, (mx1 - mx0) * (my1 - my0))
+    kind = kinds.get(address, dxrice_window_class.NORMAL)
+    if not dxrice_window_class.is_arrangeable(kind) or new_win.get("pinned"):
+        _journal("ignored", new_win, note=f"kind={kind} pinned={bool(new_win.get('pinned'))}")
+        return "ignored"
+    if not new_win.get("floating"):
+        _journal("deferred", new_win, note="tiled")
+        return "not-floating"
+    if new_win.get("fullscreen", 0) != 0:
+        _journal("deferred", new_win, note=f"fullscreen={new_win.get('fullscreen')}")
+        return "fullscreen"
+    moved, unplaced = dxrice_layout_apply.apply(mode, workspace_id, primary_address=address, newest_is_primary=True,
+                                                clients=clients, monitors=hyprctl_json(["monitors"]) or [])
+    _journal(f"layout-{mode}", new_win, note=f"{moved} moved, {len(unplaced)} unplaced")
+    return "placed"
+
+
+def relayout_after_close(workspace_id, mode):
+    """A window closed: lay the rest of its workspace out again (once the
+    compositor has dropped it from its list)."""
+    deadline = time.time() + 0.4
+    while time.time() < deadline:
+        time.sleep(0.04)
+        break
+    dxrice_layout_apply.apply(mode, workspace_id, newest_is_primary=True)
+
+
 def _creation_key(client):
     """Creation order of a client: Hyprland's stableId (assigned once, in
     order, when a window is created), else its place in the client list
@@ -2524,6 +2580,7 @@ class ThemeSettings:
         self._stamp = None
         self.gap = DEFAULT_GAP
         self.enabled = True
+        self.layout = dxrice_layout_apply.dxrice_layouts.DEFAULT_MODE
 
     def refresh(self):
         try:
@@ -2542,6 +2599,9 @@ class ThemeSettings:
         self._stamp = stamp
         self.gap = gap
         self.enabled = data.get(AUTO_PLACE_KEY, True) is not False
+        raw = data.get(dxrice_layout_apply.KEYS["auto_place"])
+        self.layout = ("galaxy" if str(raw).strip().lower() == dxrice_layout_apply.LEGACY
+                       else dxrice_layout_apply.dxrice_layouts.normalize(raw))
         return self
 
 
@@ -2587,13 +2647,17 @@ class PlacementListener:
 
     def __init__(self, settings=None, place=None, reflow=None):
         self.settings = settings or ThemeSettings()
+        self._injected = place is not None
         self._place = place or place_new_window
+        self._workspaces = {}     # address -> workspace id, for re-laying out after a close
         self._reflow = reflow or (lambda addr, ws, gap, info: place_new_window(addr, ws, gap, reflow=info))
         self.handled = set()
         self.deferred = {}  # {address: workspace_id}
 
     def _attempt(self, addr, ws_id, what="placement"):
         try:
+            if not self._injected and self.settings.layout != dxrice_layout_apply.LEGACY:
+                return place_in_layout(addr, ws_id, self.settings.layout)
             return self._place(addr, ws_id, self.settings.gap)
         except Exception as e:
             # One window failing to place must never take the listener
@@ -2623,6 +2687,7 @@ class PlacementListener:
                 self.handled.add(addr)  # opened while off: not placed later either
                 return "disabled"
             status = self._attempt(addr, ws_id)
+            self._workspaces[addr] = ws_id
             if status in ("fullscreen", "not-floating"):
                 self.deferred[addr] = ws_id
             else:
@@ -2633,6 +2698,14 @@ class PlacementListener:
             self.handled.discard(addr)
             self.deferred.pop(addr, None)
             PLACED.pop(addr, None)
+            ws_closed = self._workspaces.pop(addr, None)
+            if (not self._injected and ws_closed is not None and self.settings.refresh().enabled
+                    and self.settings.layout != dxrice_layout_apply.LEGACY):
+                try:
+                    relayout_after_close(ws_closed, self.settings.layout)
+                except Exception as e:
+                    print(f"layout after close failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+                return "relaid"
             now = _now()
             for a in [a for a, r in PLACED.items() if now - r["t"] > self.LAUNCHER_S]:
                 del PLACED[a]

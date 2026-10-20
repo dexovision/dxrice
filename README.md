@@ -18,13 +18,17 @@ never touches them.
   controls, CPU/GPU/memory/disk/network, clipboard history), a dock with a
   shortcut manager, and a theme editor. One process, started with your
   session.
-- **Window placement.** New floating windows join a spiral around the first
-  one instead of piling up in the middle. `SUPER+G` re-arranges the whole
-  workspace into that spiral. Windows keep their sizes, and opening a new
-  one doesn't move the others. The one exception is apps that open a
-  launcher or splash window first (Discord's updater, for example): when
-  that window closes right after the real one opens, the real window is
-  moved once to where it would have gone anyway.
+- **Window layouts.** Three of them, picked in Settings > Experience:
+  **Expansion** (the default) gives the newest window most of the screen and
+  shares the rest between the others, **Spiral** gives each window half of
+  what's left, turning clockwise, and **Compact** is an even grid. Windows
+  opening on their own and `SUPER+G` each have their own choice. Opening or
+  closing a window lays the workspace out again, and Hyprland animates the
+  windows into place. Too many windows for the screen? The extra ones stay
+  where they are instead of being squeezed to nothing. Pinned and fullscreen
+  windows are never touched. Set `"layout_auto_place"` or `"layout_super_g"`
+  to `"galaxy"` in `theme.json` for the old Galaxy Spiral placement, which
+  keeps window sizes.
 - **An infinite desktop.** `SUPER+ALT` and moving the mouse pans every
   window together. Dragging a window (`SUPER` + left mouse) into the screen
   edge pushes the others along.
@@ -172,7 +176,7 @@ is a one-line change in that file.
 | `SUPER + SHIFT + K` | `hyprctl kill` (click a window to kill it) |
 | `SUPER + V` | toggle floating for the window |
 | `SUPER + D` | toggle the whole workspace between floating and tiled |
-| `SUPER + G` | arrange the workspace as a Galaxy Spiral |
+| `SUPER + G` | arrange the workspace in your chosen layout (Expansion enlarges the focused window) |
 | `SUPER + Tab` | overview: zoom out / back in |
 | `SUPER + F` / `SUPER + M` | fullscreen / maximize |
 | `SUPER + P` / `SUPER + J` | pseudo-tile / toggle split (tiled layout) |

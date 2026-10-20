@@ -66,7 +66,7 @@ def capacity(area, gap, min_w=MIN_W, min_h=MIN_H):
 def _expansion_at(n, area, gap, primary, frac, min_w, min_h):
     x0, y0, x1, y1 = area
     W = x1 - x0
-    split = x0 + (W - gap) * frac
+    split = x0 + int(round((W - gap) * frac))
     out = [None] * n
     out[primary] = _rect(x0, y0, split, y1)
     rest = [i for i in range(n) if i != primary]
@@ -100,7 +100,7 @@ def expansion(n, area, gap, primary=None, min_w=MIN_W, min_h=MIN_H):
     x0, y0, x1, y1 = area
     W, H = x1 - x0, y1 - y0
     if n == 1:
-        mx, my = W * SOLO_MARGIN, H * SOLO_MARGIN
+        mx, my = int(round(W * SOLO_MARGIN)), int(round(H * SOLO_MARGIN))
         return [_rect(x0 + mx, y0 + my, x1 - mx, y1 - my)]
     # The primary's usual share; if the others don't fit beside it at a
     # usable size, give them more room (down to a third) before leaving any out.
@@ -128,7 +128,7 @@ def _spiral_at(n, area, gap, ratio, min_w, min_h):
         side = i % 4
         w, h = right - left, bottom - top
         if side in (0, 2):
-            cut = (w - gap) * ratio
+            cut = int(round((w - gap) * ratio))
             if cut < min_w or (w - gap - cut) < min_w or h < min_h:
                 return out, i, (left, top, right, bottom)
             if side == 0:
@@ -138,7 +138,7 @@ def _spiral_at(n, area, gap, ratio, min_w, min_h):
                 out[i] = _rect(right - cut, top, right, bottom)
                 right = right - cut - gap
         else:
-            cut = (h - gap) * ratio
+            cut = int(round((h - gap) * ratio))
             if cut < min_h or (h - gap - cut) < min_h or w < min_w:
                 return out, i, (left, top, right, bottom)
             if side == 1:

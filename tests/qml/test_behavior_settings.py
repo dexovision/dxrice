@@ -33,6 +33,80 @@ def theme_json(s):
     return json.loads((Path(s.bridge.config_home) / "dxrice" / "theme.json").read_text())
 
 
+class LayoutPickerTest(unittest.TestCase):
+    """Settings > Experience > Window layout: two pickers (windows opening on
+    their own, SUPER+G), Expansion selected for a fresh config, a click
+    selects, Apply saves each separately, and the two never affect each other."""
+
+    def open_experience(self, s):
+        s.ev("panels.open('theme')")
+        s.wait(700)
+        s.ev(f"{TE}.currentCategory = 'experience'")
+        s.wait(900)
+
+    def click_card(self, s, name):
+        # the page scrolls: bring the card into view, then click where it is
+        s.ev(f"(function(){{ const b = findNamed('{name}'); let it = b; while (it) {{ if (it.contentY !== undefined && it.contentHeight !== undefined) {{"
+             f" const p = b.mapToItem(it.contentItem, 0, 0); it.contentY = Math.max(0, p.y - 80); break; }} it = it.parent; }} }})()")
+        s.wait(300)
+        x, y = centre(s, name)
+        owner = s.click(x, y)
+        s.wait(250)
+        return owner
+
+    def test_a_fresh_config_selects_expansion_in_both(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None, layout_super_g=None))
+        try:
+            self.open_experience(s)
+            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "expansion")
+            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "expansion")
+            for prefix in ("layoutAuto:", "layoutSuperG:"):
+                for mode in ("expansion", "spiral", "compact"):
+                    self.assertTrue(s.ev(f"findNamed('{prefix}{mode}') !== null"), prefix + mode)
+            self.assertTrue(s.ev("findNamed('layoutAuto:expansion').picked"))
+            self.assertFalse(s.ev("findNamed('layoutAuto:spiral').picked"))
+            self.assertFalse(s.ev(f"{TE}.dirty"))
+        finally:
+            s.close()
+
+    def test_clicking_selects_one_picker_only_and_apply_saves_it(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None, layout_super_g=None, my_custom_key=[1, 2]))
+        try:
+            self.open_experience(s)
+            self.assertTrue(self.click_card(s, "layoutSuperG:spiral").startswith("ThemeEditor"))
+            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "spiral")
+            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "expansion", "one picker changed the other")
+            self.assertTrue(s.ev(f"{TE}.dirty"))
+            self.click_card(s, "layoutAuto:compact")
+            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "compact")
+            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "spiral")
+            s.ev(f"{TE}.apply()")
+            s.wait(500)
+            saved = theme_json(s)
+            self.assertEqual((saved.get("layout_auto_place"), saved.get("layout_super_g")), ("compact", "spiral"))
+            self.assertEqual(saved.get("my_custom_key"), [1, 2], "Apply lost an unrelated key")
+        finally:
+            s.close()
+
+    def test_saved_choices_are_shown_after_reopening(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place="spiral", layout_super_g="compact"))
+        try:
+            self.open_experience(s)
+            self.assertTrue(s.ev("findNamed('layoutAuto:spiral').picked"))
+            self.assertTrue(s.ev("findNamed('layoutSuperG:compact').picked"))
+        finally:
+            s.close()
+
+    def test_an_unknown_saved_value_picks_nothing_and_breaks_nothing(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place="grid"))
+        try:
+            self.open_experience(s)
+            for mode in ("expansion", "spiral", "compact"):
+                self.assertFalse(s.ev(f"findNamed('layoutAuto:{mode}').picked"))
+        finally:
+            s.close()
+
+
 class AutoPlacementSwitchTest(unittest.TestCase):
     def open_experience(self, s):
         s.ev("panels.open('theme')")
