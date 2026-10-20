@@ -134,6 +134,37 @@ class Shapes(unittest.TestCase):
         self.assertGreater(len([r for r in rects if r is None]), 20)
 
 
+class SavedChoice(unittest.TestCase):
+    """The overview's layout chips: `dxrice_layout_apply.py --mode M --save`."""
+
+    def test_saving_keeps_every_other_key_and_is_read_back(self):
+        import json
+        import tempfile
+        import dxrice_layout_apply as lap
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "theme.json")
+            json.dump({"accent": "e67878", "hypr_gaps_in": 7, "layout_auto_place": "compact", "x": [1, 2]}, open(path, "w"))
+            self.assertTrue(lap.save_setting("super_g", "spiral", path))
+            data = json.load(open(path))
+            self.assertEqual(data["layout_super_g"], "spiral")
+            self.assertEqual((data["accent"], data["hypr_gaps_in"], data["layout_auto_place"], data["x"]),
+                             ("e67878", 7, "compact", [1, 2]))
+            self.assertEqual(lap.setting("super_g", path), "spiral")
+            self.assertEqual(lap.setting("auto_place", path), "compact")
+
+    def test_a_missing_file_is_created_and_a_torn_one_does_not_crash(self):
+        import json
+        import tempfile
+        import dxrice_layout_apply as lap
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "theme.json")
+            self.assertTrue(lap.save_setting("super_g", "compact", path))
+            self.assertEqual(json.load(open(path)), {"layout_super_g": "compact"})
+            open(path, "w").write('{"torn')
+            self.assertTrue(lap.save_setting("super_g", "spiral", path))
+            self.assertEqual(json.load(open(path))["layout_super_g"], "spiral")
+
+
 class Previews(unittest.TestCase):
     def test_the_settings_cards_draw_the_real_layouts(self):
         """quickshell/LayoutPreviews.js is generated from the layout code;

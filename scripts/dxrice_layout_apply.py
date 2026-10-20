@@ -114,9 +114,33 @@ def apply(mode, workspace_id, primary_address=None, newest_is_primary=True, clie
     return len(moves), unplaced
 
 
+def save_setting(which, mode, path=None):
+    """Writes the choice into theme.json, keeping every other key; atomic."""
+    import dxrice_manifest
+    path = path or os.path.join(dxrice_xdg.config_dir(), "theme.json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return False
+    except (OSError, ValueError):
+        data = {}
+    data[KEYS[which]] = mode
+    dxrice_manifest.atomic_write_bytes(path, (json.dumps(data, indent=2) + "\n").encode())
+    return True
+
+
 def main(argv=None):
-    """SUPER+G."""
-    mode = setting("super_g")
+    """SUPER+G; or `--mode MODE [--save]`: lay out with MODE now (the
+    overview's layout chips), and with --save make it SUPER+G's choice."""
+    argv = list(argv or [])
+    explicit = None
+    if "--mode" in argv:
+        i = argv.index("--mode")
+        explicit = dxrice_layouts.normalize(argv[i + 1]) if i + 1 < len(argv) else None
+    mode = explicit or setting("super_g")
+    if explicit and "--save" in argv:
+        save_setting("super_g", explicit)
     if mode == LEGACY:
         import dxrice_auto_arrange
         return dxrice_auto_arrange.main()
@@ -134,4 +158,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main(sys.argv[1:]))

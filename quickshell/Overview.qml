@@ -72,6 +72,71 @@ PanelWindow {
     // the window whose picture the pointer is over (SUPER+C closes it, see
     // hoveredTarget); "" when none
     property string hoveredAddress: ""
+    // The window that had focus when the overview opened, and the one the
+    // keyboard (or the pointer) has selected now: arrows move it, Enter
+    // picks it. The pointer takes over while it moves and the keys take
+    // over when they are used.
+    property string focusedAddress: ""
+    property string selectedAddress: ""
+    function _tileItem(address) {
+        for (let i = 0; i < tiles.count; i++) {
+            const t = tiles.itemAt(i);
+            if (t && t.address === address) return t;
+        }
+        return null;
+    }
+    // Next window in a direction (dx, dy each -1, 0 or 1), judged on where
+    // the pictures sit in the overview: the nearest one whose centre lies
+    // that way, a sideways offset costing double. None -> stay.
+    function neighbour(from, dx, dy) {
+        const a = root._tileItem(from);
+        if (!a) return "";
+        const ax = a.tx + a.tw / 2, ay = a.ty + a.th / 2;
+        let best = "", bestCost = Infinity;
+        for (let i = 0; i < tileModel.count; i++) {
+            const t = tileModel.get(i);
+            if (t.address === from) continue;
+            const cx = t.tx + t.tw / 2 - ax, cy = t.ty + t.th / 2 - ay;
+            const along = dx !== 0 ? cx * dx : cy * dy;
+            const across = Math.abs(dx !== 0 ? cy : cx);
+            if (along <= 4) continue;
+            const cost = along + 2 * across;
+            if (cost < bestCost) { bestCost = cost; best = t.address; }
+        }
+        return best;
+    }
+    function moveSelection(dx, dy) {
+        if (!root.open || tileModel.count === 0) return;
+        const cur = root.selectedAddress || root.focusedAddress || tileModel.get(0).address;
+        if (!root.selectedAddress) { root.selectedAddress = cur; return; }
+        const next = root.neighbour(cur, dx, dy);
+        if (next) root.selectedAddress = next;
+    }
+    // Tab / Shift+Tab: through the windows in reading order
+    function cycleSelection(step) {
+        if (!root.open || tileModel.count === 0) return;
+        const order = [];
+        for (let i = 0; i < tileModel.count; i++) order.push(tileModel.get(i));
+        order.sort((a, b) => (Math.round(a.ty / 80) - Math.round(b.ty / 80)) || (a.tx - b.tx));
+        let idx = order.findIndex((t) => t.address === root.selectedAddress);
+        if (idx < 0) idx = order.findIndex((t) => t.address === root.focusedAddress);
+        idx = idx < 0 ? 0 : (idx + step + order.length) % order.length;
+        root.selectedAddress = order[idx].address;
+    }
+    // The layout SUPER+G uses (theme.json; Expansion unless it says otherwise)
+    property string layoutMode: ["expansion", "spiral", "compact"].indexOf(String(Theme.data.layout_super_g || "")) >= 0
+                                ? String(Theme.data.layout_super_g) : "expansion"
+    function applyLayout(mode) {
+        if (!root.open || layoutProc.running) return;
+        root.layoutMode = mode;
+        layoutProc.command = ["python3", Quickshell.shellDir + "/../scripts/dxrice_layout_apply.py", "--mode", mode, "--save"];
+        layoutProc.running = true;
+    }
+    Process { id: layoutProc }
+    function activateSelected() {
+        const t = root._tileItem(root.selectedAddress);
+        if (t) root.activate(t);
+    }
     // For SUPER+C (dxrice_force_close_window.py, through the shell's IPC):
     // "closed" when the overview isn't open, "" when it is but no picture
     // is under the pointer, else "<address>\t<class>" of that window.
@@ -129,6 +194,7 @@ PanelWindow {
         root.open = true;
         root.openedAt = Date.now();
         root._focusAfterClose = "";
+        root.selectedAddress = "";
         offScreenNote.shown = false;
         PanelManager.closeCurrent();
         // Immediate feedback: the surface comes up now, dimming the real
@@ -183,6 +249,13 @@ PanelWindow {
         }
         root.layout = parsed;
         root._syncTiles(parsed.windows);
+        let fa = "";
+        for (let i = 0; i < parsed.windows.length; i++) {
+            const c = (root._clients || []).find((x) => x.address === parsed.windows[i].address);
+            if (c && parseInt(c.focusHistoryID) === 0) fa = String(c.address);
+        }
+        root.focusedAddress = fa;
+        if (!root.selectedAddress || !root._tileItem(root.selectedAddress)) root.selectedAddress = fa;
         root.dataAt = Date.now();
         if (root._pendingEnter) {
             root._pendingEnter = false;
@@ -473,6 +546,18 @@ PanelWindow {
         clip: true
         focus: true
         Keys.onEscapePressed: root.hide()
+        Keys.onPressed: (e) => {
+            const k = e.key;
+            if (k === Qt.Key_Left) root.moveSelection(-1, 0);
+            else if (k === Qt.Key_Right) root.moveSelection(1, 0);
+            else if (k === Qt.Key_Up) root.moveSelection(0, -1);
+            else if (k === Qt.Key_Down) root.moveSelection(0, 1);
+            else if (k === Qt.Key_Tab) root.cycleSelection(1);
+            else if (k === Qt.Key_Backtab) root.cycleSelection(-1);
+            else if (k === Qt.Key_Return || k === Qt.Key_Enter || k === Qt.Key_Space) root.activateSelected();
+            else return;
+            e.accepted = true;
+        }
 
         // The real wallpaper, drawn as hyprpaper draws it (cover): opaque
         // the whole time the overview is covering, absent otherwise -- the
@@ -590,14 +675,43 @@ PanelWindow {
                     live: root.showing
                     paintCursor: false
                 }
-                // Hover: a quiet ring, the theme's accent only as a hairline.
+                // Rings: a hairline on every picture; the window that had
+                // focus gets a soft accent line, the selected one a full
+                // accent ring that eases in.
+                readonly property bool isFocused: tile.address === root.focusedAddress
+                readonly property bool isSelected: root.open && tile.address === root.selectedAddress
                 Rectangle {
                     anchors.fill: parent
                     color: "transparent"
                     radius: 6 * tile.p
-                    border.width: hover.containsMouse && root.open ? 2 : (tile.p > 0 ? 1 : 0)
-                    border.color: hover.containsMouse && root.open ? Theme.accent : Theme.borderIdle
+                    border.width: tile.isSelected ? 2 : (tile.p > 0 ? 1 : 0)
+                    border.color: tile.isSelected ? Theme.accent
+                                  : (tile.isFocused && root.open ? Theme.mix(Theme.borderIdle, Theme.accent, 0.55) : Theme.borderIdle)
                     opacity: tile.p
+                    Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                }
+                // Which window this is, for the selected one (and the focused
+                // one, quietly): its title, over a darkened foot of the picture.
+                Rectangle {
+                    id: caption
+                    objectName: "overviewCaption:" + tile.address
+                    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                    height: Math.min(parent.height, captionText.implicitHeight + 14)
+                    radius: 6 * tile.p
+                    color: Qt.rgba(0, 0, 0, 0.62)
+                    visible: opacity > 0.01
+                    opacity: tile.p * (tile.isSelected ? 1 : (tile.isFocused && root.open ? 0.55 : 0))
+                    Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    Text {
+                        id: captionText
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: 8; anchors.rightMargin: 8
+                        text: tile.title || tile.cls
+                        color: "white"
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Math.max(10, Math.min(14, tile.height * 0.09))
+                        elide: Text.ElideRight
+                    }
                 }
                 MouseArea {
                     id: hover
@@ -606,7 +720,7 @@ PanelWindow {
                     enabled: root.open
                     onClicked: root.activate(tile)
                     onContainsMouseChanged: {
-                        if (containsMouse) root.hoveredAddress = tile.address;
+                        if (containsMouse) { root.hoveredAddress = tile.address; root.selectedAddress = tile.address; }
                         else if (root.hoveredAddress === tile.address) root.hoveredAddress = "";
                     }
                     Component.onDestruction: if (root.hoveredAddress === tile.address) root.hoveredAddress = ""
@@ -614,6 +728,58 @@ PanelWindow {
             }
         }
 
+        }
+
+        // Layout switcher: apply Expansion, Spiral or Compact to this
+        // workspace and keep it as SUPER+G's choice. The real windows move
+        // (Hyprland animates them) and the pictures follow as the overview
+        // re-reads them.
+        Row {
+            id: layoutChips
+            objectName: "overviewLayoutChips"
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: 20 - (1 - root.progress) * 12
+            spacing: 8
+            opacity: root.open ? root.progress : 0
+            visible: opacity > 0.01 && root.windows.length > 1
+            Repeater {
+                model: ["expansion", "spiral", "compact"]
+                delegate: Rectangle {
+                    id: chip
+                    required property string modelData
+                    required property int index
+                    objectName: "overviewLayout:" + chip.modelData
+                    readonly property bool active: root.layoutMode === chip.modelData
+                    width: chipLabel.implicitWidth + 28
+                    height: 30
+                    radius: height / 2
+                    color: chip.active ? Theme.mix(Qt.rgba(0, 0, 0, 0.55), Theme.accent, 0.5)
+                                       : (chipArea.containsMouse ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(0, 0, 0, 0.45))
+                    border.width: 1
+                    border.color: chip.active ? Theme.accent : Qt.rgba(1, 1, 1, 0.12)
+                    scale: chipArea.pressed ? 0.96 : 1
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    Text {
+                        id: chipLabel
+                        anchors.centerIn: parent
+                        text: chip.modelData.charAt(0).toUpperCase() + chip.modelData.slice(1)
+                        color: "white"
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 13
+                        font.weight: chip.active ? Font.DemiBold : Font.Medium
+                    }
+                    MouseArea {
+                        id: chipArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        enabled: root.open
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.applyLayout(chip.modelData)
+                    }
+                }
+            }
         }
 
         Text {

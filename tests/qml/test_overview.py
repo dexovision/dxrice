@@ -1133,6 +1133,150 @@ class TestOpeningDoesNoHeavyWork(unittest.TestCase):
         self.assertLess(max(covered), 150, f"{max(covered):.0f} ms from the key to the overview covering")
 
 
+class TestOverviewKeysAndLayouts(unittest.TestCase):
+    """Keyboard selection, the focused window's highlight, captions, and
+    the layout chips."""
+
+    def scene(self, n=5, focused=3):
+        rects = sp.arrange(MIXED[:n], [], (0, 52, 1920, 1012), (32, 56))
+        clients = clients_for(rects)
+        clients[focused]["focusHistoryID"] = 0
+        o = OverviewScene(clients)
+        o.call("show")
+        o.scene.wait(SETTLE)
+        o.scene.ev("findNamed('overview').children[0].forceActiveFocus()")
+        return o
+
+    def sel(self, o):
+        return o.ov("selectedAddress")
+
+    def key(self, o, k):
+        o.scene.key(k)
+        o.scene.wait(60)
+
+    def test_selection_starts_on_the_window_that_had_focus(self):
+        o = self.scene(focused=3)
+        try:
+            self.assertEqual(o.ov("focusedAddress"), "0xa003")
+            self.assertEqual(self.sel(o), "0xa003")
+        finally:
+            o.scene.close()
+
+    def test_arrows_move_to_the_neighbour_in_that_direction(self):
+        from PySide6.QtCore import Qt
+        o = self.scene(n=6, focused=0)
+        try:
+            tiles = {w["address"]: w for w in o.layout["windows"]}
+            for key, dx, dy in ((Qt.Key_Right, 1, 0), (Qt.Key_Down, 0, 1), (Qt.Key_Left, -1, 0), (Qt.Key_Up, 0, -1)):
+                before = self.sel(o)
+                self.key(o, key)
+                after = self.sel(o)
+                if after == before:
+                    continue          # nothing lies that way from here
+                a, b = tiles[before], tiles[after]
+                moved = ((b["tx"] + b["tw"] / 2) - (a["tx"] + a["tw"] / 2)) * dx + \
+                        ((b["ty"] + b["th"] / 2) - (a["ty"] + a["th"] / 2)) * dy
+                self.assertGreater(moved, 0, (key, before, after))
+            self.assertIn(self.sel(o), tiles)
+        finally:
+            o.scene.close()
+
+    def test_tab_visits_every_window_and_wraps(self):
+        from PySide6.QtCore import Qt
+        o = self.scene(n=5, focused=0)
+        try:
+            seen = [self.sel(o)]
+            for _ in range(5):
+                self.key(o, Qt.Key_Tab)
+                seen.append(self.sel(o))
+            self.assertEqual(set(seen[:5]), {w["address"] for w in o.layout["windows"]})
+            self.assertEqual(seen[0], seen[5], "Tab didn't wrap")
+            self.key(o, Qt.Key_Backtab)
+            self.assertEqual(self.sel(o), seen[4])
+        finally:
+            o.scene.close()
+
+    def test_enter_focuses_the_selected_window_in_one_go(self):
+        from PySide6.QtCore import Qt
+        o = self.scene(n=4, focused=0)
+        try:
+            self.key(o, Qt.Key_Tab)
+            target = self.sel(o)
+            self.assertNotEqual(target, "0xa000")
+            before = len(o.dispatches())
+            self.key(o, Qt.Key_Return)
+            o.scene.wait(SETTLE)
+            sent = o.dispatches()[before:]
+            self.assertIn(f'hl.dsp.focus({{ window = "address:{target}" }})', sent)
+            self.assertFalse(o.ov("open"))
+        finally:
+            o.scene.close()
+
+    def test_the_selected_window_shows_its_title(self):
+        o = self.scene(n=4, focused=0)
+        try:
+            from PySide6.QtCore import Qt
+            self.key(o, Qt.Key_Tab)
+            o.scene.wait(400)
+            sel = self.sel(o)
+            vis = {w["address"]: o.scene.ev(f"findNamed('overviewCaption:{w['address']}').opacity") for w in o.layout["windows"]}
+            self.assertGreater(vis[sel], 0.9)
+            for a, op in vis.items():
+                if a not in (sel, o.ov("focusedAddress")):
+                    self.assertLess(op, 0.05, a)
+        finally:
+            o.scene.close()
+
+    def test_the_pointer_takes_the_selection_over(self):
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
+        o = self.scene(n=5, focused=0)
+        try:
+            w = o.layout["windows"][3]
+            x, y = TestOverview.visible_point(type("X", (), {"o": o})(), w)
+            QTest.mouseMove(o.scene.view, QPoint(int(x), int(y)))
+            o.scene.wait(100)
+            self.assertEqual(self.sel(o), w["address"])
+        finally:
+            o.scene.close()
+
+    def test_a_window_that_closes_while_selected_moves_the_selection_on(self):
+        o = self.scene(n=4, focused=0)
+        try:
+            from PySide6.QtCore import Qt
+            self.key(o, Qt.Key_Tab)
+            gone = self.sel(o)
+            o.load([c for c in o.clients if c["address"] != gone])
+            o.scene.ev(f"hypr.rawEvent({{ name: 'closewindow', data: '{gone[2:]}' }})")
+            o.scene.wait(800)
+            self.assertNotEqual(self.sel(o), gone)
+            self.assertIn(self.sel(o), o.tiles())
+        finally:
+            o.scene.close()
+
+    def test_layout_chips_apply_and_save_the_layout(self):
+        o = self.scene(n=4, focused=0)
+        try:
+            self.assertTrue(o.scene.ev("findNamed('overviewLayoutChips').visible"))
+            self.assertEqual(o.ov("layoutMode"), "expansion")
+            x, y = o.scene.ev("(function(){ const b = findNamed('overviewLayout:spiral'); const p = b.mapToItem(null, b.width/2, b.height/2); return [p.x, p.y]; })()").toVariant()
+            o.click(x, y)
+            o.scene.wait(300)
+            self.assertEqual(o.ov("layoutMode"), "spiral")
+            ran = [r for r in o.scene.bridge.run_log if "dxrice_layout_apply.py" in " ".join(r)]
+            self.assertEqual(len(ran), 1)
+            self.assertEqual(ran[0][-3:], ["--mode", "spiral", "--save"])
+        finally:
+            o.scene.close()
+
+    def test_no_layout_chips_for_one_window_or_none(self):
+        o = self.scene(n=1, focused=0)
+        try:
+            self.assertFalse(o.scene.ev("findNamed('overviewLayoutChips').visible"))
+        finally:
+            o.scene.close()
+
+
 class TestHoveredWindowForSuperC(unittest.TestCase):
     """SUPER+C in the overview closes the window under the pointer: the
     overview reports it (hoveredTarget, the `overview hovered` IPC call)."""
