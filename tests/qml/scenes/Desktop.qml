@@ -55,6 +55,8 @@ Item {
     readonly property QtObject panels: PanelManager
     readonly property QtObject hypr: Hyprland
     readonly property QtObject theme: Theme
+    readonly property QtObject mpris: Mpris
+    readonly property QtObject perf: PerformanceService
     // The hosted panel Item whose type exposes `prop` (QuickSettings has
     // currentTab, TaskbarManager has addPanelOpen, CalendarPanel viewDate).
     function findPanel(prop) {
@@ -121,7 +123,7 @@ Item {
             trackTitle: "", trackArtist: "", trackArtUrl: "", isPlaying: true, identity: "Spotify",
             metadata: {}, volumeSupported: true, volume: 0.7, positionSupported: true, lengthSupported: true,
             length: 245, position: 62, shuffleSupported: true, shuffle: false, loopSupported: true, loopState: 0,
-            togglePlaying: function() {}, next: function() {}, previous: function() {},
+            togglePlaying: function() {}, next: function() {}, previous: function() {}, positionChanged: function() {},
         }, p);
         Mpris.players = { values: [player] };
     }

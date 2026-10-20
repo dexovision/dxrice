@@ -78,11 +78,15 @@ class OverviewScene:
         sc = mon.get("scale", 1) or 1
         def setup(b):
             b.layer_fade_ms = layer_fade_ms
+            t = b.config_home / "dxrice" / "theme.json"
+            d = json.loads(t.read_text())
+            # the overview's frames are about windows and wallpaper: the
+            # desktop widgets (covered while it is open, like the bar) are
+            # off here and tested on their own
+            d["widget_clock"] = False
             if wallpaper:        # a real image file as the theme's wallpaper
-                t = b.config_home / "dxrice" / "theme.json"
-                d = json.loads(t.read_text())
                 d["wallpaper"] = wallpaper
-                t.write_text(json.dumps(d))
+            t.write_text(json.dumps(d))
         self.scene = Scene("OverviewDesktop.qml", width=round(mon["width"] / sc), height=round(mon["height"] / sc),
                            setup=setup)
         self.load(clients, uncapturable)
@@ -880,6 +884,26 @@ class TestNoGhosting(GhostRig, unittest.TestCase):
         for p, covering, img in seen:
             if covering:
                 self.assertEqual(self.magenta_outside_tiles(*img), 0, f"ghost at progress {p:.2f} {img[1]}")
+
+    def test_desktop_widgets_are_covered_while_it_is_open_and_come_back(self):
+        """The overview draws its own wallpaper over the whole screen, so a
+        desktop widget (a layer under it) is hidden while it is open, like the
+        bar and dock, and back on the desktop when it closes."""
+        self.o.scene.ev("theme.data = Object.assign({}, theme.data, {widget_clock: true})")
+        self.o.scene.wait(700)
+        from PySide6.QtCore import QRect
+        card = self.o.scene.ev("(function() { var c = findNamed('widgetCard:clock'); var p = c.mapToItem(null, 0, 0); return JSON.stringify([p.x, p.y, c.width, c.height]); })()")
+        x, y, w, h = (int(v) for v in json.loads(card))
+        area = QRect(x + 6, y + 6, w - 12, h - 12)
+        before = self.o.scene.view.grabWindow().copy(area)
+        self.o.call("show")
+        self.o.scene.wait(SETTLE)
+        covered = self.o.scene.view.grabWindow().copy(area)
+        self.assertGreater(max_diff(before, covered), 20, "the clock card still shows through the overview")
+        self.o.call("hide")
+        self.o.scene.wait(SETTLE)
+        after = self.o.scene.view.grabWindow().copy(area)
+        self.assertLessEqual(max_diff(before, after, 3), 6, "the clock card did not come back after the overview")
 
     def test_the_handover_frames_are_the_desktop_itself(self):
         """The first frame the overview covers, and the last before it goes,

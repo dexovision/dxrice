@@ -109,6 +109,13 @@ ShellRoot {
         function closeCurrent(): void { PanelManager.closeCurrent(); }
     }
 
+    // Desktop widgets: each sits on the Bottom layer (declared first, so
+    // under every other surface) in its own corner and is
+    // switched in Settings > Experience (see DesktopWidget.qml).
+    ClockWidget { objectName: "clockWidget" }
+    MusicWidget { objectName: "musicWidget" }
+    SystemWidget { objectName: "systemWidget" }
+
     // Opt-in, not wired to SUPER+L: see LockScreen.qml's own comment for
     // why a real Wayland session lock is a fundamentally higher-stakes
     // thing to trust than any of the panels above (fail-secure by design --

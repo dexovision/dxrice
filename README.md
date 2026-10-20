@@ -29,6 +29,12 @@ never touches them.
   windows are never touched. Set `"layout_auto_place"` or `"layout_super_g"`
   to `"galaxy"` in `theme.json` for the old Galaxy Spiral placement, which
   keeps window sizes.
+- **Desktop widgets.** A clock, a now-playing card and an optional system
+  monitor sit in the corners of the desktop, under your windows. Each can be
+  switched off or moved to another corner in Settings > Experience. The
+  now-playing card shows whatever MPRIS player is open (and isn't there when
+  nothing is), with a seekable bar. The system monitor reads `/proc` and sysfs
+  and only measures while it is on; a GPU it can't read shows as n/a.
 - **An infinite desktop.** `SUPER+ALT` and moving the mouse pans every
   window together. Dragging a window (`SUPER` + left mouse) into the screen
   edge pushes the others along.

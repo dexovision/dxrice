@@ -196,6 +196,16 @@ PanelWindow {
     property string layout_auto_place: "expansion"
     property string layout_super_g: "expansion"
     property bool reduce_motion: false
+    // Desktop widgets (see DesktopWidget.qml): whether each is shown and in
+    // which corner, plus how the clock reads.
+    property bool widget_clock: true
+    property bool widget_music: true
+    property bool widget_system: false
+    property string widget_clock_pos: "top-left"
+    property string widget_music_pos: "bottom-left"
+    property string widget_system_pos: "top-right"
+    property bool clock_24h: true
+    property bool clock_seconds: false
 
     property string font_family: "JetBrainsMono Nerd Font"
     // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
@@ -266,6 +276,16 @@ PanelWindow {
         { key: "reduce_motion", objectName: "reduceMotionSwitch", label: "Reduce motion",
           sub: "Panels appear and disappear without sliding or scaling." },
     ]
+    readonly property var widgetFields: [
+        { key: "widget_clock", objectName: "widgetClockSwitch", label: "Clock",
+          sub: "The time and date, in a corner of the desktop." },
+        { key: "clock_24h", objectName: "clock24hSwitch", label: "24-hour clock", sub: "Off shows AM and PM." },
+        { key: "clock_seconds", objectName: "clockSecondsSwitch", label: "Show seconds", sub: "Beside the time, ticking once a second." },
+        { key: "widget_music", objectName: "widgetMusicSwitch", label: "Now playing",
+          sub: "The track from whichever media player is open, with play, skip and a seekable bar. Nothing shows while nothing plays." },
+        { key: "widget_system", objectName: "widgetSystemSwitch", label: "System monitor",
+          sub: "Processor, memory, graphics and network, with the last minute of each. Measured only while it is on." },
+    ]
     readonly property var experienceFields: [
         { key: "anim_duration_ms", label: "Animation speed (lower = snappier)", min: 0, max: 500, decimals: 0, unit: "ms" },
         { key: "ui_density", label: "Spacing inside panels", min: 0.5, max: 1.5, decimals: 2 },
@@ -309,6 +329,8 @@ PanelWindow {
         for (const f of experienceFields) keys.push(f.key);
         for (const f of behaviorFields) keys.push(f.key);
         keys.push("layout_auto_place", "layout_super_g");
+        for (const f of widgetFields) keys.push(f.key);
+        keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos");
         return keys;
     }
 
@@ -620,6 +642,52 @@ PanelWindow {
     // (wrapped, never elided -- these are the explanations), the switch.
     // One of the three layouts as a card: the picture is the real layout
     // (LayoutPreviews.js is generated from it), drawn for four windows.
+    // One widget's corner: four small chips laid out like the corners they name.
+    component CornerRow: Item {
+        id: cornerRow
+        property string settingKey: ""
+        property string idPrefix: ""
+        property string label: ""
+        width: parent.width
+        height: 34
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: cornerRow.label
+            color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium
+        }
+        Row {
+            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+            spacing: Theme.padSm
+            Repeater {
+                model: Theme.widgetCorners
+                delegate: Rectangle {
+                    id: chip
+                    required property string modelData
+                    readonly property bool picked: root[cornerRow.settingKey] === chip.modelData
+                    objectName: cornerRow.idPrefix + chip.modelData
+                    width: 92; height: 30
+                    radius: Theme.roundingSm
+                    color: Theme.mix(Theme.layer1, Theme.accent, chip.picked ? 0.2 : (chipHover.hovered ? 0.07 : 0))
+                    border.width: chip.picked ? 2 : 1
+                    border.color: chip.picked ? Theme.accent : Theme.borderIdle
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
+                    Text {
+                        anchors.centerIn: parent
+                        text: chip.modelData.replace("-", " ")
+                        color: chip.picked ? Theme.textActive : Theme.text
+                        font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; font.weight: chip.picked ? Font.DemiBold : Font.Normal
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { root[cornerRow.settingKey] = chip.modelData; root.dirty = true; }
+                    }
+                }
+            }
+        }
+    }
+
     component LayoutPicker: Column {
         id: picker
         property string settingKey: ""
@@ -1843,6 +1911,25 @@ PanelWindow {
                         settingKey: "layout_super_g"; idPrefix: "layoutSuperG:"
                         title: "SUPER+G"
                         sub: "The arrangement the shortcut gives the current workspace (the focused window is the one Expansion enlarges)."
+                    }
+                }
+            }
+
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Desktop widgets"
+                Column {
+                    width: parent.width
+                    spacing: Theme.pad2xl
+                    SwitchList { width: parent.width; fields: root.widgetFields }
+                    Column {
+                        width: parent.width
+                        spacing: Theme.padMd
+                        Text { text: "Corners"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium }
+                        CornerRow { settingKey: "widget_clock_pos"; idPrefix: "widgetPos:clock:"; label: "Clock" }
+                        CornerRow { settingKey: "widget_music_pos"; idPrefix: "widgetPos:music:"; label: "Now playing" }
+                        CornerRow { settingKey: "widget_system_pos"; idPrefix: "widgetPos:system:"; label: "System monitor" }
                     }
                 }
             }

@@ -29,6 +29,19 @@ QtObject {
 
     property var data: ({})
 
+    // Desktop widgets (DesktopWidget.qml): theme.json "widget_<name>" turns
+    // one on or off, "widget_<name>_pos" puts it in a corner. A missing or
+    // unknown value is the widget's own default.
+    readonly property var widgetCorners: ["top-left", "top-right", "bottom-left", "bottom-right"]
+    function widgetOn(name, fallback) {
+        const v = root.data["widget_" + name];
+        return typeof v === "boolean" ? v : fallback;
+    }
+    function widgetCorner(name, fallback) {
+        const v = String(root.data["widget_" + name + "_pos"] || "");
+        return root.widgetCorners.indexOf(v) >= 0 ? v : fallback;
+    }
+
     function reload() {
         file.reload();
     }

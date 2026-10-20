@@ -28,6 +28,11 @@ QtObject {
     // would just be unused machinery -- see the plan's explicit
     // "don't overengineer" guidance.
     property bool active: false
+    // The desktop system widget is a second, independent consumer: it counts
+    // itself in and out here (it must not flip `active`, which Quick Settings
+    // owns), and sampling runs while either wants it.
+    property int widgetUsers: 0
+    readonly property bool sampling: root.active || root.widgetUsers > 0
 
     readonly property real cpuPercent: _cpuPercent
     readonly property real memPercent: _memPercent
@@ -189,7 +194,7 @@ QtObject {
 
     property Timer sampleTimer: Timer {
         interval: 1500
-        running: root.active
+        running: root.sampling
         repeat: true
         triggeredOnStart: true
         onTriggered: {
@@ -199,7 +204,7 @@ QtObject {
     }
     property Timer diskTimer: Timer {
         interval: 30000
-        running: root.active
+        running: root.sampling
         repeat: true
         triggeredOnStart: true
         onTriggered: root.diskProc.running = true
@@ -207,5 +212,5 @@ QtObject {
     // GPU detection is one-shot per session, triggered the first time this
     // service is actually activated (never at process startup) -- exactly
     // the same lazy-cost principle as the disk/CPU/mem timers above.
-    onActiveChanged: if (active) root._detectGpu()
+    onSamplingChanged: if (sampling) root._detectGpu()
 }

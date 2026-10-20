@@ -45,3 +45,7 @@ QuickSettings 1.0 QuickSettings.qml
 TaskbarManager 1.0 TaskbarManager.qml
 TopBar 1.0 TopBar.qml
 Dock 1.0 Dock.qml
+DesktopWidget 1.0 DesktopWidget.qml
+ClockWidget 1.0 ClockWidget.qml
+MusicWidget 1.0 MusicWidget.qml
+SystemWidget 1.0 SystemWidget.qml
