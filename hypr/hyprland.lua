@@ -109,8 +109,9 @@ hl.layer_rule({ name = "theme-blur", match = { namespace = "dxrice-theme" }, blu
 -- quicksettings-blur/taskbar-blur/calendar-blur (dxrice-quicksettings,
 -- dxrice-taskbar, dxrice-calendar) removed: those namespaces belonged to
 -- PanelWindows that no longer exist -- Quick Settings/Taskbar/Calendar are
--- now hosted inside TopBar's and Dock's own windows (see ShellIsland.qml),
--- so bar-top-blur/bar-dock-blur below already cover them.
+-- now hosted inside the bar's own window (see ShellIsland.qml), so
+-- bar-top-blur below already covers them. (bar-dock-blur is for the dock an
+-- earlier build had at the bottom; with no such surface it matches nothing.)
 hl.layer_rule({ name = "bar-top-blur", match = { namespace = "dxrice-bar-top" }, blur = true, ignore_alpha = 0.6 })
 hl.layer_rule({ name = "bar-dock-blur", match = { namespace = "dxrice-bar-dock" }, blur = true, ignore_alpha = 0.6 })
 -- The desktop overview (SUPER+Tab) only, unanimated by the compositor. The

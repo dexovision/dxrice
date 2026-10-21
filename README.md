@@ -1,6 +1,6 @@
 # DXrice
 
-DXrice is a Hyprland desktop: a Quickshell bar, dock and control panels, an
+DXrice is a Hyprland desktop: one Quickshell bar whose panels branch out of it, an
 "infinite desktop" where floating windows arrange themselves in a spiral
 (the Galaxy Spiral), a zoomed-out overview of every window, and one
 `theme.json` that colours everything from the bar to kitty, mako and the
@@ -12,29 +12,42 @@ never touches them.
 
 ## What you get
 
-- **The top bar.** Left: the app launcher and your saved shortcuts (the
-  same list as the dock, marking which apps are open), the workspaces and
-  the focused window. Middle: the clock, which opens the calendar. Right:
-  Wi-Fi, Bluetooth, sound, power and notifications, each opening its own
-  panel, plus the full Dashboard. Rest the pointer on one (or click it) and
-  its panel grows out of the bar; slide along to the next and it turns into
-  that one. A panel opened by hovering closes when the pointer leaves and
-  never takes your keyboard. `"bar_hover_open": false` in `theme.json`
-  makes it click-only.
-- **Bar, dock and panels** (Quickshell, `quickshell/`): workspaces and the
-  focused window, a clock and calendar, a status area that opens Quick
-  Settings (Wi-Fi, Bluetooth, Do Not Disturb, Keep Awake, audio, media
-  controls, CPU/GPU/memory/disk/network, clipboard history), a dock with a
-  shortcut manager, and a theme editor. One process, started with your
-  session.
+- **One top bar.** One continuous strip with three groups. Left: a
+  search pill that opens **Applications** (search every installed app,
+  your pinned shortcuts, the open windows -- focus or close one -- and the
+  apps you use most; its Shortcuts tab adds, edits, reorders and removes
+  the saved shortcuts), the shortcuts themselves (marked when their app is
+  open, wider when it's focused), the workspaces (the current one shows its
+  number) and the focused window. Middle: the clock, which opens the
+  calendar with an agenda of reminders you keep on this machine. Right:
+  what's playing (only while a player exists), capture (screenshots and
+  screen recordings; a running recording shows its time here in red),
+  performance, Wi-Fi, Bluetooth, sound (outputs and inputs), power (lock,
+  log out, restart and shut down -- the last three ask once more), and
+  notifications (an unread count; dismiss what's on screen), each opening
+  its own section, plus the full Dashboard. Every panel hangs from the
+  bar's lower edge under what opened it, joined to it with curved corners.
+  Rest the pointer on one (or click it) and its panel drops out of the bar;
+  slide along and it turns into the next one, across groups too. A panel
+  opened by hovering closes when the pointer leaves and never takes your
+  keyboard; a click (or `SUPER+R` for Applications) gives it the keyboard.
+  On a narrow screen the indicators keep their icons and drop their
+  readings. `"bar_hover_open": false` in `theme.json` makes it click-only.
+  There is no separate dock or launcher window any more: both live in the
+  bar.
+- **Panels** (Quickshell, `quickshell/`): the Dashboard (Wi-Fi, Bluetooth,
+  Do Not Disturb, Keep Awake, audio, media, CPU/GPU/memory/disk/network
+  graphs, clipboard history), the sections above, and the theme editor.
+  One process, started with your session.
 - **Window arrangement.** Three methods, one choice in Settings > Experience
   that decides both where a new window goes and what `SUPER+G` does:
   **Galaxy Spiral** (the default) keeps every window's size and grows an
   airy spiral outward across the infinite desktop; **Compact** packs the
   windows into a tight, balanced cluster and resizes them a little where
   that helps (never into a grid); **Expansion** keeps sizes and bursts the
-  windows outward from the centre, each in its own direction, and new ones
-  go to the most open side. Opening a window never moves the others.
+  windows outward from the middle of the screen, each in its own direction,
+  and a new one takes the nearest free spot around that middle, so the
+  arrangement grows ring by ring. Opening a window never moves the others.
   Pinned, fullscreen and hidden windows are never touched, and a dialog
   goes beside the window it belongs to. The overview (`SUPER+Tab`) has the
   same three as chips; picking one there changes the choice too. (theme.json
@@ -50,9 +63,18 @@ never touches them.
   Open-Meteo; nothing is shown until you set one). Switch each on or off and
   move it to another corner in Settings > Experience. Anything the machine
   can't measure is left out or says n/a, never shown as zero. The clock also
-  comes as tty-clock blocks or a round analog face; there is a battery ring
-  (on a machine with a battery) and a timer/stopwatch. Any of them can
-  either stay on the screen or move with the infinite desktop when you pan
+  comes as tty-clock blocks or a round analog face (numerals or ticks);
+  there is a battery ring (on a machine with a battery), a stopwatch with
+  laps and a countdown timer, a reminders card (today's date and what's
+  coming up, from the same local reminders as the calendar), meters that
+  fill a shape to their level (processor in a pentagon, memory in a tank,
+  disk in a scalloped disc), and the weather as a compact tilted tile.
+  The now-playing card stays with nothing playing and says so, and with
+  several players its source label switches between them -- the same
+  choice the bar and Dashboard use. Widgets that share a corner stack
+  instead of overlapping. Any of them can either stay on the screen or
+  move with the infinite desktop when you pan, drag, bring a window into
+  view from the overview, or push the desktop aside with the keyboard
   (Settings > Experience > Move with the desktop).
 - **Audio visualizer.** A real spectrum of what's playing, from `cava`, along
   the bottom of the desktop. It only runs while music plays, as bars or as
@@ -198,7 +220,7 @@ is a one-line change in that file.
 | Keys | Action |
 |---|---|
 | `SUPER + Q` | terminal (`$TERMINAL`, else kitty) |
-| `SUPER + R` | application launcher (type to search, arrows to move, Enter to launch) |
+| `SUPER + R` | Applications, from the bar (type to search, arrows to move, Enter to launch) |
 | `SUPER + E` | file manager (Nautilus) |
 | `SUPER + SHIFT + E` | yazi in kitty |
 | `SUPER + W` | Firefox |
@@ -220,7 +242,7 @@ is a one-line change in that file.
 | `SUPER + Z` / `SUPER + X` | previous / next workspace (also `SUPER` + scroll) |
 | `SUPER + SHIFT + Z` / `SUPER + SHIFT + X` | send window to previous / next workspace |
 | `SUPER + SHIFT + T` | theme editor |
-| `SUPER + SHIFT + A` | taskbar (dock) manager |
+| `SUPER + SHIFT + A` | the shortcut editor (Applications > Shortcuts) |
 | `SUPER + SHIFT + V` | clipboard history |
 | `SUPER + SHIFT + S`, `PRINT` | screenshot a region (saved to `~/Pictures/Screenshots`, copied) |
 | `SUPER + PRINT` | screenshot the whole screen |
