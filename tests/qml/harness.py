@@ -63,7 +63,7 @@ DEFAULT_DOCK = {
 # matched as a substring of " ".join(argv); first match wins.
 DEFAULT_COMMANDS = [
     ("nmcli radio wifi", "enabled\n"),
-    ("bluetoothctl show", "Powered: yes\n"),
+    ("bluetoothctl show", "Controller AA:BB:CC:DD:EE:00 (public)\n\tName: dxbox\n\tPowered: yes\n"),
     ("makoctl mode", "default\n"),
     ("nmcli -t -f NAME connection show", "HomeNet\nlo\n"),
     ("nmcli -t -f active,ssid,signal,security dev wifi list",

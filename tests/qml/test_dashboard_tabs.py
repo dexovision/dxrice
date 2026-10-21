@@ -77,6 +77,56 @@ class PerformanceTabTest(unittest.TestCase):
         self.assertFalse(self.s.ev(f"{t}.visible"))
 
 
+class ToggleStateTest(unittest.TestCase):
+    def scene(self, bt="Controller AA:BB:CC:DD:EE:00 (public)\n\tPowered: yes\n"):
+        def setup(bridge):
+            bridge.commands.insert(0, ("bluetoothctl show", bt))
+        s = Scene(width=1920, height=1080, setup=setup)
+        s.ev("panels.open('quicksettings')")
+        s.wait(900)
+        return s
+
+    def test_a_toggle_is_pending_until_the_system_says_so(self):
+        s = self.scene()
+        try:
+            qs = "findPanel('currentTab')"
+            s.set_command("nmcli radio wifi", "disabled\n")      # the radio really turns off
+            s.ev(f"{qs}.setWifi(false)")
+            self.assertTrue(s.ev("findNamed('toggle:wifi').pending"))
+            self.assertFalse(s.ev("findNamed('toggle:wifi').active"))
+            s.wait(1200)                                             # the read-back
+            self.assertFalse(s.ev("findNamed('toggle:wifi').pending"))
+            self.assertFalse(s.ev(f"{qs}.wifiEnabled"))
+            self.assertIn(["nmcli", "radio", "wifi", "off"], s.bridge.exec_log)
+        finally:
+            s.close()
+
+    def test_a_switch_the_system_refused_shows_the_real_state(self):
+        s = self.scene()
+        try:
+            qs = "findPanel('currentTab')"
+            s.set_command("nmcli radio wifi", "enabled\n")       # it stayed on (e.g. rfkill)
+            s.ev(f"{qs}.setWifi(false)")
+            s.wait(1200)
+            self.assertTrue(s.ev(f"{qs}.wifiEnabled"))
+            self.assertTrue(s.ev("findNamed('toggle:wifi').active"))
+        finally:
+            s.close()
+
+    def test_no_bluetooth_adapter_dims_the_tile_and_it_switches_nothing(self):
+        s = self.scene(bt="No default controller available\n")
+        try:
+            t = "findNamed('toggle:bluetooth')"
+            self.assertFalse(s.ev(f"{t}.available"))
+            self.assertLess(s.ev(f"{t}.opacity"), 0.6)
+            self.assertEqual(s.ev(f"{t}.label"), "No Bluetooth")
+            s.bridge.exec_log.clear()
+            s.ev("findPanel('currentTab').setBluetooth(true)")
+            self.assertEqual([c for c in s.bridge.exec_log if c and c[0] == "bluetoothctl"], [])
+        finally:
+            s.close()
+
+
 class TabMotionTest(unittest.TestCase):
     def test_a_tab_change_slides_in_from_the_side_it_was_picked_on(self):
         s = Scene(width=1920, height=1080)

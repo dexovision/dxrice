@@ -149,16 +149,29 @@ Item {
     property bool bluetoothEnabled: false
     property bool dndActive: false
     property bool idleInhibited: false
+    // A toggle is "pending" from the click until the system's own state has
+    // been read back (it shows the asked-for state meanwhile, marked as not
+    // yet confirmed); a read that disagrees puts the real state back.
+    property bool wifiPending: false
+    property bool bluetoothPending: false
+    // No adapter at all: the tile says so instead of pretending to switch.
+    property bool bluetoothAvailable: true
 
     Process {
         id: wifiRadioCheck
         command: ["nmcli", "radio", "wifi"]
-        stdout: StdioCollector { onStreamFinished: root.wifiEnabled = this.text.trim() === "enabled" }
+        stdout: StdioCollector { onStreamFinished: { root.wifiEnabled = this.text.trim() === "enabled"; root.wifiPending = false; } }
     }
     Process {
         id: btPowerCheck
         command: ["bluetoothctl", "show"]
-        stdout: StdioCollector { onStreamFinished: root.bluetoothEnabled = /Powered:\s*yes/.test(this.text) }
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.bluetoothAvailable = !/No default controller/i.test(this.text) && /Controller /.test(this.text);
+                root.bluetoothEnabled = root.bluetoothAvailable && /Powered:\s*yes/.test(this.text);
+                root.bluetoothPending = false;
+            }
+        }
     }
     Process {
         id: dndCheck
@@ -185,11 +198,14 @@ Item {
 
     function setWifi(on) {
         root.wifiEnabled = on;
+        root.wifiPending = true;
         Quickshell.execDetached(["nmcli", "radio", "wifi", on ? "on" : "off"]);
         refreshTimer.restart();
     }
     function setBluetooth(on) {
+        if (!root.bluetoothAvailable) return;
         root.bluetoothEnabled = on;
+        root.bluetoothPending = true;
         Quickshell.execDetached(["bluetoothctl", "power", on ? "on" : "off"]);
         refreshTimer.restart();
     }
@@ -551,14 +567,19 @@ Item {
                         readonly property real tileWidth: (width - spacing * 3) / 4
                         ToggleChip {
                             width: toggleRow.tileWidth
+                            objectName: "toggle:wifi"
                             glyph: "\uf1eb"; label: "Wi-Fi"
                             active: root.wifiEnabled
+                            pending: root.wifiPending
                             onToggled: (next) => root.setWifi(next)
                         }
                         ToggleChip {
                             width: toggleRow.tileWidth
-                            glyph: "\uf294"; label: "Bluetooth"
+                            objectName: "toggle:bluetooth"
+                            glyph: "\uf294"; label: root.bluetoothAvailable ? "Bluetooth" : "No Bluetooth"
                             active: root.bluetoothEnabled
+                            pending: root.bluetoothPending
+                            available: root.bluetoothAvailable
                             onToggled: (next) => root.setBluetooth(next)
                         }
                         ToggleChip {

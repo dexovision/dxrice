@@ -12,7 +12,13 @@ Rectangle {
     property string glyph: ""
     property string label: ""
     property bool active: false
+    // asked for but not yet confirmed by the system (see QuickSettings)
+    property bool pending: false
+    // false: nothing to switch on this machine -- dimmed, takes no clicks
+    property bool available: true
     signal toggled(bool next)
+    opacity: root.available ? 1 : 0.45
+    Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
 
     implicitWidth: 74
     implicitHeight: 74
@@ -21,7 +27,7 @@ Rectangle {
         if (root.active) return Theme.mix(Theme.layer1, Theme.accent, area.containsMouse ? 0.22 : 0.14);
         return area.containsMouse ? Theme.layer1Hover : Theme.layer1;
     }
-    scale: Theme.pressScale(area.pressed)
+    scale: Theme.pressScale(area.pressed && root.available)
 
     Behavior on color {
         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
@@ -34,12 +40,21 @@ Rectangle {
         anchors.centerIn: parent
         spacing: Theme.padXs
         Text {
+            id: glyphText
             anchors.horizontalCenter: parent.horizontalCenter
             text: root.glyph
             font.family: Theme.iconFamily
             font.pixelSize: Theme.fontSizeLarge
             color: root.active ? Theme.accent : Theme.text
             opacity: root.active ? 1 : 0.8
+            // pending: the icon breathes until the system confirms
+            SequentialAnimation on opacity {
+                running: root.pending
+                loops: Animation.Infinite
+                NumberAnimation { to: 0.35; duration: 420; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 1; duration: 420; easing.type: Easing.InOutSine }
+                onRunningChanged: if (!running) glyphText.opacity = Qt.binding(() => root.active ? 1 : 0.8)
+            }
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -78,8 +93,9 @@ Rectangle {
     MouseArea {
         id: area
         anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
+        hoverEnabled: root.available
+        enabled: root.available
+        cursorShape: root.available ? Qt.PointingHandCursor : Qt.ArrowCursor
         onClicked: root.toggled(!root.active)
     }
 }
