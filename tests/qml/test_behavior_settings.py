@@ -64,8 +64,10 @@ class LayoutPickerTest(unittest.TestCase):
             self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "galaxy")
             self.assertEqual(s.ev(f"{TE}.layout_super_g"), "galaxy")
             for prefix in ("layoutAuto:", "layoutSuperG:"):
-                for mode in ("galaxy", "expansion", "spiral", "compact"):
+                for mode in ("galaxy", "compact", "expansion"):
                     self.assertTrue(s.ev(f"findNamed('{prefix}{mode}') !== null"), prefix + mode)
+                # exactly three: Galaxy and Spiral are one method
+                self.assertIsNone(s.ev(f"findNamed('{prefix}spiral')"))
             self.assertTrue(s.ev("findNamed('layoutAuto:galaxy').picked"))
             self.assertFalse(s.ev("findNamed('layoutAuto:expansion').picked"))
             self.assertFalse(s.ev(f"{TE}.dirty"))
@@ -103,26 +105,37 @@ class LayoutPickerTest(unittest.TestCase):
         s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None, layout_super_g=None, my_custom_key=[1, 2]))
         try:
             self.open_experience(s)
-            self.assertTrue(self.click_card(s, "layoutSuperG:spiral").startswith("ThemeEditor"))
-            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "spiral")
+            self.assertTrue(self.click_card(s, "layoutSuperG:expansion").startswith("ThemeEditor"))
+            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "expansion")
             self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "galaxy", "one picker changed the other")
             self.assertTrue(s.ev(f"{TE}.dirty"))
             self.click_card(s, "layoutAuto:compact")
             self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "compact")
-            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "spiral")
+            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "expansion")
             s.ev(f"{TE}.apply()")
             s.wait(500)
             saved = theme_json(s)
-            self.assertEqual((saved.get("layout_auto_place"), saved.get("layout_super_g")), ("compact", "spiral"))
+            self.assertEqual((saved.get("layout_auto_place"), saved.get("layout_super_g")), ("compact", "expansion"))
             self.assertEqual(saved.get("my_custom_key"), [1, 2], "Apply lost an unrelated key")
         finally:
             s.close()
 
     def test_saved_choices_are_shown_after_reopening(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place="expansion", layout_super_g="compact"))
+        try:
+            self.open_experience(s)
+            self.assertTrue(s.ev("findNamed('layoutAuto:expansion').picked"))
+            self.assertTrue(s.ev("findNamed('layoutSuperG:compact').picked"))
+        finally:
+            s.close()
+
+    def test_a_saved_spiral_reads_as_the_galaxy_spiral(self):
+        # Galaxy and Spiral are the same method
         s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place="spiral", layout_super_g="compact"))
         try:
             self.open_experience(s)
-            self.assertTrue(s.ev("findNamed('layoutAuto:spiral').picked"))
+            self.assertTrue(s.ev("findNamed('layoutAuto:galaxy').picked"))
+            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "galaxy")
             self.assertTrue(s.ev("findNamed('layoutSuperG:compact').picked"))
         finally:
             s.close()
@@ -134,7 +147,7 @@ class LayoutPickerTest(unittest.TestCase):
         try:
             self.open_experience(s)
             self.assertTrue(s.ev("findNamed('layoutAuto:galaxy').picked"))
-            for mode in ("expansion", "spiral", "compact"):
+            for mode in ("compact", "expansion"):
                 self.assertFalse(s.ev(f"findNamed('layoutAuto:{mode}').picked"))
             self.assertFalse(s.ev(f"{TE}.dirty"))
         finally:

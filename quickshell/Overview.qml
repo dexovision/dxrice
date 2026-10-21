@@ -125,10 +125,12 @@ PanelWindow {
     }
     // The layout SUPER+G uses (theme.json; the Galaxy Spiral unless it says
     // otherwise -- the same rule as scripts/dxrice_layout_apply.py)
-    readonly property var layoutModes: ["galaxy", "expansion", "spiral", "compact"]
-    readonly property var layoutNames: ({ galaxy: "Galaxy", expansion: "Expansion", spiral: "Spiral", compact: "Compact" })
-    property string layoutMode: root.layoutModes.indexOf(String(Theme.data.layout_super_g || "").trim().toLowerCase()) >= 0
-                                ? String(Theme.data.layout_super_g).trim().toLowerCase() : "galaxy"
+    readonly property var layoutModes: ["galaxy", "compact", "expansion"]
+    readonly property var layoutNames: ({ galaxy: "Galaxy", compact: "Compact", expansion: "Expansion" })
+    property string layoutMode: {
+        const v = String(Theme.data.layout_super_g || "").trim().toLowerCase();
+        return v === "spiral" ? "galaxy" : (root.layoutModes.indexOf(v) >= 0 ? v : "galaxy");
+    }
     function applyLayout(mode) {
         if (!root.open || layoutProc.running) return;
         root.layoutMode = mode;
@@ -738,8 +740,8 @@ PanelWindow {
         }
 
         // Layout switcher for SUPER+G only (new windows keep their own
-        // choice, set in Settings): apply Galaxy, Expansion, Spiral or
-        // Compact to this workspace and keep it as SUPER+G's. The real
+        // choice, set in Settings): apply Galaxy, Compact or Expansion to
+        // this workspace and keep it as SUPER+G's. The real
         // windows move (Hyprland animates them) and the pictures follow as
         // the overview re-reads them. The label says which selector it is.
         Row {

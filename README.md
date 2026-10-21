@@ -18,17 +18,17 @@ never touches them.
   controls, CPU/GPU/memory/disk/network, clipboard history), a dock with a
   shortcut manager, and a theme editor. One process, started with your
   session.
-- **Window layouts.** Four, picked in Settings > Experience, separately for
-  windows opening on their own and for `SUPER+G`. The **Galaxy Spiral** (the
-  default) keeps every window's size and grows the arrangement outward in a
-  spiral across the infinite desktop. The other three fit everything onto
-  the screen and resize windows to do it: **Expansion** gives the newest
-  window most of the screen and shares the rest between the others,
-  **Spiral** gives each window half of what's left, turning clockwise, and
-  **Compact** is an even grid. In those three, opening or closing a window
-  lays the workspace out again, and a window too many for the screen stays
-  where it is. Pinned and fullscreen windows are never touched. The
-  overview (`SUPER+Tab`) has the same four as chips.
+- **Window arrangement.** Three methods, picked in Settings > Experience,
+  separately for windows opening on their own and for `SUPER+G`:
+  **Galaxy Spiral** (the default) keeps every window's size and grows an
+  airy spiral outward across the infinite desktop; **Compact** packs the
+  windows into a tight, balanced cluster and resizes them a little where
+  that helps (never into a grid); **Expansion** keeps sizes and bursts the
+  windows outward from the centre, each in its own direction, and new ones
+  go to the most open side. Opening a window never moves the others.
+  Pinned, fullscreen and hidden windows are never touched, and a dialog
+  goes beside the window it belongs to. The overview (`SUPER+Tab`) has the
+  same three as chips for `SUPER+G`.
 - **Desktop widgets.** Each one looks like what it is, under your windows:
   a clock in bare heavy type (or tty-clock style blocks), a now-playing card
   built around the album cover with a seekable bar, a terminal-style system
@@ -191,7 +191,7 @@ is a one-line change in that file.
 | `SUPER + SHIFT + K` | `hyprctl kill` (click a window to kill it) |
 | `SUPER + V` | toggle floating for the window |
 | `SUPER + D` | toggle the whole workspace between floating and tiled |
-| `SUPER + G` | arrange the workspace in your chosen layout (Expansion enlarges the focused window) |
+| `SUPER + G` | arrange the workspace with the method chosen for it (Galaxy Spiral, Compact or Expansion) |
 | `SUPER + Tab` | overview: zoom out / back in |
 | `SUPER + F` / `SUPER + M` | fullscreen / maximize |
 | `SUPER + P` / `SUPER + J` | pseudo-tile / toggle split (tiled layout) |

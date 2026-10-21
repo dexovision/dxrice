@@ -1,131 +1,72 @@
 #!/usr/bin/env python3
-"""Puts a workspace's floating windows into one of the three layouts.
+"""Which window-arrangement method runs, for new windows and for SUPER+G.
 
-Reads Hyprland's windows and monitors, asks dxrice_layouts for the
-rectangles, and sends the moves and resizes. Hyprland animates them with its
-own window animation, so the change glides; nothing here fakes motion.
+Three methods, each its own algorithm:
 
-  windows      the eligible ones (dxrice_window_class.partition: ordinary
-               floating windows, not pinned, fullscreen, hidden, a dialog or
-               a menu), in creation order
-  per monitor  each monitor's windows are laid out in its own usable area
-               (its size minus the bar and dock)
-  primary      the window Expansion makes big: the newest one for Auto
-               Place, the focused one for SUPER+G
-  unplaced     a window too many for the area at a usable size is left
-               exactly where it is
+  galaxy     the Galaxy Spiral (dxrice_spiral via dxrice_auto_arrange): the
+             infinite-desktop cloud, windows keep their size and the arm
+             grows outward in a spiral from the first window
+  compact    the composition solver with automatic resizing
+             (dxrice_compact, recovered from 0af6538): a balanced, compact
+             cluster centred on the screen, windows modestly resized where
+             that makes it more compact -- never a grid
+  expansion  the Big Bang (dxrice_expansion): windows keep their size and
+             burst outward from the centre, each along its own direction
 
-Settings (theme.json): layout_auto_place and layout_super_g, each
-"galaxy" (the default), "expansion", "spiral" or "compact". "galaxy" is the
-Galaxy Spiral this desktop always had (dxrice_spiral: windows keep their
-size and grow outward over the infinite desktop); it is what a missing or
-unknown value means, so nobody's setup changes behind their back. The other
-three are screen-bounded and resize windows to fit.
+Settings (theme.json), independent of each other: "layout_auto_place" (what
+a new window does) and "layout_super_g" (what SUPER+G does). Values:
+
+  "galaxy", "compact", "expansion"
+  "spiral"           -> galaxy (Galaxy and Spiral are the same method; an
+                        earlier build offered a separate screen-bounded
+                        "spiral", which is gone)
+  missing / unknown  -> galaxy (what DXrice always did)
+
+The earlier build's screen-bounded "expansion" and "compact" (tiling-like
+layouts) are gone; those saved values now mean the methods above.
 """
 import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import dxrice_layouts  # noqa: E402
-import dxrice_monitor  # noqa: E402
-import dxrice_window_class  # noqa: E402
 import dxrice_xdg  # noqa: E402
-from dxrice_hypr_ipc import (batch_async, hyprctl_json, move_window_exact_lua,  # noqa: E402
-                             resize_window_exact_lua)
+from dxrice_hypr_ipc import batch_async, hyprctl_json, move_window_exact_lua  # noqa: E402
 
 KEYS = {"auto_place": "layout_auto_place", "super_g": "layout_super_g"}
-LEGACY = "galaxy"
-DEFAULT = LEGACY
-CHOICES = (LEGACY,) + dxrice_layouts.MODES
+GALAXY = "galaxy"
+CHOICES = (GALAXY, "compact", "expansion")
+ALIASES = {"spiral": GALAXY}
+DEFAULT = GALAXY
 THRESHOLD = 1       # px: a window this close to its place isn't touched
 
 
 def resolve(raw):
-    """A saved or requested value -> one of CHOICES; anything missing or
-    unknown is DEFAULT (the Galaxy Spiral), never an error."""
+    """A saved or requested value -> one of CHOICES (see the module docstring)."""
     mode = str(raw or "").strip().lower()
+    mode = ALIASES.get(mode, mode)
     return mode if mode in CHOICES else DEFAULT
 
 
+def _theme_path(path=None):
+    return path or os.path.join(dxrice_xdg.config_dir(), "theme.json")
+
+
 def setting(which, path=None):
-    """The saved mode for "auto_place" or "super_g" (see resolve)."""
-    path = path or os.path.join(dxrice_xdg.config_dir(), "theme.json")
+    """The saved method for "auto_place" or "super_g"."""
     try:
-        with open(path) as f:
+        with open(_theme_path(path)) as f:
             raw = json.load(f).get(KEYS[which])
     except (OSError, ValueError, AttributeError):
         raw = None
     return resolve(raw)
 
 
-def gap_setting(path=None):
-    path = path or os.path.join(dxrice_xdg.config_dir(), "theme.json")
-    try:
-        with open(path) as f:
-            return max(0, int(json.load(f).get("hypr_gaps_in", 5)))
-    except (OSError, ValueError, TypeError, AttributeError):
-        return 5
-
-
-def _creation_key(c):
-    try:
-        return int(str(c.get("stableId")), 16)
-    except (TypeError, ValueError):
-        return 0
-
-
-def plan(mode, clients, monitors, workspace_id, gap, primary_address=None, newest_is_primary=True):
-    """[(address, (x, y, w, h))] for the windows that move or resize, plus
-    the addresses left unplaced. Pure: nothing is sent."""
-    kinds, _x11 = dxrice_window_class.classify_all(clients)
-    eligible, _fixed = dxrice_window_class.partition(clients, workspace_id, kinds)
-    eligible.sort(key=_creation_key)
-    by_monitor = {}
-    for c in eligible:
-        by_monitor.setdefault(c.get("monitor"), []).append(c)
-    out, unplaced = [], []
-    for mon_id, wins in sorted(by_monitor.items(), key=lambda kv: (kv[0] is None, kv[0])):
-        m = dxrice_monitor.pick(monitors, mon_id)
-        area = dxrice_monitor.usable_bounds(m) if m else dxrice_monitor.FALLBACK_BOUNDS
-        primary = len(wins) - 1 if newest_is_primary else None
-        if primary_address:
-            for i, c in enumerate(wins):
-                if c["address"] == primary_address:
-                    primary = i
-        if primary is None:
-            primary = len(wins) - 1
-        rects = dxrice_layouts.layout(mode, len(wins), tuple(area), gap, primary)
-        for c, r in zip(wins, rects):
-            if r is None:
-                unplaced.append(c["address"])
-                continue
-            (cx, cy), (cw, ch) = c["at"], c["size"]
-            if (abs(r[0] - cx) > THRESHOLD or abs(r[1] - cy) > THRESHOLD
-                    or abs(r[2] - cw) > THRESHOLD or abs(r[3] - ch) > THRESHOLD):
-                out.append((c["address"], r))
-    return out, unplaced
-
-
-def apply(mode, workspace_id, primary_address=None, newest_is_primary=True, clients=None, monitors=None, gap=None):
-    """Lay the workspace out; returns (moved, unplaced)."""
-    clients = clients if clients is not None else (hyprctl_json(["clients"]) or [])
-    monitors = monitors if monitors is not None else (hyprctl_json(["monitors"]) or [])
-    gap = gap_setting() if gap is None else gap
-    moves, unplaced = plan(mode, clients, monitors, workspace_id, gap, primary_address, newest_is_primary)
-    exprs = []
-    for address, (x, y, w, h) in moves:
-        exprs.append(resize_window_exact_lua(w, h, address))     # resize first (it is centre-anchored)...
-        exprs.append(move_window_exact_lua(x, y, address))       # ...then to the exact top-left
-    if exprs:
-        batch_async(exprs)
-    return len(moves), unplaced
-
-
 def save_setting(which, mode, path=None):
-    """Writes the choice into theme.json, keeping every other key; atomic."""
+    """Writes one selector into theme.json, keeping every other key
+    (including the other selector); atomic."""
     import dxrice_manifest
-    path = path or os.path.join(dxrice_xdg.config_dir(), "theme.json")
+    path = _theme_path(path)
     try:
         with open(path) as f:
             data = json.load(f)
@@ -138,9 +79,50 @@ def save_setting(which, mode, path=None):
     return True
 
 
+# ---- Expansion's SUPER+G (Galaxy and Compact have their own main()) ----
+
+def expansion_moves(eligible, fixed, monitor, band=None):
+    """[(address, x, y)] for the windows Expansion moves. Pure."""
+    import dxrice_expansion
+    windows = [(w["at"][0], w["at"][1], w["size"][0], w["size"][1]) for w in eligible]
+    obstacles = [(f["at"][0], f["at"][1], f["at"][0] + f["size"][0], f["at"][1] + f["size"][1]) for f in fixed]
+    rects = dxrice_expansion.arrange(windows, obstacles, monitor, band)
+    out = []
+    for w, r in zip(eligible, rects):
+        if abs(r[0] - w["at"][0]) > THRESHOLD or abs(r[1] - w["at"][1]) > THRESHOLD:
+            out.append((w["address"], r[0], r[1]))
+    return out
+
+
+def expansion_main():
+    import dxrice_window_class
+    from dxrice_auto_place_window import get_monitor_bounds
+    ws = hyprctl_json(["activeworkspace"])
+    if not ws:
+        print("Could not get the active workspace.", file=sys.stderr)
+        return 1
+    clients = hyprctl_json(["clients"]) or []
+    scales = (dxrice_window_class.monitor_scales(hyprctl_json(["monitors"]))
+              if any(c.get("xwayland") for c in clients) else [])
+    kinds, x11 = dxrice_window_class.classify_all(clients, scales=scales)
+    monitor = get_monitor_bounds()
+    dxrice_window_class.settle_unknown(kinds, clients, (monitor[2] - monitor[0]) * (monitor[3] - monitor[1]))
+    eligible, fixed = dxrice_window_class.partition(clients, ws["id"], kinds)
+    # dialogs that belong to another window move with it, not on their own
+    attached = dxrice_window_class.attached_children(clients, kinds, x11, scales)
+    parents = {e["address"] for e in eligible}
+    eligible = [w for w in eligible if attached.get(w["address"]) not in parents]
+    moves = expansion_moves(eligible, fixed, monitor)
+    if moves:
+        batch_async([move_window_exact_lua(x, y, a) for a, x, y in moves])
+    print(f"Expansion: {len(moves)} window(s) moved.")
+    return 0
+
+
 def main(argv=None):
-    """SUPER+G; or `--mode MODE [--save]`: lay out with MODE now (the
-    overview's layout chips), and with --save make it SUPER+G's choice."""
+    """SUPER+G; or `--mode MODE [--save]`: arrange with MODE now (the
+    overview's chips), and with --save make it SUPER+G's choice (the
+    new-window choice is never touched)."""
     argv = list(argv or [])
     explicit = None
     if "--mode" in argv:
@@ -149,20 +131,13 @@ def main(argv=None):
     mode = explicit or setting("super_g")
     if explicit and "--save" in argv:
         save_setting("super_g", explicit)
-    if mode == LEGACY:
-        import dxrice_auto_arrange
-        return dxrice_auto_arrange.main()
-    ws = hyprctl_json(["activeworkspace"])
-    if not ws:
-        print("Could not get the active workspace.", file=sys.stderr)
-        return 1
-    active = hyprctl_json(["activewindow"]) or {}
-    moved, unplaced = apply(mode, ws["id"], primary_address=active.get("address"), newest_is_primary=False)
-    msg = f"{mode.capitalize()}: {moved} window(s) moved."
-    if unplaced:
-        msg += f" {len(unplaced)} left where they are (no room at a usable size)."
-    print(msg)
-    return 0
+    if mode == "compact":
+        import dxrice_compact
+        return dxrice_compact.main() or 0
+    if mode == "expansion":
+        return expansion_main()
+    import dxrice_auto_arrange
+    return dxrice_auto_arrange.main() or 0
 
 
 if __name__ == "__main__":

@@ -191,10 +191,10 @@ PanelWindow {
     // file, one Apply, one Revert), but nothing a preset or "Generate from
     // wallpaper" touches -- those only carry colour keys.
     property bool auto_place_windows: true
-    // Window layout, chosen separately for windows opening on their own and
-    // for SUPER+G: the Galaxy Spiral (the default: what a theme.json without
-    // the key has always meant, see scripts/dxrice_layout_apply.py), or one of
-    // the screen-bounded Expansion, Spiral and Compact (scripts/dxrice_layouts.py).
+    // Window arrangement, chosen separately for windows opening on their own
+    // and for SUPER+G: the Galaxy Spiral (the default, and what a theme.json
+    // without the key has always meant), Compact or Expansion -- see
+    // scripts/dxrice_layout_apply.py.
     property string layout_auto_place: "galaxy"
     property string layout_super_g: "galaxy"
     property bool reduce_motion: false
@@ -372,7 +372,7 @@ PanelWindow {
         // the placement scripts read it (so Apply can't turn it into anything else)
         for (const key of ["layout_auto_place", "layout_super_g"]) {
             const v = String(root[key] || "").trim().toLowerCase();
-            root[key] = Prev.modes.indexOf(v) >= 0 ? v : "galaxy";
+            root[key] = v === "spiral" ? "galaxy" : (Prev.modes.indexOf(v) >= 0 ? v : "galaxy");
         }
         root.dirty = false;
         root._draftBase = JSON.stringify(data);
@@ -830,8 +830,7 @@ PanelWindow {
                                 id: pane
                                 required property var modelData
                                 required property int index
-                                readonly property bool lead: index === 3 && card.modelData === "expansion"
-                                                            || index === 0 && (card.modelData === "spiral" || card.modelData === "galaxy")
+                                readonly property bool lead: index === 0    // the first (and largest) window
                                 x: modelData[0] * stage.width; y: modelData[1] * stage.height
                                 width: modelData[2] * stage.width; height: modelData[3] * stage.height
                                 radius: 3
@@ -1999,12 +1998,12 @@ PanelWindow {
                     LayoutPicker {
                         settingKey: "layout_auto_place"; idPrefix: "layoutAuto:"
                         title: "Windows opening on their own"
-                        sub: "How the desktop arranges itself when you open or close a window."
+                        sub: "Where a window goes when you open it. Nothing else moves."
                     }
                     LayoutPicker {
                         settingKey: "layout_super_g"; idPrefix: "layoutSuperG:"
                         title: "SUPER+G"
-                        sub: "The arrangement the shortcut gives the current workspace (the focused window is the one Expansion enlarges)."
+                        sub: "What the shortcut does to the windows on the current workspace."
                     }
                 }
             }

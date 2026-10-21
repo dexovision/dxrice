@@ -2205,7 +2205,7 @@ def _journal(status, win, target=None, arm=(), note=""):
           f"{(' ' + note) if note else ''}", file=sys.stderr, flush=True)
 
 
-def place_new_window(address, workspace_id, gap, reflow=None):
+def place_new_window(address, workspace_id, gap, reflow=None, method="galaxy"):
     """Place a newly mapped window. `reflow` (used by PlacementListener when
     a window of the arm closes, see there) re-places an already placed
     window instead: {"expect": (x, y, w, h) where this daemon put it,
@@ -2400,9 +2400,15 @@ def place_new_window(address, workspace_id, gap, reflow=None):
     if family_anchor is not None:
         # beside its parent at the composition spacing, like any neighbour
         # in the composition (see dxrice_spiral.pair_spacing)
-        import dxrice_spiral
-        spacing = dxrice_spiral.pair_spacing(new_w * new_h, family_anchor["size"][0] * family_anchor["size"][1],
-                                             dxrice_spiral.read_spacing())
+        if method == "compact":
+            spacing = gap                       # Compact sits windows `gap` apart, as it always did
+        elif method == "expansion":
+            import dxrice_expansion
+            spacing = dxrice_expansion.spacing()
+        else:
+            import dxrice_spiral
+            spacing = dxrice_spiral.pair_spacing(new_w * new_h, family_anchor["size"][0] * family_anchor["size"][1],
+                                                 dxrice_spiral.read_spacing())
         target = _place_beside_anchor(family_anchor, new_w, new_h,
                                       [rect_for(*o) for o in obstacles], spacing, center)
         if _DEBUG and target is not None:
@@ -2439,8 +2445,20 @@ def place_new_window(address, workspace_id, gap, reflow=None):
         on_screen = any(x < mx1 and x + w > mx0 and y < my1 and y + h > my0 for x, y, w, h in members)
         visible = members if on_screen else []
         arm = tuple(e["address"] for e in arm_wins) if on_screen else ()
-        target = dxrice_auto_arrange.join_composition((new_w, new_h), visible, obstacles,
+        if method == "compact":
+            # Compact (dxrice_compact, recovered): composed with what is in view
+            import dxrice_compact
+            target = dxrice_compact.join_composition((new_w, new_h), members if on_screen else [], obstacles,
                                                      (mx0, my0, mx1, my1), gap)
+            arm = ()
+        elif method == "expansion":
+            import dxrice_expansion
+            target = dxrice_expansion.join_composition((new_w, new_h), members if on_screen else [], obstacles,
+                                                       (mx0, my0, mx1, my1), gap)
+            arm = ()
+        else:
+            target = dxrice_auto_arrange.join_composition((new_w, new_h), visible, obstacles,
+                                                         (mx0, my0, mx1, my1), gap)
         if _DEBUG:
             print(f"DEBUG address={address} joins the composition at {target} "
                   f"(composed with {len(visible)} visible of {len(eligible)}, {len(fixed)} fixed)",
@@ -2472,63 +2490,6 @@ def place_new_window(address, workspace_id, gap, reflow=None):
     dispatch_async(move_window_exact_lua(tx, ty, address))
     _settle_moves({address: {"at": (tx, ty)}})
     return "placed"
-
-
-def place_in_layout(address, workspace_id, mode, clients=None):
-    """Auto Place for Expansion, Spiral and Compact: wait for the window to
-    exist and settle, judge it exactly as place_new_window does, then lay the
-    whole workspace out with it as the newest window. Returns the same
-    statuses ("placed", "ignored", "not-floating", "fullscreen", "gone")."""
-    new_win = None
-    deadline = time.time() + 2.0
-    while time.time() < deadline:
-        clients = hyprctl_json(["clients"])
-        new_win = find_window(clients or [], address)
-        if new_win:
-            break
-        time.sleep(0.03)
-    if not new_win:
-        return "gone"
-    stable = tuple(new_win.get("size", ()))
-    for _ in range(6):
-        time.sleep(0.012)
-        clients = hyprctl_json(["clients"]) or clients
-        probe = find_window(clients, address)
-        if not probe:
-            return "gone"
-        new_win = probe
-        if tuple(probe.get("size", ())) == stable:
-            break
-        stable = tuple(probe.get("size", ()))
-    kinds, x11 = classify_clients(clients)
-    mx0, my0, mx1, my1 = get_monitor_bounds(new_win.get("monitor"))
-    dxrice_window_class.settle_unknown(kinds, clients, (mx1 - mx0) * (my1 - my0))
-    kind = kinds.get(address, dxrice_window_class.NORMAL)
-    if not dxrice_window_class.is_arrangeable(kind) or new_win.get("pinned"):
-        _journal("ignored", new_win, note=f"kind={kind} pinned={bool(new_win.get('pinned'))}")
-        return "ignored"
-    if not new_win.get("floating"):
-        _journal("deferred", new_win, note="tiled")
-        return "not-floating"
-    if new_win.get("fullscreen", 0) != 0:
-        _journal("deferred", new_win, note=f"fullscreen={new_win.get('fullscreen')}")
-        return "fullscreen"
-    moved, unplaced = dxrice_layout_apply.apply(mode, workspace_id, primary_address=address, newest_is_primary=True,
-                                                clients=clients, monitors=hyprctl_json(["monitors"]) or [])
-    _journal(f"layout-{mode}", new_win, note=f"{moved} moved, {len(unplaced)} unplaced")
-    return "placed"
-
-
-def relayout_after_close(workspace_id, mode, address=None):
-    """A window closed: lay the rest of its workspace out again, once the
-    compositor has dropped it from its list (at most 0.4 s of waiting)."""
-    clients = hyprctl_json(["clients"]) or []
-    deadline = time.time() + 0.4
-    while address and find_window(clients, address) and time.time() < deadline:
-        time.sleep(0.04)
-        clients = hyprctl_json(["clients"]) or []
-    clients = [c for c in clients if c.get("address") != address]
-    dxrice_layout_apply.apply(mode, workspace_id, newest_is_primary=True, clients=clients)
 
 
 def _creation_key(client):
@@ -2647,7 +2608,7 @@ class PlacementListener:
 
     def __init__(self, settings=None, place=None, reflow=None):
         self.settings = settings or ThemeSettings()
-        self._place = place or place_new_window
+        self._place = place      # a test's stand-in; otherwise place_new_window with the saved method
         self._workspaces = {}     # address -> workspace id, for re-laying out after a close
         self._reflow = reflow or (lambda addr, ws, gap, info: place_new_window(addr, ws, gap, reflow=info))
         self.handled = set()
@@ -2656,13 +2617,13 @@ class PlacementListener:
     def _layout(self):
         """The saved Auto Place layout; the Galaxy Spiral unless theme.json
         says otherwise (a settings object without one means Galaxy too)."""
-        return getattr(self.settings, "layout", dxrice_layout_apply.DEFAULT)
+        return dxrice_layout_apply.resolve(getattr(self.settings, "layout", None))
 
     def _attempt(self, addr, ws_id, what="placement"):
         try:
-            if self._layout() != dxrice_layout_apply.LEGACY:
-                return place_in_layout(addr, ws_id, self._layout())
-            return self._place(addr, ws_id, self.settings.gap)
+            if self._place is not None:
+                return self._place(addr, ws_id, self.settings.gap)
+            return place_new_window(addr, ws_id, self.settings.gap, method=self._layout())
         except Exception as e:
             # One window failing to place must never take the listener
             # down, but silently swallowing it is how this went unnoticed
@@ -2702,14 +2663,7 @@ class PlacementListener:
             self.handled.discard(addr)
             self.deferred.pop(addr, None)
             PLACED.pop(addr, None)
-            ws_closed = self._workspaces.pop(addr, None)
-            if (ws_closed is not None and self.settings.refresh().enabled
-                    and self._layout() != dxrice_layout_apply.LEGACY):
-                try:
-                    relayout_after_close(ws_closed, self._layout(), addr)
-                except Exception as e:
-                    print(f"layout after close failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-                return "relaid"
+            self._workspaces.pop(addr, None)
             now = _now()
             for a in [a for a, r in PLACED.items() if now - r["t"] > self.LAUNCHER_S]:
                 del PLACED[a]
@@ -2726,7 +2680,9 @@ class PlacementListener:
                     break
                 followers.append(nxt)
                 prev = nxt
-            if not followers or not self.settings.refresh().enabled:
+            # the launcher hand-off belongs to the Galaxy Spiral's arm; the
+            # other methods never move a window because another one closed
+            if not followers or not self.settings.refresh().enabled or self._layout() != dxrice_layout_apply.GALAXY:
                 return "closed"
             for i, a in enumerate(followers):
                 rec = PLACED.get(a)

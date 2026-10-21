@@ -11,6 +11,7 @@ no theme.json outside a temp dir.
 import contextlib
 import io
 import json
+import math
 import os
 import random
 import re
@@ -902,147 +903,9 @@ class TestLauncherHandoff(_Base):
         self.assertNotIn("secret", buf.getvalue())
 
 
-class TestLayoutModes(_Base):
-    """Expansion, Spiral and Compact (the screen-bounded modes, chosen in
-    Settings; the Galaxy Spiral stays the default), through the real
-    listener, the real planner and the fake Hyprland."""
-
-    def theme(self, data):
-        path = os.path.join(self._tmp.name, "theme.json")
-        with open(path, "w") as f:
-            json.dump(data, f)
-        return path
-
-    def listener(self, data=None):
-        L = apw.PlacementListener(apw.ThemeSettings(self.theme(data or {})))
-        L.settings.refresh()
-        return L
-
-    def open(self, L, addr, w=900, h=600, **kw):
-        self.hypr.open(addr, w, h, **kw)
-        return L.handle_line(f"openwindow>>{addr[2:]},1,app,x")
-
-    def rects(self):
-        return {a: tuple(c["at"]) + tuple(c["size"]) for a, c in self.hypr.clients.items()}
-
-    def stage(self, mode_data, n=4):
-        L = self.listener(mode_data)
-        for i in range(n):
-            self.assertEqual(self.open(L, f"0xw{i}"), "placed")
-        return L
-
-    def test_a_fresh_config_keeps_the_galaxy_spiral(self):
-        # was "a fresh config uses Expansion": that silently replaced the
-        # Galaxy Spiral on every existing install (no key in theme.json)
-        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "none.json")), "galaxy")
-        self.stage({}, 3)
-        r = self.rects()
-        for a in ("0xw0", "0xw1", "0xw2"):
-            self.assertEqual(r[a][2:], (900, 600), f"{a}: the Galaxy Spiral never resizes a window")
-        self.assert_no_overlap()
-
-    def test_expansion_when_chosen_gives_the_newest_window_the_room(self):
-        self.stage({"layout_auto_place": "expansion"}, 3)
-        r = self.rects()
-        newest = r["0xw2"]
-        for a in ("0xw0", "0xw1"):
-            self.assertGreater(newest[2] * newest[3], 1.5 * r[a][2] * r[a][3])
-        self.assert_no_overlap()
-
-    def test_each_mode_places_windows_differently_and_without_overlap(self):
-        seen = {}
-        for mode in ("expansion", "spiral", "compact"):
-            self.hypr.clients.clear()
-            self.stage({"layout_auto_place": mode}, 4)
-            self.assert_no_overlap()
-            seen[mode] = tuple(sorted(self.rects().items()))
-        self.assertEqual(len(set(seen.values())), 3)
-
-    def test_unknown_and_missing_values_fall_back_to_the_galaxy_spiral(self):
-        # was "... fall back to Expansion" (the regression); see above
-        for bad in ({"layout_auto_place": "grid"}, {"layout_auto_place": 7}, {"layout_auto_place": None}, {}):
-            self.assertEqual(lap.setting("auto_place", self.theme(bad)), "galaxy", bad)
-        for mode in ("galaxy", "Galaxy ", "expansion", "spiral", "compact"):
-            self.assertEqual(lap.setting("auto_place", self.theme({"layout_auto_place": mode})), mode.strip().lower())
-        with open(os.path.join(self._tmp.name, "torn.json"), "w") as f:
-            f.write('{"layout_auto_p')
-        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "torn.json")), "galaxy")
-
-    def test_auto_place_and_super_g_are_separate_settings(self):
-        t = self.theme({"layout_auto_place": "compact", "layout_super_g": "spiral"})
-        self.assertEqual((lap.setting("auto_place", t), lap.setting("super_g", t)), ("compact", "spiral"))
-
-    def test_closing_a_window_lays_the_rest_out_again(self):
-        L = self.stage({"layout_auto_place": "compact"}, 4)
-        before = self.rects()
-        del self.hypr.clients["0xw1"]
-        self.assertEqual(L.handle_line("closewindow>>w1"), "relaid")
-        after = self.rects()
-        self.assertEqual(set(after), {"0xw0", "0xw2", "0xw3"})
-        self.assertNotEqual({a: after[a] for a in after}, {a: before[a] for a in after})
-        self.assert_no_overlap()
-
-    def test_repeating_the_layout_changes_nothing(self):
-        self.stage({"layout_auto_place": "spiral"}, 4)
-        self.hypr.dispatched.clear()
-        moved, unplaced = lap.apply("spiral", 1, newest_is_primary=True)
-        self.assertEqual((moved, unplaced), (0, []))
-        self.assertEqual(self.hypr.dispatched, [])
-
-    def test_super_g_expands_the_focused_window(self):
-        self.stage({"layout_auto_place": "compact"}, 4)
-        lap.apply("expansion", 1, primary_address="0xw1", newest_is_primary=False)
-        r = self.rects()
-        big = r["0xw1"]
-        for a in ("0xw0", "0xw2", "0xw3"):
-            self.assertGreater(big[2] * big[3], 1.5 * r[a][2] * r[a][3])
-        self.assert_no_overlap()
-
-    def test_pinned_fullscreen_and_hidden_windows_are_left_alone(self):
-        for data in ({}, {"layout_auto_place": "expansion"}):
-            with self.subTest(data=data):
-                self.hypr.clients.clear()
-                self._pinned_fullscreen_hidden(data)
-
-    def _pinned_fullscreen_hidden(self, data):
-        L = self.listener(data)
-        self.open(L, "0xa")
-        self.hypr.add("0xpin", 1500, 80, 380, 220, pinned=True)
-        self.hypr.add("0xfs", 0, 0, 1920, 1080, fullscreen=2, workspace={"id": 2})
-        self.hypr.add("0xhid", 10, 10, 400, 300, hidden=True)
-        keep = {a: (tuple(self.hypr.clients[a]["at"]), tuple(self.hypr.clients[a]["size"])) for a in ("0xpin", "0xfs", "0xhid")}
-        self.open(L, "0xb")
-        for a, v in keep.items():
-            self.assertEqual((tuple(self.hypr.clients[a]["at"]), tuple(self.hypr.clients[a]["size"])), v, a)
-
-    def test_a_window_that_vanished_before_it_was_laid_out_is_a_safe_no_op(self):
-        L = self.listener({"layout_auto_place": "expansion"})
-        self.hypr.dispatched.clear()
-        self.assertEqual(L.handle_line("openwindow>>dead,1,app,x"), "gone")
-        self.assertEqual(self.hypr.dispatched, [])
-
-    def test_two_monitors_each_get_their_own_area(self):
-        monitors = [{"id": 0, "x": 0, "y": 0, "width": 1920, "height": 1080, "scale": 1, "transform": 0,
-                     "reserved": [0, 52, 0, 0], "focused": True},
-                    {"id": 1, "x": 1920, "y": 0, "width": 2560, "height": 1440, "scale": 1, "transform": 0,
-                     "reserved": [0, 0, 0, 0], "focused": False}]
-        clients = [{"address": f"0x{i}", "at": [10, 10], "size": [600, 400], "floating": True, "workspace": {"id": 1},
-                    "monitor": i % 2, "class": f"c{i}", "pid": 100 + i, "stableId": f"{i:x}", "mapped": True,
-                    "hidden": False, "fullscreen": 0, "pinned": False, "xwayland": False} for i in range(1, 5)]
-        moves, unplaced = lap.plan("compact", clients, monitors, 1, 5)
-        self.assertEqual(unplaced, [])
-        by = dict(moves)
-        for a, (x, y, w, h) in by.items():
-            mon = clients[int(a[2:]) - 1]["monitor"]
-            x0, y0, x1, y1 = (0, 52, 1920, 1080) if mon == 0 else (1920, 0, 4480, 1440)
-            self.assertTrue(x >= x0 and y >= y0 and x + w <= x1 and y + h <= y1, (a, by[a], mon))
-
-
-class TestGalaxyRouting(_Base):
-    """Which algorithm runs, through the real listener and SUPER+G's real
-    entry point with nothing injected: the Galaxy Spiral unless a bounded
-    mode was chosen. (The listener used to skip mode routing whenever a test
-    injected `place`, so the real default path had no coverage at all.)"""
+class _MethodBase(_Base):
+    """The real listener (nothing injected), the real algorithms and the
+    fake Hyprland, with theme.json saying which method new windows use."""
 
     def theme(self, data):
         path = os.path.join(self._tmp.name, "theme.json")
@@ -1055,64 +918,63 @@ class TestGalaxyRouting(_Base):
         L.settings.refresh()
         return L
 
+    def open(self, L, addr, w=900, h=600, **kw):
+        self.hypr.open(addr, w, h, **kw)
+        return L.handle_line(f"openwindow>>{addr[2:]},1,app{addr},x")
+
+    def rects(self):
+        return {a: tuple(c["at"]) + tuple(c["size"]) for a, c in self.hypr.clients.items()}
+
+    def nearest_gap(self, addr):
+        me = _rect(self.hypr.clients[addr])
+        return min(_sep(me, _rect(c)) for a, c in self.hypr.clients.items() if a != addr)
+
     def spies(self):
         import unittest.mock as m
-        galaxy = m.patch.object(apw, "place_new_window", wraps=apw.place_new_window)
-        bounded = m.patch.object(apw, "place_in_layout", wraps=apw.place_in_layout)
-        relay = m.patch.object(apw, "relayout_after_close", wraps=apw.relayout_after_close)
-        g, b, r = galaxy.start(), bounded.start(), relay.start()
-        self.addCleanup(galaxy.stop)
-        self.addCleanup(bounded.stop)
-        self.addCleanup(relay.stop)
-        return g, b, r
+        place = m.patch.object(apw, "place_new_window", wraps=apw.place_new_window)
+        p = place.start()
+        self.addCleanup(place.stop)
+        return p
 
-    def test_a_missing_key_places_new_windows_with_the_galaxy_spiral(self):
-        g, b, _ = self.spies()
-        L = self.listener({})
-        self.hypr.open("0xa", 900, 600)
-        self.assertEqual(L.handle_line("openwindow>>a,1,app,x"), "placed")
-        self.assertEqual((g.call_count, b.call_count), (1, 0))
 
-    def test_galaxy_spiral_progression_matches_the_spiral_geometry(self):
-        """Three windows opened in turn land where dxrice_spiral grows them:
-        the anchor first, each next one further along, sizes untouched."""
-        L = self.listener({"layout_auto_place": "galaxy"})
-        sizes = [(1280, 720), (945, 521), (1065, 867)]
-        for i, (w, h) in enumerate(sizes):
-            self.hypr.open(f"0xg{i}", w, h)
-            self.assertEqual(L.handle_line(f"openwindow>>g{i},1,app{i},x"), "placed")
-        got = [tuple(self.hypr.clients[f"0xg{i}"]["at"]) + tuple(self.hypr.clients[f"0xg{i}"]["size"]) for i in range(3)]
-        for (x, y, w, h), (sw, sh) in zip(got, sizes):
-            self.assertEqual((w, h), (sw, sh))
-        mon = apw.get_monitor_bounds(0)
-        expect = dxrice_spiral.arrange(sizes, [], mon, dxrice_spiral.read_spacing())
-        self.assertEqual([(x, y) for x, y, _w, _h in got][0], expect[0][:2], "the anchor is not where the spiral starts")
-        # every later window touches the cloud at a spiral spacing, never on top of it
-        self.assert_no_overlap()
+SIZES5 = [(1100, 700), (900, 600), (820, 540), (760, 520), (700, 480)]
 
-    def test_closing_under_galaxy_takes_the_classic_path_not_a_relayout(self):
-        _, _, r = self.spies()
-        L = self.listener({})
-        for i in range(3):
-            self.hypr.open(f"0xc{i}", 800, 500)
-            L.handle_line(f"openwindow>>c{i},1,app{i},x")
-        del self.hypr.clients["0xc1"]
-        self.assertIn(L.handle_line("closewindow>>c1"), ("closed", "reflowed"))
-        self.assertEqual(r.call_count, 0)
 
-    def test_a_bounded_mode_routes_to_the_layout_engine(self):
-        for mode in ("expansion", "spiral", "compact"):
-            with self.subTest(mode=mode):
+class TestMethodRouting(_MethodBase):
+    """Which algorithm a new window gets: the saved method, reaching
+    place_new_window as `method`. Galaxy and Spiral are one method; missing
+    and unknown values are Galaxy."""
+
+    def method_for(self, data):
+        p = self.spies()
+        L = self.listener(data)
+        self.open(L, "0xa")
+        return p.call_args.kwargs.get("method")
+
+    def test_each_saved_method_reaches_the_placer(self):
+        for saved, method in (("galaxy", "galaxy"), ("compact", "compact"), ("expansion", "expansion"),
+                              ("spiral", "galaxy"), ("Compact ", "compact")):
+            with self.subTest(saved=saved):
                 self.hypr.clients.clear()
-                g, b, _ = self.spies()
-                L = self.listener({"layout_auto_place": mode})
-                self.hypr.open("0xm", 900, 600)
-                L.handle_line("openwindow>>m,1,app,x")
-                self.assertEqual(g.call_count, 0)
-                self.assertEqual(b.call_args[0][2], mode)
+                self.assertEqual(self.method_for({"layout_auto_place": saved}), method)
+
+    def test_missing_and_unknown_values_are_galaxy(self):
+        for data in ({}, {"layout_auto_place": "grid"}, {"layout_auto_place": 7}, {"layout_auto_place": None}):
+            with self.subTest(data=data):
+                self.hypr.clients.clear()
+                self.assertEqual(self.method_for(data), "galaxy")
+        with open(os.path.join(self._tmp.name, "torn.json"), "w") as f:
+            f.write('{"layout_auto_p')
+        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "torn.json")), "galaxy")
+
+    def test_there_are_exactly_three_methods(self):
+        self.assertEqual(lap.CHOICES, ("galaxy", "compact", "expansion"))
+        self.assertEqual(lap.resolve("spiral"), "galaxy")
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_layouts.py")),
+                         "the screen-bounded tiling layouts are gone")
 
     def test_a_settings_object_without_a_layout_means_galaxy(self):
-        g, b, _ = self.spies()
+        p = self.spies()
 
         class Bare:
             gap, enabled = 5, True
@@ -1122,28 +984,246 @@ class TestGalaxyRouting(_Base):
         L = apw.PlacementListener(Bare())
         self.hypr.open("0xz", 700, 500)
         L.handle_line("openwindow>>z,1,app,x")
-        self.assertEqual((g.call_count, b.call_count), (1, 0))
+        self.assertEqual(p.call_args.kwargs.get("method"), "galaxy")
+
+    def test_closing_a_window_moves_nothing_outside_galaxy(self):
+        for mode in ("compact", "expansion"):
+            with self.subTest(mode=mode):
+                self.hypr.clients.clear()
+                L = self.listener({"layout_auto_place": mode})
+                for i, (w, h) in enumerate(SIZES5[:3]):
+                    self.open(L, f"0xc{i}", w, h)
+                before = self.rects()
+                self.hypr.dispatched.clear()
+                del self.hypr.clients["0xc1"]
+                self.assertEqual(L.handle_line("closewindow>>c1"), "closed")
+                self.assertEqual(self.hypr.dispatched, [])
+                self.assertEqual({a: r for a, r in self.rects().items()}, {a: before[a] for a in ("0xc0", "0xc2")})
+
+
+class TestMethodGeometry(_MethodBase):
+    """What each method does to real windows opened one after another."""
+
+    def stage(self, mode, sizes=SIZES5):
+        L = self.listener({"layout_auto_place": mode})
+        history = []
+        for i, (w, h) in enumerate(sizes):
+            before = self.rects()
+            self.assertEqual(self.open(L, f"0xw{i}", w, h), "placed")
+            after = self.rects()
+            # opening a window never moves or resizes any other one
+            self.assertEqual({a: after[a] for a in before}, before, f"{mode}: window {i} moved others")
+            history.append(after)
+        return history[-1]
+
+    def test_galaxy_keeps_sizes_spaces_by_the_band_and_reaches_past_the_screen(self):
+        sizes = [(1280, 720), (945, 521), (1065, 867), (800, 600), (900, 560), (700, 500)]
+        r = self.stage("galaxy", sizes)
+        for i, (w, h) in enumerate(sizes):
+            self.assertEqual(r[f"0xw{i}"][2:], (w, h))
+            if i:
+                _in_band(self, self.nearest_gap(f"0xw{i}"))
+        off = [a for a, (x, y, w, h) in r.items() if x < MON[0] or y < MON[1] or x + w > MON[2] or y + h > MON[3]]
+        self.assertTrue(off, "six large windows must grow the spiral past the screen edge")
+        self.assert_no_overlap()
+
+    def test_galaxy_progression_is_the_spiral_geometry(self):
+        sizes = [(1280, 720), (945, 521), (1065, 867)]
+        r = self.stage("galaxy", sizes)
+        expect = dxrice_spiral.arrange(sizes, [], MON, dxrice_spiral.read_spacing())
+        self.assertEqual(r["0xw0"][:2], expect[0][:2], "the anchor is where the spiral starts")
+
+    def test_compact_joins_tightly_at_the_hyprland_gap(self):
+        self.stage("compact")
+        for i in range(1, len(SIZES5)):
+            self.assertLessEqual(self.nearest_gap(f"0xw{i}"), GAP + 0.5, f"window {i} is not packed against the cluster")
+            self.assertGreaterEqual(self.nearest_gap(f"0xw{i}"), GAP - 0.5)
+        self.assert_no_overlap()
+
+    def test_expansion_keeps_sizes_and_the_airy_spacing(self):
+        import dxrice_expansion
+        r = self.stage("expansion")
+        for i, (w, h) in enumerate(SIZES5):
+            self.assertEqual(r[f"0xw{i}"][2:], (w, h))
+            if i:
+                self.assertAlmostEqual(self.nearest_gap(f"0xw{i}"), dxrice_expansion.spacing(), delta=1.5)
+        self.assert_no_overlap()
+
+    def test_expansion_grows_into_the_most_open_side(self):
+        r = self.stage("expansion", SIZES5[:3])
+        cen = {a: (x + w / 2, y + h / 2) for a, (x, y, w, h) in r.items()}
+        area = {a: w * h for a, (_x, _y, w, h) in r.items()}
+        first_two = ("0xw0", "0xw1")
+        tot = sum(area[a] for a in first_two)
+        g = (sum(cen[a][0] * area[a] for a in first_two) / tot, sum(cen[a][1] * area[a] for a in first_two) / tot)
+        ang = {a: math.atan2(cen[a][1] - g[1], cen[a][0] - g[0]) for a in cen}
+        for a in first_two:
+            apart = abs((ang["0xw2"] - ang[a] + math.pi) % (2 * math.pi) - math.pi)
+            self.assertGreater(math.degrees(apart), 60, f"the third window went toward {a}, not into the empty side")
+
+    def test_the_three_methods_place_the_same_windows_differently(self):
+        placed = {}
+        for mode in ("galaxy", "compact", "expansion"):
+            self.hypr.clients.clear()
+            placed[mode] = self.stage(mode)
+        import itertools
+        for a, b in itertools.combinations(placed, 2):
+            d = sum(math.hypot(placed[a][k][0] + placed[a][k][2] / 2 - placed[b][k][0] - placed[b][k][2] / 2,
+                               placed[a][k][1] + placed[a][k][3] / 2 - placed[b][k][1] - placed[b][k][3] / 2)
+                    for k in placed[a]) / len(placed[a])
+            self.assertGreater(d, 100, f"{a} and {b} put the windows in nearly the same places ({d:.0f}px)")
+
+    def test_placement_is_deterministic(self):
+        for mode in ("galaxy", "compact", "expansion"):
+            with self.subTest(mode=mode):
+                self.hypr.clients.clear()
+                first = self.stage(mode)
+                self.hypr.clients.clear()
+                self.assertEqual(self.stage(mode), first)
+
+    def test_pinned_fullscreen_and_hidden_windows_are_left_alone(self):
+        for mode in ("galaxy", "compact", "expansion"):
+            with self.subTest(mode=mode):
+                self.hypr.clients.clear()
+                L = self.listener({"layout_auto_place": mode})
+                self.open(L, "0xa")
+                self.hypr.add("0xpin", 1500, 80, 380, 220, pinned=True)
+                self.hypr.add("0xfs", 0, 0, 1920, 1080, fullscreen=2, workspace={"id": 2})
+                self.hypr.add("0xhid", 10, 10, 400, 300, hidden=True)
+                keep = {a: (tuple(self.hypr.clients[a]["at"]), tuple(self.hypr.clients[a]["size"])) for a in ("0xpin", "0xfs", "0xhid")}
+                self.open(L, "0xb")
+                for a, v in keep.items():
+                    self.assertEqual((tuple(self.hypr.clients[a]["at"]), tuple(self.hypr.clients[a]["size"])), v, a)
+
+
+class TestExpansionAlgorithm(unittest.TestCase):
+    """dxrice_expansion on its own: the Big Bang rules, in exact geometry."""
+
+    def setUp(self):
+        import dxrice_expansion
+        self.E = dxrice_expansion
+        self.band = (dxrice_spiral.SPACING_MIN_DEFAULT, dxrice_spiral.SPACING_MAX_DEFAULT)
+
+    def arrange(self, windows, fixed=()):
+        return self.E.arrange(windows, list(fixed), MON, self.band)
+
+    @staticmethod
+    def centre(r):
+        return ((r[0] + r[2]) / 2, (r[1] + r[3]) / 2)
+
+    def test_sizes_are_kept_and_nothing_is_closer_than_the_spacing(self):
+        wins = [(100 + 40 * i, 80 + 30 * i, w, h) for i, (w, h) in enumerate(SIZES5)]
+        rs = self.arrange(wins)
+        for (x, y, w, h), r in zip(wins, rs):
+            self.assertEqual((r[2] - r[0], r[3] - r[1]), (w, h))
+        gap = self.E.spacing(self.band)
+        for i in range(len(rs)):
+            for j in range(i + 1, len(rs)):
+                a, b = rs[i], rs[j]
+                apart = max(b[0] - a[2], a[0] - b[2], b[1] - a[3], a[1] - b[3])
+                self.assertGreaterEqual(apart, gap - 0.5, f"{i} and {j} are {apart}px apart")
+
+    def test_the_largest_window_is_the_core_and_the_group_is_centred(self):
+        wins = [(0, 0, 700, 480), (900, 0, 1100, 700), (0, 900, 820, 540), (900, 900, 760, 520)]
+        rs = self.arrange(wins)
+        bx = (min(r[0] for r in rs) + max(r[2] for r in rs)) / 2
+        by = (min(r[1] for r in rs) + max(r[3] for r in rs)) / 2
+        self.assertAlmostEqual(bx, 960, delta=1)
+        self.assertAlmostEqual(by, 540, delta=1)
+        core = rs[1]
+        cc = self.centre(core)
+        others = [math.hypot(*(a - b for a, b in zip(self.centre(r), cc))) for k, r in enumerate(rs) if k != 1]
+        group = (sum(self.centre(r)[0] for r in rs) / 4, sum(self.centre(r)[1] for r in rs) / 4)
+        self.assertLess(math.hypot(cc[0] - group[0], cc[1] - group[1]), min(others), "the largest window is the core")
+
+    def test_windows_keep_their_order_around_the_centre(self):
+        # four windows roughly at the compass points, in a scrambled list order
+        wins = [(1500, 500, 600, 400), (900, 0, 600, 400), (300, 500, 600, 400), (900, 900, 600, 400), (800, 450, 900, 600)]
+        rs = self.arrange(wins)
+        def ring(rects, idx):
+            c = (sum(self.centre(r)[0] for r in rects) / len(rects), sum(self.centre(r)[1] for r in rects) / len(rects))
+            return sorted(idx, key=lambda k: math.atan2(self.centre(rects[k])[1] - c[1], self.centre(rects[k])[0] - c[0]))
+        before = ring([(x, y, x + w, y + h) for x, y, w, h in wins], [0, 1, 2, 3])
+        after = ring(rs, [0, 1, 2, 3])
+        k = after.index(before[0])
+        self.assertEqual(after[k:] + after[:k], before, "the cyclic order around the centre changed")
+
+    def test_a_cascade_bursts_evenly_instead_of_into_a_line(self):
+        wins = [(200 + 160 * i, 120 + 90 * i, w, h) for i, (w, h) in enumerate(SIZES5)]
+        rs = self.arrange(wins)
+        w = max(r[2] for r in rs) - min(r[0] for r in rs)
+        h = max(r[3] for r in rs) - min(r[1] for r in rs)
+        self.assertLess(max(w / h, h / w), 2.2, f"the burst is a streak ({w}x{h})")
+
+    def test_a_fixed_window_is_kept_clear_of(self):
+        fixed = [(860, 0, 1060, 1080)]     # a tall pinned strip through the middle
+        rs = self.arrange([(0, 0, 600, 400), (0, 0, 500, 300), (0, 0, 400, 300)], fixed)
+        for r in rs:
+            self.assertTrue(r[2] <= fixed[0][0] or r[0] >= fixed[0][2], f"{r} lands on the fixed window")
+
+    def test_it_is_deterministic(self):
+        wins = [(100 + 40 * i, 80 + 30 * i, w, h) for i, (w, h) in enumerate(SIZES5)]
+        self.assertEqual(self.arrange(wins), self.arrange(wins))
+
+    def test_join_goes_to_the_widest_empty_angle(self):
+        # windows left and right of the centre: the next one goes up or down
+        layout = [(200, 400, 600, 300), (1120, 400, 600, 300)]
+        x, y = self.E.join((500, 300), layout, layout, MON, self.band)
+        cx, cy = x + 250, y + 150
+        self.assertLess(abs(cx - 960), 260)
+        self.assertGreater(abs(cy - 550), 250)
+
+    def test_it_is_not_the_spiral(self):
+        sizes = SIZES5
+        g = dxrice_spiral.arrange(sizes, [], MON, self.band)
+        e = self.arrange([(100 + 40 * i, 80 + 30 * i, w, h) for i, (w, h) in enumerate(sizes)])
+        d = sum(math.hypot(self.centre(a)[0] - self.centre(b)[0], self.centre(a)[1] - self.centre(b)[1]) for a, b in zip(g, e))
+        self.assertGreater(d / len(sizes), 100)
+
+
+class TestCompactAlgorithm(unittest.TestCase):
+    """dxrice_compact (recovered) as SUPER+G runs it: it resizes, modestly,
+    and is no grid. (Its full original suite is dxrice_test_compact.py.)"""
+
+    def test_it_resizes_some_windows_within_bounds_and_overlaps_nothing(self):
+        import dxrice_compact
+        sizes = [(1100, 700), (900, 600), (820, 540), (760, 520), (700, 480), (660, 440)]
+        eligible = [{"address": f"0x{i}", "at": [200 + 160 * i, 120 + 90 * i], "size": list(s), "class": f"a{i}", "pid": 10 + i}
+                    for i, s in enumerate(sizes)]
+        out = {a: (x, y, w, h) for a, x, y, w, h in dxrice_compact.auto_arrange(eligible, [], MON, GAP)}
+        resized = [a for a, (_x, _y, w, h) in out.items() if (w, h) != tuple(sizes[int(a[2:])])]
+        self.assertTrue(resized, "Compact is the method that resizes")
+        for a, (_x, _y, w, h) in out.items():
+            ow, oh = sizes[int(a[2:])]
+            self.assertGreaterEqual(w, min(ow, apw.MIN_USABLE_WIDTH))
+            self.assertGreaterEqual(h, min(oh, apw.MIN_USABLE_HEIGHT))
+            self.assertGreaterEqual(w * h, ow * oh * (1 - apw.MAX_SHRINK_FRACTION) ** 2 - 1, "shrunk more than its bound")
+        self.assertGreater(len({(w, h) for _x, _y, w, h in out.values()}), 1, "not every window gets one size")
+        rs = [(x, y, x + w, y + h) for x, y, w, h in out.values()]
+        for i in range(len(rs)):
+            for j in range(i + 1, len(rs)):
+                self.assertGreater(_sep(rs[i], rs[j]), 0, "overlap")
 
 
 class TestSuperGRouting(unittest.TestCase):
-    """SUPER+G (dxrice_auto_arrange.py -> dxrice_layout_apply.main): the
-    saved mode decides; no key, an unknown one, or --mode galaxy run the
-    classic arrangement (dxrice_auto_arrange.main), never a bounded mode."""
+    """SUPER+G (dxrice_auto_arrange.py -> dxrice_layout_apply.main): its own
+    saved method decides, and saving it never touches the new-window one."""
 
     def setUp(self):
         import unittest.mock as m
+        import dxrice_compact
         self._tmp = tempfile.TemporaryDirectory()
         os.makedirs(os.path.join(self._tmp.name, "dxrice"))
         self.path = os.path.join(self._tmp.name, "dxrice", "theme.json")
-        self._env = m.patch.dict(os.environ, {"XDG_CONFIG_HOME": self._tmp.name})
-        self._env.start()
-        self.classic = m.patch.object(arr, "main", return_value=0)
-        self.bounded = m.patch.object(lap, "apply", return_value=(0, []))
-        self.ws = m.patch.object(lap, "hyprctl_json", side_effect=lambda a: {"id": 1} if a == ["activeworkspace"] else {})
-        self.c, self.b, _ = self.classic.start(), self.bounded.start(), self.ws.start()
+        self._patches = [m.patch.dict(os.environ, {"XDG_CONFIG_HOME": self._tmp.name}),
+                         m.patch.object(arr, "main", return_value=0),
+                         m.patch.object(dxrice_compact, "main", return_value=0),
+                         m.patch.object(lap, "expansion_main", return_value=0)]
+        started = [p.start() for p in self._patches]
+        self.galaxy, self.compact, self.expansion = started[1], started[2], started[3]
 
     def tearDown(self):
-        for p in (self.classic, self.bounded, self.ws, self._env):
+        for p in self._patches:
             p.stop()
         self._tmp.cleanup()
 
@@ -1151,32 +1231,47 @@ class TestSuperGRouting(unittest.TestCase):
         with open(self.path, "w") as f:
             json.dump(data, f)
 
+    def ran(self):
+        return (self.galaxy.call_count, self.compact.call_count, self.expansion.call_count)
+
     def run_main(self, *argv):
         with contextlib.redirect_stdout(io.StringIO()):
             return lap.main(list(argv))
 
-    def test_no_key_runs_the_classic_arrangement(self):
-        self.write({"accent": "e67878"})
-        self.run_main()
-        self.assertEqual((self.c.call_count, self.b.call_count), (1, 0))
+    def test_each_saved_method_runs_its_own_algorithm(self):
+        for saved, expect in (("galaxy", (1, 0, 0)), ("compact", (0, 1, 0)), ("expansion", (0, 0, 1)),
+                              ("spiral", (1, 0, 0)), (None, (1, 0, 0)), ("grid", (1, 0, 0))):
+            with self.subTest(saved=saved):
+                for mk in (self.galaxy, self.compact, self.expansion):
+                    mk.reset_mock()
+                self.write({} if saved is None else {"layout_super_g": saved})
+                self.run_main()
+                self.assertEqual(self.ran(), expect)
 
-    def test_an_unknown_value_runs_the_classic_arrangement(self):
-        self.write({"layout_super_g": "grid"})
-        self.run_main()
-        self.assertEqual((self.c.call_count, self.b.call_count), (1, 0))
+    def test_the_two_selectors_are_independent(self):
+        self.write({"layout_auto_place": "expansion", "layout_super_g": "compact"})
+        self.assertEqual((lap.setting("auto_place"), lap.setting("super_g")), ("expansion", "compact"))
+        lap.save_setting("super_g", "galaxy")
+        self.assertEqual(json.load(open(self.path))["layout_auto_place"], "expansion")
+        lap.save_setting("auto_place", "compact")
+        self.assertEqual(json.load(open(self.path))["layout_super_g"], "galaxy")
 
-    def test_a_saved_bounded_mode_runs_that_mode(self):
-        self.write({"layout_super_g": "compact"})
-        self.run_main()
-        self.assertEqual(self.c.call_count, 0)
-        self.assertEqual(self.b.call_args[0][0], "compact")
-
-    def test_mode_galaxy_with_save_saves_galaxy_and_runs_the_classic_arrangement(self):
-        # this used to save and run Expansion: "galaxy" was normalised away
-        self.write({"layout_super_g": "compact", "accent": "e67878"})
+    def test_a_chip_with_save_sets_only_super_g(self):
+        self.write({"layout_auto_place": "compact", "layout_super_g": "expansion", "accent": "e67878"})
         self.run_main("--mode", "galaxy", "--save")
-        self.assertEqual(json.load(open(self.path)), {"layout_super_g": "galaxy", "accent": "e67878"})
-        self.assertEqual((self.c.call_count, self.b.call_count), (1, 0))
+        self.assertEqual(json.load(open(self.path)), {"layout_auto_place": "compact", "layout_super_g": "galaxy", "accent": "e67878"})
+        self.assertEqual(self.ran(), (1, 0, 0))
+
+    def test_saving_spiral_stores_galaxy(self):
+        self.write({})
+        lap.save_setting("super_g", "spiral")
+        self.assertEqual(json.load(open(self.path))["layout_super_g"], "galaxy")
+
+    def test_expansion_super_g_moves_only_and_keeps_sizes(self):
+        eligible = [{"address": f"0x{i}", "at": [100 + 50 * i, 100 + 40 * i], "size": list(s)} for i, s in enumerate(SIZES5)]
+        moves = lap.expansion_moves(eligible, [], MON)
+        self.assertTrue(moves)
+        self.assertEqual({len(m) for m in moves}, {3}, "Expansion only moves (address, x, y), never resizes")
 
     def test_the_auto_arrange_script_goes_through_the_router(self):
         src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_auto_arrange.py")).read()

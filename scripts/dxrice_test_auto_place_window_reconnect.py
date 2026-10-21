@@ -79,7 +79,7 @@ class TestReconnectResetsState(unittest.TestCase):
         self.fake = FakeHyprlandSocket2()
         self.place_calls = []
 
-        def fake_place_new_window(address, workspace_id, gap):
+        def fake_place_new_window(address, workspace_id, gap, **_kw):
             self.place_calls.append(address)
             # First window (deferred, never retried after reconnect in the
             # fixed version) always reports "fullscreen" (not placeable
@@ -95,9 +95,6 @@ class TestReconnectResetsState(unittest.TestCase):
             # The listener reads theme.json (gap, on/off switch): never the real one.
             unittest.mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.fake.path + ".config"}),
             unittest.mock.patch.object(apw, "place_new_window", side_effect=fake_place_new_window),
-            # a bounded mode (if one were saved) would come here; what is tested is the same
-            unittest.mock.patch.object(apw, "place_in_layout",
-                                       side_effect=lambda address, ws, mode: fake_place_new_window(address, ws, 5)),
             unittest.mock.patch.object(apw.dxrice_singleton, "claim_single_instance",
                                         return_value=unittest.mock.MagicMock()),
         ]
