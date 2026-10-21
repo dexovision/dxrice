@@ -69,6 +69,18 @@ QtObject {
         file.reload();
     }
 
+    // Changes a few keys of theme.json from the shell itself (a widget
+    // dragged to another corner): every other key is kept as the file has
+    // it. Refused while the file was never read, so it can't replace a real
+    // theme with these few keys alone.
+    function setKeys(changes) {
+        if (Object.keys(root.data).length === 0) return false;
+        const o = Object.assign({}, root.data, changes);
+        root.data = o;
+        file.setText(JSON.stringify(o, null, 4));
+        return true;
+    }
+
     function _applyText(text) {
         try {
             root.data = JSON.parse(text);

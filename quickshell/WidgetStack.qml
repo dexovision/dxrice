@@ -34,6 +34,8 @@ QtObject {
     readonly property real topClearance: 76      // the bar
     readonly property real edgeClearance: 28     // the screen's bottom edge
     property real visualizerBand: 0
+    // the widgets being dragged to new corners (ArrangeBar, IPC "widgets")
+    property bool arranging: false
     readonly property real bottomClearance: Math.max(root.edgeClearance, root.visualizerBand > 0 ? root.visualizerBand + root.gap : 0)
     property real screenWidth: 1920
     property real screenHeight: 1080

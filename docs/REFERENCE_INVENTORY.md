@@ -163,28 +163,63 @@ it's not obviously a zoom.
 - **Present in both:** the bar layout, control centre, calendar/reminders
   widget and recording indicator.
 
-## 6. Mapping to DXrice (status as of feat/redesign, 2026-10-21)
+## 6. Mapping to DXrice
 
-| Reference | DXrice | Status / action |
+Status as of `feat/redesign` at the end of the 2026-10-21 refinement pass.
+**Done** means implemented and covered by a test. **Partial** means some of
+the reference's behaviour exists and the rest is missing for the reason given.
+**Not done** means it is absent. Nothing in this table has been checked on the
+real desktop unless it says **live**. The pass's own changes have not been
+deployed, so none of them are live yet.
+
+### The bar and its panels
+
+| Reference | DXrice | Status |
 |---|---|---|
-| One continuous bar | Three separate pills | **Rebuilding**: one strip, sections inside it, panels hanging from it (ShellIsland/TopBar rewrite) |
-| Search field in the bar | Launcher icon button | **Add**: a search pill in the left section that opens Applications |
-| Media chip in the bar | none | **Add**: shown while a player exists, opening a media section (MediaSession) |
-| Time with date | Time + date in one line | Works; keep |
-| Bell with count | Bell, no count | **Add** the count from `makoctl history` |
-| Workspace pill with number | Pill and dots, no number | **Add** the number to the active pill |
-| Bluetooth / Wi-Fi / power | Indicators, each with its own section | Works (f1e3ea5, a4a11d9 pending deploy) |
-| Control centre sliders and tiles | Dashboard tab (Wi-Fi/BT/DND/Keep awake) | Mostly there; **add** screenshot and screen-record actions (grim/slurp and wf-recorder are installed) |
-| Notifications card with Clear all / × | Notifications section lists history | **Add** dismiss and clear (checking `makoctl` on this machine first) |
-| Recording indicator under the bar | none | **Add** with the recording action: timer, stop (wf-recorder); mic mute and pause only if wf-recorder supports them here |
-| Performance panel | Dashboard Performance tab | **Add** a bar section reading PerformanceService. Ping, FPS, performance profile: powerprofilesctl isn't installed, so no profile row; no FPS source |
-| Calendar/reminders widget | Calendar panel, no events | **Add** a local reminders store (labelled local) shared by the calendar panel and a desktop widget |
-| Analog clock with numerals | Analog style with ticks | **Add** numerals as a face option |
-| Shaped disk/RAM/CPU tiles | System widget (one card) | **Add** shaped meter widgets with a liquid fill, using real PerformanceService values |
-| Weather tile | Weather card | **Add** a compact tile variant from the same weather data |
-| Stopwatch | TimerWidget (stopwatch + countdown) | Works; **add** laps |
-| Mini player | MusicWidget | Works, now with an idle state (f4e5eab); scalloped art and a wavy line are optional styling |
-| Widgets pan with the desktop | Opt-in per widget (c035869) | Works when on; **consider** making it the default (global key, per-widget override) |
-| Bar fixed while panning | Bar is screen-fixed | Works |
-| Visualizer | AudioVisualizer widget | Exists; the reference's is a cava window |
-| Dock at the bottom | Dock with shortcuts and taskbar editor | **Remove** after moving the editor and shortcuts into the bar (brief: no duplicate launcher) |
+| One continuous bar with grouped sections | One strip: apps/workspaces/window left, clock centre, indicators right (`TopBar.qml`, `ShellIsland.qml`) | **Done** (4f0e2c2), live since 4f0e2c2 was deployed |
+| Panels connected to the bar | Each panel grows down out of the bar under its section, joined by concave fillets; a panel that reaches a bar end squares that corner off | **Done** (4f0e2c2, 8899a80) |
+| Moving between sections | Hover a neighbour: the panel turns into the next section without closing, after an 80 ms settle so a sweep doesn't flick through each one | **Done** (572614b) |
+| Panel size changes | An open panel eases to its new size (another section, the Dashboard); another panel taking over fades out, then in | **Done** (572614b) |
+| Search field in the bar | Search pill opens Applications (search, pinned shortcuts, open windows with focus/close, most-used, Shortcuts editor tab) | **Done** (4f0e2c2, 98143a6) |
+| Folder button beside the search | none | **Not done**: a shortcut to the file manager does the same; it isn't part of the search pill |
+| Media chip | Shown while a player exists; opens the Media section: cover, player choice, seek, volume, transport | **Done** (297db80, f4e5eab) |
+| Time with date | Clock with date; opens calendar + agenda | **Done** |
+| Bell with count | Unread count from `makoctl`; dismiss and clear all | **Done** (297db80) |
+| Workspace pill with number | Active pill shows its number | **Done** (297db80) |
+| Wi-Fi / Bluetooth / power | Their own sections | **Done** |
+| Bluetooth pairing | A timed scan (`bluetoothctl --timeout 12 scan on`), nearby devices apart from paired ones, Pair = pair + trust + connect. A device that needs a PIN is answered by the session's agent (blueman-applet); with none running the panel says so | **Done** (4d38dc3); a real pairing not tried |
+| Control-centre sliders | Volume, mic and brightness in the Sound section and Dashboard | **Done** |
+| Mic mute | In the Sound section, and a red mark beside the bar's volume while the mic is muted | **Done** (4d38dc3) |
+| Screenshot / record tiles | Capture section: region or screen, for shots and recordings; sound for a recording (none, desktop, microphone) | **Done** (297db80, 4d38dc3); SIGINT finishing the file and a desktop-audio stream verified with wf-recorder on this machine |
+| Recording indicator under the bar | A card hangs from the capture mark while recording: time, sound, Stop | **Partial** (4d38dc3): no pause and no mid-recording mic toggle. wf-recorder can do neither, so neither control is shown |
+| Performance panel | CPU/memory/GPU rings, disk, network, load, uptime, VRAM, GPU power and clock (AMD sysfs), ping (`ping_host`, default 1.1.1.1, only while shown), link to the Dashboard graphs | **Partial** (297db80, 4d38dc3): no FPS (no source), no performance profile (`powerprofilesctl` isn't installed) |
+| Notifications card | Notifications section | **Done** |
+| Power with confirmation | Lock, log out, restart, shut down; the last three ask once more | **Done** (297db80) |
+
+### Desktop widgets
+
+| Reference | DXrice | Status |
+|---|---|---|
+| Widgets pan with the desktop | On by default (`widgets_world`, per-widget `widget_<name>_world`). One shared spring with hyprland.lua's window constants, so they move in step with the windows; every camera move reports to the viewport (drag, SUPER+arrows, SUPER+G recentre, overview, edge push); a workspace switch cuts | **Done** (61bdb69); keeping pace with real windows is **not verified live** |
+| Analog clock with numerals | `clock_style: analog`, `clock_face` | **Done** (89bc47c) |
+| Stacked digital clock | none | **Not done** |
+| Calendar / reminders | Reminders widget + calendar agenda, kept locally | **Done** (89bc47c, 57b23c1) |
+| Date tile | Part of the reminders widget | **Partial** |
+| Shaped disk / RAM / CPU | Meter widgets, one 150 px footprint, liquid level | **Done** (89bc47c, 57b23c1) |
+| Weather card and tile | `weather_style` card or tile | **Done**; the Today/Tomorrow chips and wavy "feels like" meter are not |
+| Stopwatch | Timer widget with laps | **Done** (89bc47c) |
+| Mini player | Music widget | **Done**; scalloped cover and wavy line not done (styling only) |
+| Sensor waves, pixel blobs | none | **Not done** (no humidity source; blobs unclear) |
+| Visualizer | `AudioVisualizer`, a 150 px band at 1080p (scaled), kept clear of widgets while a player exists | **Done** (61bdb69) |
+| Widget layout | WidgetStack: corners stack, a full side wraps beside its narrowest neighbour, everything at the screen's scale (0.72x-1.3x) | **Done** (61bdb69, 57b23c1) |
+| Arranging | Drag any widget to a corner (Theme editor > Arrange on the desktop, or `qs ipc call widgets arrange`); saved to theme.json, and the editor no longer writes its stale copy over it | **Done** (this pass) |
+| Dock at the bottom | Removed; shortcuts and their editor live in the bar | **Done** (4f0e2c2) |
+
+### What only the real desktop can show
+
+Things these tests cannot settle, to check after deploying:
+- Widgets keep pace with the windows during a SUPER+ALT drag and a SUPER+arrow jump.
+- Hover timing feels right moving across the bar and down into a panel.
+- The fillets and shadow at the bar/panel joint with the GPU's blur.
+- Typing in the reminders widget (Bottom layer, OnDemand keyboard).
+- SUPER+R gives Applications the keyboard.

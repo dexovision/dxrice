@@ -58,6 +58,7 @@ Item {
     readonly property QtObject mpris: Mpris
     readonly property QtObject perf: PerformanceService
     readonly property QtObject viewport: Viewport
+    readonly property QtObject widgetStack: WidgetStack
     readonly property QtObject shortcuts: Shortcuts
     readonly property QtObject media: MediaSession
     readonly property QtObject notifications: NotificationService

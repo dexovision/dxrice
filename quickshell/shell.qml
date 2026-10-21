@@ -113,6 +113,12 @@ ShellRoot {
     // under every other surface) in its own corner and is
     // switched in Settings > Experience (see DesktopWidget.qml).
     AudioVisualizer {}
+    ArrangeBar {}
+    IpcHandler {
+        target: "widgets"
+        function arrange(): void { WidgetStack.arranging = !WidgetStack.arranging; }
+        function done(): void { WidgetStack.arranging = false; }
+    }
     ClockWidget { objectName: "clockWidget" }
     MusicWidget { objectName: "musicWidget" }
     SystemWidget { objectName: "systemWidget" }

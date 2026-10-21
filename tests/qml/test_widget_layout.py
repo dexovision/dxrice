@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import Scene  # noqa: E402
-from test_customization import with_theme  # noqa: E402
+from test_customization import TE, with_theme  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 ALL_ON = dict(widget_clock=True, widget_music=True, widget_system=True, widget_timer=True, widget_reminders=True,
@@ -278,6 +278,67 @@ class FlowTest(unittest.TestCase):
             self.assertGreater(max(r[0] for r in rs.values()), 28 + 100)
         finally:
             s.close()
+
+class ArrangeTest(unittest.TestCase):
+    """Arranging the desktop by hand: any widget can be dragged to another
+    corner, the choice is saved to theme.json, and the theme editor no
+    longer writes its stale copy back over it."""
+
+    def drag(self, s, frm, to):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        QTest.mousePress(s.view, Qt.LeftButton, Qt.NoModifier, QPoint(*frm))
+        steps = 12
+        for i in range(1, steps + 1):
+            QTest.mouseMove(s.view, QPoint(int(frm[0] + (to[0] - frm[0]) * i / steps), int(frm[1] + (to[1] - frm[1]) * i / steps)))
+            s.wait(10)
+        QTest.mouseRelease(s.view, Qt.LeftButton, Qt.NoModifier, QPoint(*to))
+
+    def saved(self, s):
+        return json.loads((Path(s.bridge.config_home) / "dxrice" / "theme.json").read_text())
+
+    def test_a_widget_dragged_to_another_corner_goes_there_and_is_saved(self):
+        s = scene(widget_clock=True, widget_clock_pos="top-left")
+        try:
+            s.wait(700)
+            r = rect(s, "clock")
+            centre = (int(r[0] + r[2] / 2), int(r[1] + r[3] / 2))
+            self.assertIsNone(s.input_owner(*centre), "the clock takes the pointer outside arranging")
+            s.ev("widgetStack.arranging = true")
+            s.wait(100)
+            self.assertTrue(s.ev("findNamed('arrangeBar').visible"))
+            self.assertTrue(s.ev("findNamed('widgetArrange:clock').visible"))
+            self.assertEqual(s.input_owner(*centre), "clockWidget", "arranging: the clock can't be picked up")
+            self.drag(s, centre, (1700, 900))
+            s.wait(900)
+            self.assertEqual(self.saved(s).get("widget_clock_pos"), "bottom-right")
+            r2 = rect(s, "clock")
+            self.assertAlmostEqual(r2[0] + r2[2], 1920 - 28, delta=1)
+            # Done: back to only looking at it
+            s.ev("widgetStack.arranging = false")
+            s.wait(50)
+            self.assertFalse(s.ev("findNamed('widgetArrange:clock').visible"))
+        finally:
+            s.close()
+
+    def test_the_theme_editor_keeps_a_corner_changed_elsewhere(self):
+        s = scene(widget_music=True, widget_music_pos="bottom-left")
+        try:
+            s.ev("panels.open('theme')")
+            s.wait(800)
+            # dragged on the desktop while the editor is open
+            s.ev("theme.setKeys({ widget_music_pos: 'top-right' })")
+            s.wait(200)
+            self.assertEqual(s.ev(f"{TE}.widget_music_pos"), "top-right", "the editor kept showing the old corner")
+            # an unrelated edit applied afterwards doesn't put it back
+            s.ev(f"{TE}.widget_clock_world = false; {TE}.dirty = true; {TE}.save()")
+            s.wait(200)
+            data = self.saved(s)
+            self.assertEqual(data["widget_music_pos"], "top-right")
+            self.assertIs(data["widget_clock_world"], False)
+        finally:
+            s.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

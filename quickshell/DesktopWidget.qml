@@ -62,7 +62,41 @@ PanelWindow {
     // effect in a widget is gated on this and degrades to plain drawing.
     readonly property bool effects: surface.GraphicsInfo.api !== GraphicsInfo.Software
     readonly property bool on: Theme.widgetOn(root.name, root.defaultOn)
-    readonly property string corner: Theme.widgetCorner(root.name, root.defaultCorner)
+    // (a corner it was just dropped in counts at once, before theme.json
+    // has been written and read back)
+    property string _cornerOverride: ""
+    readonly property string corner: root._cornerOverride || Theme.widgetCorner(root.name, root.defaultCorner)
+    Connections {
+        target: Theme
+        function onDataChanged() { if (Theme.widgetCorner(root.name, root.defaultCorner) === root._cornerOverride) root._cornerOverride = ""; }
+    }
+
+    // ---- arranging (WidgetStack.arranging): drag it to any corner ----
+    // Every widget takes the pointer then, even one that is only to look
+    // at. Dropped, it joins the corner nearest its centre -- in its place in
+    // that corner's order -- and theme.json "widget_<name>_pos" is saved.
+    readonly property bool arranging: WidgetStack.arranging && root.active
+    property real dragX: 0
+    property real dragY: 0
+    property point _grab: Qt.point(0, 0)
+    function dropAt(cx, cy) {
+        const corner = (cy < root.height / 2 ? "top" : "bottom") + "-" + (cx < root.width / 2 ? "left" : "right");
+        const before = surface.mapToItem(null, 0, 0);
+        if (corner !== root.corner) {
+            root._cornerOverride = corner;
+            Theme.setKeys({ ["widget_" + root.name + "_pos"]: corner });
+        }
+        root.dragX = 0; root.dragY = 0;
+        const after = surface.mapToItem(null, 0, 0);
+        root.dragX = before.x - after.x; root.dragY = before.y - after.y;
+        settle.restart();
+        return corner;
+    }
+    ParallelAnimation {
+        id: settle
+        NumberAnimation { target: root; property: "dragX"; to: 0; duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle }
+        NumberAnimation { target: root; property: "dragY"; to: 0; duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle }
+    }
     readonly property bool active: root.on && root.wanted
     property real shown: 0
     // its place in the desktop's layout (WidgetStack), eased when it changes
@@ -103,7 +137,7 @@ PanelWindow {
     implicitWidth: root.screen && root.screen.width ? root.screen.width : 1920
     implicitHeight: root.screen && root.screen.height ? root.screen.height : 1080
     // input only over the card, or none at all
-    mask: root.interactive ? root._cardRegion : root._noRegion
+    mask: root.interactive || root.arranging ? root._cardRegion : root._noRegion
     property Region _cardRegion: Region { item: surface }
     property Region _noRegion: Region {}
 
@@ -120,10 +154,10 @@ PanelWindow {
         height: root.contentHeight + 2 * root.pad
         readonly property bool atTop: root.corner.indexOf("top") === 0
         readonly property bool atLeft: root.corner.endsWith("left")
-        x: (atLeft ? WidgetStack.sideMargin + root.slotX : parent.width - width - WidgetStack.sideMargin - root.slotX) + root.panX
+        x: (atLeft ? WidgetStack.sideMargin + root.slotX : parent.width - width - WidgetStack.sideMargin - root.slotX) + root.panX + root.dragX
         // rises 12 px into place on arrival (falls 12 px when leaving)
         y: (atTop ? WidgetStack.topClearance + root.slotY : parent.height - height - root.bottomClearance - root.slotY) + root.panY
-           + (1 - root.shown) * (atTop ? -12 : 12)
+           + (1 - root.shown) * (atTop ? -12 : 12) + root.dragY
         onHeightChanged: root._report()
         onWidthChanged: root._report()
         // the hover lift is drawn, not a move: `y` has to follow a pan at once
@@ -180,6 +214,25 @@ PanelWindow {
                 shadowOpacity: 0.55
                 shadowBlur: 0.6
                 shadowVerticalOffset: 2
+            }
+        }
+        // arranging: an outline, and the whole card is the handle
+        Rectangle {
+            objectName: "widgetArrange:" + root.name
+            visible: root.arranging
+            anchors.fill: parent
+            anchors.margins: -6
+            radius: Theme.radius + 6
+            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, arrangeArea.pressed ? 0.18 : 0.08)
+            border.width: 2
+            border.color: Theme.accentText
+            MouseArea {
+                id: arrangeArea
+                anchors.fill: parent
+                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                onPressed: (m) => { settle.stop(); const p = mapToItem(null, m.x, m.y); root._grab = Qt.point(p.x - root.dragX, p.y - root.dragY); }
+                onPositionChanged: (m) => { const p = mapToItem(null, m.x, m.y); root.dragX = p.x - root._grab.x; root.dragY = p.y - root._grab.y; }
+                onReleased: { const c = surface.mapToItem(null, surface.width / 2, surface.height / 2); root.dropAt(c.x, c.y); }
             }
         }
     }

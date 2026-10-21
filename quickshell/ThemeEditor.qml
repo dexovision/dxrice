@@ -432,7 +432,8 @@ PanelWindow {
     property string _draftBase: ""
     Connections {
         target: Theme
-        function onDataChanged() { if (!root.dirty) root._draftBase = JSON.stringify(Theme.data); }
+        // nothing unapplied: the fields follow a change made elsewhere
+        function onDataChanged() { if (!root.dirty) root.loadFromTheme(Theme.data); }
     }
     function snapshot() {
         const out = {};
@@ -482,8 +483,11 @@ PanelWindow {
         // per Apply, rotating real pre-migration backups out of the 10 kept.
         const obj = {};
         for (const key in Theme.data) obj[key] = Theme.data[key];
+        // Only what was edited here is written over the live file: a key
+        // changed elsewhere since the editor loaded (a widget dragged to
+        // another corner) keeps its new value instead of the editor's stale one.
         for (const key of allKeys()) {
-            if (key in Theme.data || JSON.stringify(root[key]) !== JSON.stringify(root._loaded[key]))
+            if (JSON.stringify(root[key]) !== JSON.stringify(root._loaded[key]))
                 obj[key] = root[key];
         }
         // one window-arrangement setting: the two an earlier build had are
@@ -2164,7 +2168,17 @@ PanelWindow {
                     Column {
                         width: parent.width
                         spacing: Theme.padMd
-                        Text { text: "Corners"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium }
+                        Item {
+                            width: parent.width; height: 36
+                            Text { anchors.verticalCenter: parent.verticalCenter; text: "Corners"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium }
+                            // or drag them there on the desktop itself (saved at once)
+                            GlassButton {
+                                objectName: "arrangeOnDesktop"
+                                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                text: "Arrange on the desktop"; variant: "secondary"
+                                onClicked: { WidgetStack.arranging = true; PanelManager.close("theme"); }
+                            }
+                        }
                         CornerRow { settingKey: "widget_clock_pos"; idPrefix: "widgetPos:clock:"; label: "Clock" }
                         CornerRow { settingKey: "widget_music_pos"; idPrefix: "widgetPos:music:"; label: "Now playing" }
                         CornerRow { settingKey: "widget_system_pos"; idPrefix: "widgetPos:system:"; label: "System monitor" }

@@ -21,8 +21,13 @@ never touches them.
   number) and the focused window. Middle: the clock, which opens the
   calendar with an agenda of reminders you keep on this machine. Right:
   what's playing (only while a player exists), capture (screenshots and
-  screen recordings; a running recording shows its time here in red),
-  performance, Wi-Fi, Bluetooth, sound (outputs and inputs), power (lock,
+  screen recordings, with desktop sound or the microphone if you like; while
+  one runs, a card with its time and Stop hangs from here), performance
+  (with VRAM, GPU power and clock where the GPU reports them, and a ping to
+  `ping_host` in `theme.json`, default 1.1.1.1, only while it's open),
+  Wi-Fi, Bluetooth (search for nearby devices and pair them; a device that
+  needs a PIN is asked through blueman-applet), sound (outputs and inputs;
+  a muted microphone shows beside the volume), power (lock,
   log out, restart and shut down -- the last three ask once more), and
   notifications (an unread count; dismiss what's on screen), each opening
   its own section, plus the full Dashboard. Every panel hangs from the
@@ -72,13 +77,19 @@ never touches them.
   The now-playing card stays with nothing playing and says so, and with
   several players its source label switches between them -- the same
   choice the bar and Dashboard use. Widgets that share a corner stack
-  instead of overlapping. Any of them can either stay on the screen or
-  move with the infinite desktop when you pan, drag, bring a window into
-  view from the overview, or push the desktop aside with the keyboard
-  (Settings > Experience > Move with the desktop).
+  instead of overlapping, and a side that runs out of room starts a new
+  column beside its narrowest widget; everything is drawn in proportion to
+  the screen (designed at 1080 px tall). Settings > Experience > Arrange on
+  the desktop (or `qs ipc call widgets arrange`) lets you drag any widget
+  to another corner; the corner is saved. They move with the infinite
+  desktop -- when you pan, use `SUPER`+arrows, recentre with `SUPER+G` or
+  bring a window into view from the overview -- on the same spring as the
+  windows, so the two keep pace. Turn that off for one widget or all of
+  them in Settings > Experience > Move with the desktop.
 - **Audio visualizer.** A real spectrum of what's playing, from `cava`, along
   the bottom of the desktop. It only runs while music plays, as bars or as
-  block characters.
+  block characters. While a player exists its band is kept clear: the
+  widgets in the bottom corners sit above it.
 - **Wallpaper browser.** Settings > Wallpaper shows thumbnails of the pictures
   in `~/Pictures/Wallpapers` (and the folder of the wallpaper in use); click
   one and Apply.
