@@ -198,7 +198,8 @@ DesktopWidget {
                     height: parent.height; radius: parent.radius
                     width: parent.width * progress.frac
                     color: root.hasArt ? "white" : Theme.accent
-                    Behavior on width { enabled: media.playing && !progressArea.pressed; NumberAnimation { duration: 950; easing.type: Easing.Linear } }
+                    // one short step per second, not a bar that is always animating
+                    Behavior on width { enabled: !progressArea.pressed; NumberAnimation { duration: 240; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                 }
             }
             MouseArea {

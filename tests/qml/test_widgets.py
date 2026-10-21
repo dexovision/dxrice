@@ -223,6 +223,13 @@ class MusicWidgetTest(unittest.TestCase):
         polls = self.s.ev("mpris.players.values[0].calls.filter(c => c === 'poll').length")
         self.assertGreaterEqual(polls, 1)
 
+    def test_the_playing_player_wins_over_a_paused_one_listed_first(self):
+        paused = PLAYER.replace("'Blue in Green'", "'A Paused Tab'").replace("isPlaying: true", "isPlaying: false").replace("'Spotify'", "'Brave'")
+        self.s.ev(f"mpris.players = {{ values: [{paused}, {PLAYER}] }}")
+        self.s.wait(600)
+        self.assertEqual(named(self.s, "musicTitle", "text"), "Blue in Green")
+        self.assertTrue(named(self.s, "musicMedia", "playing"))
+
     def test_a_player_going_away_takes_the_card_with_it(self):
         self.play()
         self.s.ev("mpris.players = { values: [] }")

@@ -75,11 +75,10 @@ PanelWindow {
     WlrLayershell.layer: WlrLayer.Bottom
     WlrLayershell.namespace: "dxrice-visualizer"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-    // the whole screen, like the desktop widgets (it takes no input anywhere),
-    // with the bars along its bottom edge
-    anchors { top: true; left: true; right: true; bottom: true }
-    implicitWidth: root.screen && root.screen.width ? root.screen.width : 1920
-    implicitHeight: root.screen && root.screen.height ? root.screen.height : 1080
+    // a strip along the bottom edge, only as tall as the bars: it redraws 30
+    // times a second while music plays, so it must not be a whole-screen surface
+    anchors { left: true; right: true; bottom: true }
+    implicitHeight: root.barHeight
     mask: Region {}                        // only to look at: never takes input
 
     Item {

@@ -129,6 +129,15 @@ class VisualizerTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_it_is_a_strip_not_a_whole_screen_surface(self):
+        s = self.scene()
+        try:
+            self.play(s)
+            self.assertEqual(s.ev(f"{V}.implicitHeight"), s.ev(f"{V}.barHeight"))
+            self.assertLess(s.ev(f"{V}.height"), 200)
+        finally:
+            s.close()
+
     def test_it_never_takes_input(self):
         s = self.scene()
         try:

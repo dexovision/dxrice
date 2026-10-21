@@ -201,7 +201,7 @@ QtObject {
             + "g=$(ls /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null | head -1); "
             + "[ -n \"$g\" ] && for h in $(dirname $g)/hwmon/hwmon*; do [ -f $h/temp1_input ] && echo gputemp=$h/temp1_input; done; "
             + "for b in /sys/class/power_supply/*; do [ \"$(cat $b/type 2>/dev/null)\" = Battery ] && [ \"$(cat $b/scope 2>/dev/null)\" != Device ] "
-            + "&& [ -f $b/capacity ] && echo bat=$b; done"]
+            + "&& [ -f $b/capacity ] && echo bat=$b; done; true"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const found = {};
