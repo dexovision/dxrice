@@ -133,6 +133,23 @@ class BarTest(unittest.TestCase):
         self.s.wait(700)
         self.assertEqual(self.current(), "")
 
+    def test_a_closed_panel_does_not_reopen_under_a_resting_pointer(self):
+        # the Dashboard's row shifts when it closes (its close button goes),
+        # sliding its indicator back under a pointer that never moved
+        x, y = self.centre("dashboard")
+        QTest.mouseMove(self.s.view, QPoint(x, 300))
+        self.s.wait(20)
+        QTest.mouseMove(self.s.view, QPoint(x, y))
+        self.s.wait(1200)
+        self.assertEqual(self.current(), "quicksettings")
+        self.assertNotEqual(self.centre("dashboard"), [x, y], "the row no longer shifts; this test needs a new setup")
+        self.s.ev("panels.closeCurrent()")
+        self.s.wait(1200)
+        self.assertEqual(self.current(), "", "reopened without the pointer moving")
+        QTest.mouseMove(self.s.view, QPoint(x + 2, y))
+        self.s.wait(400)
+        self.assertEqual(self.current(), "quicksettings", "moving on the element it rests on opens it")
+
     def test_the_dashboard_indicator_opens_the_full_dashboard(self):
         x, y = self.centre("dashboard")
         self.s.click(x, y)
@@ -239,6 +256,9 @@ class ClickOnlyTest(BarTest):
         self.skipTest("covered above")
 
     def test_the_clock_opens_the_calendar_on_a_pause(self):
+        self.skipTest("nothing opens on hover")
+
+    def test_a_closed_panel_does_not_reopen_under_a_resting_pointer(self):
         self.skipTest("nothing opens on hover")
 
 

@@ -201,7 +201,7 @@ PanelWindow {
             }
             if (!root.hoverOpens || cur !== "") return;
             root._hoverWant = name;
-            hoverOpenTimer.restart();
+            if (root._pointerMoved()) hoverOpenTimer.restart();
         } else if (root._hoverWant === name) {
             root._hoverWant = "";
             hoverOpenTimer.stop();
@@ -221,6 +221,28 @@ PanelWindow {
             if (hoverCloseTimer.island === "status" && root.statusOpen && !statusIsland.pointerInside) PanelManager.closeCurrent();
             if (hoverCloseTimer.island === "clock" && PanelManager.isOpen("calendar") && !clockIsland.pointerInside) PanelManager.closeCurrent();
         }
+    }
+    // Closing a panel shifts the row (its close button goes), which can slide
+    // an element under a pointer that never moved -- that is not a hover, and
+    // reopening there made a panel come straight back after its close button
+    // was clicked. So a hover opens nothing until the pointer has moved since
+    // the last close; an element it is already resting on opens once it does.
+    property point _closedAt: Qt.point(-1e6, -1e6)
+    function _pointerMoved() {
+        const p = barPointer.point.scenePosition;
+        return Math.abs(p.x - root._closedAt.x) > 0.5 || Math.abs(p.y - root._closedAt.y) > 0.5;
+    }
+    HoverHandler {      // on the window itself, so it sees the pointer over every island
+        id: barPointer
+        onPointChanged: {
+            if (!root._pointerMoved()) return;
+            root._closedAt = Qt.point(-1e6, -1e6);
+            if (root._hoverWant && PanelManager.current === "" && !hoverOpenTimer.running) hoverOpenTimer.restart();
+        }
+    }
+    Connections {
+        target: PanelManager
+        function onCurrentChanged() { if (PanelManager.current === "") root._closedAt = barPointer.point.scenePosition; }
     }
     function islandLeft(island, inside) {
         if (inside) { if (hoverCloseTimer.island === island) hoverCloseTimer.stop(); return; }
