@@ -852,6 +852,7 @@ PanelWindow {
         expandedHeight: collapsedHeight + (panelItem ? panelItem.contentHeight : 52)
         panel: recordingComponent
         elevation: 2
+        sectionHoverable: false
     }
     Component { id: recordingComponent; RecordingCard {} }
 

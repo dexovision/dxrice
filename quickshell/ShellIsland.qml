@@ -174,7 +174,11 @@ Item {
         id: hover
         readonly property bool inside: sectionHover.hovered || bodyHover.hovered
     }
-    HoverHandler { id: sectionHover }
+    // false for a branch laid over another section's control (the
+    // recording card over the capture mark): its hover would otherwise
+    // take the pointer from that control
+    property bool sectionHoverable: true
+    HoverHandler { id: sectionHover; enabled: root.sectionHoverable }
 
     // the section's own state layer under the pointer
     Rectangle {

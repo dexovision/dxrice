@@ -88,6 +88,20 @@ class BarTest(unittest.TestCase):
         self.s.wait(900)
         self.assertTrue(self.s.ev("findNamed('statusSection:bluetooth').visible"))
 
+    def test_every_indicator_opens_its_own_section_on_a_pause(self):
+        # (the recording card's branch, laid over the capture mark, once took
+        # its hover: capture never opened by hovering)
+        for name in ("capture", "performance", "network", "bluetooth", "audio", "power", "notifications"):
+            self.s.ev("panels.closeCurrent()")
+            self.away()
+            self.s.wait(500)
+            x, y = self.centre(name)
+            QTest.mouseMove(self.s.view, QPoint(x, 70))
+            self.s.wait(30)
+            self.hover(name)
+            self.s.wait(500)
+            self.assertEqual(self.current(), "status:" + name, f"hovering {name} opened nothing")
+
     def test_sweeping_along_the_indicators_does_not_flick_through_each(self):
         x, y = self.centre("network")
         self.s.click(x, y)
@@ -343,6 +357,9 @@ class ClickOnlyTest(BarTest):
         self.skipTest("nothing opens on hover")
 
     def test_a_hover_opened_panel_gives_way_to_another_sections(self):
+        self.skipTest("nothing opens on hover")
+
+    def test_every_indicator_opens_its_own_section_on_a_pause(self):
         self.skipTest("nothing opens on hover")
 
 
