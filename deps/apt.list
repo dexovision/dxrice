@@ -3,6 +3,7 @@ core waybar
 core wofi
 core mako-notifier
 core kitty
+core cava
 core nautilus
 core grim
 core slurp

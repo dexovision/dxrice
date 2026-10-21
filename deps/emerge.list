@@ -6,6 +6,7 @@ core gui-apps/waybar
 core gui-apps/wofi
 core gui-apps/mako
 core x11-terms/kitty
+core media-sound/cava
 core gnome-base/nautilus
 core gui-apps/grim
 core gui-apps/slurp

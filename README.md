@@ -29,12 +29,18 @@ never touches them.
   lays the workspace out again, and a window too many for the screen stays
   where it is. Pinned and fullscreen windows are never touched. The
   overview (`SUPER+Tab`) has the same four as chips.
-- **Desktop widgets.** A clock, a now-playing card and an optional system
-  monitor sit in the corners of the desktop, under your windows. Each can be
-  switched off or moved to another corner in Settings > Experience. The
-  now-playing card shows whatever MPRIS player is open (and isn't there when
-  nothing is), with a seekable bar. The system monitor reads `/proc` and sysfs
-  and only measures while it is on; a GPU it can't read shows as n/a.
+- **Desktop widgets.** Each one looks like what it is, under your windows:
+  a clock in bare heavy type (or tty-clock style blocks), a now-playing card
+  built around the album cover with a seekable bar, a terminal-style system
+  readout (CPU, GPU, memory, disk, network, battery, temperatures and
+  uptime from `/proc` and sysfs, with the last minute drawn in block
+  characters), and the weather for a place you type in Settings (from
+  Open-Meteo; nothing is shown until you set one). Switch each on or off and
+  move it to another corner in Settings > Experience. Anything the machine
+  can't measure is left out or says n/a, never shown as zero.
+- **Audio visualizer.** A real spectrum of what's playing, from `cava`, along
+  the bottom of the desktop. It only runs while music plays, as bars or as
+  block characters.
 - **Wallpaper browser.** Settings > Wallpaper shows thumbnails of the pictures
   in `~/Pictures/Wallpapers` (and the folder of the wallpaper in use); click
   one and Apply.
