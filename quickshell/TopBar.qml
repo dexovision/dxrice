@@ -812,7 +812,7 @@ PanelWindow {
                 BarIndicator {
                     name: "status:media"
                     accessibleName: "Media"
-                    visible: MediaSession.player !== null
+                    wanted: MediaSession.player !== null
                     glyph: MediaSession.player && MediaSession.player.isPlaying ? "\u{f075a}" : "\u{f03e4}"
                     label: {
                         const p = MediaSession.player;
@@ -1019,6 +1019,13 @@ PanelWindow {
         // a second state mark after the reading (a muted microphone)
         property string extraGlyph: ""
         readonly property bool open: PanelManager.current === ind.name
+        // shown when it has something to show (`wanted`) and the bar is set
+        // to show it (theme.json "bar_show_<name>", Settings > Top bar); the
+        // Dashboard always is, and a recording always shows its time
+        property bool wanted: true
+        readonly property string key: ind.name.replace("status:", "")
+        visible: ind.wanted && (Theme.data["bar_show_" + ind.key] !== false || ind.name === "quicksettings"
+                                || (ind.key === "capture" && CaptureService.recording))
         objectName: "barIndicator:" + ind.name.replace("status:", "")
         height: ShellSurface.chip
         width: visible ? indRow.implicitWidth + ShellSurface.pad : 0

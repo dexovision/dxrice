@@ -229,6 +229,15 @@ PanelWindow {
     property string weather_location: ""
     property string weather_units: "metric"
     // world-attached widgets travel with the infinite desktop when you pan
+    property bool bar_hover_open: true
+    property bool bar_show_media: true
+    property bool bar_show_capture: true
+    property bool bar_show_performance: true
+    property bool bar_show_network: true
+    property bool bar_show_bluetooth: true
+    property bool bar_show_audio: true
+    property bool bar_show_power: true
+    property bool bar_show_notifications: true
     property bool widget_clock_world: true
     property bool widget_music_world: true
     property bool widget_system_world: true
@@ -309,6 +318,16 @@ PanelWindow {
         { key: "reduce_motion", objectName: "reduceMotionSwitch", label: "Reduce motion",
           sub: "Panels appear and disappear without sliding or scaling." },
     ]
+    readonly property var barFields: [
+        { key: "bar_hover_open", objectName: "barHoverOpenSwitch", label: "Open panels by resting on them",
+          sub: "Resting the pointer on a part of the bar opens its panel, and it closes when you move away; a click keeps it open. Off: only clicks open them." },
+    ]
+    readonly property var barShowOptions: [
+        { key: "bar_show_media", label: "Media" }, { key: "bar_show_capture", label: "Capture" },
+        { key: "bar_show_performance", label: "Performance" }, { key: "bar_show_network", label: "Network" },
+        { key: "bar_show_bluetooth", label: "Bluetooth" }, { key: "bar_show_audio", label: "Sound" },
+        { key: "bar_show_power", label: "Power" }, { key: "bar_show_notifications", label: "Notifications" },
+    ]
     readonly property var widgetFields: [
         { key: "widget_clock", objectName: "widgetClockSwitch", label: "Clock",
           sub: "The time and date, in a corner of the desktop." },
@@ -377,6 +396,8 @@ PanelWindow {
         for (const f of fontSizeFields) keys.push(f.key);
         for (const f of experienceFields) keys.push(f.key);
         for (const f of behaviorFields) keys.push(f.key);
+        for (const f of barFields) keys.push(f.key);
+        for (const f of barShowOptions) keys.push(f.key);
         keys.push("window_layout");
         for (const f of widgetFields) keys.push(f.key);
         keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style", "visualizer_style",
@@ -2091,6 +2112,22 @@ PanelWindow {
                 padding: Theme.pad2xl
                 title: "Windows and motion"
                 SwitchList { width: parent.width; fields: root.behaviorFields }
+            }
+
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Top bar"
+                Column {
+                    width: parent.width
+                    spacing: Theme.padLg
+                    SwitchList { width: parent.width; fields: root.barFields }
+                    ToggleChips {
+                        label: "Shown in the bar"
+                        sub: "Each opens its own panel. A hidden one is still in the Dashboard; a recording always shows its time."
+                        options: root.barShowOptions
+                    }
+                }
             }
 
             Card {

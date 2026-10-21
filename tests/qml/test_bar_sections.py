@@ -304,6 +304,31 @@ class SectionsTest(unittest.TestCase):
         self.assertIn(self.s.ev("findNamed('statusPing').value").split()[0], ("no", "…"))
 
 
+    # ---- which indicators the bar shows (Settings > Top bar) ----
+    def test_indicators_can_be_hidden_but_a_recording_still_shows(self):
+        vis = lambda n: self.s.ev(f"findNamed('barIndicator:{n}').visible")  # noqa: E731
+        self.assertTrue(vis("bluetooth"))
+        self.s.ev("theme.data = Object.assign({}, theme.data, { bar_show_bluetooth: false, bar_show_capture: false })")
+        self.s.wait(100)
+        self.assertFalse(vis("bluetooth"))
+        self.assertFalse(vis("capture"))
+        self.assertEqual(self.s.ev("findNamed('barIndicator:bluetooth').width"), 0)
+        self.assertTrue(vis("dashboard"), "the Dashboard can't be hidden: it leads to everything")
+        self.s.set_command("dxrice_capture.sh record", "__HANG__")
+        self.s.ev("capture.record('screen')")
+        self.s.wait(600)
+        self.assertTrue(vis("capture"), "a running recording must show its time even when capture is hidden")
+
+    def test_the_choice_is_in_settings(self):
+        self.s.ev("panels.open('theme')")
+        self.s.wait(800)
+        te = "surfaces().filter(w => _name(w).indexOf('ThemeEditor') === 0)[0]"
+        self.s.ev(f"{te}.currentCategory = 'experience'")
+        self.s.wait(600)
+        self.assertIsNotNone(self.s.ev("findNamed('toggleChip:bar_show_bluetooth')"))
+        self.assertIsNotNone(self.s.ev("findNamed('barHoverOpenSwitch')"))
+        self.assertIn("bar_show_bluetooth", self.s.ev(f"{te}.allKeys().join(',')").split(","))
+
 
 class CaptureScriptTest(unittest.TestCase):
     """scripts/dxrice_capture.sh against fake grim/slurp/wf-recorder/wl-copy/
