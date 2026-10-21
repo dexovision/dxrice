@@ -19,7 +19,10 @@ Item {
     property Margins margins: Margins {}
     // OSD-style single-edge panels are centred by the compositor on the free axis.
     x: implicitWidth < Harness.screenWidth ? (Harness.screenWidth - implicitWidth) / 2 : 0
-    y: margins.top
+    // anchored to the bottom edge only (the harness sets this from the
+    // stripped `anchors {..}` line): the compositor puts it at the bottom
+    property bool anchorBottom: false
+    y: anchorBottom ? Harness.screenHeight - height - margins.bottom : margins.top
     // Lets the harness locate every shell surface without knowing ids.
     readonly property bool isShellSurface: true
     implicitWidth: Harness.screenWidth

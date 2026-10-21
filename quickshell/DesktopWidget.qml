@@ -75,7 +75,10 @@ PanelWindow {
     Behavior on slotX { enabled: root._placed; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle } }
     Behavior on slotY { enabled: root._placed; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle } }
     Behavior on bottomClearance { enabled: root._placed; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle } }
-    function _report() { WidgetStack.report(root.name, root.corner, surface.width, surface.height, root.active); }
+    // drawn at the desktop's scale (WidgetStack.scale), from its own corner
+    readonly property real uiScale: WidgetStack.scale
+    function _report() { WidgetStack.report(root.name, root.corner, surface.width * root.uiScale, surface.height * root.uiScale, root.active); }
+    onUiScaleChanged: root._report()
     onCornerChanged: root._report()
     Component.onDestruction: WidgetStack.report(root.name, root.corner, 0, 0, false)
     onActiveChanged: { arrive.stop(); arrive.to = root.active ? 1 : 0; arrive.duration = root.active ? Theme.durationDefault : Theme.durationFast; arrive.start(); root._report(); }
@@ -129,7 +132,7 @@ PanelWindow {
             Behavior on y { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         }
         opacity: root.shown
-        scale: 0.97 + 0.03 * root.shown
+        scale: root.uiScale * (0.97 + 0.03 * root.shown)
         transformOrigin: surface.atTop ? (surface.atLeft ? Item.TopLeft : Item.TopRight) : (surface.atLeft ? Item.BottomLeft : Item.BottomRight)
 
         RectangularShadow {

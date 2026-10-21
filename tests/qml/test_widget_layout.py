@@ -43,7 +43,8 @@ def scene(w=1920, h=1080, **theme):
 
 def rect(s, name):
     return json.loads(s.ev(f"(function(){{ const c = findNamed('widgetCard:{name}'); if (!c || !c.visible || c.opacity < 0.5) return 'null';"
-                           " const p = c.mapToItem(null, 0, 0); return JSON.stringify([p.x, p.y, c.width, c.height]); })()"))
+                           " const p = c.mapToItem(null, 0, 0), q = c.mapToItem(null, c.width, c.height);"
+                           " return JSON.stringify([p.x, p.y, q.x - p.x, q.y - p.y]); })()"))
 
 
 def shown_rects(s):
@@ -241,23 +242,42 @@ class VisualizerBandTest(unittest.TestCase):
         self.check_screen(2560, 1440)
 
 
+class ScaleTest(unittest.TestCase):
+    def test_widgets_keep_their_proportions_on_another_screen(self):
+        sizes = {}
+        for w, h in ((1920, 1080), (1366, 768), (2560, 1440)):
+            s = scene(w, h, widget_music=True, widget_clock=True)
+            try:
+                s.wait(800)
+                sizes[h] = (rect(s, "music"), rect(s, "clock"))
+            finally:
+                s.close()
+        self.assertAlmostEqual(sizes[768][0][2] / sizes[1080][0][2], 0.72, delta=0.01)
+        self.assertAlmostEqual(sizes[1440][0][2] / sizes[1080][0][2], 1440 / 1080, delta=0.04)
+        # the corner margins don't scale: the edge stays where the bar's is
+        for h in sizes:
+            self.assertAlmostEqual(sizes[h][0][0], 28, delta=0.5)
+            self.assertAlmostEqual(sizes[h][1][0], 28, delta=0.5)
+
+
 class FlowTest(unittest.TestCase):
     def test_a_full_side_wraps_into_a_new_column(self):
-        s = scene(1366, 768, widget_clock=True, widget_reminders=True, widget_reminders_pos="top-left",
-                  widget_music=True, widget_timer=True, widget_timer_pos="bottom-left", widget_visualizer=True)
+        left = dict(widget_clock=True, widget_reminders=True, widget_reminders_pos="top-left", widget_system=True,
+                    widget_system_pos="top-left", widget_music=True, widget_timer=True, widget_timer_pos="bottom-left",
+                    widget_weather=True, widget_weather_pos="bottom-left", widget_visualizer=True)
+        s = scene(1366, 768, **left)
         try:
             s.ev("setPlayer({ trackTitle: 'x', isPlaying: true })")
             s.wait(1200)
             rs = shown_rects(s)
-            for a in ("clock", "reminders", "music", "timer"):
-                for b in ("clock", "reminders", "music", "timer"):
-                    if a < b:
-                        self.assertFalse(overlap(rs[a], rs[b]), f"{a} {rs[a]} overlaps {b} {rs[b]}")
+            names = list(rs)
+            for i, a in enumerate(names):
+                for b in names[i + 1:]:
+                    self.assertFalse(overlap(rs[a], rs[b]), f"{a} {rs[a]} overlaps {b} {rs[b]}")
             # something moved inward rather than on top
             self.assertGreater(max(r[0] for r in rs.values()), 28 + 100)
         finally:
             s.close()
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

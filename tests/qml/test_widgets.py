@@ -175,9 +175,10 @@ class ClockSizeAndMotionTest(unittest.TestCase):
             s = Scene(width=w, height=h)
             try:
                 s.wait(300)
-                self.assertAlmostEqual(named(s, "clockWidget", "k"), k, places=3)
-                self.assertEqual(named(s, "clockHours", "font.pixelSize"), round(96 * k))
-                card = named(s, "widgetCard:clock", "width")
+                # (the clock is drawn at the desktop's scale, with every widget)
+                self.assertAlmostEqual(named(s, "clockWidget", "uiScale"), k, places=3)
+                self.assertAlmostEqual(named(s, "widgetCard:clock", "scale"), k, places=3)
+                card = named(s, "widgetCard:clock", "width") * k
                 self.assertLess(card, w * 0.45, f"{w}x{h}: the clock takes too much of the screen ({card}px)")
             finally:
                 s.close()

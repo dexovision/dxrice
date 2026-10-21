@@ -9,6 +9,9 @@ import QtQuick
 //   "memory"  a tall rounded tank    memory in use, used / total GiB
 //   "disk"    a scalloped disc       the root filesystem's use, used / size
 //
+// All three take the same 150 x 150 slot, the shape drawn inside it, so a
+// column of them lines up on the same edge and centre whichever are on.
+//
 // Real samples only, taken while it is shown (it counts itself in to
 // PerformanceService the way the system monitor does). The level rises and
 // falls on a soft spring; the surface is a still wave, so nothing animates
@@ -22,8 +25,8 @@ DesktopWidget {
     surface: "none"
     interactive: false
     pad: 0
-    contentWidth: root.metric === "memory" ? 136 : 150
-    contentHeight: root.metric === "memory" ? 168 : 150
+    contentWidth: 150
+    contentHeight: 150
 
     readonly property real value: root.metric === "cpu" ? PerformanceService.cpuPercent
         : (root.metric === "memory" ? PerformanceService.memPercent : PerformanceService.diskPercent)
@@ -75,11 +78,12 @@ DesktopWidget {
                     ctx.arcTo(p[0], p[1], m[0], m[1], 18);
                 }
             } else if (root.metric === "memory") {
-                const r = 30;
-                ctx.moveTo(r, 0); ctx.lineTo(w - r, 0); ctx.arcTo(w, 0, w, r, r);
-                ctx.lineTo(w, h - r); ctx.arcTo(w, h, w - r, h, r);
-                ctx.lineTo(r, h); ctx.arcTo(0, h, 0, h - r, r);
-                ctx.lineTo(0, r); ctx.arcTo(0, 0, r, 0, r);
+                // a tank, narrower than the slot
+                const r = 28, x0 = w * 0.1, x1 = w * 0.9;
+                ctx.moveTo(x0 + r, 0); ctx.lineTo(x1 - r, 0); ctx.arcTo(x1, 0, x1, r, r);
+                ctx.lineTo(x1, h - r); ctx.arcTo(x1, h, x1 - r, h, r);
+                ctx.lineTo(x0 + r, h); ctx.arcTo(x0, h, x0, h - r, r);
+                ctx.lineTo(x0, r); ctx.arcTo(x0, 0, x0 + r, 0, r);
             } else {
                 // a scalloped disc: a circle with ten soft bumps
                 const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 6;
@@ -122,11 +126,12 @@ DesktopWidget {
         anchors.centerIn: parent
         anchors.verticalCenterOffset: root.metric === "cpu" ? 8 : 0
         spacing: 0
-        Text {
+        Eyebrow {
+            objectName: "meterTitle:" + root.metric
             anchors.horizontalCenter: parent.horizontalCenter
             text: root.title
-            color: Theme.textActive; opacity: 0.8
-            font.family: Theme.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold; font.letterSpacing: 1
+            // over the liquid the accent itself would sink into it
+            color: Theme.textActive; opacity: 0.85
         }
         Text {
             objectName: "meterValue:" + root.metric
@@ -140,7 +145,7 @@ DesktopWidget {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: text.length > 0
             text: root.detail
-            color: Theme.textActive; opacity: 0.7
+            color: Theme.textActive; opacity: 0.8
             font.family: Theme.fontMono; font.pixelSize: 10
         }
     }

@@ -33,8 +33,9 @@ DesktopWidget {
     readonly property string minutes: Qt.formatDateTime(root.now, "mm")
     readonly property string timeText: root.hours + ":" + root.minutes
     readonly property string meridiem: Qt.formatDateTime(root.now, "AP")
-    // sized to the screen: the design is for 1080 px tall, held to 0.72-1.3x
-    readonly property real k: Math.max(0.72, Math.min(1.3, root.implicitHeight / 1080))
+    // (sized to the screen with every other widget: DesktopWidget draws it at
+    // WidgetStack.scale; k is kept for the proportions inside the faces)
+    readonly property real k: 1
     // a new minute (or hour) rises into place; seconds just change
     component Roll: Text {
         id: roll

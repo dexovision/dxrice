@@ -17,6 +17,12 @@ import QtQuick
 // column further in instead of overlapping (a short screen, or many
 // widgets on one side).
 //
+// Every widget is drawn at `scale`: designed for a 1080 px tall screen and
+// sized in proportion to the real one (0.72x-1.3x), so the desktop keeps its
+// composition on a laptop panel and on a 1440p monitor alike. Sizes reported
+// here, and the places returned, are as drawn (scaled); the margins and
+// gaps are not scaled, so the edges stay where the bar's are.
+//
 // The bottom band is the audio visualizer's while it can show (it reports
 // `visualizerBand`): bottom-corner widgets sit above it rather than on it.
 // It is held while a player exists, not only while one plays, so pausing
@@ -31,6 +37,7 @@ QtObject {
     readonly property real bottomClearance: Math.max(root.edgeClearance, root.visualizerBand > 0 ? root.visualizerBand + root.gap : 0)
     property real screenWidth: 1920
     property real screenHeight: 1080
+    readonly property real scale: Math.max(0.72, Math.min(1.3, root.screenHeight / 1080))
     readonly property real room: root.screenHeight - root.topClearance - root.bottomClearance
 
     readonly property var order: ["clock", "date", "reminders", "system", "cpu", "memory", "disk", "sensors", "battery", "weather", "music", "timer"]
@@ -60,38 +67,34 @@ QtObject {
     }
     function placeOf(name) { return root.places[name] || { dx: 0, dy: 0 }; }
 
-    // the deepest the given columns reach over the span [x, x + w)
-    function _reach(cols, x, w) {
+    // how deep the facing corner's widgets reach over the span [x, x + w)
+    function _reach(rects, x, w) {
         let r = 0;
-        for (const c of cols) if (c.x < x + w && x < c.x + c.w && c.y > 0) r = Math.max(r, c.y);
+        for (const q of rects) if (q.x < x + w && x < q.x + q.w) r = Math.max(r, q.y + q.h + root.gap);
         return r;
     }
-    function _blocker(cols, x, w) {
-        for (const c of cols) if (c.x < x + w && x < c.x + c.w && c.y > 0) return c;
-        return null;
-    }
-    // lays `names` out in columns from the corner, avoiding `others` (the
-    // facing corner's columns); returns its own columns
+    // Lays `names` out in columns from the corner, each against the facing
+    // corner's widgets (`others`, as placed); returns its own as placed.
+    // A widget that doesn't fit under the last one starts a new column, at
+    // the first spot past its own columns where the facing corner leaves it
+    // room -- right beside a narrow widget there, not past the widest.
     function _flow(names, others, out) {
-        const cols = [];
+        const placed = [];
         let col = { x: 0, w: 0, y: 0 };
-        cols.push(col);
         for (const n of names) {
             const e = root.entries[n];
-            const fits = (c) => c.y + e.height <= root.room - root._reach(others, c.x, Math.max(c.w, e.width));
-            if (!fits(col)) {
-                if (col.y > 0) { col = { x: col.x + col.w + root.gap, w: 0, y: 0 }; cols.push(col); }
-                // past whatever the facing corner leaves no room beside
-                for (let guard = 0; guard < 8 && !fits(col); guard++) {
-                    const b = root._blocker(others, col.x, e.width);
-                    if (!b) break;
-                    col.x = b.x + b.w + root.gap;
-                }
+            const fits = (x, y) => y + e.height <= root.room - root._reach(others, x, e.width);
+            if (!fits(col.x, col.y)) {
+                const from = col.y > 0 ? col.x + col.w + root.gap : col.x;
+                const spots = [from].concat(others.map((q) => q.x + q.w + root.gap).filter((x) => x > from)).sort((a, b) => a - b);
+                const x = spots.find((x) => fits(x, 0));
+                col = { x: x === undefined ? from : x, w: 0, y: 0 };
             }
             out[n] = { dx: col.x, dy: col.y };
+            placed.push({ x: col.x, y: col.y, w: e.width, h: e.height });
             col.y += e.height + root.gap;
             col.w = Math.max(col.w, e.width);
         }
-        return cols;
+        return placed;
     }
 }

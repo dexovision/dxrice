@@ -184,6 +184,9 @@ _PANEL_LINE_STRIP = [
 ]
 
 
+_ANCHORS = _PANEL_LINE_STRIP[0]
+
+
 def _prepare_shell(dest: Path):
     """Copy the real shell sources, stripping only window-protocol lines a
     stub Item cannot carry (layer-shell anchors / WlrLayershell.*)."""
@@ -194,9 +197,15 @@ def _prepare_shell(dest: Path):
             continue
         text = src.read_text()
         if "PanelWindow {" in text:
-            text = "\n".join(
-                "" if any(rx.match(line) for rx in _PANEL_LINE_STRIP) else line
-                for line in text.split("\n"))
+            def strip(line):
+                if not any(rx.match(line) for rx in _PANEL_LINE_STRIP):
+                    return line
+                # a surface anchored to the bottom edge and not the top sits
+                # at the bottom of the screen (the stub reads anchorBottom)
+                if _ANCHORS.match(line) and "bottom" in line and "top" not in line:
+                    return "    anchorBottom: true"
+                return ""
+            text = "\n".join(strip(line) for line in text.split("\n"))
         (dest / src.name).write_text(text)
     for scene in SCENES.glob("*.qml"):
         shutil.copy(scene, dest / scene.name)

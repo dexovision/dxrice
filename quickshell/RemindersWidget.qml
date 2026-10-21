@@ -13,6 +13,9 @@ DesktopWidget {
     takesKeys: true
     contentWidth: 330
     contentHeight: Math.max(dateBlock.height, list.implicitHeight)
+    // the date block, then the list: its label, each reminder with when it
+    // is on the right (the line used to stop at its short text and leave
+    // the card's right half empty), and the line to add one
 
     property date now: new Date()
     Timer {
@@ -65,24 +68,35 @@ DesktopWidget {
         x: dateBlock.width + Theme.padLg
         width: root.contentWidth - x
         spacing: 4
+        Eyebrow { text: "Coming up"; bottomPadding: 2 }
         Repeater {
             model: root.coming
-            delegate: Row {
+            delegate: Item {
                 id: line
                 required property var modelData
                 objectName: "reminderLine:" + modelData.id
                 width: list.width
-                spacing: Theme.padSm
+                height: 22
                 Text {
+                    id: kindGlyph
                     anchors.verticalCenter: parent.verticalCenter
+                    width: 16
                     text: ReminderStore.kindOf(line.modelData.kind).glyph
                     color: Theme.accentText
                     font.family: Theme.iconFamily; font.pixelSize: 11
                 }
-                Column {
-                    width: parent.width - 20
-                    Text { width: parent.width; text: line.modelData.text; elide: Text.ElideRight; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
-                    Text { text: root.when(line.modelData.date); color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: 10 }
+                Text {
+                    anchors.left: kindGlyph.right; anchors.right: whenText.left; anchors.rightMargin: Theme.padSm
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: line.modelData.text; elide: Text.ElideRight
+                    color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall
+                }
+                Text {
+                    id: whenText
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                    text: root.when(line.modelData.date)
+                    color: Theme.text; opacity: Theme.opacityMuted
+                    font.family: Theme.fontFamily; font.pixelSize: 10
                 }
             }
         }
