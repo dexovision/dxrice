@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
 
 // The shell's bottom edge -- one island, not a bar.
 //
@@ -212,13 +213,46 @@ PanelWindow {
                     Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                     Behavior on scale { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
 
+                    // is its app open, and is it the focused one (Hyprland's own window list)
+                    readonly property string appKey: root.appKeyOf(shortcutTile.modelData.onClick)
+                    readonly property bool running: root.isRunning(shortcutTile.appKey)
+                    readonly property bool focusedApp: shortcutTile.running && root.matches(root.focusedClass, shortcutTile.appKey)
+                    // the glyph lifts a little under the pointer and hops when launched;
+                    // only this icon moves, so sweeping across the dock stays calm
+                    property real hop: 0
+                    SequentialAnimation {
+                        id: hopAnim
+                        NumberAnimation { target: shortcutTile; property: "hop"; to: -9; duration: Theme.reduceMotion ? 0 : 110; easing.type: Easing.OutQuad }
+                        NumberAnimation { target: shortcutTile; property: "hop"; to: 0; duration: Theme.durationSpring; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast }
+                    }
+
                     Text {
                         id: tileLabel
+                        objectName: "dockGlyph"
                         anchors.centerIn: parent
+                        anchors.verticalCenterOffset: (tileArea.containsMouse ? -3 : 0) + shortcutTile.hop
+                        Behavior on anchors.verticalCenterOffset {
+                            enabled: !hopAnim.running
+                            NumberAnimation { duration: Theme.durationSpringFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast }
+                        }
                         text: shortcutTile.modelData.glyph
                         font.family: Theme.iconFamily
                         font.pixelSize: Theme.fontSizeLarge
                         color: Theme.textActive
+                    }
+                    // running: a small mark under the icon; focused: a wider accent one
+                    Rectangle {
+                        objectName: "dockRunning"
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 2
+                        height: 3; radius: 1.5
+                        width: shortcutTile.focusedApp ? 14 : 4
+                        color: shortcutTile.focusedApp ? Theme.accent : Theme.textActive
+                        opacity: shortcutTile.running ? (shortcutTile.focusedApp ? 1 : 0.55) : 0
+                        Behavior on width { NumberAnimation { duration: Theme.durationSpringFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast } }
+                        Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                     }
 
                     MouseArea {
@@ -245,7 +279,7 @@ PanelWindow {
                             const m = /^sh -c '(.*) >\/dev\/null 2>&1 &'$/.exec(shortcutTile.modelData.onClick);
                             const cmd = m ? m[1].replace(/'\\''/g, "'") : shortcutTile.modelData.onClick;
                             if (cmd === "wofi --show drun") { root.launcherRequested(); return; }
-                            if (cmd) Launcher.launch("dock", ["sh", "-c", cmd]);
+                            if (cmd) { hopAnim.restart(); Launcher.launch("dock", ["sh", "-c", cmd]); }
                         }
                     }
                 }
@@ -270,6 +304,42 @@ PanelWindow {
                 onClicked: root.taskbarRequested()
             }
         }
+    }
+
+    // ---- which shortcuts' apps are open ----
+    // A shortcut's app: the program its command runs, by name ("/usr/bin/
+    // discord --x" -> "discord"). An open window matches when its class or
+    // app id is that name, or ends in it after a dot ("org.gnome.Nautilus"
+    // for "nautilus"), or starts with it and a dash ("brave-browser").
+    function appKeyOf(onClick) {
+        const m = /^sh -c '(.*) >\/dev\/null 2>&1 &'$/.exec(String(onClick || ""));
+        let cmd = (m ? m[1].replace(/'\\''/g, "'") : String(onClick || "")).trim();
+        let parts = cmd.split(/\s+/);
+        while (parts.length && (parts[0] === "env" || parts[0].indexOf("=") > 0)) parts.shift();
+        const prog = parts.length ? parts[0].split("/").pop().toLowerCase() : "";
+        return prog === "sh" || prog === "bash" ? "" : prog;
+    }
+    function matches(cls, key) {
+        if (!cls || !key) return false;
+        const c = String(cls).toLowerCase();
+        return c === key || c.endsWith("." + key) || c.startsWith(key + "-");
+    }
+    function classOf(t) {
+        if (!t) return "";
+        if (t.lastIpcObject && t.lastIpcObject.class) return String(t.lastIpcObject.class);
+        return t.wayland && t.wayland.appId ? String(t.wayland.appId) : "";
+    }
+    readonly property var runningClasses: {
+        const list = Hyprland.toplevels ? Hyprland.toplevels.values : [];
+        const out = [];
+        for (let i = 0; i < list.length; i++) { const c = root.classOf(list[i]); if (c) out.push(c); }
+        return out;
+    }
+    readonly property string focusedClass: root.classOf(Hyprland.activeToplevel)
+    function isRunning(key) {
+        if (!key) return false;
+        for (const c of root.runningClasses) if (root.matches(c, key)) return true;
+        return false;
     }
 
     // ---- the hovered icon's name, above the dock ----

@@ -142,7 +142,9 @@ Item {
         fadeAnim.start();
     }
     readonly property real pV: morph
-    readonly property real pH: sub(morph, 0.18, 1.0)
+    // past 1 while the opening spring overshoots: both axes follow it, so
+    // the surface swells evenly and settles back, never lopsided
+    readonly property real pH: morph > 1 ? morph : sub(morph, 0.18, 1.0)
 
     property real surfaceW: collapsedWidth + (expandedWidth - collapsedWidth) * pH
     property real surfaceH: collapsedHeight + (expandedHeight - collapsedHeight) * pV

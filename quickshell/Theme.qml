@@ -405,8 +405,26 @@ QtObject {
     readonly property int durationExit: root.reduceMotion ? 1 : Math.round(animMs * 2.0)
     readonly property int durationFadeIn: Math.round(animMs * (root.reduceMotion ? 1.0 : 1.8))
     readonly property int durationFadeOut: Math.round(animMs * 0.8)
-    readonly property var curveEnter: curveStandard
+    // Opening is a spring: the surface grows a touch past its size and
+    // settles back (Material 3 Expressive's default spatial curve, peaking
+    // about 5% over). Closing never bounces -- it tucks away.
+    readonly property var curveEnter: curveSpring
     readonly property var curveExit: [0.3, 0, 0.8, 0.15, 1, 1]
+
+    // ---- springs: the shared vocabulary for things that physically move
+    // into place. Overshoot-and-settle curves, all flattened to the plain
+    // standard curve under reduce_motion, so "less motion" means no bounce
+    // anywhere, not just shorter bounces.
+    //   curveSpring      panels, launcher, popovers opening (~5% over)
+    //   curveSpringFast  small things: a pressed button, a dock icon, a
+    //                    chip (~10% over, short)
+    //   curveSettle      selection/focus moving to a new place: no
+    //                    overshoot, a long soft landing
+    readonly property var curveSpring: root.reduceMotion ? curveStandard : curveExpressiveDefault
+    readonly property var curveSpringFast: root.reduceMotion ? curveStandard : curveExpressiveFast
+    readonly property var curveSettle: curveEmphasizedDecel
+    readonly property int durationSpring: root.reduceMotion ? 1 : Math.round(animMs * 3.0)
+    readonly property int durationSpringFast: root.reduceMotion ? 1 : Math.round(animMs * 1.6)
 
     // theme.json "reduce_motion": true (Settings > Experience > Reduce
     // motion). Surfaces then appear and disappear in place (opacity only)

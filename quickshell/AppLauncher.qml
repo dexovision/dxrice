@@ -104,8 +104,9 @@ PanelWindow {
     NumberAnimation {
         id: enter
         target: root; property: "progress"; to: 1
-        duration: Theme.durationDefault
-        easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEmphasizedDecel
+        // a spring: it rises a little past its place and settles (Theme.curveSpring)
+        duration: Theme.durationSpring
+        easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpring
     }
     NumberAnimation {
         id: leave

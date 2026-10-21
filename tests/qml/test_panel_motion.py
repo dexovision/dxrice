@@ -53,6 +53,15 @@ STATE_JS = """(function(){
 })()"""
 
 
+def record_morph(s, island):
+    """Every morph value the island takes, recorded inside QML (polling
+    from Python is too coarse to catch a 100 ms overshoot)."""
+    qml = ("import QtQuick; Item { id: r; objectName: 'morphRec'; property var seen: []; "
+           "Connections { target: r.parent; function onMorphChanged() { r.seen.push(r.parent.morph); } } }")
+    s.ev("(function(){ const old = findNamed('morphRec'); if (old) old.destroy(); })()")
+    s.ev(f"Qt.createQmlObject({json.dumps(qml)}, findNamed('{island}'), 'rec')")
+
+
 class PanelMotionTest(unittest.TestCase):
     size = (1920, 1080)
 
@@ -204,6 +213,26 @@ class PanelMotionTest(unittest.TestCase):
                     self.assertGreater(st["op"], 0.99, f"content stuck faded after reopening: {st}")
                     self.assertTrue(st["enabled"], "content stuck non-interactive after reopening")
 
+    def test_opening_springs_past_its_size_and_settles_exactly(self):
+        for panel, island in PANELS.items():
+            with self.subTest(panel=panel):
+                self.s.ev("panels.closeCurrent()")
+                self.s.wait(700)
+                record_morph(self.s, island)
+                self.s.ev(f"panels.open('{panel}')")
+                self.s.wait(1000)
+                seen = json.loads(self.s.ev("JSON.stringify(findNamed('morphRec').seen)"))
+                self.assertGreater(max(seen), 1.01, f"{panel} opened without a spring: peak {max(seen):.3f}")
+                self.assertLess(max(seen), 1.12, f"{panel} bounced too far: peak {max(seen):.3f}")
+                self.assertAlmostEqual(seen[-1], 1, places=3, msg=f"{panel} did not settle")
+                # and closing never bounces
+                record_morph(self.s, island)
+                self.s.ev("panels.closeCurrent()")
+                self.s.wait(800)
+                seen = json.loads(self.s.ev("JSON.stringify(findNamed('morphRec').seen)"))
+                self.assertLessEqual(max(seen), 1.0 + 1e-6)
+                self.assertGreaterEqual(min(seen), -1e-6)
+
     def test_rapid_toggle_spam_settles_in_the_last_state(self):
         for panel in PANELS:
             for n, final_open in ((7, True), (10, False)):
@@ -314,6 +343,23 @@ class LockShakeTest(unittest.TestCase):
 class ReducedMotionTest(unittest.TestCase):
     """theme.json "reduce_motion": true -- panels appear and disappear in
     place: no growing/shrinking geometry, only a short fade of the content."""
+
+    def test_reduced_motion_never_bounces(self):
+        def reduce(bridge):
+            path = Path(bridge.config_home) / "dxrice" / "theme.json"
+            data = json.loads(path.read_text())
+            data["reduce_motion"] = True
+            path.write_text(json.dumps(data))
+        s = Scene(width=1920, height=1080, setup=reduce)
+        try:
+            record_morph(s, "statusIsland")
+            s.ev("panels.open('quicksettings')")
+            s.wait(600)
+            seen = json.loads(s.ev("JSON.stringify(findNamed('morphRec').seen)"))
+            self.assertLessEqual(max(seen), 1.0 + 1e-6)
+            self.assertEqual(s.ev("theme.curveSpring.toString()"), s.ev("theme.curveStandard.toString()"))
+        finally:
+            s.close()
 
     def test_panels_change_size_at_once_and_still_fade_cleanly(self):
         def reduce(bridge):
