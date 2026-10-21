@@ -91,7 +91,7 @@ DesktopWidget {
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: root.ok
                 text: root.now.glyph
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.iconFamily; font.pixelSize: 40
             }
             Text {
@@ -138,7 +138,7 @@ DesktopWidget {
                 objectName: "weatherGlyph"
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.now.glyph
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.iconFamily; font.pixelSize: 54
             }
             Column {
@@ -180,7 +180,7 @@ DesktopWidget {
                     spacing: 2
                     Text {
                         text: index === 0 ? "Today" : Qt.formatDate(new Date(modelData.date + "T12:00:00"), "ddd")
-                        color: Theme.accent
+                        color: Theme.accentText
                         font.family: Theme.fontFamily; font.pixelSize: 11; font.weight: Font.Bold; font.letterSpacing: 1
                     }
                     Row {

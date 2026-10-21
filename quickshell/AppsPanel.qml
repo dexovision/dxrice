@@ -134,7 +134,7 @@ Item {
                     id: tabRow
                     anchors.centerIn: parent
                     spacing: Theme.padSm
-                    Text { text: tab.modelData.glyph; color: tab.current ? Theme.accent : Theme.text; font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmaller; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: tab.modelData.glyph; color: tab.current ? Theme.accentText : Theme.text; font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmaller; anchors.verticalCenter: parent.verticalCenter }
                     Text { text: tab.modelData.label; color: tab.current ? Theme.textActive : Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; font.weight: tab.current ? Font.DemiBold : Font.Normal; anchors.verticalCenter: parent.verticalCenter }
                 }
                 MouseArea {
@@ -170,7 +170,7 @@ Item {
                 id: searchGlyph
                 x: 14; anchors.verticalCenter: parent.verticalCenter
                 text: ""
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeNormal
             }
             TextInput {
@@ -273,7 +273,7 @@ Item {
                         x: 8; width: 22; anchors.verticalCenter: parent.verticalCenter
                         horizontalAlignment: Text.AlignHCenter
                         text: (win.modelData.cls || "?").charAt(0).toUpperCase()
-                        color: Theme.accent; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.DemiBold
+                        color: Theme.accentText; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.DemiBold
                     }
                     Text {
                         x: 40; width: parent.width - 40 - 90
@@ -375,7 +375,7 @@ Item {
                             const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
                             const a = row.modelData.start, l = row.modelData.len;
                             if (!l) return esc(n);
-                            return esc(n.slice(0, a)) + "<font color=\"" + Theme.accent + "\">" + esc(n.slice(a, a + l)) + "</font>" + esc(n.slice(a + l));
+                            return esc(n.slice(0, a)) + "<font color=\"" + Theme.accentText + "\">" + esc(n.slice(a, a + l)) + "</font>" + esc(n.slice(a + l));
                         }
                     }
                     MouseArea {

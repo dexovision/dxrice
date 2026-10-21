@@ -904,7 +904,7 @@ Item {
             anchors.rightMargin: Theme.padSm
             visible: choice.selected
             text: ""
-            color: Theme.accent
+            color: Theme.accentText
             font.family: Theme.iconFamily
             font.pixelSize: Theme.fontSizeSmall
         }
@@ -1109,7 +1109,7 @@ Item {
                         width: parent.width
                         visible: mediaBackend.source.length > 0
                         text: mediaBackend.source.toUpperCase()
-                        color: Theme.accent
+                        color: Theme.accentText
                         font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 2.5
                         elide: Text.ElideRight
                     }
@@ -1660,7 +1660,7 @@ Item {
             width: parent.width; height: 14
             Text {
                 text: tile.label.toUpperCase()
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1.8
             }
             Text {
@@ -1668,7 +1668,7 @@ Item {
                 anchors.right: parent.right
                 visible: tile.available && tile.temp >= 0
                 text: Math.round(tile.temp) + "°C"
-                color: tile.temp >= 85 ? Theme.accent : Theme.text
+                color: tile.temp >= 85 ? Theme.accentText : Theme.text
                 opacity: tile.temp >= 85 ? 1 : Theme.opacityMuted
                 font.family: Theme.fontMono; font.pixelSize: 11
             }

@@ -191,5 +191,28 @@ class SmallerPiecesTest(unittest.TestCase):
             s.close()
 
 
+class ReadableAccentTest(unittest.TestCase):
+    def luma(self, s, expr):
+        return s.ev(f"theme.luma({expr})")
+
+    def test_a_dark_accent_is_lifted_for_text_and_a_light_one_kept(self):
+        # (seen live: a deep blue accent, #0707ea, made matched letters and
+        # small captions all but disappear on the dark panel)
+        s = scene(accent="0707ea")
+        try:
+            s.wait(300)
+            self.assertGreaterEqual(self.luma(s, "theme.accentText"), 0.49)
+            self.assertLess(self.luma(s, "theme.accent"), 0.2)
+            self.assertGreater(s.ev("theme.accentText.b"), s.ev("theme.accentText.r"), "it stays recognisably the accent")
+        finally:
+            s.close()
+        s = scene(accent="f0c060")
+        try:
+            s.wait(300)
+            self.assertEqual(s.ev("theme.accentText.toString()"), s.ev("theme.accent.toString()"))
+        finally:
+            s.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

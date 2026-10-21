@@ -124,7 +124,7 @@ PanelWindow {
             anchors.horizontalCenter: parent.horizontalCenter
             readonly property string ramp: " ▁▂▃▄▅▆▇█"
             text: root.values.map((v) => ramp.charAt(Math.round(v * 8))).join(" ")
-            color: Theme.accent
+            color: Theme.accentText
             opacity: 0.75
             font.family: Theme.fontMono
             font.pixelSize: 28

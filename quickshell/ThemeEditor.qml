@@ -1272,7 +1272,7 @@ PanelWindow {
                                         text: catRow.modelData.glyph
                                         font.family: Theme.iconFamily
                                         font.pixelSize: Theme.fontSizeLarger
-                                        color: catRow.selected ? Theme.accent : Theme.text
+                                        color: catRow.selected ? Theme.accentText : Theme.text
                                     }
                                     Column {
                                         anchors.left: catGlyph.right
@@ -1530,7 +1530,7 @@ PanelWindow {
                             anchors.right: parent.right
                             anchors.margins: 6
                             text: "\u2713"
-                            color: Theme.accent
+                            color: Theme.accentText
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                             font.weight: Font.DemiBold
@@ -2264,7 +2264,7 @@ PanelWindow {
                             width: parent.width
                             wrapMode: Text.WordWrap
                             text: root.wallpaperGenerateError
-                            color: Theme.accent
+                            color: Theme.accentText
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmaller
                         }

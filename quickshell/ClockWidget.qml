@@ -98,7 +98,7 @@ DesktopWidget {
                     objectName: "clockSeconds"
                     visible: root.seconds
                     text: Qt.formatDateTime(root.now, "ss")
-                    color: Theme.accent
+                    color: Theme.accentText
                     font.family: Theme.fontMono; font.pixelSize: Math.round(18 * root.k); font.weight: Font.Medium
                 }
                 Text {
@@ -123,7 +123,7 @@ DesktopWidget {
             Text {
                 objectName: "clockMonth"
                 text: Qt.formatDateTime(root.now, "MMMM").toUpperCase()
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.fontFamily; font.pixelSize: Math.round(15 * root.k); font.weight: Font.Bold; font.letterSpacing: 4
             }
             Text {

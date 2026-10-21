@@ -100,7 +100,7 @@ DesktopWidget {
             readonly property int count: media.players.length
             text: (media.available ? media.source : "No player").toUpperCase()
                   + (count > 1 ? "  ›  " + (media.players.indexOf(media.player) + 1) + "/" + count : "")
-            color: root.hasArt ? "white" : Theme.accent; opacity: sourceArea.containsMouse ? 1 : 0.75
+            color: root.hasArt ? "white" : Theme.accentText; opacity: sourceArea.containsMouse ? 1 : 0.75
             font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold
             font.letterSpacing: 2.5; elide: Text.ElideRight
             MouseArea {

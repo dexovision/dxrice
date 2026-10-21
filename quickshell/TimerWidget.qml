@@ -64,7 +64,7 @@ DesktopWidget {
                 delegate: Text {
                     required property var modelData
                     text: modelData.label.toUpperCase()
-                    color: root.mode === modelData.id ? Theme.accent : Theme.text
+                    color: root.mode === modelData.id ? Theme.accentText : Theme.text
                     opacity: root.mode === modelData.id ? 1 : 0.55
                     font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1.5
                     rightPadding: 8

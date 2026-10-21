@@ -45,7 +45,7 @@ Rectangle {
             text: root.glyph
             font.family: Theme.iconFamily
             font.pixelSize: Theme.fontSizeLarge
-            color: root.active ? Theme.accent : Theme.text
+            color: root.active ? Theme.accentText : Theme.text
             opacity: root.active ? 1 : 0.8
             // pending: the icon breathes until the system confirms
             SequentialAnimation on opacity {

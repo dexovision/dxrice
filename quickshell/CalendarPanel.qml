@@ -229,7 +229,7 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: ReminderStore.kindOf(entry.modelData.kind).glyph
-                    color: Theme.accent
+                    color: Theme.accentText
                     font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
                 }
                 Text {
@@ -271,7 +271,7 @@ Item {
                         id: kindRow
                         anchors.centerIn: parent
                         spacing: 4
-                        Text { text: kindChip.modelData.glyph; color: kindChip.current ? Theme.accent : Theme.text; font.family: Theme.iconFamily; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: kindChip.modelData.glyph; color: kindChip.current ? Theme.accentText : Theme.text; font.family: Theme.iconFamily; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
                         Text { text: kindChip.modelData.label; color: kindChip.current ? Theme.textActive : Theme.text; font.family: Theme.fontFamily; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
                     }
                     MouseArea { id: kindArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.newKind = kindChip.modelData.id }

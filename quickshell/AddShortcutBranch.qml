@@ -346,7 +346,7 @@ Item {
                                         anchors.rightMargin: Theme.padSm
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: "+"
-                                        color: Theme.accent
+                                        color: Theme.accentText
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeLarge
                                         opacity: appArea.containsMouse ? 1 : 0

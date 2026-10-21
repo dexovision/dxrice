@@ -91,14 +91,14 @@ DesktopWidget {
             Text {
                 objectName: "systemUser"
                 text: Quickshell.env("USER") || "user"
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.fontMono; font.pixelSize: 14; font.weight: Font.Bold
             }
             Text { text: "@"; color: Theme.textActive; opacity: 0.6; font.family: Theme.fontMono; font.pixelSize: 14 }
             Text {
                 objectName: "systemHost"
                 text: PerformanceService.hostName
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.fontMono; font.pixelSize: 14; font.weight: Font.Bold
             }
             Text {
@@ -125,7 +125,7 @@ DesktopWidget {
                 Text {
                     width: 44
                     text: row.modelData.label
-                    color: Theme.accent
+                    color: Theme.accentText
                     font.family: Theme.fontMono; font.pixelSize: 13; font.weight: Font.Bold
                 }
                 Text {

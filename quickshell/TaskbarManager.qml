@@ -562,7 +562,7 @@ Item {
             x: Theme.padLg
             y: Theme.padLg
             wrapMode: Text.WordWrap
-            color: Theme.accent
+            color: Theme.accentText
             font.family: Theme.fontFamily
             text: "Could not read " + root.configPath + " -- nothing will be changed until this is fixed. Run install.sh first if this is a fresh install."
         }

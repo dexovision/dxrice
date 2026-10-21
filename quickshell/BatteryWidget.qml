@@ -62,7 +62,7 @@ DesktopWidget {
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: BatteryService.charging
                 text: "\u{f0e7}"
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.iconFamily; font.pixelSize: 14
             }
         }

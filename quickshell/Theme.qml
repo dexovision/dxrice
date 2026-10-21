@@ -172,6 +172,16 @@ QtObject {
     // ---- base colors ----
     readonly property color accent: root._color(accentHex, 1.0)
     readonly property color accentSoft: root._color(accentHex, 0.85)
+    // the accent as TEXT on the panel: a dark accent (a deep blue) all but
+    // disappears on a dark panel, so it is lifted toward the text colour
+    // until it reads -- a light accent is used as it is. Judged by perceived
+    // brightness, not HSL lightness (pure blue is "50 % light" yet dark).
+    function luma(c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
+    readonly property color accentText: {
+        const want = 0.5, a = root.luma(root.accent), t = root.luma(root.textActive);
+        if (a >= want || t <= a) return root.accent;
+        return root.mix(root.accent, root.textActive, Math.min(0.7, (want - a) / (t - a)));
+    }
     readonly property color text: root._color(textHex, 1.0)
     readonly property color textActive: root._color(textActiveHex, 1.0)
     readonly property color scrim: Qt.rgba(0, 0, 0, 0.32)

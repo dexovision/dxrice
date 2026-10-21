@@ -466,7 +466,7 @@ PanelWindow {
                         id: searchRow
                         anchors.centerIn: parent
                         spacing: Theme.padSm
-                        Text { text: "\uf002"; color: searchPill.open ? Theme.accent : Theme.textActive; font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmaller; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: "\uf002"; color: searchPill.open ? Theme.accentText : Theme.textActive; font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmaller; anchors.verticalCenter: parent.verticalCenter }
                         Text {
                             visible: root.width >= 1000
                             text: "Search apps"
@@ -584,7 +584,7 @@ PanelWindow {
                     text: root.hoveredApp.length > 0 ? root.hoveredApp : root.activeTitle
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmaller
-                    color: root.hoveredApp.length > 0 ? Theme.accent : Theme.text
+                    color: root.hoveredApp.length > 0 ? Theme.accentText : Theme.text
                     elide: Text.ElideRight
                     // The one deliberately "substantial" number in this file:
                     // enough width that a real window title reads as content,
@@ -955,7 +955,7 @@ PanelWindow {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: ind.glyph
-                color: ind.tint.a > 0 ? ind.tint : (ind.open ? Theme.accent : Theme.textActive)
+                color: ind.tint.a > 0 ? ind.tint : (ind.open ? Theme.accentText : Theme.textActive)
                 opacity: ind.dim ? 0.45 : 1
                 font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
             }

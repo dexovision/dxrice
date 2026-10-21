@@ -152,7 +152,7 @@ Item {
             id: headGlyph
             anchors.verticalCenter: parent.verticalCenter
             text: head.glyph
-            color: Theme.accent
+            color: Theme.accentText
             font.family: Theme.iconFamily; font.pixelSize: 20
         }
         Column {
@@ -198,7 +198,7 @@ Item {
         Text {
             visible: choice.selected
             anchors.right: parent.right; anchors.rightMargin: Theme.padMd; anchors.verticalCenter: parent.verticalCenter
-            text: ""; color: Theme.accent; font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
+            text: ""; color: Theme.accentText; font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
         }
         MouseArea { id: choiceArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: choice.picked() }
     }
@@ -527,7 +527,7 @@ Item {
                         objectName: "statusClearAll"
                         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                         text: "Clear all"
-                        color: clearArea.containsMouse ? Theme.accent : Theme.text
+                        color: clearArea.containsMouse ? Theme.accentText : Theme.text
                         font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
                         MouseArea { id: clearArea; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: NotificationService.dismissAll() }
                     }
@@ -579,7 +579,7 @@ Item {
                         Text {
                             width: parent.width; elide: Text.ElideRight
                             text: (media.available ? media.source : "No player").toUpperCase()
-                            color: Theme.accent; font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1.5
+                            color: Theme.accentText; font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1.5
                         }
                         Text {
                             objectName: "statusMediaTitle"
@@ -761,7 +761,7 @@ Item {
                         objectName: "statusOpenGraphs"
                         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                         text: "Graphs in the Dashboard  ›"
-                        color: graphsArea.containsMouse ? Theme.accent : Theme.text
+                        color: graphsArea.containsMouse ? Theme.accentText : Theme.text
                         font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
                         MouseArea { id: graphsArea; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.dashboardRequested("performance") }
                     }
@@ -776,7 +776,7 @@ Item {
                     objectName: "statusOpenDashboard"
                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                     text: "Dashboard  "
-                    color: dashArea.containsMouse ? Theme.accent : Theme.text
+                    color: dashArea.containsMouse ? Theme.accentText : Theme.text
                     font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall
                     MouseArea { id: dashArea; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.dashboardRequested("") }
                 }

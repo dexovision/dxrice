@@ -42,7 +42,7 @@ DesktopWidget {
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: Qt.formatDate(root.now, "MMM").toUpperCase()
-                color: Theme.accent
+                color: Theme.accentText
                 font.family: Theme.fontFamily; font.pixelSize: 12; font.weight: Font.Bold; font.letterSpacing: 2
             }
             Text {
@@ -76,7 +76,7 @@ DesktopWidget {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: ReminderStore.kindOf(line.modelData.kind).glyph
-                    color: Theme.accent
+                    color: Theme.accentText
                     font.family: Theme.iconFamily; font.pixelSize: 11
                 }
                 Column {

@@ -46,7 +46,7 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         horizontalAlignment: Text.AlignHCenter
         text: root.glyph
-        color: root.connected ? Theme.accent : Theme.text
+        color: root.connected ? Theme.accentText : Theme.text
         opacity: root.connected ? 1 : Theme.opacitySecondary
         font.family: Theme.iconFamily
         font.pixelSize: Theme.fontSizeLarger
@@ -72,7 +72,7 @@ Rectangle {
             width: parent.width
             visible: root.detail.length > 0
             text: root.detail
-            color: root.connected ? Theme.accent : Theme.text
+            color: root.connected ? Theme.accentText : Theme.text
             opacity: root.connected ? 0.9 : Theme.opacityMuted
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -112,7 +112,7 @@ Rectangle {
             width: 20
             horizontalAlignment: Text.AlignHCenter
             text: ""
-            color: Theme.accent
+            color: Theme.accentText
             font.family: Theme.iconFamily
             font.pixelSize: Theme.fontSizeSmaller
         }
