@@ -125,6 +125,25 @@ class TopBarLayoutTest(unittest.TestCase):
         self.s.wait(900)
         self.assertGreater(self.s.ev("findNamed('barStrip').bottomRightRadius"), 10, "the corner did not come back")
 
+    def test_with_a_long_title_playing_the_sections_still_never_overlap(self):
+        self.s.ev("setPlayer({ trackTitle: 'An Extremely Long Track Title That Goes On' })")
+        self.s.wait(500)
+        try:
+            rects = [self.island(n) for n in ISLANDS]
+            for a in range(len(ISLANDS)):
+                for b in range(a + 1, len(ISLANDS)):
+                    self.assertFalse(self.overlap(rects[a], rects[b]), f"{ISLANDS[a]} {rects[a]} overlaps {ISLANDS[b]} {rects[b]}")
+            compact = self.s.ev("findNamed('statusIsland').parent.statusCompact")
+            if self.size[0] >= 1920:
+                self.assertFalse(compact, "a wide screen dropped the readings")
+                self.assertEqual(self.s.ev("findNamed('barIndicator:media').label"), "An Extremely Long Tra…")
+            # every indicator is still there, compact or not
+            for name in ("media", "network", "audio", "notifications", "dashboard"):
+                self.assertTrue(self.s.ev(f"findNamed('barIndicator:{name}').visible"), name)
+        finally:
+            self.s.ev("setPlayer(null)")
+            self.s.wait(300)
+
     def test_rapid_switching_settles_cleanly(self):
         for i in range(12):
             self.s.ev(f"panels.open('{['quicksettings', 'calendar', 'apps'][i % 3]}')")

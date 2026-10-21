@@ -755,6 +755,7 @@ PanelWindow {
                     glyph: CaptureService.recording ? "\u{f044a}" : "\uf030"
                     tint: CaptureService.recording ? "#e5534b" : "transparent"
                     label: CaptureService.recording ? CaptureService.clock(CaptureService.elapsed) : ""
+                    keepLabel: true
                 }
                 BarIndicator { name: "status:performance"; accessibleName: "Performance"; glyph: "\u{f04c5}" }
                 BarIndicator {
@@ -787,6 +788,22 @@ PanelWindow {
         }
         onPointerInsideChanged: root.islandLeft("status", pointerInside)
     }
+
+    // ---- overflow: the right section never runs into the clock ----
+    // Estimated from parts that don't depend on it (each indicator a chip,
+    // each reading about 7px a character): when the readings would not fit
+    // between the clock and the bar's end, the indicators drop them and keep
+    // their icons -- every one of them stays, nothing is silently dropped,
+    // and each one's section still says everything.
+    readonly property real _rightRoom: (barStrip.x + barStrip.width) - (clockIsland.x + clockIsland.width) - root.edgeMargin * 2
+    readonly property real _statusIconsWidth: {
+        let n = 0;
+        for (let i = 0; i < indicatorRow.children.length; i++) if (indicatorRow.children[i].visible) n += 1;
+        return n * (ShellSurface.chip + 2) + (trayRow.visible ? trayRow.implicitWidth + ShellSurface.pad * 2 : 0) + ShellSurface.pad * 2;
+    }
+    readonly property int _statusLabelChars: (MediaSession.player ? Math.min(22, String(MediaSession.player.trackTitle || "").length) : 0)
+        + String(root.volumePercent).length + 1 + (BatteryService.available ? String(BatteryService.percent).length + 1 : 0)
+    readonly property bool statusCompact: root._statusIconsWidth + root._statusLabelChars * 7 + 3 * Theme.padXs > root._rightRoom
 
     // what a hovered shortcut launches, shown in the title beside it
     property string hoveredApp: ""
@@ -897,6 +914,9 @@ PanelWindow {
         property int badge: 0
         // a state colour of its own (a recording in progress)
         property color tint: "transparent"
+        // short of room (statusCompact), indicators show their icon alone,
+        // except one whose reading is the point (a recording's time)
+        property bool keepLabel: false
         readonly property bool open: PanelManager.current === ind.name
         objectName: "barIndicator:" + ind.name.replace("status:", "")
         height: ShellSurface.chip
@@ -917,7 +937,8 @@ PanelWindow {
                 font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
             }
             Text {
-                visible: ind.label.length > 0
+                objectName: "barIndicatorLabel"
+                visible: ind.label.length > 0 && (ind.keepLabel || !root.statusCompact)
                 anchors.verticalCenter: parent.verticalCenter
                 text: ind.label
                 color: Theme.textActive
