@@ -762,8 +762,8 @@ Item {
                             text: netHeader.tab === "wifi"
                                 ? (root.wifiEnabled && wifiBackend.hasScanned && wifiBackend.networks.length > 0
                                     ? wifiBackend.networks.length + (wifiBackend.networks.length === 1 ? " network" : " networks") : "")
-                                : (root.bluetoothEnabled && btBackend.hasScanned && btBackend.devices.length > 0
-                                    ? btBackend.devices.length + " paired" : "")
+                                : (root.bluetoothEnabled && btBackend.hasScanned && btBackend.paired.length > 0
+                                    ? btBackend.paired.length + " paired" : "")
                             color: Theme.text
                             opacity: Theme.opacityMuted
                             font.family: Theme.fontFamily
@@ -814,7 +814,7 @@ Item {
                             }
 
                             Repeater {
-                                model: root.bluetoothEnabled && netHeader.tab === "bt" ? btBackend.devices : []
+                                model: root.bluetoothEnabled && netHeader.tab === "bt" ? btBackend.paired : []
                                 delegate: DeviceRow {
                                     required property var modelData
                                     glyph: modelData.connected ? "\u{f00b1}" : "\u{f00af}"
@@ -832,7 +832,7 @@ Item {
                                 }
                             }
                             EmptyLine {
-                                visible: netHeader.tab === "bt" && (!root.bluetoothEnabled || !btBackend.hasScanned || btBackend.devices.length === 0)
+                                visible: netHeader.tab === "bt" && (!root.bluetoothEnabled || !btBackend.hasScanned || btBackend.paired.length === 0)
                                 fillHeight: netFlick.height
                                 busy: root.bluetoothEnabled && !btBackend.hasScanned
                                 glyph: root.bluetoothEnabled ? "\u{f00af}" : "\u{f00b2}"

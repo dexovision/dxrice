@@ -75,6 +75,17 @@ QtObject {
     readonly property string batteryStatus: _batteryStatus
     readonly property real uptimeS: _uptimeS
     readonly property real load1: _load1
+    // AMD's own sysfs readings beside the busy percent: video memory in use
+    // (bytes), the GPU's power draw (hwmon power1_average, µW) and its
+    // shader clock (hwmon freq1_input, Hz). -1 where this GPU has none.
+    readonly property real vramUsedGiB: _vramUsed >= 0 ? _vramUsed / 1073741824 : -1
+    readonly property real vramTotalGiB: _vramTotal > 0 ? _vramTotal / 1073741824 : -1
+    readonly property real gpuPowerW: _gpuPower >= 0 ? _gpuPower / 1e6 : -1
+    readonly property real gpuClockMHz: _gpuClock >= 0 ? _gpuClock / 1e6 : -1
+    property real _vramUsed: -1
+    property real _vramTotal: -1
+    property real _gpuPower: -1
+    property real _gpuClock: -1
     readonly property string hostName: hostFile.text().trim()
     readonly property string kernel: kernelFile.text().trim()
 
@@ -129,6 +140,10 @@ QtObject {
     property FileView diskTempFile: FileView { path: root._sensorPaths.disk || "" }
     property FileView batCapFile: FileView { path: root._sensorPaths.bat ? root._sensorPaths.bat + "/capacity" : "" }
     property FileView batStatusFile: FileView { path: root._sensorPaths.bat ? root._sensorPaths.bat + "/status" : "" }
+    property FileView vramUsedFile: FileView { path: root._sensorPaths.vram ? root._sensorPaths.vram + "/mem_info_vram_used" : "" }
+    property FileView vramTotalFile: FileView { path: root._sensorPaths.vram ? root._sensorPaths.vram + "/mem_info_vram_total" : "" }
+    property FileView gpuPowerFile: FileView { path: root._sensorPaths.gpupower || "" }
+    property FileView gpuClockFile: FileView { path: root._sensorPaths.gpuclock || "" }
     property FileView uptimeFile: FileView { path: "/proc/uptime" }
     property FileView loadFile: FileView { path: "/proc/loadavg" }
     property FileView hostFile: FileView { path: "/proc/sys/kernel/hostname" }
@@ -217,7 +232,9 @@ QtObject {
             "for h in /sys/class/hwmon/hwmon*; do case \"$(cat $h/name 2>/dev/null)\" in "
             + "k10temp|coretemp|zenpower|cpu_thermal) echo cpu=$h/temp1_input;; nvme) echo disk=$h/temp1_input;; esac; done; "
             + "g=$(ls /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null | head -1); "
-            + "[ -n \"$g\" ] && for h in $(dirname $g)/hwmon/hwmon*; do [ -f $h/temp1_input ] && echo gputemp=$h/temp1_input; done; "
+            + "[ -n \"$g\" ] && for h in $(dirname $g)/hwmon/hwmon*; do [ -f $h/temp1_input ] && echo gputemp=$h/temp1_input; "
+            + "[ -f $h/power1_average ] && echo gpupower=$h/power1_average; [ -f $h/freq1_input ] && echo gpuclock=$h/freq1_input; done; "
+            + "[ -n \"$g\" ] && [ -f $(dirname $g)/mem_info_vram_used ] && echo vram=$(dirname $g); "
             + "for b in /sys/class/power_supply/*; do [ \"$(cat $b/type 2>/dev/null)\" = Battery ] && [ \"$(cat $b/scope 2>/dev/null)\" != Device ] "
             + "&& [ -f $b/capacity ] && echo bat=$b; done; true"]
         stdout: StdioCollector {
@@ -248,6 +265,16 @@ QtObject {
             root._batteryPercent = isNaN(c) ? -1 : Math.max(0, Math.min(100, c));
             root._batteryStatus = batStatusFile.text().trim();
         }
+        const num = (file, has) => {
+            if (!has) return -1;
+            file.reload();
+            const v = Number(file.text().trim());
+            return isNaN(v) || file.text().trim() === "" ? -1 : v;
+        };
+        root._vramUsed = num(vramUsedFile, !!p.vram);
+        root._vramTotal = num(vramTotalFile, !!p.vram);
+        root._gpuPower = num(gpuPowerFile, !!p.gpupower);
+        root._gpuClock = num(gpuClockFile, !!p.gpuclock);
         uptimeFile.reload(); loadFile.reload();
         root._uptimeS = Number(uptimeFile.text().split(" ")[0]) || 0;
         root._load1 = Number(loadFile.text().split(" ")[0]) || 0;

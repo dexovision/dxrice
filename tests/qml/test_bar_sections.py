@@ -194,6 +194,116 @@ class SectionsTest(unittest.TestCase):
         # looking at them read the history (what is still on screen stays counted)
         self.assertEqual(self.s.ev("notifications.history.filter(n => n.id > notifications.seenId).length"), 0)
 
+    # ---- the recording's sound, and its card hanging from the bar ----
+    def test_the_recording_sound_is_chosen_first_and_a_card_hangs_while_it_runs(self):
+        self.s.set_command("dxrice_capture.sh record", "__HANG__")
+        self.open("capture")
+        self.click("recordSound:desktop")
+        self.assertEqual(self.s.ev("capture.audio"), "desktop")
+        self.click("statusRecordScreen")
+        self.s.wait(1300)
+        self.assertTrue(self.s.ev("capture.recording"))
+        cmd = json.loads(self.s.ev("JSON.stringify(capture.recorder.command)"))
+        self.assertEqual(cmd[2:], ["record", "screen", "desktop"])
+        # the panel closed for the recording: the card has grown out of the capture mark
+        self.assertTrue(self.s.ev("findNamed('recordIsland').expanded"))
+        self.assertGreater(self.s.ev("findNamed('recordIsland').bodyHeight"), 40)
+        self.assertEqual(self.s.ev("findNamed('recordingSound').text"), "with desktop sound")
+        ind = self.centre("barIndicator:capture")
+        body = json.loads(self.s.ev("(function(){ const b = findNamed('recordIslandBody'); const p = b.mapToItem(null, b.width/2, 0);"
+                                    " return JSON.stringify([p.x, p.y]); })()"))
+        self.assertLess(abs(body[0] - ind[0]), 60, "the card doesn't hang from the capture mark")
+        self.assertEqual(self.s.input_owner(*self.centre("recordingStop")), "TopBar", "Stop takes no clicks")
+        # the right section's panel opening tucks it away
+        self.open("network")
+        self.assertFalse(self.s.ev("findNamed('recordIsland').expanded"))
+        self.s.ev("panels.closeCurrent()")
+        self.s.wait(900)
+        self.s.bridge.exec_log.clear()
+        self.click("recordingStop")
+        stops = [e for e in self.execs("sh") if e[1].endswith("dxrice_capture.sh")]
+        self.assertEqual([e[2:] for e in stops], [["stop"]])
+
+    def test_no_card_without_a_recording(self):
+        self.assertFalse(self.s.ev("findNamed('recordIsland').expanded"))
+        self.assertLess(self.s.ev("findNamed('recordIsland').bodyHeight"), 0.5)
+
+    # ---- a muted microphone shows from anywhere ----
+    def test_a_muted_microphone_shows_in_the_bar(self):
+        extra = "findNamed('barIndicator:audio').extraGlyph"
+        self.assertEqual(self.s.ev(extra), "")
+        self.s.ev("pipewire.defaultAudioSource.audio.muted = true")
+        self.s.wait(50)
+        self.assertNotEqual(self.s.ev(extra), "")
+
+    # ---- bluetooth: nearby devices and pairing ----
+    def bt(self, pair_out="Attempting to pair\nPairing successful\n", agent="4242\n"):
+        c = self.s.bridge.commands
+        c.insert(0, ("bluetoothctl devices", "Device AA:BB:CC:DD:EE:01 WH-1000XM4\nDevice AA:BB:CC:DD:EE:09 Buds Pro\n"))
+        c.insert(0, ("bluetoothctl info AA:BB:CC:DD:EE:09", "Name: Buds Pro\nPaired: no\nConnected: no\n"))
+        c.insert(0, ("bluetoothctl info AA:BB:CC:DD:EE:01", "Paired: yes\nConnected: yes\n"))
+        c.insert(0, ("&& bluetoothctl --timeout 10 connect", pair_out))
+        c.insert(0, ("pgrep -x blueman-applet", agent))
+        self.open("bluetooth")
+        self.s.wait(400)
+
+    def test_bluetooth_lists_paired_and_nearby_apart(self):
+        self.bt()
+        self.assertIsNotNone(self.s.ev("findNamed('btPaired:AA:BB:CC:DD:EE:01')"))
+        self.assertIsNone(self.s.ev("findNamed('btPaired:AA:BB:CC:DD:EE:09')"), "an unpaired device listed as paired")
+        self.assertIsNotNone(self.s.ev("findNamed('btNearby:AA:BB:CC:DD:EE:09')"))
+
+    def test_bluetooth_searches_for_a_while_then_pairs_trusts_and_connects(self):
+        self.bt()
+        self.s.bridge.run_log.clear()
+        self.click("btScan")
+        self.s.wait(200)
+        self.assertIn(["bluetoothctl", "--timeout", "12", "scan", "on"], self.s.bridge.run_log)
+        self.s.ev("findNamed('btNearby:AA:BB:CC:DD:EE:09').actionClicked()")
+        self.s.wait(300)
+        pairs = [r for r in self.s.bridge.run_log if r[:2] == ["sh", "-c"] and "pair" in r[2]]
+        self.assertEqual(len(pairs), 1)
+        self.assertIn("trust", pairs[0][2])
+        self.assertIn("connect", pairs[0][2])
+        self.assertEqual(pairs[0][-1], "AA:BB:CC:DD:EE:09")
+        self.assertFalse(self.s.ev("findNamed('btNote').visible && findNamed('btNote').text.indexOf('PIN') >= 0"))
+
+    def test_a_pairing_that_needs_a_pin_without_an_agent_says_so(self):
+        self.bt(pair_out="Attempting to pair\nFailed to pair: org.bluez.Error.AuthenticationFailed\n", agent="")
+        self.s.ev("findNamed('btNearby:AA:BB:CC:DD:EE:09').actionClicked()")
+        self.s.wait(300)
+        note = self.s.ev("findNamed('btNote').text")
+        self.assertTrue(self.s.ev("findNamed('btNote').visible"))
+        self.assertIn("blueman-applet", note)
+
+    # ---- performance: the GPU's own readings and a ping ----
+    def test_performance_shows_vram_gpu_power_and_ping(self):
+        c = self.s.bridge.commands
+        c.insert(0, ("for h in /sys/class/hwmon", "vram=/fake/gpu\ngpupower=/fake/hwmon/power1_average\ngpuclock=/fake/hwmon/freq1_input\n"))
+        c.insert(0, ("ping -n -c 1 -W 2 1.1.1.1", "64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=38.6 ms\n"))
+        f = self.s.bridge.files
+        f["/fake/gpu/mem_info_vram_used"] = "1073741824\n"
+        f["/fake/gpu/mem_info_vram_total"] = "4294967296\n"
+        f["/fake/hwmon/power1_average"] = "4000000\n"
+        f["/fake/hwmon/freq1_input"] = "1500000000\n"
+        self.open("performance")
+        self.s.wait(2500)
+        self.assertEqual(self.s.ev("findNamed('statusVram').value"), "1.0 / 4.0 GiB")
+        self.assertEqual(self.s.ev("findNamed('statusGpuPower').value"), "4 W · 1500 MHz")
+        self.assertEqual(self.s.ev("findNamed('statusPing').value"), "39 ms  1.1.1.1")
+        # a ping host of "" turns it off
+        self.s.ev("theme.data = Object.assign({}, theme.data, { ping_host: '' })")
+        self.s.wait(100)
+        self.assertFalse(self.s.ev("findNamed('statusPing').visible"))
+
+    def test_without_those_sources_nothing_is_made_up(self):
+        self.open("performance")
+        self.s.wait(1500)
+        self.assertFalse(self.s.ev("findNamed('statusVram').visible"))
+        self.assertFalse(self.s.ev("findNamed('statusGpuPower').visible"))
+        self.assertIn(self.s.ev("findNamed('statusPing').value").split()[0], ("no", "…"))
+
+
 
 class CaptureScriptTest(unittest.TestCase):
     """scripts/dxrice_capture.sh against fake grim/slurp/wf-recorder/wl-copy/
@@ -213,6 +323,7 @@ class CaptureScriptTest(unittest.TestCase):
             "slurp": f'[ -n "{slurp_out}" ] && echo "{slurp_out}" || exit 1',
             "wl-copy": 'cat > /dev/null; echo wl-copy >> "$LOG"',
             "notify-send": 'echo "notify-send $*" >> "$LOG"',
+            "pactl": '[ "$1" = get-default-sink ] && echo alsa_output.hdmi; [ "$1" = get-default-source ] && echo alsa_input.mic; true',
             "wf-recorder": 'echo "wf-recorder $*" >> "$LOG"; f=""; while [ $# -gt 0 ]; do [ "$1" = -f ] && f="$2"; shift; done;'
                            ' trap \'echo video > "$f"; exit 0\' INT TERM; while :; do sleep 0.05; done',
         }
@@ -263,6 +374,17 @@ class CaptureScriptTest(unittest.TestCase):
         self.assertFalse(Path(f"/proc/{rec}").exists() and "wf-recorder" in Path(f"/proc/{rec}/cmdline").read_text(errors="ignore"),
                          "the recorder outlived the script")
         self.assertEqual(len(list((tmp / "home" / "Videos" / "Recordings").glob("*.mp4"))), 1, "the file was not finished")
+
+    def test_a_recording_with_desktop_sound_records_the_outputs_monitor(self):
+        import time
+        tmp, proc, log, env, script = self.run_script("record", "screen", "desktop", wait=False)
+        for _ in range(100):
+            if log.exists() and "wf-recorder" in log.read_text():
+                break
+            time.sleep(0.05)
+        proc.terminate()
+        proc.wait(timeout=10)
+        self.assertIn("--audio=alsa_output.hdmi.monitor", log.read_text())
 
     def test_stop_ends_a_recording_and_keeps_the_file(self):
         import subprocess

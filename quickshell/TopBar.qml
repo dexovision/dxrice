@@ -115,6 +115,7 @@ PanelWindow {
         Region { item: activityIsland.expanded ? activityIsland.bodyItem : null }
         Region { item: clockIsland.expanded ? clockIsland.bodyItem : null }
         Region { item: statusIsland.expanded ? statusIsland.bodyItem : null }
+        Region { item: recordIsland.expanded ? recordIsland.bodyItem : null }
         // the Add Shortcut branch: explicit bounds, only while it is open (an
         // item region would keep its full rect while it is closed)
         Region {
@@ -153,7 +154,7 @@ PanelWindow {
     // panels' span (the panels cast their own shadow below).
     readonly property var _openSpan: {
         let lo = 1e9, hi = -1e9;
-        for (const i of [activityIsland, clockIsland, statusIsland]) {
+        for (const i of [activityIsland, clockIsland, statusIsland, recordIsland]) {
             if (i.bodyHeight <= 0.5) continue;
             lo = Math.min(lo, i.x + i.bodyX - i.filletRadius);
             hi = Math.max(hi, i.x + i.bodyX + i.bodyWidth + i.filletRadius);
@@ -190,6 +191,7 @@ PanelWindow {
                                    root._cornerFor(statusIsland, statusIsland.flushLeft),
                                    root._cornerFor(clockIsland, clockIsland.flushLeft))
         bottomRightRadius: Math.min(root._cornerFor(statusIsland, statusIsland.flushRight),
+                                    root._cornerFor(recordIsland, recordIsland.flushRight),
                                     root._cornerFor(activityIsland, activityIsland.flushRight),
                                     root._cornerFor(clockIsland, clockIsland.flushRight))
         // takes clicks on the bar's bare stretches, so they don't reach the
@@ -342,8 +344,10 @@ PanelWindow {
     }
 
     // ---- audio, for the status cluster ----
-    PwObjectTracker { objects: [Pipewire.defaultAudioSink] }
+    PwObjectTracker { objects: [Pipewire.defaultAudioSink, Pipewire.defaultAudioSource] }
     readonly property var sink: Pipewire.defaultAudioSink
+    // a muted microphone is worth seeing from anywhere: it shows beside the volume
+    readonly property bool micMuted: Pipewire.defaultAudioSource && Pipewire.defaultAudioSource.audio ? Pipewire.defaultAudioSource.audio.muted : false
     readonly property int volumePercent: (sink && sink.audio) ? Math.round(sink.audio.volume * 100) : 0
     readonly property bool muted: (sink && sink.audio) ? sink.audio.muted : false
 
@@ -787,6 +791,7 @@ PanelWindow {
                 }
                 // a running recording shows here, red, with its time
                 BarIndicator {
+                    id: captureIndicator
                     name: "status:capture"
                     accessibleName: CaptureService.recording ? "Recording" : "Capture"
                     glyph: CaptureService.recording ? "\u{f044a}" : "\uf030"
@@ -807,6 +812,7 @@ PanelWindow {
                     accessibleName: "Sound"
                     glyph: root.muted ? "\u{f075f}" : "\uf028"
                     label: root.volumePercent + "%"
+                    extraGlyph: root.micMuted ? "\u{f036d}" : ""
                 }
                 BarIndicator {
                     name: "status:power"
@@ -826,6 +832,29 @@ PanelWindow {
         onPointerInsideChanged: root.islandLeft("status", pointerInside)
     }
 
+    // ---- the recording branch: while a recording runs, a small card hangs
+    // from the capture indicator with its time and Stop (RecordingCard) --
+    // the reference's recording card. It tucks away while the right
+    // section's own panel is open (its Capture section says the same, and
+    // the two would overlap). ----
+    ShellIsland {
+        id: recordIsland
+        objectName: "recordIsland"
+        x: statusIsland.x + statusRow.x + indicatorRow.x + captureIndicator.x
+        y: barStrip.y
+        barLeft: barStrip.x
+        barRight: barStrip.x + barStrip.width
+        pinX: "center"
+        expanded: CaptureService.recording && !root.statusOpen
+        collapsedWidth: captureIndicator.width
+        collapsedHeight: root.islandHeight
+        expandedWidth: Math.max(220, panelItem ? panelItem.implicitWidth : 220)
+        expandedHeight: collapsedHeight + (panelItem ? panelItem.contentHeight : 52)
+        panel: recordingComponent
+        elevation: 2
+    }
+    Component { id: recordingComponent; RecordingCard {} }
+
     // ---- overflow: the right section never runs into the clock ----
     // Estimated from parts that don't depend on it (each indicator a chip,
     // each reading about 7px a character): when the readings would not fit
@@ -836,7 +865,8 @@ PanelWindow {
     readonly property real _statusIconsWidth: {
         let n = 0;
         for (let i = 0; i < indicatorRow.children.length; i++) if (indicatorRow.children[i].visible) n += 1;
-        return n * (ShellSurface.chip + 2) + (trayRow.visible ? trayRow.implicitWidth + ShellSurface.pad * 2 : 0) + ShellSurface.pad * 2;
+        return n * (ShellSurface.chip + 2) + (trayRow.visible ? trayRow.implicitWidth + ShellSurface.pad * 2 : 0) + ShellSurface.pad * 2
+            + (root.micMuted ? 18 : 0);
     }
     readonly property int _statusLabelChars: (MediaSession.player ? Math.min(22, String(MediaSession.player.trackTitle || "").length) : 0)
         + String(root.volumePercent).length + 1 + (BatteryService.available ? String(BatteryService.percent).length + 1 : 0)
@@ -954,6 +984,8 @@ PanelWindow {
         // short of room (statusCompact), indicators show their icon alone,
         // except one whose reading is the point (a recording's time)
         property bool keepLabel: false
+        // a second state mark after the reading (a muted microphone)
+        property string extraGlyph: ""
         readonly property bool open: PanelManager.current === ind.name
         objectName: "barIndicator:" + ind.name.replace("status:", "")
         height: ShellSurface.chip
@@ -988,6 +1020,14 @@ PanelWindow {
                 color: Theme.textActive
                 font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
                 font.features: { "tnum": 1 }
+            }
+            Text {
+                objectName: "barIndicatorExtra"
+                visible: ind.extraGlyph.length > 0
+                anchors.verticalCenter: parent.verticalCenter
+                text: ind.extraGlyph
+                color: "#e5534b"
+                font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
             }
         }
         Rectangle {

@@ -5,10 +5,17 @@
 #                                            to ~/Pictures/Screenshots/<date>.png
 #                                            and copied to the clipboard, the
 #                                            same as the PRINT keybinds
-#   dxrice_capture.sh record region|screen   wf-recorder into
+#   dxrice_capture.sh record region|screen [none|desktop|mic]
+#                                            wf-recorder into
 #                                            ~/Videos/Recordings/<date>.mp4, in
 #                                            the foreground: it returns when
-#                                            the recording ends
+#                                            the recording ends. The sound, if
+#                                            any: what is playing (the default
+#                                            output's monitor) or the default
+#                                            microphone, as PipeWire's pulse
+#                                            server names them. It is chosen
+#                                            before recording: wf-recorder
+#                                            can't add or drop it midway
 #   dxrice_capture.sh stop                   ends a recording (SIGINT, so
 #                                            wf-recorder finishes the file;
 #                                            SIGTERM after 3 s if it is still
@@ -49,12 +56,17 @@ record)
     dir="$HOME/Videos/Recordings"
     mkdir -p "$dir" "$state_dir"
     file="$dir/$(stamp).mp4"
+    audio=""
+    case "${3:-none}" in
+    desktop) dev="$(pactl get-default-sink 2>/dev/null)" && [ -n "$dev" ] && audio="--audio=$dev.monitor" ;;
+    mic) dev="$(pactl get-default-source 2>/dev/null)" && [ -n "$dev" ] && audio="--audio=$dev" ;;
+    esac
     if [ "${2:-screen}" = "region" ]; then
         geom="$(pick)" || exit 1
         [ -n "$geom" ] || exit 1
-        wf-recorder -g "$geom" -f "$file" >/dev/null 2>&1 &
+        wf-recorder $audio -g "$geom" -f "$file" >/dev/null 2>&1 &
     else
-        wf-recorder -f "$file" >/dev/null 2>&1 &
+        wf-recorder $audio -f "$file" >/dev/null 2>&1 &
     fi
     rec=$!
     echo "$rec" > "$pid_file"
@@ -85,7 +97,7 @@ stop)
     exit 0
     ;;
 *)
-    echo "usage: $0 shot region|screen | record region|screen | stop" >&2
+    echo "usage: $0 shot region|screen | record region|screen [none|desktop|mic] | stop" >&2
     exit 2
     ;;
 esac

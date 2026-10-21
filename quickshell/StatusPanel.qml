@@ -90,6 +90,26 @@ Item {
         else if (!root._wantSamples && root._sampling) { PerformanceService.widgetUsers -= 1; root._sampling = false; }
     }
     Component.onDestruction: if (root._sampling) PerformanceService.widgetUsers -= 1
+    // ---- ping: one echo every 5 s, only while Performance is showing ----
+    // theme.json "ping_host" (default 1.1.1.1, as in the reference); ""
+    // turns it off. -1 = no reply (or no network), -2 = not measured yet.
+    readonly property string pingHost: Theme.data.ping_host === undefined ? "1.1.1.1" : String(Theme.data.ping_host)
+    property real pingMs: -2
+    Process {
+        id: pingProc
+        command: ["ping", "-n", "-c", "1", "-W", "2", root.pingHost]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const m = this.text.match(/time[=<]([\d.]+)\s*ms/);
+                root.pingMs = m ? Number(m[1]) : -1;
+            }
+        }
+    }
+    Timer {
+        running: root.shown === "performance" && root.pingHost.length > 0
+        interval: 5000; repeat: true; triggeredOnStart: true
+        onTriggered: pingProc.running = true
+    }
     function rate(kbs) { return kbs >= 1024 ? (kbs / 1024).toFixed(1) + " MB/s" : Math.round(kbs) + " KB/s"; }
     function uptime(s) {
         const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
@@ -121,7 +141,8 @@ Item {
             dlg.visible = true;
         }
     }
-    BluetoothBackend { id: btBackend; radioOn: root.btOn }
+    BluetoothBackend { id: btBackend; radioOn: root.btOn; onScanningChanged: if (scanning) root._btSearched = true }
+    property bool _btSearched: false
     AudioDeviceBackend { id: audioDevices }
     BrightnessBackend { id: brightness }
     PwObjectTracker { objects: [Pipewire.defaultAudioSink, Pipewire.defaultAudioSource] }
@@ -369,9 +390,10 @@ Item {
                 }
                 Hairline {}
                 Repeater {
-                    model: root.btOn ? btBackend.devices.slice(0, 6) : []
+                    model: root.btOn ? btBackend.paired.slice(0, 5) : []
                     delegate: DeviceRow {
                         required property var modelData
+                        objectName: "btPaired:" + modelData.mac
                         width: body.width
                         glyph: modelData.connected ? "\u{f00b1}" : "\u{f00af}"
                         title: modelData.name
@@ -385,9 +407,50 @@ Item {
                     }
                 }
                 Note {
-                    visible: !root.btAvailable || !root.btOn || (btBackend.hasScanned && btBackend.devices.length === 0)
+                    visible: !root.btAvailable || !root.btOn || (btBackend.hasScanned && btBackend.paired.length === 0)
                     text: !root.btAvailable ? "There is no Bluetooth adapter to switch on."
-                        : (!root.btOn ? "Bluetooth is off." : "No paired devices.")
+                        : (!root.btOn ? "Bluetooth is off." : "No paired devices yet.")
+                }
+                // nearby: a timed scan, then pair (and trust and connect) in one go
+                Item {
+                    visible: root.btOn
+                    width: body.width; height: 30
+                    Caption { anchors.verticalCenter: parent.verticalCenter; text: "NEARBY" }
+                    Row {
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        spacing: Theme.padSm
+                        LoadingDots { visible: btBackend.scanning; anchors.verticalCenter: parent.verticalCenter }
+                        CompactChip {
+                            objectName: "btScan"
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: btBackend.scanning ? "Searching…" : (btBackend.nearby.length > 0 ? "Search again" : "Search")
+                            enabled: !btBackend.scanning
+                            opacity: enabled ? 1 : 0.6
+                            onClicked: btBackend.scan()
+                        }
+                    }
+                }
+                Repeater {
+                    model: root.btOn ? btBackend.nearby.slice(0, 5) : []
+                    delegate: DeviceRow {
+                        required property var modelData
+                        objectName: "btNearby:" + modelData.mac
+                        width: body.width
+                        glyph: "\u{f00af}"
+                        title: modelData.name
+                        detail: btBackend.pairingMac === modelData.mac ? "Pairing…" : "Not paired"
+                        actionText: btBackend.pairingMac === modelData.mac ? "" : "Pair"
+                        onActionClicked: btBackend.pair(modelData.mac)
+                    }
+                }
+                Note {
+                    objectName: "btNote"
+                    visible: root.btOn && (btBackend.pairError.length > 0 || (!btBackend.scanning && btBackend.nearby.length === 0 && root._btSearched))
+                    text: btBackend.pairError.length > 0 ? btBackend.pairError : "Nothing new nearby. Put the device in pairing mode and search again."
+                }
+                Note {
+                    visible: root.btOn && !btBackend.agentRunning && btBackend.nearby.length > 0 && btBackend.pairError.length === 0
+                    text: "No pairing agent is running: a device that asks for a PIN can't pair until blueman-applet is started."
                 }
             }
 
@@ -713,6 +776,36 @@ Item {
                     GlassButton { objectName: "statusShotScreen"; text: "Whole screen"; variant: "secondary"; onClicked: { root.closeRequested(); CaptureService.shot("screen"); } }
                 }
                 Caption { text: "SCREEN RECORDING"; topPadding: 4 }
+                // the sound it takes, chosen before it starts
+                Row {
+                    visible: !CaptureService.recording
+                    spacing: 2
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Sound"; rightPadding: Theme.padSm
+                        color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
+                    }
+                    Repeater {
+                        model: [{ id: "none", label: "None" }, { id: "desktop", label: "Desktop" }, { id: "mic", label: "Microphone" }]
+                        delegate: Rectangle {
+                            id: seg
+                            required property var modelData
+                            readonly property bool picked: CaptureService.audio === modelData.id
+                            objectName: "recordSound:" + modelData.id
+                            width: segText.implicitWidth + Theme.padLg; height: 26; radius: 13
+                            color: seg.picked ? Theme.mix(Theme.layer1, Theme.accent, 0.22) : (segArea.containsMouse ? Theme.layer1Hover : Theme.layer1)
+                            Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                            Text {
+                                id: segText
+                                anchors.centerIn: parent
+                                text: seg.modelData.label
+                                color: seg.picked ? Theme.textActive : Theme.text
+                                font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; font.weight: seg.picked ? Font.DemiBold : Font.Normal
+                            }
+                            MouseArea { id: segArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: CaptureService.audio = seg.modelData.id }
+                        }
+                    }
+                }
                 Flow {
                     width: parent.width
                     spacing: Theme.padSm
@@ -754,6 +847,26 @@ Item {
                     Readout { label: "Network"; value: "↓ " + root.rate(PerformanceService.netDownKBs) + "  ↑ " + root.rate(PerformanceService.netUpKBs) }
                     Readout { label: "Load"; value: PerformanceService.load1.toFixed(2) }
                     Readout { label: "Up"; value: root.uptime(PerformanceService.uptimeS) }
+                    Readout {
+                        objectName: "statusVram"
+                        visible: PerformanceService.vramTotalGiB > 0
+                        label: "VRAM"; value: PerformanceService.vramUsedGiB.toFixed(1) + " / " + PerformanceService.vramTotalGiB.toFixed(1) + " GiB"
+                    }
+                    Readout {
+                        objectName: "statusGpuPower"
+                        visible: PerformanceService.gpuPowerW >= 0 || PerformanceService.gpuClockMHz >= 0
+                        label: "GPU"
+                        value: [PerformanceService.gpuPowerW >= 0 ? Math.round(PerformanceService.gpuPowerW) + " W" : "",
+                                PerformanceService.gpuClockMHz > 0 ? Math.round(PerformanceService.gpuClockMHz) + " MHz" : (PerformanceService.gpuClockMHz === 0 ? "idle" : "")]
+                               .filter((t) => t).join(" · ")
+                    }
+                    Readout {
+                        objectName: "statusPing"
+                        visible: root.pingHost.length > 0
+                        label: "Ping"
+                        value: (root.pingMs >= 0 ? (root.pingMs < 10 ? root.pingMs.toFixed(1) : Math.round(root.pingMs)) + " ms"
+                                : (root.pingMs === -1 ? "no reply" : "…")) + "  " + root.pingHost
+                    }
                 }
                 Item {
                     width: parent.width; height: 24

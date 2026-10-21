@@ -14,6 +14,11 @@ QtObject {
     readonly property bool recording: recorder.running
     property int elapsed: 0
     property string _pendingShot: ""
+    // the sound a recording takes: "none", "desktop" (what is playing) or
+    // "mic"; picked before it starts (theme.json "record_audio" is the
+    // default). `recordingAudio` is what the running one has.
+    property string audio: ["desktop", "mic"].indexOf(String(Theme.data.record_audio)) >= 0 ? String(Theme.data.record_audio) : "none"
+    property string recordingAudio: "none"
 
     property Process recorder: Process {
         onRunningChanged: if (running) root.elapsed = 0
@@ -40,7 +45,8 @@ QtObject {
     }
     function record(mode) {
         if (root.recording || root.recordDelay.running) return;
-        root.recorder.command = ["sh", root.script, "record", mode === "region" ? "region" : "screen"];
+        root.recordingAudio = root.audio;
+        root.recorder.command = ["sh", root.script, "record", mode === "region" ? "region" : "screen", root.audio];
         root.recordDelay.restart();
     }
     function stop() { if (root.recording) Quickshell.execDetached(["sh", root.script, "stop"]); }

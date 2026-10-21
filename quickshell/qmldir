@@ -64,3 +64,4 @@ singleton WidgetStack 1.0 WidgetStack.qml
 MeterWidget 1.0 MeterWidget.qml
 singleton ReminderStore 1.0 ReminderStore.qml
 RemindersWidget 1.0 RemindersWidget.qml
+RecordingCard 1.0 RecordingCard.qml
