@@ -27,7 +27,7 @@ QML_DIR = REPO / "quickshell"
 # Short-lived helpers: they finish with the action, so staying in the
 # shell's cgroup costs nothing. Anything else started with a bare
 # execDetached is a long-lived app and must use Launcher.launch instead.
-SHORT_LIVED = {"brightnessctl", "bluetoothctl", "nmcli", "makoctl", "loginctl", "systemctl"}
+SHORT_LIVED = {"brightnessctl", "bluetoothctl", "nmcli", "makoctl", "loginctl", "systemctl", "notify-send"}
 
 
 class DockLaunchTest(unittest.TestCase):

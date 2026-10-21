@@ -251,6 +251,66 @@ class WorldAttachedTest(unittest.TestCase):
             s.close()
 
 
+class NewInstrumentsTest(unittest.TestCase):
+    def test_the_analog_clock_points_at_the_real_time(self):
+        s = scene(clock_style="analog", clock_seconds=True)
+        try:
+            s.wait(400)
+            self.assertTrue(named(s, "clockAnalogFace", "visible"))
+            self.assertFalse(named(s, "clockTypeFace", "visible"))
+            # the clock keeps ticking (seconds on): compare with the time it shows
+            s.wait(500)
+            h, m, sec = (s.ev(f"findNamed('clockWidget').now.get{f}()") for f in ("Hours", "Minutes", "Seconds"))
+            s.wait(300)   # let the hands finish turning to it
+            h2, m2, sec2 = (s.ev(f"findNamed('clockWidget').now.get{f}()") for f in ("Hours", "Minutes", "Seconds"))
+            if (h2, m2, sec2) != (h, m, sec):
+                s.wait(320)
+                h, m, sec = (s.ev(f"findNamed('clockWidget').now.get{f}()") for f in ("Hours", "Minutes", "Seconds"))
+            # a hand turning clockwise past 12 may read +360: same direction
+            for hand, want in (("clockHourHand", (h % 12) * 30 + m * 0.5), ("clockMinuteHand", m * 6 + sec * 0.1),
+                               ("clockSecondHand", sec * 6)):
+                self.assertAlmostEqual(named(s, hand, "rotation") % 360, want % 360, delta=1.0, msg=hand)
+        finally:
+            s.close()
+
+    def test_the_battery_ring_needs_a_battery_and_shows_its_reading(self):
+        s = scene(widget_battery=True)
+        try:
+            s.wait(400)
+            self.assertFalse(named(s, "batteryWidget", "active"), "no battery in the harness: no ring")
+            s.ev("(function(){ const b = findNamed('batteryWidget'); })()")
+            s.ev("battery.path = '/fake'; battery.percent = 64; battery.status = 'Charging'")
+            s.wait(500)
+            self.assertTrue(named(s, "batteryWidget", "active"))
+            self.assertEqual(named(s, "batteryPercent", "text"), "64%")
+            self.assertTrue(named(s, "batteryBolt", "visible"))
+        finally:
+            s.close()
+
+    def test_the_stopwatch_counts_and_a_countdown_notifies_at_zero(self):
+        s = scene(widget_timer=True)
+        try:
+            s.wait(400)
+            T = "findNamed('timerWidget')"
+            s.ev(f"{T}.start()")
+            s.wait(450)
+            s.ev(f"{T}.pause()")
+            shown = s.ev(f"{T}.shownMs")
+            self.assertTrue(350 <= shown <= 900, shown)
+            s.wait(300)
+            self.assertEqual(s.ev(f"{T}.shownMs"), shown, "paused, it kept counting")
+            s.ev(f"{T}.reset()")
+            self.assertEqual(s.ev(f"{T}.shownMs"), 0)
+            s.bridge.exec_log.clear()
+            s.ev(f"{T}.countdown(0.005)")          # 0.3 s
+            s.wait(900)
+            self.assertFalse(s.ev(f"{T}.running"))
+            self.assertEqual(s.ev(f"{T}.shownMs"), 0)
+            self.assertTrue(any(c and c[0] == "notify-send" for c in s.bridge.exec_log), s.bridge.exec_log)
+        finally:
+            s.close()
+
+
 class MusicWidgetTest(unittest.TestCase):
     def setUp(self):
         self.s = scene(widget_music=None)

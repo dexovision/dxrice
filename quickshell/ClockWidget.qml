@@ -7,6 +7,8 @@ import QtQuick
 //             colour, both heavy, a light colon raised between them; a thin
 //             accent bar, then the month, the day and the weekday stacked
 //   "blocks"  tty-clock's block digits, drawn as cells in the accent
+//   "analog"  a round face: hour ticks, the hands, a second hand in the
+//             accent when seconds are on, and the date under it
 //
 // "clock_24h" (default true) and "clock_seconds" (false) apply to both. It is
 // only to look at: it takes no input, so the desktop under it stays
@@ -18,12 +20,13 @@ DesktopWidget {
     defaultOn: true
     surface: "none"
     interactive: false
-    contentWidth: root.blocks ? blockFace.implicitWidth : typeFace.implicitWidth
-    contentHeight: root.blocks ? blockFace.implicitHeight : typeFace.implicitHeight
+    contentWidth: root.analog ? analogFace.width : (root.blocks ? blockFace.implicitWidth : typeFace.implicitWidth)
+    contentHeight: root.analog ? analogFace.height : (root.blocks ? blockFace.implicitHeight : typeFace.implicitHeight)
 
     readonly property bool h24: Theme.data.clock_24h !== false
     readonly property bool seconds: Theme.data.clock_seconds === true
     readonly property bool blocks: Theme.data.clock_style === "blocks"
+    readonly property bool analog: Theme.data.clock_style === "analog"
     property date now: new Date()
     readonly property real dayFraction: (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400
     readonly property string hours: Qt.formatDateTime(root.now, root.h24 ? "HH" : "h")
@@ -62,7 +65,7 @@ DesktopWidget {
     Row {
         id: typeFace
         objectName: "clockTypeFace"
-        visible: !root.blocks
+        visible: !root.blocks && !root.analog
         spacing: Math.round(22 * root.k)
         Row {
             id: digits
@@ -166,7 +169,7 @@ DesktopWidget {
     Column {
         id: blockFace
         objectName: "clockBlockFace"
-        visible: root.blocks
+        visible: root.blocks && !root.analog
         spacing: 12
         Row {
             spacing: root.cell
@@ -181,6 +184,91 @@ DesktopWidget {
             text: Qt.formatDateTime(root.now, "ddd MMM d") + (root.h24 ? "" : "  " + root.meridiem)
             color: Theme.textActive; opacity: 0.8
             font.family: Theme.fontMono; font.pixelSize: 13; font.letterSpacing: 1
+        }
+    }
+
+    // ---- "analog" ----
+    Column {
+        id: analogFace
+        objectName: "clockAnalogFace"
+        visible: root.analog
+        spacing: Math.round(10 * root.k)
+        readonly property real size: Math.round(190 * root.k)
+        width: size
+        Item {
+            id: dial
+            width: analogFace.size; height: width
+            Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.55)
+                border.width: 1
+                border.color: Theme.mix(Theme.borderIdle, Theme.accent, 0.3)
+            }
+            Repeater {      // twelve ticks, the quarters longer
+                model: 12
+                delegate: Item {
+                    required property int index
+                    anchors.fill: parent
+                    rotation: index * 30
+                    Rectangle {
+                        readonly property bool quarter: index % 3 === 0
+                        width: quarter ? 3 : 2
+                        height: quarter ? dial.width * 0.09 : dial.width * 0.05
+                        radius: width / 2
+                        x: (dial.width - width) / 2
+                        y: dial.width * 0.05
+                        color: quarter ? Theme.textActive : Theme.text
+                        opacity: quarter ? 0.9 : 0.5
+                    }
+                }
+            }
+            component Hand: Item {
+                id: hand
+                property real angle: 0
+                property real length: 0.3
+                property real thickness: 4
+                property color tint: Theme.textActive
+                anchors.fill: parent
+                rotation: hand.angle
+                Behavior on rotation { enabled: !Theme.reduceMotion; RotationAnimation { direction: RotationAnimation.Clockwise; duration: 260; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast } }
+                Rectangle {
+                    width: hand.thickness
+                    height: dial.width * hand.length
+                    radius: width / 2
+                    x: (dial.width - width) / 2
+                    y: dial.width / 2 - height + width / 2
+                    color: hand.tint
+                    antialiasing: true
+                }
+            }
+            Hand {
+                objectName: "clockHourHand"
+                angle: (root.now.getHours() % 12) * 30 + root.now.getMinutes() * 0.5
+                length: 0.28; thickness: Math.max(4, dial.width * 0.03)
+            }
+            Hand {
+                objectName: "clockMinuteHand"
+                angle: root.now.getMinutes() * 6 + root.now.getSeconds() * 0.1
+                length: 0.4; thickness: Math.max(3, dial.width * 0.02)
+            }
+            Hand {
+                objectName: "clockSecondHand"
+                visible: root.seconds
+                angle: root.now.getSeconds() * 6
+                length: 0.44; thickness: 2; tint: Theme.accent
+            }
+            Rectangle {
+                width: Math.max(8, dial.width * 0.05); height: width; radius: width / 2
+                anchors.centerIn: parent
+                color: Theme.accent
+            }
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: Qt.formatDateTime(root.now, "dddd d MMMM")
+            color: Theme.textActive; opacity: 0.85
+            font.family: Theme.fontFamily; font.pixelSize: Math.round(14 * root.k); font.letterSpacing: 1
         }
     }
 }

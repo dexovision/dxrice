@@ -56,3 +56,5 @@ singleton BatteryService 1.0 BatteryService.qml
 StatusPanel 1.0 StatusPanel.qml
 singleton Shortcuts 1.0 Shortcuts.qml
 singleton Viewport 1.0 Viewport.qml
+BatteryWidget 1.0 BatteryWidget.qml
+TimerWidget 1.0 TimerWidget.qml

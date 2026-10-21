@@ -58,6 +58,7 @@ Item {
     readonly property QtObject mpris: Mpris
     readonly property QtObject perf: PerformanceService
     readonly property QtObject viewport: Viewport
+    readonly property QtObject battery: BatteryService
     // The hosted panel Item whose type exposes `prop` (QuickSettings has
     // currentTab, TaskbarManager has addPanelOpen, CalendarPanel viewDate).
     function findPanel(prop) {

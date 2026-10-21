@@ -211,6 +211,10 @@ PanelWindow {
     property bool widget_visualizer: true
     property string visualizer_style: "bars"
     property bool widget_weather: false
+    property bool widget_battery: false
+    property bool widget_timer: false
+    property string widget_battery_pos: "top-right"
+    property string widget_timer_pos: "bottom-right"
     property string widget_weather_pos: "bottom-right"
     property string weather_location: ""
     property string weather_units: "metric"
@@ -300,6 +304,10 @@ PanelWindow {
           sub: "A real spectrum of what is playing (from cava), along the bottom of the desktop. It runs only while music plays." },
         { key: "widget_weather", objectName: "widgetWeatherSwitch", label: "Weather",
           sub: "Now and the next three days, from Open-Meteo, for the place you type below. Nothing is shown for a place you haven't set." },
+        { key: "widget_battery", objectName: "widgetBatterySwitch", label: "Battery ring",
+          sub: "The charge as a ring, with the percentage and whether it is charging. Only on a machine with a battery." },
+        { key: "widget_timer", objectName: "widgetTimerSwitch", label: "Timer and stopwatch",
+          sub: "A stopwatch, or a countdown that sends a notification when it ends." },
         { key: "widget_system", objectName: "widgetSystemSwitch", label: "System monitor",
           sub: "Processor, memory, graphics and network, with the last minute of each. Measured only while it is on." },
     ]
@@ -349,7 +357,8 @@ PanelWindow {
         for (const f of widgetFields) keys.push(f.key);
         keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style", "visualizer_style",
                    "widget_weather_pos", "weather_location", "weather_units",
-                   "widget_clock_world", "widget_music_world", "widget_system_world", "widget_weather_world");
+                   "widget_clock_world", "widget_music_world", "widget_system_world", "widget_weather_world",
+                   "widget_battery_pos", "widget_timer_pos");
         return keys;
     }
 
@@ -2078,7 +2087,7 @@ PanelWindow {
                     SwitchList { width: parent.width; fields: root.widgetFields }
                     ChoiceRow {
                         settingKey: "clock_style"; idPrefix: "clockStyle:"; label: "Clock style"
-                        options: [{ value: "type", label: "Type" }, { value: "blocks", label: "Blocks" }]
+                        options: [{ value: "type", label: "Type" }, { value: "blocks", label: "Blocks" }, { value: "analog", label: "Analog" }]
                     }
                     ChoiceRow {
                         settingKey: "visualizer_style"; idPrefix: "visualizerStyle:"; label: "Visualizer style"
@@ -2124,6 +2133,8 @@ PanelWindow {
                         CornerRow { settingKey: "widget_music_pos"; idPrefix: "widgetPos:music:"; label: "Now playing" }
                         CornerRow { settingKey: "widget_system_pos"; idPrefix: "widgetPos:system:"; label: "System monitor" }
                         CornerRow { settingKey: "widget_weather_pos"; idPrefix: "widgetPos:weather:"; label: "Weather" }
+                        CornerRow { settingKey: "widget_battery_pos"; idPrefix: "widgetPos:battery:"; label: "Battery ring" }
+                        CornerRow { settingKey: "widget_timer_pos"; idPrefix: "widgetPos:timer:"; label: "Timer" }
                     }
                     ToggleChips {
                         label: "Move with the desktop"

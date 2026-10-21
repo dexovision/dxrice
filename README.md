@@ -12,6 +12,15 @@ never touches them.
 
 ## What you get
 
+- **The top bar.** Left: the app launcher and your saved shortcuts (the
+  same list as the dock, marking which apps are open), the workspaces and
+  the focused window. Middle: the clock, which opens the calendar. Right:
+  Wi-Fi, Bluetooth, sound, power and notifications, each opening its own
+  panel, plus the full Dashboard. Rest the pointer on one (or click it) and
+  its panel grows out of the bar; slide along to the next and it turns into
+  that one. A panel opened by hovering closes when the pointer leaves and
+  never takes your keyboard. `"bar_hover_open": false` in `theme.json`
+  makes it click-only.
 - **Bar, dock and panels** (Quickshell, `quickshell/`): workspaces and the
   focused window, a clock and calendar, a status area that opens Quick
   Settings (Wi-Fi, Bluetooth, Do Not Disturb, Keep Awake, audio, media
@@ -40,7 +49,11 @@ never touches them.
   characters), and the weather for a place you type in Settings (from
   Open-Meteo; nothing is shown until you set one). Switch each on or off and
   move it to another corner in Settings > Experience. Anything the machine
-  can't measure is left out or says n/a, never shown as zero.
+  can't measure is left out or says n/a, never shown as zero. The clock also
+  comes as tty-clock blocks or a round analog face; there is a battery ring
+  (on a machine with a battery) and a timer/stopwatch. Any of them can
+  either stay on the screen or move with the infinite desktop when you pan
+  (Settings > Experience > Move with the desktop).
 - **Audio visualizer.** A real spectrum of what's playing, from `cava`, along
   the bottom of the desktop. It only runs while music plays, as bars or as
   block characters.

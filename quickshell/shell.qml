@@ -117,6 +117,8 @@ ShellRoot {
     MusicWidget { objectName: "musicWidget" }
     SystemWidget { objectName: "systemWidget" }
     WeatherWidget { objectName: "weatherWidget" }
+    BatteryWidget { objectName: "batteryWidget" }
+    TimerWidget { objectName: "timerWidget" }
 
     // Opt-in, not wired to SUPER+L: see LockScreen.qml's own comment for
     // why a real Wayland session lock is a fundamentally higher-stakes
