@@ -2519,14 +2519,16 @@ def place_in_layout(address, workspace_id, mode, clients=None):
     return "placed"
 
 
-def relayout_after_close(workspace_id, mode):
-    """A window closed: lay the rest of its workspace out again (once the
-    compositor has dropped it from its list)."""
+def relayout_after_close(workspace_id, mode, address=None):
+    """A window closed: lay the rest of its workspace out again, once the
+    compositor has dropped it from its list (at most 0.4 s of waiting)."""
+    clients = hyprctl_json(["clients"]) or []
     deadline = time.time() + 0.4
-    while time.time() < deadline:
+    while address and find_window(clients, address) and time.time() < deadline:
         time.sleep(0.04)
-        break
-    dxrice_layout_apply.apply(mode, workspace_id, newest_is_primary=True)
+        clients = hyprctl_json(["clients"]) or []
+    clients = [c for c in clients if c.get("address") != address]
+    dxrice_layout_apply.apply(mode, workspace_id, newest_is_primary=True, clients=clients)
 
 
 def _creation_key(client):
@@ -2580,7 +2582,7 @@ class ThemeSettings:
         self._stamp = None
         self.gap = DEFAULT_GAP
         self.enabled = True
-        self.layout = dxrice_layout_apply.dxrice_layouts.DEFAULT_MODE
+        self.layout = dxrice_layout_apply.DEFAULT
 
     def refresh(self):
         try:
@@ -2599,9 +2601,7 @@ class ThemeSettings:
         self._stamp = stamp
         self.gap = gap
         self.enabled = data.get(AUTO_PLACE_KEY, True) is not False
-        raw = data.get(dxrice_layout_apply.KEYS["auto_place"])
-        self.layout = ("galaxy" if str(raw).strip().lower() == dxrice_layout_apply.LEGACY
-                       else dxrice_layout_apply.dxrice_layouts.normalize(raw))
+        self.layout = dxrice_layout_apply.resolve(data.get(dxrice_layout_apply.KEYS["auto_place"]))
         return self
 
 
@@ -2647,17 +2647,21 @@ class PlacementListener:
 
     def __init__(self, settings=None, place=None, reflow=None):
         self.settings = settings or ThemeSettings()
-        self._injected = place is not None
         self._place = place or place_new_window
         self._workspaces = {}     # address -> workspace id, for re-laying out after a close
         self._reflow = reflow or (lambda addr, ws, gap, info: place_new_window(addr, ws, gap, reflow=info))
         self.handled = set()
         self.deferred = {}  # {address: workspace_id}
 
+    def _layout(self):
+        """The saved Auto Place layout; the Galaxy Spiral unless theme.json
+        says otherwise (a settings object without one means Galaxy too)."""
+        return getattr(self.settings, "layout", dxrice_layout_apply.DEFAULT)
+
     def _attempt(self, addr, ws_id, what="placement"):
         try:
-            if not self._injected and self.settings.layout != dxrice_layout_apply.LEGACY:
-                return place_in_layout(addr, ws_id, self.settings.layout)
+            if self._layout() != dxrice_layout_apply.LEGACY:
+                return place_in_layout(addr, ws_id, self._layout())
             return self._place(addr, ws_id, self.settings.gap)
         except Exception as e:
             # One window failing to place must never take the listener
@@ -2699,10 +2703,10 @@ class PlacementListener:
             self.deferred.pop(addr, None)
             PLACED.pop(addr, None)
             ws_closed = self._workspaces.pop(addr, None)
-            if (not self._injected and ws_closed is not None and self.settings.refresh().enabled
-                    and self.settings.layout != dxrice_layout_apply.LEGACY):
+            if (ws_closed is not None and self.settings.refresh().enabled
+                    and self._layout() != dxrice_layout_apply.LEGACY):
                 try:
-                    relayout_after_close(ws_closed, self.settings.layout)
+                    relayout_after_close(ws_closed, self._layout(), addr)
                 except Exception as e:
                     print(f"layout after close failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
                 return "relaid"

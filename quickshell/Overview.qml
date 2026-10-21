@@ -123,9 +123,12 @@ PanelWindow {
         idx = idx < 0 ? 0 : (idx + step + order.length) % order.length;
         root.selectedAddress = order[idx].address;
     }
-    // The layout SUPER+G uses (theme.json; Expansion unless it says otherwise)
-    property string layoutMode: ["expansion", "spiral", "compact"].indexOf(String(Theme.data.layout_super_g || "")) >= 0
-                                ? String(Theme.data.layout_super_g) : "expansion"
+    // The layout SUPER+G uses (theme.json; the Galaxy Spiral unless it says
+    // otherwise -- the same rule as scripts/dxrice_layout_apply.py)
+    readonly property var layoutModes: ["galaxy", "expansion", "spiral", "compact"]
+    readonly property var layoutNames: ({ galaxy: "Galaxy", expansion: "Expansion", spiral: "Spiral", compact: "Compact" })
+    property string layoutMode: root.layoutModes.indexOf(String(Theme.data.layout_super_g || "").trim().toLowerCase()) >= 0
+                                ? String(Theme.data.layout_super_g).trim().toLowerCase() : "galaxy"
     function applyLayout(mode) {
         if (!root.open || layoutProc.running) return;
         root.layoutMode = mode;
@@ -747,7 +750,7 @@ PanelWindow {
             opacity: root.open ? root.progress : 0
             visible: opacity > 0.01 && root.windows.length > 1
             Repeater {
-                model: ["expansion", "spiral", "compact"]
+                model: root.layoutModes
                 delegate: Rectangle {
                     id: chip
                     required property string modelData
@@ -768,7 +771,7 @@ PanelWindow {
                     Text {
                         id: chipLabel
                         anchors.centerIn: parent
-                        text: chip.modelData.charAt(0).toUpperCase() + chip.modelData.slice(1)
+                        text: root.layoutNames[chip.modelData]
                         color: "white"
                         font.family: Theme.fontFamily
                         font.pixelSize: 13

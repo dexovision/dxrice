@@ -18,17 +18,17 @@ never touches them.
   controls, CPU/GPU/memory/disk/network, clipboard history), a dock with a
   shortcut manager, and a theme editor. One process, started with your
   session.
-- **Window layouts.** Three of them, picked in Settings > Experience:
-  **Expansion** (the default) gives the newest window most of the screen and
-  shares the rest between the others, **Spiral** gives each window half of
-  what's left, turning clockwise, and **Compact** is an even grid. Windows
-  opening on their own and `SUPER+G` each have their own choice. Opening or
-  closing a window lays the workspace out again, and Hyprland animates the
-  windows into place. Too many windows for the screen? The extra ones stay
-  where they are instead of being squeezed to nothing. Pinned and fullscreen
-  windows are never touched. Set `"layout_auto_place"` or `"layout_super_g"`
-  to `"galaxy"` in `theme.json` for the old Galaxy Spiral placement, which
-  keeps window sizes.
+- **Window layouts.** Four, picked in Settings > Experience, separately for
+  windows opening on their own and for `SUPER+G`. The **Galaxy Spiral** (the
+  default) keeps every window's size and grows the arrangement outward in a
+  spiral across the infinite desktop. The other three fit everything onto
+  the screen and resize windows to do it: **Expansion** gives the newest
+  window most of the screen and shares the rest between the others,
+  **Spiral** gives each window half of what's left, turning clockwise, and
+  **Compact** is an even grid. In those three, opening or closing a window
+  lays the workspace out again, and a window too many for the screen stays
+  where it is. Pinned and fullscreen windows are never touched. The
+  overview (`SUPER+Tab`) has the same four as chips.
 - **Desktop widgets.** A clock, a now-playing card and an optional system
   monitor sit in the corners of the desktop, under your windows. Each can be
   switched off or moved to another corner in Settings > Experience. The

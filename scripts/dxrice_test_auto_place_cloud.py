@@ -903,7 +903,8 @@ class TestLauncherHandoff(_Base):
 
 
 class TestLayoutModes(_Base):
-    """Expansion (the default), Spiral and Compact, through the real
+    """Expansion, Spiral and Compact (the screen-bounded modes, chosen in
+    Settings; the Galaxy Spiral stays the default), through the real
     listener, the real planner and the fake Hyprland."""
 
     def theme(self, data):
@@ -930,9 +931,18 @@ class TestLayoutModes(_Base):
             self.assertEqual(self.open(L, f"0xw{i}"), "placed")
         return L
 
-    def test_a_fresh_config_uses_expansion(self):
-        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "none.json")), "expansion")
+    def test_a_fresh_config_keeps_the_galaxy_spiral(self):
+        # was "a fresh config uses Expansion": that silently replaced the
+        # Galaxy Spiral on every existing install (no key in theme.json)
+        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "none.json")), "galaxy")
         self.stage({}, 3)
+        r = self.rects()
+        for a in ("0xw0", "0xw1", "0xw2"):
+            self.assertEqual(r[a][2:], (900, 600), f"{a}: the Galaxy Spiral never resizes a window")
+        self.assert_no_overlap()
+
+    def test_expansion_when_chosen_gives_the_newest_window_the_room(self):
+        self.stage({"layout_auto_place": "expansion"}, 3)
         r = self.rects()
         newest = r["0xw2"]
         for a in ("0xw0", "0xw1"):
@@ -948,13 +958,15 @@ class TestLayoutModes(_Base):
             seen[mode] = tuple(sorted(self.rects().items()))
         self.assertEqual(len(set(seen.values())), 3)
 
-    def test_unknown_and_missing_values_fall_back_to_expansion(self):
+    def test_unknown_and_missing_values_fall_back_to_the_galaxy_spiral(self):
+        # was "... fall back to Expansion" (the regression); see above
         for bad in ({"layout_auto_place": "grid"}, {"layout_auto_place": 7}, {"layout_auto_place": None}, {}):
-            self.assertEqual(lap.setting("auto_place", self.theme(bad)), "expansion", bad)
-        self.assertEqual(lap.setting("auto_place", self.theme({"layout_auto_place": "galaxy"})), "galaxy")
+            self.assertEqual(lap.setting("auto_place", self.theme(bad)), "galaxy", bad)
+        for mode in ("galaxy", "Galaxy ", "expansion", "spiral", "compact"):
+            self.assertEqual(lap.setting("auto_place", self.theme({"layout_auto_place": mode})), mode.strip().lower())
         with open(os.path.join(self._tmp.name, "torn.json"), "w") as f:
             f.write('{"layout_auto_p')
-        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "torn.json")), "expansion")
+        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "torn.json")), "galaxy")
 
     def test_auto_place_and_super_g_are_separate_settings(self):
         t = self.theme({"layout_auto_place": "compact", "layout_super_g": "spiral"})
@@ -987,7 +999,13 @@ class TestLayoutModes(_Base):
         self.assert_no_overlap()
 
     def test_pinned_fullscreen_and_hidden_windows_are_left_alone(self):
-        L = self.listener({})
+        for data in ({}, {"layout_auto_place": "expansion"}):
+            with self.subTest(data=data):
+                self.hypr.clients.clear()
+                self._pinned_fullscreen_hidden(data)
+
+    def _pinned_fullscreen_hidden(self, data):
+        L = self.listener(data)
         self.open(L, "0xa")
         self.hypr.add("0xpin", 1500, 80, 380, 220, pinned=True)
         self.hypr.add("0xfs", 0, 0, 1920, 1080, fullscreen=2, workspace={"id": 2})
@@ -998,7 +1016,7 @@ class TestLayoutModes(_Base):
             self.assertEqual((tuple(self.hypr.clients[a]["at"]), tuple(self.hypr.clients[a]["size"])), v, a)
 
     def test_a_window_that_vanished_before_it_was_laid_out_is_a_safe_no_op(self):
-        L = self.listener({})
+        L = self.listener({"layout_auto_place": "expansion"})
         self.hypr.dispatched.clear()
         self.assertEqual(L.handle_line("openwindow>>dead,1,app,x"), "gone")
         self.assertEqual(self.hypr.dispatched, [])
@@ -1018,6 +1036,152 @@ class TestLayoutModes(_Base):
             mon = clients[int(a[2:]) - 1]["monitor"]
             x0, y0, x1, y1 = (0, 52, 1920, 1080) if mon == 0 else (1920, 0, 4480, 1440)
             self.assertTrue(x >= x0 and y >= y0 and x + w <= x1 and y + h <= y1, (a, by[a], mon))
+
+
+class TestGalaxyRouting(_Base):
+    """Which algorithm runs, through the real listener and SUPER+G's real
+    entry point with nothing injected: the Galaxy Spiral unless a bounded
+    mode was chosen. (The listener used to skip mode routing whenever a test
+    injected `place`, so the real default path had no coverage at all.)"""
+
+    def theme(self, data):
+        path = os.path.join(self._tmp.name, "theme.json")
+        with open(path, "w") as f:
+            json.dump(data, f)
+        return path
+
+    def listener(self, data):
+        L = apw.PlacementListener(apw.ThemeSettings(self.theme(data)))
+        L.settings.refresh()
+        return L
+
+    def spies(self):
+        import unittest.mock as m
+        galaxy = m.patch.object(apw, "place_new_window", wraps=apw.place_new_window)
+        bounded = m.patch.object(apw, "place_in_layout", wraps=apw.place_in_layout)
+        relay = m.patch.object(apw, "relayout_after_close", wraps=apw.relayout_after_close)
+        g, b, r = galaxy.start(), bounded.start(), relay.start()
+        self.addCleanup(galaxy.stop)
+        self.addCleanup(bounded.stop)
+        self.addCleanup(relay.stop)
+        return g, b, r
+
+    def test_a_missing_key_places_new_windows_with_the_galaxy_spiral(self):
+        g, b, _ = self.spies()
+        L = self.listener({})
+        self.hypr.open("0xa", 900, 600)
+        self.assertEqual(L.handle_line("openwindow>>a,1,app,x"), "placed")
+        self.assertEqual((g.call_count, b.call_count), (1, 0))
+
+    def test_galaxy_spiral_progression_matches_the_spiral_geometry(self):
+        """Three windows opened in turn land where dxrice_spiral grows them:
+        the anchor first, each next one further along, sizes untouched."""
+        L = self.listener({"layout_auto_place": "galaxy"})
+        sizes = [(1280, 720), (945, 521), (1065, 867)]
+        for i, (w, h) in enumerate(sizes):
+            self.hypr.open(f"0xg{i}", w, h)
+            self.assertEqual(L.handle_line(f"openwindow>>g{i},1,app{i},x"), "placed")
+        got = [tuple(self.hypr.clients[f"0xg{i}"]["at"]) + tuple(self.hypr.clients[f"0xg{i}"]["size"]) for i in range(3)]
+        for (x, y, w, h), (sw, sh) in zip(got, sizes):
+            self.assertEqual((w, h), (sw, sh))
+        mon = apw.get_monitor_bounds(0)
+        expect = dxrice_spiral.arrange(sizes, [], mon, dxrice_spiral.read_spacing())
+        self.assertEqual([(x, y) for x, y, _w, _h in got][0], expect[0][:2], "the anchor is not where the spiral starts")
+        # every later window touches the cloud at a spiral spacing, never on top of it
+        self.assert_no_overlap()
+
+    def test_closing_under_galaxy_takes_the_classic_path_not_a_relayout(self):
+        _, _, r = self.spies()
+        L = self.listener({})
+        for i in range(3):
+            self.hypr.open(f"0xc{i}", 800, 500)
+            L.handle_line(f"openwindow>>c{i},1,app{i},x")
+        del self.hypr.clients["0xc1"]
+        self.assertIn(L.handle_line("closewindow>>c1"), ("closed", "reflowed"))
+        self.assertEqual(r.call_count, 0)
+
+    def test_a_bounded_mode_routes_to_the_layout_engine(self):
+        for mode in ("expansion", "spiral", "compact"):
+            with self.subTest(mode=mode):
+                self.hypr.clients.clear()
+                g, b, _ = self.spies()
+                L = self.listener({"layout_auto_place": mode})
+                self.hypr.open("0xm", 900, 600)
+                L.handle_line("openwindow>>m,1,app,x")
+                self.assertEqual(g.call_count, 0)
+                self.assertEqual(b.call_args[0][2], mode)
+
+    def test_a_settings_object_without_a_layout_means_galaxy(self):
+        g, b, _ = self.spies()
+
+        class Bare:
+            gap, enabled = 5, True
+
+            def refresh(self):
+                return self
+        L = apw.PlacementListener(Bare())
+        self.hypr.open("0xz", 700, 500)
+        L.handle_line("openwindow>>z,1,app,x")
+        self.assertEqual((g.call_count, b.call_count), (1, 0))
+
+
+class TestSuperGRouting(unittest.TestCase):
+    """SUPER+G (dxrice_auto_arrange.py -> dxrice_layout_apply.main): the
+    saved mode decides; no key, an unknown one, or --mode galaxy run the
+    classic arrangement (dxrice_auto_arrange.main), never a bounded mode."""
+
+    def setUp(self):
+        import unittest.mock as m
+        self._tmp = tempfile.TemporaryDirectory()
+        os.makedirs(os.path.join(self._tmp.name, "dxrice"))
+        self.path = os.path.join(self._tmp.name, "dxrice", "theme.json")
+        self._env = m.patch.dict(os.environ, {"XDG_CONFIG_HOME": self._tmp.name})
+        self._env.start()
+        self.classic = m.patch.object(arr, "main", return_value=0)
+        self.bounded = m.patch.object(lap, "apply", return_value=(0, []))
+        self.ws = m.patch.object(lap, "hyprctl_json", side_effect=lambda a: {"id": 1} if a == ["activeworkspace"] else {})
+        self.c, self.b, _ = self.classic.start(), self.bounded.start(), self.ws.start()
+
+    def tearDown(self):
+        for p in (self.classic, self.bounded, self.ws, self._env):
+            p.stop()
+        self._tmp.cleanup()
+
+    def write(self, data):
+        with open(self.path, "w") as f:
+            json.dump(data, f)
+
+    def run_main(self, *argv):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return lap.main(list(argv))
+
+    def test_no_key_runs_the_classic_arrangement(self):
+        self.write({"accent": "e67878"})
+        self.run_main()
+        self.assertEqual((self.c.call_count, self.b.call_count), (1, 0))
+
+    def test_an_unknown_value_runs_the_classic_arrangement(self):
+        self.write({"layout_super_g": "grid"})
+        self.run_main()
+        self.assertEqual((self.c.call_count, self.b.call_count), (1, 0))
+
+    def test_a_saved_bounded_mode_runs_that_mode(self):
+        self.write({"layout_super_g": "compact"})
+        self.run_main()
+        self.assertEqual(self.c.call_count, 0)
+        self.assertEqual(self.b.call_args[0][0], "compact")
+
+    def test_mode_galaxy_with_save_saves_galaxy_and_runs_the_classic_arrangement(self):
+        # this used to save and run Expansion: "galaxy" was normalised away
+        self.write({"layout_super_g": "compact", "accent": "e67878"})
+        self.run_main("--mode", "galaxy", "--save")
+        self.assertEqual(json.load(open(self.path)), {"layout_super_g": "galaxy", "accent": "e67878"})
+        self.assertEqual((self.c.call_count, self.b.call_count), (1, 0))
+
+    def test_the_auto_arrange_script_goes_through_the_router(self):
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_auto_arrange.py")).read()
+        tail = src[src.index('if __name__ == "__main__":'):]
+        self.assertIn("dxrice_layout_apply.main()", tail)
 
 
 if __name__ == "__main__":

@@ -1282,7 +1282,7 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
         o = self.scene(n=4, focused=0)
         try:
             self.assertTrue(o.scene.ev("findNamed('overviewLayoutChips').visible"))
-            self.assertEqual(o.ov("layoutMode"), "expansion")
+            self.assertEqual(o.ov("layoutMode"), "galaxy")   # no key: the Galaxy Spiral, as SUPER+G runs it
             x, y = o.scene.ev("(function(){ const b = findNamed('overviewLayout:spiral'); const p = b.mapToItem(null, b.width/2, b.height/2); return [p.x, p.y]; })()").toVariant()
             o.click(x, y)
             o.scene.wait(300)
@@ -1290,6 +1290,22 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
             ran = [r for r in o.scene.bridge.run_log if "dxrice_layout_apply.py" in " ".join(r)]
             self.assertEqual(len(ran), 1)
             self.assertEqual(ran[0][-3:], ["--mode", "spiral", "--save"])
+        finally:
+            o.scene.close()
+
+    def test_the_galaxy_chip_is_offered_and_saves_galaxy(self):
+        o = self.scene(n=4, focused=0)
+        try:
+            o.scene.ev("theme.data = Object.assign({}, theme.data, {layout_super_g: 'compact'})")
+            o.scene.wait(50)
+            self.assertEqual(o.ov("layoutMode"), "compact")
+            self.assertEqual(o.scene.ev("findNamed('overviewLayout:galaxy').children[0].text"), "Galaxy")
+            x, y = o.scene.ev("(function(){ const b = findNamed('overviewLayout:galaxy'); const p = b.mapToItem(null, b.width/2, b.height/2); return [p.x, p.y]; })()").toVariant()
+            o.click(x, y)
+            o.scene.wait(300)
+            self.assertEqual(o.ov("layoutMode"), "galaxy")
+            ran = [r for r in o.scene.bridge.run_log if "dxrice_layout_apply.py" in " ".join(r)]
+            self.assertEqual(ran[-1][-3:], ["--mode", "galaxy", "--save"])
         finally:
             o.scene.close()
 

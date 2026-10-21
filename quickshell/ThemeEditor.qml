@@ -191,10 +191,12 @@ PanelWindow {
     // file, one Apply, one Revert), but nothing a preset or "Generate from
     // wallpaper" touches -- those only carry colour keys.
     property bool auto_place_windows: true
-    // Window layout (Expansion, Spiral or Compact), chosen separately for
-    // windows opening on their own and for SUPER+G; see scripts/dxrice_layouts.py.
-    property string layout_auto_place: "expansion"
-    property string layout_super_g: "expansion"
+    // Window layout, chosen separately for windows opening on their own and
+    // for SUPER+G: the Galaxy Spiral (the default: what a theme.json without
+    // the key has always meant, see scripts/dxrice_layout_apply.py), or one of
+    // the screen-bounded Expansion, Spiral and Compact (scripts/dxrice_layouts.py).
+    property string layout_auto_place: "galaxy"
+    property string layout_super_g: "galaxy"
     property bool reduce_motion: false
     // Desktop widgets (see DesktopWidget.qml): whether each is shown and in
     // which corner, plus how the clock reads.
@@ -353,6 +355,12 @@ PanelWindow {
         // from Wallpaper" have something real to work with immediately.
         if (!root.wallpaper) {
             root.wallpaper = Quickshell.env("HOME") + "/Pictures/Wallpapers/default.png";
+        }
+        // a layout this version doesn't know reads as the Galaxy Spiral, as
+        // the placement scripts read it (so Apply can't turn it into anything else)
+        for (const key of ["layout_auto_place", "layout_super_g"]) {
+            const v = String(root[key] || "").trim().toLowerCase();
+            root[key] = Prev.modes.indexOf(v) >= 0 ? v : "galaxy";
         }
         root.dirty = false;
         root._draftBase = JSON.stringify(data);
@@ -726,8 +734,8 @@ PanelWindow {
                     required property int index
                     readonly property bool picked: root[picker.settingKey] === card.modelData
                     objectName: picker.idPrefix + card.modelData
-                    width: (picker.width - 2 * Theme.padMd) / 3
-                    height: 204
+                    width: (picker.width - (Prev.modes.length - 1) * Theme.padMd) / Prev.modes.length
+                    height: stage.y + stage.height + Theme.padSm + 62
                     scale: cardHover.hovered && !card.picked ? 1.025 : 1
                     Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                     HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
@@ -745,13 +753,25 @@ PanelWindow {
                         x: Theme.padMd; y: Theme.padMd
                         width: parent.width - 2 * Theme.padMd
                         height: width * 0.625
+                        // the screen, inside a preview that reaches past it (Galaxy)
+                        Rectangle {
+                            readonly property var r: Prev.screens[card.modelData] ? Prev.screens[card.modelData][4] : null
+                            visible: r !== null
+                            x: r ? r[0] * stage.width : 0; y: r ? r[1] * stage.height : 0
+                            width: r ? r[2] * stage.width : 0; height: r ? r[3] * stage.height : 0
+                            radius: 3
+                            color: "transparent"
+                            border.width: 1
+                            border.color: Theme.mix(Theme.borderIdle, Theme.textActive, card.picked ? 0.5 : 0.25)
+                        }
                         Repeater {
                             model: Prev.rects[card.modelData][4]
                             delegate: Rectangle {
                                 id: pane
                                 required property var modelData
                                 required property int index
-                                readonly property bool lead: index === 3 && card.modelData === "expansion" || index === 0 && card.modelData === "spiral"
+                                readonly property bool lead: index === 3 && card.modelData === "expansion"
+                                                            || index === 0 && (card.modelData === "spiral" || card.modelData === "galaxy")
                                 x: modelData[0] * stage.width; y: modelData[1] * stage.height
                                 width: modelData[2] * stage.width; height: modelData[3] * stage.height
                                 radius: 3

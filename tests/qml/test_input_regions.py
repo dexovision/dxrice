@@ -58,7 +58,8 @@ class InputRegionTest(unittest.TestCase):
         self.assertEqual([r["surface"] for r in widgets], ["clockWidget"], f"{context}: widgets claiming input: {widgets}")
         c = widgets[0]
         self.assertEqual(c["x"], 28, f"{context}: clock card is not in the top-left corner: {c}")
-        self.assertIn(c["y"], (74, 76), f"{context}: clock card is not in the top-left corner: {c}")   # 74: lifted by a hover
+        # 76, or up to 2 px less while a hover lifts it (the lift is animated)
+        self.assertTrue(74 <= c["y"] <= 76, f"{context}: clock card is not in the top-left corner: {c}")
         for r in top:
             self.assertLessEqual(r["h"], 40, f"{context}: top-bar input taller than a capsule: {r}")
         d = dock[0]

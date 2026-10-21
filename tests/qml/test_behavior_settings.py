@@ -35,8 +35,9 @@ def theme_json(s):
 
 class LayoutPickerTest(unittest.TestCase):
     """Settings > Experience > Window layout: two pickers (windows opening on
-    their own, SUPER+G), Expansion selected for a fresh config, a click
-    selects, Apply saves each separately, and the two never affect each other."""
+    their own, SUPER+G), the Galaxy Spiral selected for a fresh config, a
+    click selects, Apply saves each separately, and the two never affect
+    each other."""
 
     def open_experience(self, s):
         s.ev("panels.open('theme')")
@@ -54,18 +55,47 @@ class LayoutPickerTest(unittest.TestCase):
         s.wait(250)
         return owner
 
-    def test_a_fresh_config_selects_expansion_in_both(self):
+    def test_a_fresh_config_selects_the_galaxy_spiral_in_both(self):
+        # was "... selects Expansion": that showed (and, on Apply, saved) a
+        # layout the user never chose; see the next test
         s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None, layout_super_g=None))
         try:
             self.open_experience(s)
-            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "expansion")
-            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "expansion")
+            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "galaxy")
+            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "galaxy")
             for prefix in ("layoutAuto:", "layoutSuperG:"):
-                for mode in ("expansion", "spiral", "compact"):
+                for mode in ("galaxy", "expansion", "spiral", "compact"):
                     self.assertTrue(s.ev(f"findNamed('{prefix}{mode}') !== null"), prefix + mode)
-            self.assertTrue(s.ev("findNamed('layoutAuto:expansion').picked"))
-            self.assertFalse(s.ev("findNamed('layoutAuto:spiral').picked"))
+            self.assertTrue(s.ev("findNamed('layoutAuto:galaxy').picked"))
+            self.assertFalse(s.ev("findNamed('layoutAuto:expansion').picked"))
             self.assertFalse(s.ev(f"{TE}.dirty"))
+        finally:
+            s.close()
+
+    def test_applying_other_settings_never_changes_the_layout(self):
+        """The regression on the real desktop: Apply (for a widget switch)
+        wrote "expansion" into a theme.json that had no layout key, and the
+        Galaxy Spiral was gone."""
+        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None, layout_super_g=None))
+        try:
+            self.open_experience(s)
+            s.ev(f"{TE}.widget_system = true; {TE}.dirty = true")
+            s.ev(f"{TE}.apply()")
+            s.wait(500)
+            saved = theme_json(s)
+            self.assertEqual((saved.get("layout_auto_place"), saved.get("layout_super_g")), ("galaxy", "galaxy"))
+            self.assertTrue(saved.get("widget_system"))
+        finally:
+            s.close()
+
+    def test_the_galaxy_card_shows_the_screen_inside_the_spiral(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None))
+        try:
+            self.open_experience(s)
+            frames = s.ev("(function() { var c = findNamed('layoutAuto:galaxy'); var n = 0; var stack = [c];"
+                          " while (stack.length) { var it = stack.pop(); if (it.border && it.border.width === 1 && it.color.a === 0 && it.visible) n++;"
+                          " for (var i = 0; i < it.children.length; i++) stack.push(it.children[i]); } return n; })()")
+            self.assertGreaterEqual(frames, 1, "no screen outline in the Galaxy preview")
         finally:
             s.close()
 
@@ -75,7 +105,7 @@ class LayoutPickerTest(unittest.TestCase):
             self.open_experience(s)
             self.assertTrue(self.click_card(s, "layoutSuperG:spiral").startswith("ThemeEditor"))
             self.assertEqual(s.ev(f"{TE}.layout_super_g"), "spiral")
-            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "expansion", "one picker changed the other")
+            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "galaxy", "one picker changed the other")
             self.assertTrue(s.ev(f"{TE}.dirty"))
             self.click_card(s, "layoutAuto:compact")
             self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "compact")
@@ -97,12 +127,16 @@ class LayoutPickerTest(unittest.TestCase):
         finally:
             s.close()
 
-    def test_an_unknown_saved_value_picks_nothing_and_breaks_nothing(self):
+    def test_an_unknown_saved_value_reads_as_the_galaxy_spiral(self):
+        # was "... picks nothing": the scripts run the Galaxy Spiral for it,
+        # so that is what Settings shows (and what Apply keeps)
         s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place="grid"))
         try:
             self.open_experience(s)
+            self.assertTrue(s.ev("findNamed('layoutAuto:galaxy').picked"))
             for mode in ("expansion", "spiral", "compact"):
                 self.assertFalse(s.ev(f"findNamed('layoutAuto:{mode}').picked"))
+            self.assertFalse(s.ev(f"{TE}.dirty"))
         finally:
             s.close()
 
