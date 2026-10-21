@@ -145,14 +145,37 @@ PanelWindow {
     function _cornerFor(island, flush) {
         return flush ? root.barRadius * (1 - Math.min(1, island.bodyHeight / root.barRadius)) : root.barRadius;
     }
-    RectangularShadow {
-        anchors.fill: barStrip
-        radius: root.barRadius
-        color: Theme.shadowColor
-        blur: Theme.elevationBlur(2)
-        spread: Theme.elevationSpread(2)
-        offset.y: Theme.elevationOffsetY(2)
+    // The bar's shadow, everywhere except below the bar where a panel hangs
+    // from it: there the bar and the panel are one shape, and the shadow
+    // seen through the translucent panel would draw a dark band across the
+    // joint. So it is drawn in three clipped pieces -- down to the bar's
+    // lower edge everywhere, and below it only left and right of the open
+    // panels' span (the panels cast their own shadow below).
+    readonly property var _openSpan: {
+        let lo = 1e9, hi = -1e9;
+        for (const i of [activityIsland, clockIsland, statusIsland]) {
+            if (i.bodyHeight <= 0.5) continue;
+            lo = Math.min(lo, i.x + i.bodyX - i.filletRadius);
+            hi = Math.max(hi, i.x + i.bodyX + i.bodyWidth + i.filletRadius);
+        }
+        return lo < hi ? [lo, hi] : [root.width, root.width];
     }
+    component BarShadowPiece: Item {
+        id: piece
+        clip: true
+        RectangularShadow {
+            x: barStrip.x - piece.x; y: barStrip.y - piece.y
+            width: barStrip.width; height: barStrip.height
+            radius: root.barRadius
+            color: Theme.shadowColor
+            blur: Theme.elevationBlur(2)
+            spread: Theme.elevationSpread(2)
+            offset.y: Theme.elevationOffsetY(2)
+        }
+    }
+    BarShadowPiece { x: 0; y: 0; width: root.width; height: barStrip.y + barStrip.height }
+    BarShadowPiece { x: 0; y: barStrip.y + barStrip.height; width: Math.max(0, root._openSpan[0]); height: 80 }
+    BarShadowPiece { x: root._openSpan[1]; y: barStrip.y + barStrip.height; width: Math.max(0, root.width - root._openSpan[1]); height: 80 }
     Rectangle {
         id: barStrip
         objectName: "barStrip"

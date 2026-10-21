@@ -58,8 +58,14 @@ record)
     fi
     rec=$!
     echo "$rec" > "$pid_file"
+    # Whatever stops this script (the shell going away mid-recording) stops
+    # the recording with it, so the file is finished rather than the
+    # recorder left running unseen; TERM after 3 s, as `stop` does.
+    trap 'kill -INT "$rec" 2>/dev/null; ( sleep 3; kill -TERM "$rec" 2>/dev/null ) &' TERM HUP INT
     wait "$rec"
     status=$?
+    # (a trapped signal returns from `wait` early: wait for the file to close)
+    while kill -0 "$rec" 2>/dev/null; do wait "$rec"; status=$?; done
     rm -f "$pid_file"
     if [ -s "$file" ]; then
         notify-send -a "Screen recording" "Recording saved" "$file" 2>/dev/null

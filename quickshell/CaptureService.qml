@@ -32,10 +32,16 @@ QtObject {
         root._pendingShot = mode === "screen" ? "screen" : "region";
         root.shotDelay.restart();
     }
+    // a recording waits the same moment, so its first frames aren't the
+    // panel closing
+    property Timer recordDelay: Timer {
+        interval: 280
+        onTriggered: root.recorder.running = true
+    }
     function record(mode) {
-        if (root.recording) return;
+        if (root.recording || root.recordDelay.running) return;
         root.recorder.command = ["sh", root.script, "record", mode === "region" ? "region" : "screen"];
-        root.recorder.running = true;
+        root.recordDelay.restart();
     }
     function stop() { if (root.recording) Quickshell.execDetached(["sh", root.script, "stop"]); }
     function clock(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }

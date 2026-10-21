@@ -842,11 +842,11 @@ PanelWindow {
 
         }
 
-        // Layout switcher for SUPER+G only (new windows keep their own
-        // choice, set in Settings): apply Galaxy, Compact or Expansion to
-        // this workspace and keep it as SUPER+G's. The real
-        // windows move (Hyprland animates them) and the pictures follow as
-        // the overview re-reads them. The label says which selector it is.
+        // The one window-layout choice (theme.json "window_layout": what a
+        // new window does and what SUPER+G does alike): apply Galaxy,
+        // Compact or Expansion to this workspace now and keep it as the
+        // choice. The real windows move (Hyprland animates them) and the
+        // pictures follow as the overview re-reads them.
         Row {
             id: layoutChips
             objectName: "overviewLayoutChips"

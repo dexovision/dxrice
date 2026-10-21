@@ -245,6 +245,25 @@ class CaptureScriptTest(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertFalse(log.exists() and "grim" in log.read_text())
 
+    def test_the_script_going_away_ends_its_recording_too(self):
+        # the shell restarting mid-recording: no recorder left running unseen
+        import signal
+        import time
+        tmp, proc, log, env, script = self.run_script("record", "screen", wait=False)
+        pid_file = tmp / "run" / "dxrice" / "recording.pid"
+        for _ in range(100):
+            if pid_file.exists():
+                break
+            time.sleep(0.05)
+        rec = int(pid_file.read_text())
+        time.sleep(0.2)
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=10)
+        time.sleep(0.3)
+        self.assertFalse(Path(f"/proc/{rec}").exists() and "wf-recorder" in Path(f"/proc/{rec}/cmdline").read_text(errors="ignore"),
+                         "the recorder outlived the script")
+        self.assertEqual(len(list((tmp / "home" / "Videos" / "Recordings").glob("*.mp4"))), 1, "the file was not finished")
+
     def test_stop_ends_a_recording_and_keeps_the_file(self):
         import subprocess
         import time

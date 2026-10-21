@@ -108,6 +108,20 @@ class TopBarLayoutTest(unittest.TestCase):
                 self.s.wait(400)
                 self.assertEqual(len(self.topbar_input_rects()), 1, f"bar input not restored after {panel} closed")
 
+    def test_the_bars_shadow_leaves_out_the_open_panels_span(self):
+        # (the shadow itself needs the GPU; this checks where it is cut away)
+        bar = self.strip()
+        self.assertGreaterEqual(v(self.s.ev("findNamed('statusIsland').parent._openSpan"))[0], self.size[0], "cut away with nothing open")
+        self.s.ev("panels.open('calendar')")
+        self.s.wait(900)
+        span = v(self.s.ev("findNamed('statusIsland').parent._openSpan"))
+        body = self.body("clockIsland")
+        self.assertLessEqual(span[0], body["x"] - 13)
+        self.assertGreaterEqual(span[1], body["x"] + body["w"] + 13)
+        self.assertGreater(span[0], bar["x"])
+        self.s.ev("panels.closeCurrent()")
+        self.s.wait(900)
+
     def test_a_panel_reaching_an_end_of_the_bar_runs_flush_with_it(self):
         """Quick Settings and Applications reach the bar's right and left
         ends: they run flush (no joint), and the bar squares that corner
