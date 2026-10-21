@@ -220,7 +220,7 @@ DesktopWidget {
                     width: parent.width * progress.frac
                     color: root.hasArt ? "white" : Theme.accent
                     // one short step per second, not a bar that is always animating
-                    Behavior on width { enabled: !progressArea.pressed; NumberAnimation { duration: 240; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    Behavior on width { enabled: !progressArea.pressed; NumberAnimation { duration: Theme.durationTick; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                 }
             }
             MouseArea {

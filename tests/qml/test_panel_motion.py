@@ -391,5 +391,75 @@ class ReducedMotionTest(unittest.TestCase):
             s.close()
 
 
+def record_body(s, island):
+    """Every width and height the island's body takes while it is open,
+    and the content's opacity whenever the panel's item is replaced."""
+    qml = ("import QtQuick; Item { id: r; objectName: 'bodyRec'; property var w: []; property var h: []; property var swaps: []; "
+           "Connections { target: r.parent; function onBodyWidthChanged() { r.w.push(r.parent.bodyWidth); } "
+           "function onBodyHeightChanged() { r.h.push(r.parent.bodyHeight); } "
+           "function onPanelItemChanged() { r.swaps.push(r.parent.contentOpacity); } } }")
+    s.ev("(function(){ const old = findNamed('bodyRec'); if (old) old.destroy(); })()")
+    s.ev(f"Qt.createQmlObject({json.dumps(qml)}, findNamed('{island}'), 'rec')")
+
+
+def biggest_step(values):
+    return max((abs(b - a) for a, b in zip(values, values[1:])), default=0)
+
+
+class ResizeWhileOpenTest(unittest.TestCase):
+    """An open panel whose content changes size (another section, the
+    Dashboard) eases to the new size; it used to snap to it in one frame,
+    and the Dashboard's content replaced the section's in one frame too."""
+
+    def setUp(self):
+        self.s = Scene(width=1920, height=1080)
+        self.s.wait(500)
+
+    def tearDown(self):
+        self.s.close()
+
+    def test_another_section_eases_to_its_height(self):
+        s = self.s
+        s.ev("panels.open('status:power', 'click')")
+        s.wait(900)
+        h0 = s.ev("findNamed('statusIsland').bodyHeight")
+        record_body(s, "statusIsland")
+        s.ev("panels.open('status:performance', 'click')")
+        s.wait(900)
+        hs = json.loads(s.ev("JSON.stringify(findNamed('bodyRec').h)"))
+        h1 = s.ev("findNamed('statusIsland').bodyHeight")
+        self.assertGreater(abs(h1 - h0), 40, "the two sections should differ in height for this test")
+        self.assertGreaterEqual(len(hs), 5, f"the height changed in {len(hs)} steps: {hs}")
+        self.assertLess(biggest_step([h0] + hs), abs(h1 - h0) * 0.4, f"it snapped: {[h0] + hs}")
+
+    def test_the_dashboard_eases_out_of_a_section(self):
+        s = self.s
+        s.ev("panels.open('status:audio', 'click')")
+        s.wait(900)
+        w0 = s.ev("findNamed('statusIsland').bodyWidth")
+        record_body(s, "statusIsland")
+        s.ev("panels.open('quicksettings', 'click')")
+        s.wait(1000)
+        rec = json.loads(s.ev("(function(){ const r = findNamed('bodyRec'); return JSON.stringify({ w: r.w, swaps: r.swaps }); })()"))
+        w1 = s.ev("findNamed('statusIsland').bodyWidth")
+        self.assertGreater(w1 - w0, 100)
+        self.assertLess(biggest_step([w0] + rec["w"]), (w1 - w0) * 0.4, f"the width snapped: {[w0] + rec['w']}")
+        self.assertTrue(rec["swaps"], "the Dashboard never replaced the section")
+        self.assertLessEqual(max(rec["swaps"]), 0.05, f"the section was still showing when the Dashboard replaced it: {rec['swaps']}")
+        self.assertGreater(s.ev("findNamed('statusIslandContent').opacity"), 0.99, "the Dashboard never faded in")
+        self.assertTrue(s.ev("findNamed('statusIsland').panelItem.currentTab !== undefined"), "not the Dashboard")
+
+    def test_the_section_list_slides_rather_than_jumping_back(self):
+        s = self.s
+        s.ev("panels.open('quicksettings', 'click')")
+        s.wait(900)
+        record_body(s, "statusIsland")
+        s.ev("panels.open('status:network', 'click')")
+        s.wait(1000)
+        rec = json.loads(s.ev("(function(){ const r = findNamed('bodyRec'); return JSON.stringify({ w: r.w, swaps: r.swaps }); })()"))
+        self.assertGreaterEqual(len(rec["w"]), 5, rec["w"])
+        self.assertLessEqual(max(rec["swaps"]), 0.05)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

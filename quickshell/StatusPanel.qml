@@ -38,10 +38,10 @@ Item {
     }
     SequentialAnimation {
         id: swap
-        NumberAnimation { target: body; property: "opacity"; to: 0; duration: Theme.reduceMotion ? 0 : 90; easing.type: Easing.InQuad }
+        NumberAnimation { target: body; property: "opacity"; to: 0; duration: Theme.reduceMotion ? 0 : Theme.durationFadeOut; easing.type: Easing.InQuad }
         ScriptAction { script: { root.shown = root.section; slide.x = root.direction * 22; } }
         ParallelAnimation {
-            NumberAnimation { target: body; property: "opacity"; to: 1; duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+            NumberAnimation { target: body; property: "opacity"; to: 1; duration: Theme.durationFadeIn; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
             NumberAnimation { target: slide; property: "x"; to: 0; duration: Theme.durationSpring; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpring }
         }
     }
@@ -610,7 +610,7 @@ Item {
                             height: parent.height; radius: parent.radius
                             width: parent.width * seekBar.frac
                             color: Theme.accent
-                            Behavior on width { enabled: !seekArea.pressed; NumberAnimation { duration: 240; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                            Behavior on width { enabled: !seekArea.pressed; NumberAnimation { duration: Theme.durationTick; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                         }
                     }
                     MouseArea {

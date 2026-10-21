@@ -470,6 +470,31 @@ QtObject {
     // "this replaced that", it isn't a page transition.
     readonly property real contentShift: root.reduceMotion ? 0 : 8
 
+    // ---- the motion table: which timing each kind of change uses ----
+    //   hover / press colour     durationFast, curveStandard
+    //   press sink, small pop    durationSpringFast, curveSpringFast
+    //   a pill or reading resizing in place   durationMove, curveStandard
+    //   content swapped in place (a section, a tab, another panel):
+    //                            out durationFadeOut, then in durationFadeIn
+    //                            (+ contentShift / a short slide)
+    //   a panel growing out of the bar        morph: durationEnter on
+    //                            curveEnter; content durationFadeIn
+    //   a panel tucking back into the bar     morph: durationExit on
+    //                            curveExit; content durationFadeOut first
+    //   an open panel changing size           durationDefault, curveStandard
+    //   a widget arriving / leaving           durationDefault / durationFast,
+    //                            curveEmphasizedDecel
+    //   a widget moving to a new place in the layout   durationDefault,
+    //                            curveSettle
+    //   the desktop panning      not a curve: Viewport runs the windows'
+    //                            own spring, so widgets keep pace with them
+    //   a reading that ticks (a progress bar each second)   durationTick
+    // and the pointer's intent on the bar, which is timing too:
+    readonly property int hoverOpenDelay: 150     // resting on a section before it opens
+    readonly property int hoverSwitchDelay: 80    // settling on a neighbour while one is open
+    readonly property int hoverCloseDelay: 320    // grace after leaving a hover-opened panel
+    readonly property int durationTick: root.reduceMotion ? 1 : 240
+
     // ---- elevation: ported directly from caelestia-dots/shell's own
     // components/effects/Elevation.qml -- a real Material 3 discrete
     // elevation scale (dp = [0, 1, 3, 6, 8, 12] for levels 0-5), not one

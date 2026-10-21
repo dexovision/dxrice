@@ -88,6 +88,22 @@ class BarTest(unittest.TestCase):
         self.s.wait(900)
         self.assertTrue(self.s.ev("findNamed('statusSection:bluetooth').visible"))
 
+    def test_sweeping_along_the_indicators_does_not_flick_through_each(self):
+        x, y = self.centre("network")
+        self.s.click(x, y)
+        self.s.wait(400)
+        seen = []
+        for name in ("bluetooth", "audio", "power"):
+            self.hover(name)
+            for _ in range(3):
+                self.s.wait(10)
+                if self.current() not in seen:
+                    seen.append(self.current())
+        self.s.wait(300)
+        self.assertEqual(self.current(), "status:power")
+        self.assertNotIn("status:bluetooth", seen, "it switched to a section the pointer only passed over")
+        self.assertNotIn("status:audio", seen)
+
     def test_leaving_closes_a_hover_opened_panel(self):
         self.hover("power")
         self.s.wait(400)

@@ -73,11 +73,17 @@ Item {
     }
     // the search takes the keys whenever Apps is showing and the bar has them
     function focusSearch() { if (root.view === "apps") search.forceActiveFocus(); }
-    onViewChanged: Qt.callLater(root.focusSearch)
+    // a tab changed while open: the new view rises into place as it fades
+    // in, while the panel eases to its height (ShellIsland)
+    property real viewIn: 1
+    property bool _settled: false
+    onViewChanged: { Qt.callLater(root.focusSearch); if (root._settled) viewAnim.restart(); }
+    NumberAnimation { id: viewAnim; target: root; property: "viewIn"; from: 0; to: 1; duration: Theme.durationFadeIn; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
     Component.onCompleted: {
         root.view = PanelManager.isOpen("taskbar") ? "shortcuts" : "apps";
         appsProc.running = true;
         Qt.callLater(root.focusSearch);
+        Qt.callLater(() => { root._settled = true; });
     }
     // a reopen (even one quick enough to find this panel still alive from
     // the last time) starts clean
@@ -154,6 +160,8 @@ Item {
         objectName: "appsView"
         visible: root.view === "apps"
         y: root.navH
+        opacity: root.viewIn
+        transform: Translate { y: (1 - root.viewIn) * Theme.contentShift }
         width: parent.width
         spacing: Theme.padSm
         bottomPadding: Theme.padMd
@@ -414,6 +422,8 @@ Item {
         active: root.view === "shortcuts"
         visible: active
         y: root.navH
+        opacity: root.viewIn
+        transform: Translate { y: (1 - root.viewIn) * Theme.contentShift }
         width: parent.width
         height: item ? item.contentHeight : 0
         sourceComponent: TaskbarManager { onCloseRequested: root.closeRequested() }

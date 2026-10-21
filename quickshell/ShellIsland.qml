@@ -24,6 +24,12 @@ import QtQuick.Effects
 // `contentFade` owns the content's visibility; each direction has its own
 // curve (Theme's enter/exit), and both always start from where they are, so
 // reversing mid-way never jumps.
+//
+// While it is open, a panel that changes size (a section with more or less
+// in it, the Dashboard taking over from a section) eases to the new size
+// (`shownWidth`/`shownHeight`) rather than snapping; a different panel
+// taking over (`panel` changing) fades the old content out first, then
+// fades the new in as the body reaches its size.
 Item {
     id: root
 
@@ -59,6 +65,7 @@ Item {
     property Component panel: null
     default property alias controlContent: controlHolder.data
     readonly property alias panelItem: panelLoader.item
+    readonly property real contentOpacity: panelLoader.opacity
     // for the host's input mask
     readonly property alias bodyItem: body
 
@@ -102,10 +109,18 @@ Item {
     // past 1 while the opening spring overshoots: both axes follow it
     readonly property real pH: morph > 1 ? morph : sub(morph, 0.18, 1.0)
 
+    // ---- the size it opens to, eased while open ----
+    // (snapped while opening or closing: the morph is what moves then)
+    readonly property bool _easeSize: root.expanded && !morphAnim.running && !Theme.reduceMotion
+    property real shownWidth: root.expandedWidth
+    property real shownHeight: root.expandedHeight
+    Behavior on shownWidth { enabled: root._easeSize; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+    Behavior on shownHeight { enabled: root._easeSize; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+
     // ---- the body's live geometry (x in this item's coordinates) ----
     readonly property real bodyWidth: Math.max(root.collapsedWidth, Math.min(root.barRight - root.barLeft,
-        root.collapsedWidth + (root.expandedWidth - root.collapsedWidth) * root.pH))
-    readonly property real bodyHeight: Math.max(0, (root.expandedHeight - root.collapsedHeight) * root.pV)
+        root.collapsedWidth + (root.shownWidth - root.collapsedWidth) * root.pH))
+    readonly property real bodyHeight: Math.max(0, (root.shownHeight - root.collapsedHeight) * root.pV)
     readonly property real _pinnedX: root.pinX === "left" ? 0
         : (root.pinX === "right" ? root.collapsedWidth - root.bodyWidth : (root.collapsedWidth - root.bodyWidth) / 2)
     readonly property real bodyX: Math.max(root.barLeft - root.x, Math.min(root.barRight - root.x - root.bodyWidth, root._pinnedX))
@@ -114,6 +129,28 @@ Item {
 
     width: collapsedWidth
     height: collapsedHeight
+
+    // ---- another panel taking over while open: out, swap, in ----
+    property Component _component: root.panel
+    property real swapFade: 1
+    property real _frozenWidth: -1      // the outgoing content keeps its layout while it fades
+    onPanelChanged: {
+        if (!panelLoader.item || root.contentFade < 0.01 || Theme.reduceMotion) {
+            swapAnim.stop();
+            root._frozenWidth = -1;
+            root.swapFade = 1;
+            root._component = root.panel;
+            return;
+        }
+        if (!swapAnim.running) root._frozenWidth = panelLoader.width;
+        swapAnim.restart();
+    }
+    SequentialAnimation {
+        id: swapAnim
+        NumberAnimation { target: root; property: "swapFade"; to: 0; duration: Theme.durationFadeOut; easing.type: Easing.InQuad }
+        ScriptAction { script: { root._frozenWidth = -1; root._component = root.panel; } }
+        NumberAnimation { target: root; property: "swapFade"; to: 1; duration: Theme.durationFadeIn; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+    }
 
     property bool _keepAlive: false
     onExpandedChanged: {
@@ -203,13 +240,14 @@ Item {
         }
         Loader {
             id: panelLoader
-            opacity: Math.min(root.contentFade, root.sub(Math.min(root.pH, root.pV), 0.85, 1.0))
-            enabled: root.expanded
+            objectName: (root.objectName || "island") + "Content"
+            opacity: Math.min(root.contentFade, root.swapFade, root.sub(Math.min(root.pH, root.pV), 0.85, 1.0))
+            enabled: root.expanded && !swapAnim.running
             active: root.expanded || root._keepAlive
-            width: root.expandedWidth
+            width: root._frozenWidth >= 0 ? root._frozenWidth : root.expandedWidth
             height: root.expandedHeight - root.collapsedHeight
             x: root.pinX === "left" ? 0 : (root.pinX === "right" ? body.width - width : (body.width - width) / 2)
-            sourceComponent: root.panel
+            sourceComponent: root._component
         }
     }
 

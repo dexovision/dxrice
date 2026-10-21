@@ -216,7 +216,7 @@ PanelWindow {
     readonly property bool _mayHoverOpen: PanelManager.current === "" || PanelManager.openedBy === "hover"
     Timer {
         id: hoverOpenTimer
-        interval: 150
+        interval: Theme.hoverOpenDelay
         onTriggered: if (root._hoverWant && root._mayHoverOpen && PanelManager.current !== root._hoverWant) PanelManager.open(root._hoverWant, "hover")
     }
     function elementHovered(name, on, island) {
@@ -227,25 +227,39 @@ PanelWindow {
             if (sameIsland) {
                 hoverOpenTimer.stop();
                 root._hoverWant = "";
-                if (cur !== name && island === "status") PanelManager.open(name, PanelManager.openedBy);
+                // a short settle, so sweeping along the indicators (or
+                // cutting a corner on the way down into the panel) doesn't
+                // flick the panel through every section it crosses
+                if (cur !== name && island === "status") { switchTimer.target = name; switchTimer.restart(); }
+                else switchTimer.stop();
                 return;
             }
             if (!root.hoverOpens || !root._mayHoverOpen) return;
             root._hoverWant = name;
             if (root._pointerMoved()) hoverOpenTimer.restart();
-        } else if (root._hoverWant === name) {
-            root._hoverWant = "";
-            hoverOpenTimer.stop();
+        } else {
+            if (switchTimer.target === name) switchTimer.stop();
+            if (root._hoverWant === name) {
+                root._hoverWant = "";
+                hoverOpenTimer.stop();
+            }
         }
+    }
+    Timer {
+        id: switchTimer
+        property string target: ""
+        interval: Theme.hoverSwitchDelay
+        onTriggered: if (root.statusOpen && PanelManager.current !== target) PanelManager.open(target, PanelManager.openedBy)
     }
     function elementClicked(name) {
         hoverOpenTimer.stop();
+        switchTimer.stop();
         root._hoverWant = "";
         PanelManager.toggle(name);
     }
     Timer {
         id: hoverCloseTimer
-        interval: 320
+        interval: Theme.hoverCloseDelay
         property string island: ""
         onTriggered: {
             if (PanelManager.openedBy !== "hover") return;
@@ -944,13 +958,20 @@ PanelWindow {
         objectName: "barIndicator:" + ind.name.replace("status:", "")
         height: ShellSurface.chip
         width: visible ? indRow.implicitWidth + ShellSurface.pad : 0
+        // a reading that comes or goes (a recording's time, a narrow screen)
+        // widens or narrows it smoothly, and the row beside it moves with it
+        Behavior on width { enabled: ind.visible; NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+        clip: true
         radius: ShellSurface.chipRadius
         color: ind.open ? Theme.mix(Theme.layer1, Theme.accent, 0.22)
              : (ind.tint.a > 0 ? Qt.rgba(ind.tint.r, ind.tint.g, ind.tint.b, 0.22) : (indArea.containsMouse ? Theme.layer1Hover : "transparent"))
         Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         Row {
             id: indRow
-            anchors.centerIn: parent
+            // from the left edge, so a reading is revealed beside the icon
+            // as the indicator widens (the icon itself stays put)
+            x: ShellSurface.pad / 2
+            anchors.verticalCenter: parent.verticalCenter
             spacing: Theme.padXs
             Text {
                 anchors.verticalCenter: parent.verticalCenter
