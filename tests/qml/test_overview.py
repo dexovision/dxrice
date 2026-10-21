@@ -1299,12 +1299,12 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
     def test_the_galaxy_chip_is_offered_and_saves_galaxy(self):
         o = self.scene(n=4, focused=0)
         try:
-            o.scene.ev("theme.data = Object.assign({}, theme.data, {layout_super_g: 'compact'})")
+            o.scene.ev("theme.data = Object.assign({}, theme.data, {window_layout: 'compact'})")
             o.scene.wait(50)
             self.assertEqual(o.ov("layoutMode"), "compact")
             self.assertEqual(o.scene.ev("findNamed('overviewLayout:galaxy').children[0].text"), "Galaxy")
-            # the row says which selector it sets: SUPER+G, never Auto Place
-            self.assertEqual(o.scene.ev("findNamed('overviewLayoutLabel').text"), "SUPER+G")
+            # one method for new windows and SUPER+G: the row just arranges
+            self.assertEqual(o.scene.ev("findNamed('overviewLayoutLabel').text"), "ARRANGE")
             x, y = o.scene.ev("(function(){ const b = findNamed('overviewLayout:galaxy'); const p = b.mapToItem(null, b.width/2, b.height/2); return [p.x, p.y]; })()").toVariant()
             o.click(x, y)
             o.scene.wait(300)

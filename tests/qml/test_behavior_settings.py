@@ -34,10 +34,9 @@ def theme_json(s):
 
 
 class LayoutPickerTest(unittest.TestCase):
-    """Settings > Experience > Window layout: two pickers (windows opening on
-    their own, SUPER+G), the Galaxy Spiral selected for a fresh config, a
-    click selects, Apply saves each separately, and the two never affect
-    each other."""
+    """Settings > Experience > Window layout: ONE three-way choice (Galaxy
+    Spiral, Compact, Expansion) for new windows and SUPER+G alike, read by
+    the shared migration rule, written as "window_layout" on Apply."""
 
     def open_experience(self, s):
         s.ev("panels.open('theme')")
@@ -55,101 +54,92 @@ class LayoutPickerTest(unittest.TestCase):
         s.wait(250)
         return owner
 
-    def test_a_fresh_config_selects_the_galaxy_spiral_in_both(self):
-        # was "... selects Expansion": that showed (and, on Apply, saved) a
-        # layout the user never chose; see the next test
-        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None, layout_super_g=None))
+    def test_there_is_one_picker_with_exactly_three_methods(self):
+        s = Scene(width=1920, height=1080, setup=with_theme())
         try:
             self.open_experience(s)
-            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "galaxy")
-            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "galaxy")
-            for prefix in ("layoutAuto:", "layoutSuperG:"):
-                for mode in ("galaxy", "compact", "expansion"):
-                    self.assertTrue(s.ev(f"findNamed('{prefix}{mode}') !== null"), prefix + mode)
-                # exactly three: Galaxy and Spiral are one method
-                self.assertIsNone(s.ev(f"findNamed('{prefix}spiral')"))
-            self.assertTrue(s.ev("findNamed('layoutAuto:galaxy').picked"))
-            self.assertFalse(s.ev("findNamed('layoutAuto:expansion').picked"))
+            for mode in ("galaxy", "compact", "expansion"):
+                self.assertIsNotNone(s.ev(f"findNamed('layout:{mode}')"), mode)
+            self.assertIsNone(s.ev("findNamed('layout:spiral')"))
+            for old in ("layoutAuto:galaxy", "layoutSuperG:galaxy"):
+                self.assertIsNone(s.ev(f"findNamed('{old}')"), f"{old}: the second selector is gone")
+        finally:
+            s.close()
+
+    def test_a_fresh_config_is_the_galaxy_spiral(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(window_layout=None, layout_auto_place=None, layout_super_g=None))
+        try:
+            self.open_experience(s)
+            self.assertEqual(s.ev(f"{TE}.window_layout"), "galaxy")
+            self.assertTrue(s.ev("findNamed('layout:galaxy').picked"))
             self.assertFalse(s.ev(f"{TE}.dirty"))
         finally:
             s.close()
 
-    def test_applying_other_settings_never_changes_the_layout(self):
-        """The regression on the real desktop: Apply (for a widget switch)
-        wrote "expansion" into a theme.json that had no layout key, and the
-        Galaxy Spiral was gone."""
-        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None, layout_super_g=None))
+    def test_old_settings_are_read_by_the_migration_rule_without_writing(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(window_layout=None, layout_auto_place="compact", layout_super_g="expansion"))
+        try:
+            before = theme_json(s)
+            self.open_experience(s)
+            self.assertTrue(s.ev("findNamed('layout:compact').picked"), "new windows' old setting comes first")
+            self.assertFalse(s.ev(f"{TE}.dirty"))
+            self.assertEqual(theme_json(s), before, "opening Settings must not rewrite theme.json")
+        finally:
+            s.close()
+
+    def test_picking_and_applying_saves_one_key_and_drops_the_old_ones(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(window_layout=None, layout_auto_place="galaxy",
+                                                           layout_super_g="galaxy", my_custom_key=[1, 2]))
+        try:
+            self.open_experience(s)
+            self.assertTrue(self.click_card(s, "layout:compact").startswith("ThemeEditor"))
+            self.assertEqual(s.ev(f"{TE}.window_layout"), "compact")
+            self.assertTrue(s.ev("findNamed('layout:compact').picked"))
+            self.assertFalse(s.ev("findNamed('layout:galaxy').picked"))
+            self.assertTrue(s.ev(f"{TE}.dirty"))
+            s.ev(f"{TE}.apply()")
+            s.wait(500)
+            saved = theme_json(s)
+            self.assertEqual(saved.get("window_layout"), "compact")
+            self.assertNotIn("layout_auto_place", saved)
+            self.assertNotIn("layout_super_g", saved)
+            self.assertEqual(saved.get("my_custom_key"), [1, 2], "Apply lost an unrelated key")
+        finally:
+            s.close()
+
+    def test_revert_puts_the_saved_method_back(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(window_layout="expansion"))
+        try:
+            self.open_experience(s)
+            self.click_card(s, "layout:galaxy")
+            self.assertEqual(s.ev(f"{TE}.window_layout"), "galaxy")
+            s.ev(f"{TE}.revert()")
+            s.wait(200)
+            self.assertEqual(s.ev(f"{TE}.window_layout"), "expansion")
+        finally:
+            s.close()
+
+    def test_applying_other_settings_keeps_the_method(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(window_layout="expansion"))
         try:
             self.open_experience(s)
             s.ev(f"{TE}.widget_system = true; {TE}.dirty = true")
             s.ev(f"{TE}.apply()")
             s.wait(500)
-            saved = theme_json(s)
-            self.assertEqual((saved.get("layout_auto_place"), saved.get("layout_super_g")), ("galaxy", "galaxy"))
-            self.assertTrue(saved.get("widget_system"))
+            self.assertEqual(theme_json(s).get("window_layout"), "expansion")
         finally:
             s.close()
 
-    def test_the_galaxy_card_shows_the_screen_inside_the_spiral(self):
-        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None))
+    def test_the_shell_and_the_scripts_read_old_files_the_same_way(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+        import dxrice_layout_apply as lap
+        cases = [{}, {"window_layout": "compact"}, {"window_layout": "spiral"}, {"window_layout": "grid", "layout_auto_place": "compact"},
+                 {"layout_auto_place": "expansion", "layout_super_g": "galaxy"}, {"layout_super_g": "compact"},
+                 {"layout_auto_place": "spiral"}, {"layout_auto_place": " Compact "}, {"window_layout": 7}]
+        s = Scene(width=1920, height=1080)
         try:
-            self.open_experience(s)
-            frames = s.ev("(function() { var c = findNamed('layoutAuto:galaxy'); var n = 0; var stack = [c];"
-                          " while (stack.length) { var it = stack.pop(); if (it.border && it.border.width === 1 && it.color.a === 0 && it.visible) n++;"
-                          " for (var i = 0; i < it.children.length; i++) stack.push(it.children[i]); } return n; })()")
-            self.assertGreaterEqual(frames, 1, "no screen outline in the Galaxy preview")
-        finally:
-            s.close()
-
-    def test_clicking_selects_one_picker_only_and_apply_saves_it(self):
-        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place=None, layout_super_g=None, my_custom_key=[1, 2]))
-        try:
-            self.open_experience(s)
-            self.assertTrue(self.click_card(s, "layoutSuperG:expansion").startswith("ThemeEditor"))
-            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "expansion")
-            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "galaxy", "one picker changed the other")
-            self.assertTrue(s.ev(f"{TE}.dirty"))
-            self.click_card(s, "layoutAuto:compact")
-            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "compact")
-            self.assertEqual(s.ev(f"{TE}.layout_super_g"), "expansion")
-            s.ev(f"{TE}.apply()")
-            s.wait(500)
-            saved = theme_json(s)
-            self.assertEqual((saved.get("layout_auto_place"), saved.get("layout_super_g")), ("compact", "expansion"))
-            self.assertEqual(saved.get("my_custom_key"), [1, 2], "Apply lost an unrelated key")
-        finally:
-            s.close()
-
-    def test_saved_choices_are_shown_after_reopening(self):
-        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place="expansion", layout_super_g="compact"))
-        try:
-            self.open_experience(s)
-            self.assertTrue(s.ev("findNamed('layoutAuto:expansion').picked"))
-            self.assertTrue(s.ev("findNamed('layoutSuperG:compact').picked"))
-        finally:
-            s.close()
-
-    def test_a_saved_spiral_reads_as_the_galaxy_spiral(self):
-        # Galaxy and Spiral are the same method
-        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place="spiral", layout_super_g="compact"))
-        try:
-            self.open_experience(s)
-            self.assertTrue(s.ev("findNamed('layoutAuto:galaxy').picked"))
-            self.assertEqual(s.ev(f"{TE}.layout_auto_place"), "galaxy")
-            self.assertTrue(s.ev("findNamed('layoutSuperG:compact').picked"))
-        finally:
-            s.close()
-
-    def test_an_unknown_saved_value_reads_as_the_galaxy_spiral(self):
-        # was "... picks nothing": the scripts run the Galaxy Spiral for it,
-        # so that is what Settings shows (and what Apply keeps)
-        s = Scene(width=1920, height=1080, setup=with_theme(layout_auto_place="grid"))
-        try:
-            self.open_experience(s)
-            self.assertTrue(s.ev("findNamed('layoutAuto:galaxy').picked"))
-            for mode in ("compact", "expansion"):
-                self.assertFalse(s.ev(f"findNamed('layoutAuto:{mode}').picked"))
-            self.assertFalse(s.ev(f"{TE}.dirty"))
+            for d in cases:
+                self.assertEqual(s.ev(f"theme.windowLayoutOf({json.dumps(d)})"), lap.mode_from(d), d)
         finally:
             s.close()
 

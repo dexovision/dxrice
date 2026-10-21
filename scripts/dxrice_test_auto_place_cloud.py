@@ -964,8 +964,8 @@ class TestMethodRouting(_MethodBase):
                 self.hypr.clients.clear()
                 self.assertEqual(self.method_for(data), "galaxy")
         with open(os.path.join(self._tmp.name, "torn.json"), "w") as f:
-            f.write('{"layout_auto_p')
-        self.assertEqual(lap.setting("auto_place", os.path.join(self._tmp.name, "torn.json")), "galaxy")
+            f.write('{"window_lay')
+        self.assertEqual(lap.mode(os.path.join(self._tmp.name, "torn.json")), "galaxy")
 
     def test_there_are_exactly_three_methods(self):
         self.assertEqual(lap.CHOICES, ("galaxy", "compact", "expansion"))
@@ -1205,9 +1205,79 @@ class TestCompactAlgorithm(unittest.TestCase):
                 self.assertGreater(_sep(rs[i], rs[j]), 0, "overlap")
 
 
+# (theme.json contents, the method both new windows and SUPER+G must use)
+MIGRATION = [
+    ({}, "galaxy"),
+    ({"window_layout": "compact"}, "compact"),
+    ({"window_layout": "expansion", "layout_auto_place": "compact", "layout_super_g": "galaxy"}, "expansion"),
+    ({"window_layout": "spiral"}, "galaxy"),
+    ({"window_layout": "grid", "layout_auto_place": "compact"}, "galaxy"),
+    ({"layout_auto_place": "expansion", "layout_super_g": "galaxy"}, "expansion"),
+    ({"layout_auto_place": "galaxy", "layout_super_g": "compact"}, "galaxy"),
+    ({"layout_super_g": "compact"}, "compact"),
+    ({"layout_auto_place": "spiral"}, "galaxy"),
+    ({"layout_auto_place": None, "layout_super_g": "expansion"}, "expansion"),
+]
+
+
+class TestOneSetting(_MethodBase):
+    """ONE method for new windows and SUPER+G (theme.json "window_layout"),
+    with the documented migration from the two old settings."""
+
+    def test_new_windows_and_super_g_resolve_the_same_method_from_any_file(self):
+        import unittest.mock as m
+        import dxrice_compact
+        for data, expect in MIGRATION:
+            with self.subTest(data=data):
+                # new windows: the real listener
+                self.hypr.clients.clear()
+                p = self.spies()
+                L = self.listener(data)
+                self.open(L, "0xa")
+                placed_with = p.call_args.kwargs.get("method")
+                # SUPER+G: the real router, each algorithm's entry stubbed
+                with m.patch.dict(os.environ, {"XDG_CONFIG_HOME": self._tmp.name}), \
+                        m.patch.object(arr, "main", return_value=0) as g, \
+                        m.patch.object(dxrice_compact, "main", return_value=0) as c, \
+                        m.patch.object(lap, "expansion_main", return_value=0) as e:
+                    os.makedirs(os.path.join(self._tmp.name, "dxrice"), exist_ok=True)
+                    with open(os.path.join(self._tmp.name, "dxrice", "theme.json"), "w") as f:
+                        json.dump(data, f)
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        lap.main([])
+                    ran = {"galaxy": g.call_count, "compact": c.call_count, "expansion": e.call_count}
+                self.assertEqual(placed_with, expect)
+                self.assertEqual(ran, {k: int(k == expect) for k in ran})
+
+    def test_reading_never_writes(self):
+        path = self.theme({"layout_auto_place": "compact", "layout_super_g": "expansion"})
+        before = open(path).read()
+        lap.mode(path)
+        apw.ThemeSettings(path).refresh()
+        self.assertEqual(open(path).read(), before)
+
+    def test_saving_writes_the_one_key_and_drops_the_old_ones(self):
+        path = self.theme({"layout_auto_place": "expansion", "layout_super_g": "galaxy", "accent": "e67878"})
+        lap.save_mode("compact", path)
+        self.assertEqual(json.load(open(path)), {"window_layout": "compact", "accent": "e67878"})
+        lap.save_mode("spiral", path)
+        self.assertEqual(json.load(open(path))["window_layout"], "galaxy")
+
+    def test_a_change_reaches_a_running_listener(self):
+        path = self.theme({"window_layout": "galaxy"})
+        S = apw.ThemeSettings(path)
+        S.refresh()
+        self.assertEqual(S.layout, "galaxy")
+        lap.save_mode("expansion", path)
+        st = os.stat(path)
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))   # a later write, as on disk
+        S.refresh()
+        self.assertEqual(S.layout, "expansion")
+
+
 class TestSuperGRouting(unittest.TestCase):
-    """SUPER+G (dxrice_auto_arrange.py -> dxrice_layout_apply.main): its own
-    saved method decides, and saving it never touches the new-window one."""
+    """SUPER+G (dxrice_auto_arrange.py -> dxrice_layout_apply.main) runs the
+    one saved method; an overview chip (--mode M --save) changes it."""
 
     def setUp(self):
         import unittest.mock as m
@@ -1238,34 +1308,22 @@ class TestSuperGRouting(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return lap.main(list(argv))
 
-    def test_each_saved_method_runs_its_own_algorithm(self):
+    def test_each_method_runs_its_own_algorithm(self):
         for saved, expect in (("galaxy", (1, 0, 0)), ("compact", (0, 1, 0)), ("expansion", (0, 0, 1)),
                               ("spiral", (1, 0, 0)), (None, (1, 0, 0)), ("grid", (1, 0, 0))):
             with self.subTest(saved=saved):
                 for mk in (self.galaxy, self.compact, self.expansion):
                     mk.reset_mock()
-                self.write({} if saved is None else {"layout_super_g": saved})
+                self.write({} if saved is None else {"window_layout": saved})
                 self.run_main()
                 self.assertEqual(self.ran(), expect)
 
-    def test_the_two_selectors_are_independent(self):
-        self.write({"layout_auto_place": "expansion", "layout_super_g": "compact"})
-        self.assertEqual((lap.setting("auto_place"), lap.setting("super_g")), ("expansion", "compact"))
-        lap.save_setting("super_g", "galaxy")
-        self.assertEqual(json.load(open(self.path))["layout_auto_place"], "expansion")
-        lap.save_setting("auto_place", "compact")
-        self.assertEqual(json.load(open(self.path))["layout_super_g"], "galaxy")
-
-    def test_a_chip_with_save_sets_only_super_g(self):
+    def test_a_chip_with_save_changes_the_one_method(self):
         self.write({"layout_auto_place": "compact", "layout_super_g": "expansion", "accent": "e67878"})
         self.run_main("--mode", "galaxy", "--save")
-        self.assertEqual(json.load(open(self.path)), {"layout_auto_place": "compact", "layout_super_g": "galaxy", "accent": "e67878"})
+        self.assertEqual(json.load(open(self.path)), {"window_layout": "galaxy", "accent": "e67878"})
         self.assertEqual(self.ran(), (1, 0, 0))
-
-    def test_saving_spiral_stores_galaxy(self):
-        self.write({})
-        lap.save_setting("super_g", "spiral")
-        self.assertEqual(json.load(open(self.path))["layout_super_g"], "galaxy")
+        self.assertEqual(lap.mode(), "galaxy")
 
     def test_expansion_super_g_moves_only_and_keeps_sizes(self):
         eligible = [{"address": f"0x{i}", "at": [100 + 50 * i, 100 + 40 * i], "size": list(s)} for i, s in enumerate(SIZES5)]
@@ -1277,6 +1335,20 @@ class TestSuperGRouting(unittest.TestCase):
         src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_auto_arrange.py")).read()
         tail = src[src.index('if __name__ == "__main__":'):]
         self.assertIn("dxrice_layout_apply.main()", tail)
+
+    def test_nothing_else_reads_the_old_settings(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        repo = os.path.dirname(here)
+        hits = []
+        for d in ("scripts", "quickshell"):
+            for name in os.listdir(os.path.join(repo, d)):
+                if name.startswith("dxrice_test_") or not name.endswith((".py", ".qml", ".js")):
+                    continue
+                text = open(os.path.join(repo, d, name)).read()
+                for key in ("layout_auto_place", "layout_super_g"):
+                    if key in text and name not in ("dxrice_layout_apply.py", "Theme.qml", "ThemeEditor.qml"):
+                        hits.append((name, key))
+        self.assertEqual(hits, [], "only the migration rule and the editor's clean-up may name the old keys")
 
 
 if __name__ == "__main__":

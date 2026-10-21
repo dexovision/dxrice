@@ -18,8 +18,8 @@ never touches them.
   controls, CPU/GPU/memory/disk/network, clipboard history), a dock with a
   shortcut manager, and a theme editor. One process, started with your
   session.
-- **Window arrangement.** Three methods, picked in Settings > Experience,
-  separately for windows opening on their own and for `SUPER+G`:
+- **Window arrangement.** Three methods, one choice in Settings > Experience
+  that decides both where a new window goes and what `SUPER+G` does:
   **Galaxy Spiral** (the default) keeps every window's size and grows an
   airy spiral outward across the infinite desktop; **Compact** packs the
   windows into a tight, balanced cluster and resizes them a little where
@@ -28,7 +28,10 @@ never touches them.
   go to the most open side. Opening a window never moves the others.
   Pinned, fullscreen and hidden windows are never touched, and a dialog
   goes beside the window it belongs to. The overview (`SUPER+Tab`) has the
-  same three as chips for `SUPER+G`.
+  same three as chips; picking one there changes the choice too. (theme.json
+  `"window_layout"`; files from an earlier build with separate
+  `layout_auto_place` / `layout_super_g` keep working, the first of those
+  winning, until the next Apply replaces them.)
 - **Desktop widgets.** Each one looks like what it is, under your windows:
   a clock in bare heavy type (or tty-clock style blocks), a now-playing card
   built around the album cover with a seekable bar, a terminal-style system
@@ -191,7 +194,7 @@ is a one-line change in that file.
 | `SUPER + SHIFT + K` | `hyprctl kill` (click a window to kill it) |
 | `SUPER + V` | toggle floating for the window |
 | `SUPER + D` | toggle the whole workspace between floating and tiled |
-| `SUPER + G` | arrange the workspace with the method chosen for it (Galaxy Spiral, Compact or Expansion) |
+| `SUPER + G` | arrange the workspace with the chosen method (Galaxy Spiral, Compact or Expansion) |
 | `SUPER + Tab` | overview: zoom out / back in |
 | `SUPER + F` / `SUPER + M` | fullscreen / maximize |
 | `SUPER + P` / `SUPER + J` | pseudo-tile / toggle split (tiled layout) |

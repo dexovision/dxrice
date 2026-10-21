@@ -195,8 +195,7 @@ PanelWindow {
     // and for SUPER+G: the Galaxy Spiral (the default, and what a theme.json
     // without the key has always meant), Compact or Expansion -- see
     // scripts/dxrice_layout_apply.py.
-    property string layout_auto_place: "galaxy"
-    property string layout_super_g: "galaxy"
+    property string window_layout: "galaxy"
     property bool reduce_motion: false
     // Desktop widgets (see DesktopWidget.qml): whether each is shown and in
     // which corner, plus how the clock reads.
@@ -341,7 +340,7 @@ PanelWindow {
         for (const f of fontSizeFields) keys.push(f.key);
         for (const f of experienceFields) keys.push(f.key);
         for (const f of behaviorFields) keys.push(f.key);
-        keys.push("layout_auto_place", "layout_super_g");
+        keys.push("window_layout");
         for (const f of widgetFields) keys.push(f.key);
         keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style", "visualizer_style",
                    "widget_weather_pos", "weather_location", "weather_units");
@@ -370,10 +369,9 @@ PanelWindow {
         }
         // a layout this version doesn't know reads as the Galaxy Spiral, as
         // the placement scripts read it (so Apply can't turn it into anything else)
-        for (const key of ["layout_auto_place", "layout_super_g"]) {
-            const v = String(root[key] || "").trim().toLowerCase();
-            root[key] = v === "spiral" ? "galaxy" : (Prev.modes.indexOf(v) >= 0 ? v : "galaxy");
-        }
+        // the one window-arrangement choice, read by the shared migration
+        // rule (Theme.windowLayoutOf); nothing is written until Apply
+        root.window_layout = Theme.windowLayoutOf(data);
         root.dirty = false;
         root._draftBase = JSON.stringify(data);
     }
@@ -437,6 +435,9 @@ PanelWindow {
         const obj = {};
         for (const key in Theme.data) obj[key] = Theme.data[key];
         for (const key of allKeys()) obj[key] = root[key];
+        // one window-arrangement setting: the two an earlier build had go
+        delete obj.layout_auto_place;
+        delete obj.layout_super_g;
         writer.setText(JSON.stringify(obj, null, 4));
         // Written to theme.json, so there is no longer anything unapplied
         // to keep (even if rendering it fails -- see applyProc).
@@ -1996,14 +1997,9 @@ PanelWindow {
                     width: parent.width
                     spacing: Theme.pad2xl
                     LayoutPicker {
-                        settingKey: "layout_auto_place"; idPrefix: "layoutAuto:"
-                        title: "Windows opening on their own"
-                        sub: "Where a window goes when you open it. Nothing else moves."
-                    }
-                    LayoutPicker {
-                        settingKey: "layout_super_g"; idPrefix: "layoutSuperG:"
-                        title: "SUPER+G"
-                        sub: "What the shortcut does to the windows on the current workspace."
+                        settingKey: "window_layout"; idPrefix: "layout:"
+                        title: "Window arrangement"
+                        sub: "One choice for both: where a window goes when you open it, and what SUPER+G does to the workspace."
                     }
                 }
             }

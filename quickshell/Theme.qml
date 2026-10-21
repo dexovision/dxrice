@@ -32,6 +32,23 @@ QtObject {
     // Desktop widgets (DesktopWidget.qml): theme.json "widget_<name>" turns
     // one on or off, "widget_<name>_pos" puts it in a corner. A missing or
     // unknown value is the widget's own default.
+    // The window-arrangement method -- ONE for new windows and SUPER+G --
+    // by the same rule as scripts/dxrice_layout_apply.py (mode_from):
+    // "window_layout", else the two settings an earlier build had
+    // (layout_auto_place, then layout_super_g), else the Galaxy Spiral.
+    // "spiral" is Galaxy; anything unknown is Galaxy.
+    readonly property var windowLayouts: ["galaxy", "compact", "expansion"]
+    function windowLayoutOf(d) {
+        for (const key of ["window_layout", "layout_auto_place", "layout_super_g"]) {
+            if (d && d[key] !== undefined && d[key] !== null) {
+                const v = String(d[key]).trim().toLowerCase();
+                const m = v === "spiral" ? "galaxy" : v;
+                return root.windowLayouts.indexOf(m) >= 0 ? m : "galaxy";
+            }
+        }
+        return "galaxy";
+    }
+    readonly property string windowLayout: root.windowLayoutOf(root.data)
     readonly property var widgetCorners: ["top-left", "top-right", "bottom-left", "bottom-right"]
     function widgetOn(name, fallback) {
         const v = root.data["widget_" + name];

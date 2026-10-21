@@ -2562,7 +2562,7 @@ class ThemeSettings:
         self._stamp = stamp
         self.gap = gap
         self.enabled = data.get(AUTO_PLACE_KEY, True) is not False
-        self.layout = dxrice_layout_apply.resolve(data.get(dxrice_layout_apply.KEYS["auto_place"]))
+        self.layout = dxrice_layout_apply.mode_from(data)     # the one choice (dxrice_layout_apply)
         return self
 
 

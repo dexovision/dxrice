@@ -123,14 +123,11 @@ PanelWindow {
         idx = idx < 0 ? 0 : (idx + step + order.length) % order.length;
         root.selectedAddress = order[idx].address;
     }
-    // The layout SUPER+G uses (theme.json; the Galaxy Spiral unless it says
-    // otherwise -- the same rule as scripts/dxrice_layout_apply.py)
-    readonly property var layoutModes: ["galaxy", "compact", "expansion"]
+    // The window-arrangement method (Theme.windowLayout: one choice for new
+    // windows and SUPER+G alike); a chip changes it at once and saves it
+    readonly property var layoutModes: Theme.windowLayouts
     readonly property var layoutNames: ({ galaxy: "Galaxy", compact: "Compact", expansion: "Expansion" })
-    property string layoutMode: {
-        const v = String(Theme.data.layout_super_g || "").trim().toLowerCase();
-        return v === "spiral" ? "galaxy" : (root.layoutModes.indexOf(v) >= 0 ? v : "galaxy");
-    }
+    property string layoutMode: Theme.windowLayout
     function applyLayout(mode) {
         if (!root.open || layoutProc.running) return;
         root.layoutMode = mode;
@@ -756,7 +753,7 @@ PanelWindow {
                 objectName: "overviewLayoutLabel"
                 anchors.verticalCenter: parent.verticalCenter
                 rightPadding: 4
-                text: "SUPER+G"
+                text: "ARRANGE"
                 color: "white"
                 opacity: 0.6
                 font.family: Theme.fontFamily

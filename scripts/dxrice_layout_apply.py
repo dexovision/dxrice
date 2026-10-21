@@ -13,14 +13,23 @@ Three methods, each its own algorithm:
   expansion  the Big Bang (dxrice_expansion): windows keep their size and
              burst outward from the centre, each along its own direction
 
-Settings (theme.json), independent of each other: "layout_auto_place" (what
-a new window does) and "layout_super_g" (what SUPER+G does). Values:
+ONE setting decides both what a new window does and what SUPER+G does:
+theme.json "window_layout". Values:
 
   "galaxy", "compact", "expansion"
   "spiral"           -> galaxy (Galaxy and Spiral are the same method; an
                         earlier build offered a separate screen-bounded
                         "spiral", which is gone)
-  missing / unknown  -> galaxy (what DXrice always did)
+  unknown            -> galaxy
+
+Migration from the two settings an earlier build had (layout_auto_place
+for new windows, layout_super_g for SUPER+G), applied the same way
+everywhere it is read (here, and Theme.windowLayoutOf in the shell):
+"window_layout" if the file has it; else "layout_auto_place"; else
+"layout_super_g"; else galaxy (what DXrice always did). Reading never
+writes. Saving the choice (Settings' Apply, an overview chip) writes
+"window_layout" and removes the two old keys, so there is only ever one
+value to disagree with.
 
 The earlier build's screen-bounded "expansion" and "compact" (tiling-like
 layouts) are gone; those saved values now mean the methods above.
@@ -33,7 +42,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_xdg  # noqa: E402
 from dxrice_hypr_ipc import batch_async, hyprctl_json, move_window_exact_lua  # noqa: E402
 
-KEYS = {"auto_place": "layout_auto_place", "super_g": "layout_super_g"}
+KEY = "window_layout"
+LEGACY_KEYS = ("layout_auto_place", "layout_super_g")     # in migration order
 GALAXY = "galaxy"
 CHOICES = (GALAXY, "compact", "expansion")
 ALIASES = {"spiral": GALAXY}
@@ -48,23 +58,33 @@ def resolve(raw):
     return mode if mode in CHOICES else DEFAULT
 
 
+def mode_from(data):
+    """The method a theme.json's contents say, by the migration rule above."""
+    if not isinstance(data, dict):
+        return DEFAULT
+    for key in (KEY,) + LEGACY_KEYS:
+        if data.get(key) is not None:
+            return resolve(data[key])
+    return DEFAULT
+
+
 def _theme_path(path=None):
     return path or os.path.join(dxrice_xdg.config_dir(), "theme.json")
 
 
-def setting(which, path=None):
-    """The saved method for "auto_place" or "super_g"."""
+def mode(path=None):
+    """The saved method (one for new windows and SUPER+G alike)."""
     try:
         with open(_theme_path(path)) as f:
-            raw = json.load(f).get(KEYS[which])
-    except (OSError, ValueError, AttributeError):
-        raw = None
-    return resolve(raw)
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = None
+    return mode_from(data)
 
 
-def save_setting(which, mode, path=None):
-    """Writes one selector into theme.json, keeping every other key
-    (including the other selector); atomic."""
+def save_mode(value, path=None):
+    """Writes the one choice into theme.json, keeping every unrelated key
+    and dropping the two old ones; atomic."""
     import dxrice_manifest
     path = _theme_path(path)
     try:
@@ -74,7 +94,9 @@ def save_setting(which, mode, path=None):
             return False
     except (OSError, ValueError):
         data = {}
-    data[KEYS[which]] = resolve(mode)
+    data[KEY] = resolve(value)
+    for key in LEGACY_KEYS:
+        data.pop(key, None)
     dxrice_manifest.atomic_write_bytes(path, (json.dumps(data, indent=2) + "\n").encode())
     return True
 
@@ -121,20 +143,20 @@ def expansion_main():
 
 def main(argv=None):
     """SUPER+G; or `--mode MODE [--save]`: arrange with MODE now (the
-    overview's chips), and with --save make it SUPER+G's choice (the
-    new-window choice is never touched)."""
+    overview's chips), and with --save make it THE choice (new windows
+    follow it too)."""
     argv = list(argv or [])
     explicit = None
     if "--mode" in argv:
         i = argv.index("--mode")
         explicit = resolve(argv[i + 1]) if i + 1 < len(argv) else None
-    mode = explicit or setting("super_g")
+    method = explicit or mode()
     if explicit and "--save" in argv:
-        save_setting("super_g", explicit)
-    if mode == "compact":
+        save_mode(explicit)
+    if method == "compact":
         import dxrice_compact
         return dxrice_compact.main() or 0
-    if mode == "expansion":
+    if method == "expansion":
         return expansion_main()
     import dxrice_auto_arrange
     return dxrice_auto_arrange.main() or 0
