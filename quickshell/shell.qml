@@ -112,6 +112,7 @@ ShellRoot {
     // Desktop widgets: each sits on the Bottom layer (declared first, so
     // under every other surface) in its own corner and is
     // switched in Settings > Experience (see DesktopWidget.qml).
+    AudioVisualizer {}
     ClockWidget { objectName: "clockWidget" }
     MusicWidget { objectName: "musicWidget" }
     SystemWidget { objectName: "systemWidget" }

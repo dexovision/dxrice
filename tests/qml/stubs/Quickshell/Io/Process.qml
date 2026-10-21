@@ -49,8 +49,11 @@ QtObject {
         let code = 0, stdoutText = out, stderrText = "";
         const m = /^__EXIT__(\d+)\n?([\s\S]*)$/.exec(out);
         if (m) { code = Number(m[1]); stdoutText = ""; stderrText = m[2]; }
+        // a SplitParser reads its lines while the process still runs; a
+        // StdioCollector only gets the whole text once it has exited
+        if (root.stdout && root.stdout.feedAll) root.stdout.feedAll(stdoutText);
         root.running = false;
-        if (root.stdout) { root.stdout.text = stdoutText; root.stdout.streamFinished(); }
+        if (root.stdout && !root.stdout.feedAll) { root.stdout.text = stdoutText; root.stdout.streamFinished(); }
         if (root.stderr) { root.stderr.text = stderrText; root.stderr.streamFinished(); }
         root.exited(code, 0);
         if (root._target && !root.running) { root._target = false; root.running = true; }

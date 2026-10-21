@@ -49,3 +49,4 @@ DesktopWidget 1.0 DesktopWidget.qml
 ClockWidget 1.0 ClockWidget.qml
 MusicWidget 1.0 MusicWidget.qml
 SystemWidget 1.0 SystemWidget.qml
+AudioVisualizer 1.0 AudioVisualizer.qml

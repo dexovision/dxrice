@@ -372,7 +372,8 @@ class WidgetSettingsTest(unittest.TestCase):
             self.open(s)
             keys = s.ev(f"{TE}.allKeys().join(',')").split(",")
             for k in ("widget_clock", "widget_music", "widget_system", "clock_24h", "clock_seconds",
-                      "widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style"):
+                      "widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style",
+                      "widget_visualizer", "visualizer_style"):
                 self.assertIn(k, keys)
         finally:
             s.close()

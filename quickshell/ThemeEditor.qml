@@ -209,6 +209,8 @@ PanelWindow {
     property bool clock_24h: true
     property bool clock_seconds: false
     property string clock_style: "type"
+    property bool widget_visualizer: true
+    property string visualizer_style: "bars"
 
     property string font_family: "JetBrainsMono Nerd Font"
     // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
@@ -286,6 +288,8 @@ PanelWindow {
         { key: "clock_seconds", objectName: "clockSecondsSwitch", label: "Show seconds", sub: "Beside the time, ticking once a second." },
         { key: "widget_music", objectName: "widgetMusicSwitch", label: "Now playing",
           sub: "The track from whichever media player is open, with play, skip and a seekable bar. Nothing shows while nothing plays." },
+        { key: "widget_visualizer", objectName: "widgetVisualizerSwitch", label: "Audio visualizer",
+          sub: "A real spectrum of what is playing (from cava), along the bottom of the desktop. It runs only while music plays." },
         { key: "widget_system", objectName: "widgetSystemSwitch", label: "System monitor",
           sub: "Processor, memory, graphics and network, with the last minute of each. Measured only while it is on." },
     ]
@@ -333,7 +337,7 @@ PanelWindow {
         for (const f of behaviorFields) keys.push(f.key);
         keys.push("layout_auto_place", "layout_super_g");
         for (const f of widgetFields) keys.push(f.key);
-        keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style");
+        keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style", "visualizer_style");
         return keys;
     }
 
@@ -2009,6 +2013,10 @@ PanelWindow {
                     ChoiceRow {
                         settingKey: "clock_style"; idPrefix: "clockStyle:"; label: "Clock style"
                         options: [{ value: "type", label: "Type" }, { value: "blocks", label: "Blocks" }]
+                    }
+                    ChoiceRow {
+                        settingKey: "visualizer_style"; idPrefix: "visualizerStyle:"; label: "Visualizer style"
+                        options: [{ value: "bars", label: "Bars" }, { value: "blocks", label: "Blocks" }]
                     }
                     Column {
                         width: parent.width
