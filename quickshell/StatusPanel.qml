@@ -673,7 +673,8 @@ Item {
                     Text {
                         objectName: "statusClearAll"
                         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                        text: "Clear all"
+                        // what's on screen; mako has no way to clear its history
+                        text: "Dismiss all"
                         color: clearArea.containsMouse ? Theme.accentText : Theme.text
                         font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
                         MouseArea { id: clearArea; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: NotificationService.dismissAll() }
