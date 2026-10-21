@@ -141,6 +141,74 @@ class BarTest(unittest.TestCase):
         self.assertIsNotNone(self.s.ev("findPanel('currentTab')"))
 
 
+class BarAppsTest(unittest.TestCase):
+    """The left island: the launcher and the saved shortcuts (the dock's
+    list), launching through the same scope launcher."""
+
+    def setUp(self):
+        self.s = Scene(width=1920, height=1080)
+        self.s.wait(600)
+
+    def tearDown(self):
+        self.s.close()
+
+    def centre(self, name):
+        return json.loads(self.s.ev(f"(function(){{ const b = findNamed('{name}'); const p = b.mapToItem(null, b.width/2, b.height/2);"
+                                    " return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
+
+    def test_the_shortcuts_are_the_docks_minus_the_launcher_duplicate(self):
+        dock = self.s.ev("JSON.stringify(findNamed('dockIsland') ? 1 : 0)")
+        self.assertEqual(dock, "1")
+        labels = self.s.ev("JSON.stringify((function(){ const r = findNamed('barApps'); const out = [];"
+                           " for (let i = 0; i < r.children.length; i++) { const c = r.children[i]; if (c.objectName.indexOf('barShortcut:') === 0) out.push(c.objectName.slice(12)); }"
+                           " return out; })())")
+        self.assertIn("Firefox", json.loads(labels))
+        self.assertNotIn("App Launcher", json.loads(labels))
+        self.assertIsNotNone(self.s.ev("findNamed('barLauncher')"))
+
+    def test_a_shortcut_launches_through_the_scope_launcher(self):
+        x, y = self.centre("barShortcut:Firefox")
+        self.s.bridge.exec_log.clear()
+        self.s.click(x, y)
+        self.s.wait(50)
+        self.assertEqual(self.s.bridge.exec_log, [[f"{self.s.shell}/../scripts/dxrice_launch.sh", "bar", "sh", "-c", "firefox"]])
+
+    def test_the_launcher_button_opens_the_launcher(self):
+        x, y = self.centre("barLauncher")
+        self.s.click(x, y)
+        self.s.wait(600)
+        self.assertTrue(self.s.ev("findNamed('launcher').open"))
+
+    def test_hovering_a_shortcut_names_it(self):
+        x, y = self.centre("barShortcut:Firefox")
+        QTest.mouseMove(self.s.view, QPoint(x - 6, y))     # arrive, as a pointer does
+        QTest.mouseMove(self.s.view, QPoint(x, y))
+        self.s.wait(80)
+        self.assertEqual(self.s.ev("findNamed('barTitle').text"), "Firefox")
+        QTest.mouseMove(self.s.view, QPoint(900, 700))
+        self.s.wait(80)
+        self.assertNotEqual(self.s.ev("findNamed('barTitle').text"), "Firefox")
+
+    def test_an_open_app_is_marked_in_the_bar_too(self):
+        mark = ("(function(){ const t = findNamed('barShortcut:Firefox'); for (let i = 0; i < t.children.length; i++)"
+                " if (t.children[i].objectName === 'barRunning') return t.children[i]; return null; })()")
+        self.assertEqual(self.s.ev(f"{mark}.opacity"), 0)
+        self.s.ev("hypr.toplevels = ({ values: [{ address: '0x1', lastIpcObject: { class: 'firefox' } }] })")
+        self.s.wait(400)
+        self.assertGreater(self.s.ev(f"{mark}.opacity"), 0)
+
+
+class NarrowBarTest(unittest.TestCase):
+    def test_a_narrow_screen_keeps_just_the_launcher(self):
+        s = Scene(width=800, height=600)
+        try:
+            s.wait(500)
+            self.assertIsNotNone(s.ev("findNamed('barLauncher')"))
+            self.assertIsNone(s.ev("findNamed('barShortcut:Firefox')"))
+        finally:
+            s.close()
+
+
 class ClickOnlyTest(BarTest):
     def setUp(self):
         super().setUp(bar_hover_open=False)

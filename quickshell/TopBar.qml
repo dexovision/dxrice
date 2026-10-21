@@ -45,6 +45,7 @@ PanelWindow {
 
     signal calendarRequested()
     signal quickSettingsRequested()
+    signal launcherRequested()
 
     // Straight from the shell's geometry system (ShellSurface.qml) rather
     // than tuned per-file. Measured against the reference bar, capsules sit
@@ -379,6 +380,46 @@ PanelWindow {
             anchors.centerIn: parent
             spacing: ShellSurface.pad
 
+            // The launcher and the saved shortcuts (the same list as the
+            // dock: Shortcuts), each with its open/focused mark; hovering one
+            // names it in the title beside. theme.json "bar_shortcuts": false
+            // leaves only the launcher.
+            Row {
+                id: barApps
+                objectName: "barApps"
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 2
+                BarAppButton {
+                    objectName: "barLauncher"
+                    glyph: "\uf135"
+                    label: "Applications"
+                    onActivated: root.launcherRequested()
+                }
+                Repeater {
+                    // (the app-launcher shortcut is the launcher button above;
+                    // one with no command would do nothing)
+                    model: root.shortcutsFit ? root.barShortcuts : []
+                    delegate: BarAppButton {
+                        required property var modelData
+                        objectName: "barShortcut:" + modelData.label
+                        glyph: modelData.glyph
+                        label: modelData.label
+                        appKey: Shortcuts.appKeyOf(modelData.onClick)
+                        onActivated: {
+                            const what = Shortcuts.launch(modelData.onClick, "bar");
+                            if (what === "launcher") root.launcherRequested();
+                            else if (what === "launched") hop();
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                width: 1
+                height: ShellSurface.chip
+                anchors.verticalCenter: parent.verticalCenter
+                color: Theme.borderIdle
+            }
+
             Row {
                 id: wsRow
                 anchors.verticalCenter: parent.verticalCenter
@@ -416,7 +457,7 @@ PanelWindow {
             // one capsule, not one thing -- present only when there is a
             // second thing to divide from (a focused window to show).
             Rectangle {
-                visible: root.activeTitle.length > 0
+                visible: root.activeTitle.length > 0 || root.hoveredApp.length > 0
                 width: 1
                 height: ShellSurface.chip
                 anchors.verticalCenter: parent.verticalCenter
@@ -424,10 +465,11 @@ PanelWindow {
             }
 
             Row {
-                visible: root.activeTitle.length > 0
+                visible: root.activeTitle.length > 0 || root.hoveredApp.length > 0
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Theme.padXs
                 Text {
+                    visible: root.hoveredApp.length === 0
                     text: activityIsland.appGlyph
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeNormal
@@ -435,10 +477,11 @@ PanelWindow {
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
-                    text: root.activeTitle
+                    objectName: "barTitle"
+                    text: root.hoveredApp.length > 0 ? root.hoveredApp : root.activeTitle
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmaller
-                    color: Theme.text
+                    color: root.hoveredApp.length > 0 ? Theme.accent : Theme.text
                     elide: Text.ElideRight
                     // The one deliberately "substantial" number in this file:
                     // enough width that a real window title reads as content,
@@ -623,6 +666,70 @@ PanelWindow {
             }
         }
         onPointerInsideChanged: root.islandLeft("status", pointerInside)
+    }
+
+    // what a hovered shortcut launches, shown in the title beside it
+    property string hoveredApp: ""
+    // The shortcuts show in the bar only when the left island still clears
+    // the clock with them (a narrow screen keeps just the launcher; the dock
+    // has them all anyway). Measured from parts that don't depend on them.
+    readonly property var barShortcuts: Theme.data.bar_shortcuts === false ? []
+        : Shortcuts.list.filter((s) => { const c = Shortcuts.commandOf(s.onClick).trim(); return c.length > 0 && c !== "wofi --show drun"; })
+    readonly property real _leftRoom: (root.width - clockIsland.collapsedWidth) / 2 - root.edgeMargin * 3
+    readonly property real _leftBase: ShellSurface.pad * 6 + ShellSurface.chip + wsRow.implicitWidth + 2
+                                      + (root.activeTitle.length > 0 ? 260 + 24 : 0)
+    readonly property bool shortcutsFit: root._leftBase + root.barShortcuts.length * (ShellSurface.chip + 2) <= root._leftRoom
+    // A launcher or shortcut button in the left island.
+    component BarAppButton: Rectangle {
+        id: app
+        property string glyph: ""
+        property string label: ""
+        property string appKey: ""
+        signal activated()
+        readonly property bool running: Shortcuts.isRunning(app.appKey)
+        readonly property bool focusedApp: app.running && Shortcuts.matches(root.activeAppId, app.appKey)
+        property real lift: 0
+        function hop() { hopAnim.restart(); }
+        width: ShellSurface.chip; height: ShellSurface.chip
+        radius: ShellSurface.chipRadius
+        color: appArea.containsMouse ? Theme.layer1Hover : "transparent"
+        scale: Theme.pressScale(appArea.pressed, 0.88)
+        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+        Behavior on scale { NumberAnimation { duration: Theme.durationSpringFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast } }
+        SequentialAnimation {
+            id: hopAnim
+            NumberAnimation { target: app; property: "lift"; to: -5; duration: Theme.reduceMotion ? 0 : 90; easing.type: Easing.OutQuad }
+            NumberAnimation { target: app; property: "lift"; to: 0; duration: Theme.durationSpring; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast }
+        }
+        Text {
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: app.lift - (app.running ? 1 : 0)
+            text: app.glyph
+            color: Theme.textActive
+            font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeNormal
+        }
+        Rectangle {
+            objectName: "barRunning"
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom; anchors.bottomMargin: 1
+            height: 2; radius: 1
+            width: app.focusedApp ? 10 : 3
+            color: app.focusedApp ? Theme.accent : Theme.textActive
+            opacity: app.running ? (app.focusedApp ? 1 : 0.55) : 0
+            Behavior on width { NumberAnimation { duration: Theme.durationSpringFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast } }
+            Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+        }
+        MouseArea {
+            id: appArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onContainsMouseChanged: {
+                if (containsMouse) root.hoveredApp = app.label;
+                else if (root.hoveredApp === app.label) root.hoveredApp = "";
+            }
+            onClicked: app.activated()
+        }
     }
 
     // A bar element: an icon (and a short reading), a soft pill under the

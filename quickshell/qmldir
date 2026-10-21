@@ -54,3 +54,4 @@ WeatherWidget 1.0 WeatherWidget.qml
 HistoryGraph 1.0 HistoryGraph.qml
 singleton BatteryService 1.0 BatteryService.qml
 StatusPanel 1.0 StatusPanel.qml
+singleton Shortcuts 1.0 Shortcuts.qml

@@ -128,31 +128,9 @@ PanelWindow {
 
     Binding { target: ShellSurface; property: "bottomEdgeHeight"; value: root.exclusiveZone }
 
-    readonly property string configPath: Xdg.configHome + "/waybar/config-dock"
-    property var shortcuts: []
-
-    FileView {
-        id: configFile
-        path: root.configPath
-        watchChanges: true
-        onFileChanged: this.reload()
-        onLoaded: root.reloadShortcuts()
-    }
-
-    function reloadShortcuts() {
-        try {
-            const cfg = JSON.parse(configFile.text());
-            const ids = cfg["modules-left"] || [];
-            root.shortcuts = ids.map((id) => ({
-                id,
-                label: cfg[id] ? (cfg[id]["tooltip-format"] || cfg[id]["dxrice_label"] || id) : id,
-                glyph: cfg[id] ? cfg[id]["format"] || "" : "",
-                onClick: cfg[id] ? cfg[id]["on-click"] || "" : "",
-            }));
-        } catch (e) {
-            console.warn("Dock: could not read", root.configPath, e);
-        }
-    }
+    // the saved shortcuts (Shortcuts: one list for the dock and the bar)
+    readonly property string configPath: Shortcuts.configPath
+    readonly property var shortcuts: Shortcuts.list
 
     ShellIsland {
         id: dockIsland
@@ -266,20 +244,10 @@ PanelWindow {
                         }
                         onPressed: dockTip.dismissed = true
                         onClicked: {
-                            // Must mirror TaskbarManager.unwrapShellCmd's
-                            // un-escaping exactly -- this regex extracts
-                            // the STILL '\''-escaped inner command (see
-                            // TaskbarManager.wrapShellCmd for why it's
-                            // escaped that way), and execDetached's argv
-                            // form means sh -c here parses it as a fresh
-                            // script, not as text nested inside another
-                            // quote -- the escaping must be undone first or
-                            // every shortcut containing a quote throws a
-                            // shell syntax error instead of running.
-                            const m = /^sh -c '(.*) >\/dev\/null 2>&1 &'$/.exec(shortcutTile.modelData.onClick);
-                            const cmd = m ? m[1].replace(/'\\''/g, "'") : shortcutTile.modelData.onClick;
-                            if (cmd === "wofi --show drun") { root.launcherRequested(); return; }
-                            if (cmd) { hopAnim.restart(); Launcher.launch("dock", ["sh", "-c", cmd]); }
+                            // Shortcuts.launch un-escapes the saved command (see there)
+                            const what = Shortcuts.launch(shortcutTile.modelData.onClick, "dock");
+                            if (what === "launcher") root.launcherRequested();
+                            else if (what === "launched") hopAnim.restart();
                         }
                     }
                 }
@@ -311,40 +279,15 @@ PanelWindow {
     // discord --x" -> "discord"). An open window matches when its class or
     // app id is that name, or ends in it after a dot ("org.gnome.Nautilus"
     // for "nautilus"), or starts with it and a dash ("brave-browser").
-    function appKeyOf(onClick) {
-        const m = /^sh -c '(.*) >\/dev\/null 2>&1 &'$/.exec(String(onClick || ""));
-        let cmd = (m ? m[1].replace(/'\\''/g, "'") : String(onClick || "")).trim();
-        let parts = cmd.split(/\s+/);
-        while (parts.length && (parts[0] === "env" || parts[0].indexOf("=") > 0)) parts.shift();
-        const prog = parts.length ? parts[0].split("/").pop().toLowerCase() : "";
-        return prog === "sh" || prog === "bash" ? "" : prog;
-    }
-    function matches(cls, key) {
-        if (!cls || !key) return false;
-        const c = String(cls).toLowerCase();
-        return c === key || c.endsWith("." + key) || c.startsWith(key + "-");
-    }
-    function classOf(t) {
-        if (!t) return "";
-        if (t.lastIpcObject && t.lastIpcObject.class) return String(t.lastIpcObject.class);
-        return t.wayland && t.wayland.appId ? String(t.wayland.appId) : "";
-    }
-    readonly property var runningClasses: {
-        const list = Hyprland.toplevels ? Hyprland.toplevels.values : [];
-        const out = [];
-        for (let i = 0; i < list.length; i++) { const c = root.classOf(list[i]); if (c) out.push(c); }
-        return out;
-    }
+    function appKeyOf(onClick) { return Shortcuts.appKeyOf(onClick); }
+    function matches(cls, key) { return Shortcuts.matches(cls, key); }
+    function classOf(t) { return Shortcuts.classOf(t); }
+    function isRunning(key) { return Shortcuts.isRunning(key); }
     // set by shell.qml from TopBar, which knows the focused window from the
     // start; Hyprland.activeToplevel only as a fallback (null until the
     // first focus change after the shell starts)
     property string focusedAppId: ""
     readonly property string focusedClass: root.focusedAppId || root.classOf(Hyprland.activeToplevel)
-    function isRunning(key) {
-        if (!key) return false;
-        for (const c of root.runningClasses) if (root.matches(c, key)) return true;
-        return false;
-    }
 
     // ---- the hovered icon's name, above the dock ----
     // Icon-only tiles say nothing about what they launch until clicked.

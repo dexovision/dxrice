@@ -151,6 +151,7 @@ ShellRoot {
         id: topBar
         onCalendarRequested: PanelManager.toggle("calendar")
         onQuickSettingsRequested: PanelManager.toggle("quicksettings")
+        onLauncherRequested: appLauncher.toggle()
     }
     Dock {
         id: dock
