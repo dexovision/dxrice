@@ -1,22 +1,12 @@
 import QtQuick
-import Quickshell.Services.Mpris
 
-// Native MPRIS binding -- no playerctl subprocess, no polling. Tracks
-// whichever player is currently active; good enough for the common
-// single-player case this panel is meant for.
+// Native MPRIS binding -- no playerctl subprocess, no polling. Shows the
+// player MediaSession picked, the same one everywhere in the shell.
 Item {
     id: root
-    // The player to show: one that is playing (a paused browser tab listed
-    // first must not hide the music that is actually on); else the one that
-    // played last, while it is still around; else the first.
-    property var _lastPlaying: null
-    readonly property var player: {
-        const all = Mpris.players.values;
-        for (let i = 0; i < all.length; i++) if (all[i].isPlaying) return all[i];
-        if (root._lastPlaying && all.indexOf(root._lastPlaying) >= 0) return root._lastPlaying;
-        return all.length > 0 ? all[0] : null;
-    }
-    onPlayerChanged: if (root.player && root.player.isPlaying) root._lastPlaying = root.player
+    readonly property var player: MediaSession.player
+    readonly property var players: MediaSession.players
+    function choose(p) { MediaSession.choose(p); }
     readonly property bool available: player !== null
     readonly property string title: available ? (player.trackTitle || "Unknown") : ""
     readonly property string artist: available ? player.trackArtist : ""

@@ -326,9 +326,31 @@ class MusicWidgetTest(unittest.TestCase):
         self.s.ev(f"mpris.players = {{ values: [{PLAYER}] }}")
         self.s.wait(600)
 
-    def test_with_no_player_there_is_no_card(self):
-        self.assertFalse(named(self.s, "musicWidget", "active"))
-        self.assertFalse(named(self.s, "musicWidget", "visible"))
+    def test_with_no_player_the_card_stays_and_says_so(self):
+        # it used to vanish, which read as the widget having been removed
+        self.assertTrue(named(self.s, "musicWidget", "active"))
+        self.assertEqual(named(self.s, "widgetCard:music", "opacity"), 1)
+        self.assertEqual(named(self.s, "musicTitle", "text"), "Nothing playing")
+        self.assertFalse(named(self.s, "musicProgress", "visible"))
+        self.assertFalse(named(self.s, "musicPlay", "enabled"), "no player, nothing to drive")
+
+    def test_with_two_players_the_label_switches_and_everyone_follows(self):
+        other = PLAYER.replace("'Blue in Green'", "'A Paused Tab'").replace("isPlaying: true", "isPlaying: false").replace("'Spotify'", "'Brave'")
+        self.s.ev(f"mpris.players = {{ values: [{PLAYER}, {other}] }}")
+        self.s.wait(400)
+        self.assertEqual(named(self.s, "musicTitle", "text"), "Blue in Green")
+        self.assertIn("1/2", named(self.s, "musicSource", "text"))
+        c = self.centre("musicSourceSwitch", 0.5)
+        self.s.click(c[0], c[1])
+        self.s.wait(400)
+        self.assertEqual(named(self.s, "musicTitle", "text"), "A Paused Tab")
+        # the one choice: every other media view shows the same player
+        self.assertEqual(named(self.s, "visualizerMedia", "title"), "A Paused Tab")
+        # a player that starts playing takes over again
+        third = PLAYER.replace("'Blue in Green'", "'So What'").replace("'Spotify'", "'mpv'")
+        self.s.ev(f"mpris.players = {{ values: [mpris.players.values[0], mpris.players.values[1], {third}] }}")
+        self.s.wait(400)
+        self.assertEqual(named(self.s, "musicTitle", "text"), "So What")
 
     def test_a_player_brings_the_card_with_its_real_track(self):
         self.play()
@@ -373,11 +395,12 @@ class MusicWidgetTest(unittest.TestCase):
         self.assertEqual(named(self.s, "musicTitle", "text"), "Blue in Green")
         self.assertTrue(named(self.s, "musicMedia", "playing"))
 
-    def test_a_player_going_away_takes_the_card_with_it(self):
+    def test_a_player_going_away_leaves_the_idle_card(self):
         self.play()
         self.s.ev("mpris.players = { values: [] }")
         self.s.wait(600)
-        self.assertFalse(named(self.s, "musicWidget", "visible"))
+        self.assertTrue(named(self.s, "musicWidget", "visible"))
+        self.assertEqual(named(self.s, "musicTitle", "text"), "Nothing playing")
 
 
 class SystemWidgetTest(unittest.TestCase):

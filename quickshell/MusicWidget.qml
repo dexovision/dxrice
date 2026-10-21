@@ -5,14 +5,16 @@ import QtQuick.Effects
 // by its artwork: the card's ground is the cover itself, blurred and dimmed,
 // with the sharp cover on it, then the source, title and artist, the time,
 // and play/pause/previous/next. The bar seeks (click or drag) when the
-// player allows it. A new track slides its text in. Nothing shows while
-// there is no player: the card isn't there at all.
+// player allows it. A new track slides its text in. With no player at all
+// the card stays, saying so, its controls dimmed -- it used to vanish, which
+// read as the widget having been removed. With more than one player, the
+// source label switches between them (the same choice as the Media tab and
+// the bar: MediaSession).
 DesktopWidget {
     id: root
     name: "music"
     defaultCorner: "bottom-left"
     defaultOn: true
-    wanted: media.available
     surface: "none"
     pad: 0
     contentWidth: 420
@@ -93,16 +95,31 @@ DesktopWidget {
         property real slide: 0
         transform: Translate { x: words.slide }
         Text {
+            objectName: "musicSource"
             width: parent.width
-            text: media.source.toUpperCase()
-            color: root.hasArt ? "white" : Theme.accent; opacity: 0.75
+            readonly property int count: media.players.length
+            text: (media.available ? media.source : "No player").toUpperCase()
+                  + (count > 1 ? "  ›  " + (media.players.indexOf(media.player) + 1) + "/" + count : "")
+            color: root.hasArt ? "white" : Theme.accent; opacity: sourceArea.containsMouse ? 1 : 0.75
             font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold
             font.letterSpacing: 2.5; elide: Text.ElideRight
+            MouseArea {
+                id: sourceArea
+                objectName: "musicSourceSwitch"
+                width: Math.min(parent.width, parent.implicitWidth); height: parent.height
+                enabled: parent.count > 1
+                hoverEnabled: true
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: {
+                    const all = media.players;
+                    media.choose(all[(all.indexOf(media.player) + 1) % all.length]);
+                }
+            }
         }
         Text {
             objectName: "musicTitle"
             width: parent.width
-            text: media.title
+            text: media.available ? media.title : "Nothing playing"
             color: "white"
             font.family: Theme.fontFamily; font.pixelSize: 19; font.weight: Font.Bold
             wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
@@ -111,7 +128,7 @@ DesktopWidget {
         Text {
             objectName: "musicArtist"
             width: parent.width
-            text: media.artist
+            text: media.available ? media.artist : "Music from any MPRIS player shows here"
             visible: text.length > 0
             color: "white"; opacity: 0.72
             font.family: Theme.fontFamily; font.pixelSize: 13; elide: Text.ElideRight
@@ -136,6 +153,7 @@ DesktopWidget {
             anchors.left: parent.left
             anchors.top: parent.top
             spacing: 4
+            visible: media.available
             Text {
                 objectName: "musicTime"
                 text: media.formatTime(media.position)
@@ -153,6 +171,8 @@ DesktopWidget {
             anchors.top: parent.top
             anchors.topMargin: -8
             spacing: 6
+            enabled: media.available
+            opacity: enabled ? 1 : 0.35
             Repeater {
                 model: [{ g: "󰒮", fn: "previous", big: false, name: "Prev" },
                         { g: "", fn: "playPause", big: true, name: "Play" },
@@ -187,6 +207,7 @@ DesktopWidget {
             objectName: "musicProgress"
             anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
             height: 14
+            visible: media.available
             readonly property real frac: media.length > 0 ? Math.max(0, Math.min(1, media.position / media.length)) : 0
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
