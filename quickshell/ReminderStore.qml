@@ -24,6 +24,7 @@ QtObject {
     property FileView file: FileView {
         path: root.path
         watchChanges: true
+        printErrors: false          // no file yet just means no reminders yet
         onFileChanged: this.reload()
         onLoaded: {
             try {

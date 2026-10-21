@@ -41,7 +41,11 @@ Item {
     property string query: ""
     property int selected: 0
     readonly property int maxRows: 8
-    readonly property var results: Search.rank(root.allApps, root.query, root.query.length > 0 ? root.maxRows : 5)
+    // typed: every installed app, ranked; nothing typed: only apps you have
+    // actually launched from here, most first (with no history yet the
+    // section stays empty rather than listing the alphabet)
+    readonly property var results: root.query.length > 0 ? Search.rank(root.allApps, root.query, root.maxRows)
+        : Search.rank(root.allApps.filter((a) => Number(a.uses) > 0), "", 5)
     onQueryChanged: root.selected = 0
     onResultsChanged: if (root.selected >= root.results.length) root.selected = Math.max(0, root.results.length - 1)
     Process {
@@ -387,7 +391,7 @@ Item {
                 visible: root.results.length === 0
                 anchors.centerIn: parent
                 text: !root.appsLoaded ? "Looking for applications…"
-                      : (root.query.length > 0 ? "Nothing matches “" + root.query + "”" : "No applications found")
+                      : (root.query.length > 0 ? "Nothing matches “" + root.query + "”" : "Type to search every installed app")
                 color: Theme.text; opacity: Theme.opacityMuted
                 font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall
             }

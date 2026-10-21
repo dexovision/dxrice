@@ -138,6 +138,16 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(len(self.names()), 5)
         self.assertEqual(len([r for r in self.s.bridge.run_log if "dxrice_list_desktop_apps.py" in " ".join(r)]), 1)
 
+    def test_with_no_launch_history_nothing_typed_lists_no_alphabet(self):
+        # (live, before any launch from here: "Most used" was the first five
+        # installed apps by name -- Advanced Network Configuration, Avahi...)
+        self.s.set_command("dxrice_list_desktop_apps.py", json.dumps([dict(a, uses=0) for a in APPS]))
+        self.open()
+        self.assertEqual(self.names(), [])
+        self.assertEqual(self.s.ev("findNamed('appsEmpty').text"), "Type to search every installed app")
+        self.type("firef")
+        self.assertEqual(self.names(), ["Firefox"])
+
     def test_typing_narrows_and_the_selection_resets_to_the_top(self):
         self.open()
         self.s.ev(f"{self.L}.selected = 3")
