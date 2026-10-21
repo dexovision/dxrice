@@ -36,6 +36,24 @@ QtObject {
     // once per sample, after every reading above is updated (a history that
     // only grew when a value changed would never draw a steady reading)
     signal sampled()
+    // The last minute or so of each reading (one entry per sample, oldest
+    // first), for graphs; kept here so a graph that appears later still has
+    // what was sampled before it was shown. Real samples only: a reading
+    // with no source (no GPU) gets no entries.
+    readonly property int historyLength: 40
+    property var cpuHistory: []
+    property var gpuHistory: []
+    property var memHistory: []
+    property var netDownHistory: []
+    property var netUpHistory: []
+    function _keep(list, v) { const a = list.slice(-(root.historyLength - 1)); a.push(v); return a; }
+    function _record() {
+        root.cpuHistory = root._keep(root.cpuHistory, root._cpuPercent);
+        root.memHistory = root._keep(root.memHistory, root._memPercent);
+        if (root._gpuAvailable) root.gpuHistory = root._keep(root.gpuHistory, root._gpuPercent);
+        root.netDownHistory = root._keep(root.netDownHistory, root._netDownKBs);
+        root.netUpHistory = root._keep(root.netUpHistory, root._netUpKBs);
+    }
 
     readonly property real cpuPercent: _cpuPercent
     readonly property real memPercent: _memPercent
@@ -295,6 +313,7 @@ QtObject {
         onTriggered: {
             root.statFile.reload(); root.memFile.reload(); root.netFile.reload();
             root._sampleCpu(); root._sampleMem(); root._sampleNetwork(); root._sampleGpu(); root._sampleSensors();
+            root._record();
             root.sampled();
         }
     }

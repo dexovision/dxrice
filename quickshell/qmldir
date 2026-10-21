@@ -51,3 +51,4 @@ MusicWidget 1.0 MusicWidget.qml
 SystemWidget 1.0 SystemWidget.qml
 AudioVisualizer 1.0 AudioVisualizer.qml
 WeatherWidget 1.0 WeatherWidget.qml
+HistoryGraph 1.0 HistoryGraph.qml

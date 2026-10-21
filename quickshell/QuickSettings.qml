@@ -937,8 +937,35 @@ Item {
         // so neither a short player layout nor the empty state leaves a dead
         // band under it now that panes are top-aligned.
         Item {
+            id: mediaStage
             width: parent ? parent.width : implicitWidth
             implicitHeight: Math.max(loader.implicitHeight, root.paneAvailableHeight)
+            // The pane's ground is the cover itself, blurred, under a scrim
+            // in the panel's own colour (blur needs the GPU scene graph; under
+            // the software renderer the ground is a flat tint instead).
+            readonly property bool effects: mediaStage.GraphicsInfo.api !== GraphicsInfo.Software
+            Item {
+                id: mediaGround
+                objectName: "mediaGround"
+                anchors.fill: parent
+                visible: mediaBackend.available
+                layer.enabled: mediaStage.effects
+                layer.effect: MultiEffect { maskEnabled: true; maskSource: mediaGroundMask; maskThresholdMin: 0.5; maskSpreadAtMin: 1.0 }
+                Rectangle { anchors.fill: parent; radius: ShellSurface.cardRadius; color: Theme.mix(Theme.panel, Theme.accent, 0.12) }
+                Image {
+                    anchors.fill: parent
+                    source: mediaStage.effects ? mediaBackend.artUrl : ""
+                    visible: status === Image.Ready
+                    asynchronous: true; cache: true
+                    sourceSize: Qt.size(96, 96)
+                    fillMode: Image.PreserveAspectCrop
+                    opacity: 0.9
+                    layer.enabled: mediaStage.effects
+                    layer.effect: MultiEffect { blurEnabled: true; blur: 1.0; blurMax: 64; saturation: 0.15 }
+                }
+                Rectangle { anchors.fill: parent; radius: ShellSurface.cardRadius; color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.62) }
+            }
+            Rectangle { id: mediaGroundMask; anchors.fill: parent; radius: ShellSurface.cardRadius; layer.enabled: true; visible: false }
             Loader {
                 id: loader
                 width: parent ? parent.width : implicitWidth
@@ -952,8 +979,19 @@ Item {
         id: mediaPlayerContent
         Row {
             id: mediaRow
+            objectName: "mediaRow"
             width: parent ? parent.width : implicitWidth
             spacing: Theme.padLg
+            leftPadding: Theme.padLg
+            rightPadding: Theme.padLg
+            // a new track: the words slide in, the cover crossfades (below)
+            property string track: mediaBackend.title + "\u0001" + mediaBackend.artist
+            onTrackChanged: trackIn.restart()
+            ParallelAnimation {
+                id: trackIn
+                NumberAnimation { target: mediaWords; property: "slide"; from: 16; to: 0; duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle }
+                NumberAnimation { target: mediaWords; property: "opacity"; from: 0; to: 1; duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+            }
             // Bigger than before (168/152): the whole point of the
             // three-region composition was to use the panel's real width,
             // and a small art tile plus small type in the middle of a wide
@@ -961,13 +999,16 @@ Item {
             // middle" even with real regions either side of it.
             // Art and the info column give width back to the centre column,
             // which carries the title -- this pane's primary element.
-            readonly property real artSize: 184
-            readonly property real sideWidth: 144
+            readonly property real artSize: 216
+            readonly property real sideWidth: 136
 
             Item {
                 width: mediaRow.artSize
                 height: mediaRow.artSize
                 anchors.verticalCenter: parent.verticalCenter
+                // playing, the cover sits full size; paused, it settles back a little
+                scale: mediaBackend.playing ? 1 : 0.94
+                Behavior on scale { NumberAnimation { duration: Theme.durationSpring; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpring } }
 
                 RectangularShadow {
                     anchors.fill: art
@@ -984,12 +1025,20 @@ Item {
                     color: Theme.layer1
                     clip: true
                     Image {
+                        objectName: "mediaArt"
                         anchors.fill: parent
                         source: mediaBackend.artUrl
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
-                        visible: status === Image.Ready
+                        sourceSize: Qt.size(432, 432)
+                        opacity: status === Image.Ready ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                        // rounded like its tile (`clip` only cuts square); GPU only
+                        readonly property bool effects: GraphicsInfo.api !== GraphicsInfo.Software
+                        layer.enabled: effects
+                        layer.effect: MultiEffect { maskEnabled: true; maskSource: mediaArtMask; maskThresholdMin: 0.5; maskSpreadAtMin: 1.0 }
                     }
+                    Rectangle { id: mediaArtMask; anchors.fill: parent; radius: art.radius; layer.enabled: true; visible: false }
                     Text {
                         anchors.centerIn: parent
                         visible: mediaBackend.artUrl.length === 0
@@ -1007,14 +1056,27 @@ Item {
 
             // ---- center: title/artist, transport, playback controls ----
             Column {
-                width: mediaRow.width - mediaRow.artSize - mediaRow.sideWidth - mediaRow.spacing * 2
+                width: mediaRow.width - mediaRow.artSize - mediaRow.sideWidth - mediaRow.spacing * 2 - mediaRow.leftPadding - mediaRow.rightPadding
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Theme.padMd
 
                 Column {
+                    id: mediaWords
                     width: parent.width
                     spacing: Theme.padXs
+                    property real slide: 0
+                    transform: Translate { x: mediaWords.slide }
                     Text {
+                        objectName: "mediaSource"
+                        width: parent.width
+                        visible: mediaBackend.source.length > 0
+                        text: mediaBackend.source.toUpperCase()
+                        color: Theme.accent
+                        font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 2.5
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        objectName: "mediaTitle"
                         width: parent.width
                         text: mediaBackend.title
                         color: Theme.textActive
@@ -1068,18 +1130,17 @@ Item {
                     Row {
                         width: parent.width
                         Text {
-                            font.family: Theme.fontFamily
                             text: mediaBackend.formatTime(root.mediaPosition)
-                            color: Theme.text
-                            opacity: 0.6
+                            color: Theme.textActive
+                            font.family: Theme.fontMono
                             font.pixelSize: Theme.fontSizeSmall
                             width: parent.width / 2
                         }
                         Text {
-                            font.family: Theme.fontFamily
                             text: mediaBackend.formatTime(mediaBackend.length)
                             color: Theme.text
                             opacity: 0.6
+                            font.family: Theme.fontMono
                             font.pixelSize: Theme.fontSizeSmall
                             width: parent.width / 2
                             horizontalAlignment: Text.AlignRight
@@ -1102,7 +1163,22 @@ Item {
                     // primary transport action, matching the Dashboard's
                     // own "one dominant element" language rather than five
                     // same-weight buttons in a row.
-                    IconButton { glyph: mediaBackend.playing ? "\uf04c" : "\uf04b"; size: Theme.iconLg; onClicked: mediaBackend.playPause() }
+                    Rectangle {
+                        objectName: "mediaPlay"
+                        width: Theme.iconLg + 6; height: width; radius: width / 2
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Theme.accent
+                        scale: playArea.pressed ? 0.9 : (playArea.containsMouse ? 1.06 : 1)
+                        Behavior on scale { NumberAnimation { duration: Theme.durationSpringFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast } }
+                        Text {
+                            anchors.centerIn: parent
+                            anchors.horizontalCenterOffset: mediaBackend.playing ? 0 : 1
+                            text: mediaBackend.playing ? "\uf04c" : "\uf04b"
+                            color: Theme.panel
+                            font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeLarge
+                        }
+                        MouseArea { id: playArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: mediaBackend.playPause() }
+                    }
                     IconButton { glyph: "\uf051"; size: Theme.iconMd; onClicked: mediaBackend.next() }
                     IconButton {
                         visible: mediaBackend.loopSupported
@@ -1120,27 +1196,6 @@ Item {
                 width: mediaRow.sideWidth
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Theme.padMd
-
-                Column {
-                    width: parent.width
-                    spacing: 2
-                    visible: mediaBackend.source.length > 0
-                    Text {
-                        text: "Playing via"
-                        color: Theme.text
-                        opacity: Theme.opacityMuted
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                    }
-                    Text {
-                        width: parent.width
-                        text: mediaBackend.source
-                        color: Theme.textActive
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmaller
-                        elide: Text.ElideRight
-                    }
-                }
 
                 Column {
                     width: parent.width
@@ -1249,58 +1304,100 @@ Item {
             width: parent ? parent.width : implicitWidth
             spacing: ShellSurface.cardGap
 
+            // The machine as an instrument: four live readings with their
+            // recent history (PerformanceService keeps it, so it is already
+            // there when the tab opens), then storage and uptime. One
+            // surface, divided by hairlines -- not a card per number.
             Card {
                 id: systemCard
                 width: parent.width
                 title: "System"
-                spacing: Theme.padLg
+                spacing: Theme.padMd
 
-                Row {
+                Grid {
+                    id: perfGrid
+                    objectName: "perfGrid"
                     width: parent.width
-                    spacing: Theme.pad2xl
-                    readonly property real cellWidth: (width - spacing * 2) / 3
-                    Metric {
-                        width: parent.cellWidth
+                    columns: 2
+                    columnSpacing: Theme.pad2xl
+                    rowSpacing: Theme.padMd
+                    readonly property real cellWidth: (width - columnSpacing) / 2
+                    PerfTile {
+                        objectName: "perf:cpu"
+                        width: perfGrid.cellWidth
                         label: "CPU"
-                        value: Math.round(PerformanceService.cpuPercent) + "%"
-                        fraction: PerformanceService.cpuPercent / 100
+                        value: Math.round(PerformanceService.cpuPercent); unit: "%"
+                        temp: PerformanceService.cpuTempC
+                        history: PerformanceService.cpuHistory
                     }
-                    Metric {
-                        width: parent.cellWidth
+                    PerfTile {
+                        objectName: "perf:gpu"
+                        width: perfGrid.cellWidth
                         label: "GPU"
                         available: PerformanceService.gpuAvailable
-                        value: Math.round(PerformanceService.gpuPercent) + "%"
-                        fraction: PerformanceService.gpuPercent / 100
+                        missingText: "No readable GPU"
+                        value: Math.round(PerformanceService.gpuPercent); unit: "%"
+                        temp: PerformanceService.gpuTempC
+                        history: PerformanceService.gpuHistory
                     }
-                    Metric {
-                        width: parent.cellWidth
+                    PerfTile {
+                        objectName: "perf:mem"
+                        width: perfGrid.cellWidth
                         label: "Memory"
-                        value: Math.round(PerformanceService.memPercent) + "%"
-                        fraction: PerformanceService.memPercent / 100
+                        value: PerformanceService.memUsedGiB.toFixed(1); unit: "/ " + PerformanceService.memTotalGiB.toFixed(1) + " GiB"
+                        history: PerformanceService.memHistory
+                    }
+                    PerfTile {
+                        objectName: "perf:net"
+                        width: perfGrid.cellWidth
+                        label: "Network"
+                        readonly property bool mb: PerformanceService.netDownKBs >= 1024
+                        value: mb ? (PerformanceService.netDownKBs / 1024).toFixed(1) : Math.round(PerformanceService.netDownKBs)
+                        unit: (mb ? "MB/s" : "KB/s") + " down"
+                        side: "↑ " + (PerformanceService.netUpKBs >= 1024 ? (PerformanceService.netUpKBs / 1024).toFixed(1) + " MB/s"
+                                                                        : Math.round(PerformanceService.netUpKBs) + " KB/s")
+                        history: PerformanceService.netDownHistory
+                        graphMax: 0
                     }
                 }
 
                 Rectangle { width: parent.width; height: 1; color: Theme.withAlpha(Theme.borderTint, 0.08) }
 
-                Row {
+                Item {
+                    objectName: "perfFooter"
                     width: parent.width
-                    spacing: Theme.pad2xl
-                    readonly property real cellWidth: (width - spacing) / 2
-                    SecondaryMetric {
-                        width: parent.cellWidth
-                        label: "Storage"
-                        value: Math.round(PerformanceService.diskPercent) + "%"
-                        detail: PerformanceService.diskUsedLabel
-                        fraction: PerformanceService.diskPercent / 100
+                    height: 22
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Theme.padMd
+                        Text {
+                            text: "STORAGE"
+                            color: Theme.text; opacity: Theme.opacityMuted
+                            font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.DemiBold; font.letterSpacing: 1.5
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        LevelBar {
+                            width: 120
+                            anchors.verticalCenter: parent.verticalCenter
+                            value: Math.max(0, Math.min(1, PerformanceService.diskPercent / 100))
+                        }
+                        Text {
+                            objectName: "perfStorage"
+                            text: PerformanceService.diskUsedLabel.length > 0
+                                ? PerformanceService.diskUsedLabel + "  ·  " + Math.round(PerformanceService.diskPercent) + "%" : "…"
+                            color: Theme.textActive
+                            font.family: Theme.fontMono; font.pixelSize: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
                     }
-                    SecondaryMetric {
-                        width: parent.cellWidth
-                        label: "Network"
-                        value: PerformanceService.networkRateKBs >= 1024
-                            ? (PerformanceService.networkRateKBs / 1024).toFixed(1) + " MB/s"
-                            : Math.round(PerformanceService.networkRateKBs) + " KB/s"
-                        detail: "rx + tx"
-                        fraction: -1
+                    Text {
+                        objectName: "perfUptime"
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        readonly property real up: PerformanceService.uptimeS
+                        text: "up " + (up >= 86400 ? Math.floor(up / 86400) + "d " : "") + Math.floor(up % 86400 / 3600) + "h "
+                              + Math.floor(up % 3600 / 60) + "m  ·  load " + PerformanceService.load1.toFixed(2)
+                        color: Theme.text; opacity: Theme.opacityMuted
+                        font.family: Theme.fontMono; font.pixelSize: 12
                     }
                 }
             }
@@ -1507,6 +1604,71 @@ Item {
 
     // A hero readout: label, big number, thin bar. `available: false` is the
     // honest no-data state (GPU without a utilisation source).
+    // One live reading: label (and its temperature, where there is a
+    // sensor), the value large with a small unit, and its recent history.
+    component PerfTile: Column {
+        id: tile
+        property string label: ""
+        property var value: 0
+        property string unit: ""
+        property string side: ""             // a second, smaller reading (network up)
+        property real temp: -1
+        property bool available: true
+        property string missingText: "Unavailable"
+        property var history: []
+        property real graphMax: 100          // 0: scale to the largest sample
+        spacing: 2
+        Item {
+            width: parent.width; height: 14
+            Text {
+                text: tile.label.toUpperCase()
+                color: Theme.accent
+                font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1.8
+            }
+            Text {
+                objectName: "perfTemp"
+                anchors.right: parent.right
+                visible: tile.available && tile.temp >= 0
+                text: Math.round(tile.temp) + "°C"
+                color: tile.temp >= 85 ? Theme.accent : Theme.text
+                opacity: tile.temp >= 85 ? 1 : Theme.opacityMuted
+                font.family: Theme.fontMono; font.pixelSize: 11
+            }
+        }
+        Row {
+            spacing: 6
+            Text {
+                objectName: "perfValue"
+                text: tile.available ? String(tile.value) : "n/a"
+                color: tile.available ? Theme.textActive : Theme.text
+                opacity: tile.available ? 1 : Theme.opacityFaint
+                font.family: Theme.fontFamily; font.pixelSize: 30; font.weight: Font.Light
+            }
+            Column {
+                anchors.bottom: parent.bottom; anchors.bottomMargin: 6
+                Text {
+                    visible: tile.side.length > 0 && tile.available
+                    text: tile.side
+                    color: Theme.text; opacity: Theme.opacityMuted
+                    font.family: Theme.fontMono; font.pixelSize: 11
+                }
+                Text {
+                    text: tile.available ? tile.unit : tile.missingText
+                    color: Theme.text; opacity: Theme.opacityMuted
+                    font.family: tile.available ? Theme.fontMono : Theme.fontFamily; font.pixelSize: 11
+                }
+            }
+        }
+        HistoryGraph {
+            objectName: "perfGraph"
+            width: parent.width
+            height: 30
+            visible: tile.available
+            values: tile.history
+            max: tile.graphMax
+        }
+    }
+
     component Metric: Column {
         id: metric
         property string label: ""
