@@ -81,14 +81,19 @@ Item {
     // Any descendant whose objectName matches.
     function findNamed(name) {
         const stack = [shellLoader];
+        const seen = new Set();
         while (stack.length) {
             const it = stack.pop();
-            if (!it) continue;
+            if (!it || seen.has(it)) continue;
+            seen.add(it);
             if (it.objectName === name) return it;
-            // `data`, not `children`: also reaches non-Item objects
-            // (Shortcut, Timer, ...) declared inside an Item.
+            // `data` reaches non-Item objects (Shortcut, Timer, ...) declared
+            // inside an Item; `children` too, for an item whose `data` is an
+            // alias to an inner one (a Card's content) yet has items of its own
             const kids = it.data !== undefined ? it.data : [];
             for (let i = 0; i < kids.length; i++) stack.push(kids[i]);
+            const ch = it.children !== undefined ? it.children : [];
+            for (let i = 0; i < ch.length; i++) stack.push(ch[i]);
         }
         return null;
     }

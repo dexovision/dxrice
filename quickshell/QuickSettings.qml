@@ -1452,15 +1452,48 @@ Item {
 
                 Card {
                     id: clipCard
+                    property bool searching: false
+                    property bool asking: false
                     width: (parent.width - parent.spacing) * 0.58
                     height: parent.height
                     title: "Clipboard"
                     Item {
                         width: parent.width
                         height: clipCard.height - clipCard.padding * 2 - clipCard.titleHeight
+                        // the search field, while searching (the header's search
+                        // button): the card is short, and a field always there
+                        // would cost an entry
+                        Rectangle {
+                            id: clipTools
+                            visible: clipCard.searching
+                            width: parent.width
+                            height: 28; radius: 14
+                            color: Theme.layer1
+                            border.width: 1
+                            border.color: clipSearch.activeFocus ? Theme.mix(Theme.borderIdle, Theme.accent, 0.6) : Theme.borderIdle
+                            TextInput {
+                                id: clipSearch
+                                objectName: "clipSearch"
+                                anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                                verticalAlignment: TextInput.AlignVCenter
+                                clip: true
+                                color: Theme.textActive
+                                font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
+                                onTextChanged: clipboardBackend.query = text
+                                Keys.onEscapePressed: { clipSearch.text = ""; clipCard.searching = false; }
+                                Text {
+                                    visible: clipSearch.text.length === 0
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Search the clipboard…"
+                                    color: Theme.text; opacity: Theme.opacityFaint
+                                    font: clipSearch.font
+                                }
+                            }
+                        }
                         Flickable {
                             id: clipFlick
                             anchors.fill: parent
+                            anchors.topMargin: clipCard.searching ? clipTools.height + Theme.padSm : 0
                             contentHeight: clipList.implicitHeight
                             clip: true
                             boundsBehavior: Flickable.StopAtBounds
@@ -1496,6 +1529,23 @@ Item {
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: clipboardBackend.copyEntry(parent.modelData.raw)
                                         }
+                                        // delete just this one
+                                        Text {
+                                            objectName: "clipDelete"
+                                            anchors.right: parent.right; anchors.rightMargin: Theme.padSm
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: clipArea.containsMouse || delArea.containsMouse
+                                            text: "\u{f0156}"
+                                            color: delArea.containsMouse ? Theme.textActive : Theme.text
+                                            font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
+                                            MouseArea {
+                                                id: delArea
+                                                anchors.fill: parent; anchors.margins: -6
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: clipboardBackend.remove(parent.parent.modelData.raw)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1509,7 +1559,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             visible: clipboardBackend.entries.length === 0
-                            text: "Clipboard history is empty"
+                            text: clipboardBackend.all.length === 0 ? "Clipboard history is empty" : "Nothing matches"
                             color: Theme.text
                             opacity: Theme.opacityMuted
                             font.family: Theme.fontFamily
@@ -1517,15 +1567,43 @@ Item {
                         }
                     }
                 }
-                // Refresh lives on the card's title line, not as a row of
-                // its own.
-                IconButton {
+                // Search, clear and refresh live on the card's title line,
+                // not as rows of their own. Clearing asks once more first.
+                Row {
                     parent: clipCard
                     x: clipCard.width - width - Theme.padSm
                     y: Theme.padXs + 2
-                    glyph: "\uf021"
-                    size: 24
-                    onClicked: clipboardBackend.refresh()
+                    spacing: 2
+                    CompactChip {
+                        objectName: "clipClearConfirm"
+                        visible: clipCard.asking
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Clear all?"
+                        onClicked: { clipCard.asking = false; clipboardBackend.wipe(); }
+                    }
+                    Timer { id: clearAsk; interval: 4000; onTriggered: clipCard.asking = false }
+                    IconButton {
+                        objectName: "clipSearchButton"
+                        glyph: "\uf002"
+                        size: 24
+                        onClicked: {
+                            clipCard.searching = !clipCard.searching;
+                            if (clipCard.searching) clipSearch.forceActiveFocus(); else clipSearch.text = "";
+                        }
+                    }
+                    IconButton {
+                        objectName: "clipClear"
+                        glyph: "\uf1f8"
+                        size: 24
+                        enabled: clipboardBackend.all.length > 0
+                        opacity: enabled ? 1 : 0.4
+                        onClicked: { clipCard.asking = true; clearAsk.restart(); }
+                    }
+                    IconButton {
+                        glyph: "\uf021"
+                        size: 24
+                        onClicked: clipboardBackend.refresh()
+                    }
                 }
 
                 Card {

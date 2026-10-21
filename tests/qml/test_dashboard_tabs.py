@@ -5,6 +5,7 @@ player.
 
     python3 tests/qml/test_dashboard_tabs.py
 """
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -195,6 +196,59 @@ class MediaTabTest(unittest.TestCase):
         self.s.ev("mpris.players = { values: [] }")
         self.s.wait(400)
         self.assertFalse(self.s.ev("findNamed('mediaGround').visible"))
+
+
+class ClipboardTest(unittest.TestCase):
+    """The Dashboard's clipboard card: cliphist's own history, searched,
+    with one entry deleted or the whole history cleared (asked twice)."""
+
+    def setUp(self):
+        self.s = Scene(width=1920, height=1080)
+        self.s.wait(500)
+        self.s.ev("panels.open('quicksettings', 'click')")
+        self.s.wait(1000)
+        self.s.ev("findPanel('currentTab').currentTab = 'performance'")     # where the clipboard card is
+        self.s.wait(900)
+
+    def tearDown(self):
+        self.s.close()
+
+    def previews(self):
+        return json.loads(self.s.ev("(function(){ const q = findPanel('currentTab'); const st = [q]; const out = [];"
+                                    " while (st.length) { const it = st.pop(); if (it.modelData && it.modelData.preview !== undefined && it.visible) out.push(it.modelData.preview);"
+                                    " for (let k = 0; k < it.children.length; k++) st.push(it.children[k]); } return JSON.stringify(out.sort()); })()"))
+
+    def test_search_delete_and_clear(self):
+        self.assertEqual(len(self.previews()), 3)
+        self.assertFalse(self.s.ev("findNamed('clipSearch').visible"), "the search field costs an entry: only while searching")
+        self.s.ev("findNamed('clipSearchButton').clicked()")
+        self.s.wait(50)
+        self.assertTrue(self.s.ev("findNamed('clipSearch').visible"))
+        self.s.ev("findNamed('clipSearch').text = 'git'")
+        self.s.wait(100)
+        self.assertEqual(self.previews(), ["git commit -m 'fix input region'"])
+        self.s.ev("findNamed('clipSearch').text = 'zzz'")
+        self.s.wait(100)
+        self.assertEqual(self.previews(), [])
+        # closing the search clears it and gives the room back
+        self.s.ev("findNamed('clipSearchButton').clicked()")
+        self.s.wait(100)
+        self.assertEqual(self.s.ev("findNamed('clipSearch').text"), "")
+        self.assertEqual(len(self.previews()), 3)
+        # delete one: cliphist is told which (its own raw line, on stdin)
+        self.s.bridge.run_log.clear()
+        self.s.ev("(function(){ const q = findPanel('currentTab'); const st = [q]; while (st.length) { const it = st.pop();"
+                  " if (it.objectName === 'clipDelete' && it.parent.modelData.preview === 'Hello world') { it.children[0].clicked(null); return; }"
+                  " for (let k = 0; k < it.children.length; k++) st.push(it.children[k]); } })()")
+        self.s.wait(100)
+        self.assertIn(["cliphist", "delete"], self.s.bridge.run_log)
+        # clear: the first click asks, the second clears
+        self.s.ev("findNamed('clipClear').clicked()")
+        self.assertTrue(self.s.ev("findNamed('clipClearConfirm').visible"))
+        self.assertNotIn(["cliphist", "wipe"], self.s.bridge.run_log)
+        self.s.ev("findNamed('clipClearConfirm').clicked()")
+        self.s.wait(100)
+        self.assertIn(["cliphist", "wipe"], self.s.bridge.run_log)
 
 
 if __name__ == "__main__":
