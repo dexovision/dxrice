@@ -2,7 +2,8 @@ import QtQuick
 import Quickshell
 
 // A stopwatch and a countdown, one at a time. The stopwatch counts up
-// from start (pause and resume keep its time, reset clears it); a
+// from start (pause and resume keep its time, Lap marks a split -- the last
+// three show, newest first -- reset clears it all); a
 // countdown runs from one of a few presets and, when it reaches zero, says
 // so with a real desktop notification. Time is measured against the clock,
 // not by counting ticks, so it stays right if the shell is busy.
@@ -26,7 +27,10 @@ DesktopWidget {
 
     function start() { if (root.running) return; root.startedAt = Date.now(); root.now = root.startedAt; root.running = true; }
     function pause() { if (!root.running) return; root.elapsedMs += Date.now() - root.startedAt; root.running = false; }
-    function reset() { root.running = false; root.elapsedMs = 0; }
+    function reset() { root.running = false; root.elapsedMs = 0; root.laps = []; }
+    // splits: the total at each Lap, newest first
+    property var laps: []
+    function lap() { if (root.mode === "stopwatch" && root.running) { root.now = Date.now(); root.laps = [root.totalElapsed].concat(root.laps); } }
     function countdown(minutes) { root.reset(); root.mode = "countdown"; root.targetMs = minutes * 60000; root.start(); }
     function stopwatch() { root.reset(); root.mode = "stopwatch"; }
     function format(ms) {
@@ -98,7 +102,34 @@ DesktopWidget {
                 variant: "primary"
                 onClicked: root.running ? root.pause() : root.start()
             }
-            GlassButton { objectName: "timerReset"; text: "Reset"; variant: "secondary"; onClicked: root.reset() }
+            GlassButton { objectName: "timerLap"; visible: root.mode === "stopwatch" && root.running; text: "Lap"; variant: "secondary"; onClicked: root.lap() }
+            GlassButton { objectName: "timerReset"; visible: !(root.mode === "stopwatch" && root.running); text: "Reset"; variant: "secondary"; onClicked: root.reset() }
+        }
+        Column {
+            visible: root.laps.length > 0
+            width: parent.width
+            spacing: 2
+            Repeater {
+                model: root.laps.slice(0, 3)
+                delegate: Item {
+                    required property real modelData
+                    required property int index
+                    objectName: "timerLapRow:" + index
+                    width: col.width; height: 18
+                    Text {
+                        text: "Lap " + (root.laps.length - index)
+                        color: Theme.text; opacity: Theme.opacityMuted
+                        font.family: Theme.fontFamily; font.pixelSize: 11
+                    }
+                    Text {
+                        anchors.right: parent.right
+                        // the split, and its length since the lap before
+                        text: root.format(modelData - (index + 1 < root.laps.length ? root.laps[index + 1] : 0)) + "   " + root.format(modelData)
+                        color: index === 0 ? Theme.textActive : Theme.text
+                        font.family: Theme.fontMono; font.pixelSize: 11
+                    }
+                }
+            }
         }
     }
 }

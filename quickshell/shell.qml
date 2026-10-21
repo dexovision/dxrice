@@ -119,6 +119,11 @@ ShellRoot {
     WeatherWidget { objectName: "weatherWidget" }
     BatteryWidget { objectName: "batteryWidget" }
     TimerWidget { objectName: "timerWidget" }
+    RemindersWidget { objectName: "remindersWidget" }
+    // a reading each, in a shape of its own (off until switched on)
+    MeterWidget { objectName: "cpuWidget"; metric: "cpu" }
+    MeterWidget { objectName: "memoryWidget"; metric: "memory" }
+    MeterWidget { objectName: "diskWidget"; metric: "disk" }
 
     // Opt-in, not wired to SUPER+L: see LockScreen.qml's own comment for
     // why a real Wayland session lock is a fundamentally higher-stakes

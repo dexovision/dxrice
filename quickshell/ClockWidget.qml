@@ -205,12 +205,32 @@ DesktopWidget {
                 border.width: 1
                 border.color: Theme.mix(Theme.borderIdle, Theme.accent, 0.3)
             }
-            Repeater {      // twelve ticks, the quarters longer
+            // theme.json "clock_face": "numerals" (default) sets 12, 3, 6 and
+            // 9 large in place of the quarter ticks; "ticks" keeps all twelve
+            // as marks
+            readonly property bool numerals: Theme.data.clock_face !== "ticks"
+            Repeater {
+                model: dial.numerals ? [12, 3, 6, 9] : []
+                delegate: Text {
+                    required property int modelData
+                    required property int index
+                    objectName: "clockNumeral:" + modelData
+                    readonly property real a: index * Math.PI / 2
+                    readonly property real r: dial.width * 0.34
+                    x: dial.width / 2 + r * Math.sin(a) - width / 2
+                    y: dial.width / 2 - r * Math.cos(a) - height / 2
+                    text: modelData
+                    color: Theme.textActive; opacity: 0.85
+                    font.family: Theme.fontFamily; font.pixelSize: Math.round(dial.width * 0.17); font.weight: Font.DemiBold
+                }
+            }
+            Repeater {      // twelve ticks, the quarters longer (or numerals)
                 model: 12
                 delegate: Item {
                     required property int index
                     anchors.fill: parent
                     rotation: index * 30
+                    visible: !(dial.numerals && index % 3 === 0)
                     Rectangle {
                         readonly property bool quarter: index % 3 === 0
                         width: quarter ? 3 : 2

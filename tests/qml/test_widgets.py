@@ -71,7 +71,8 @@ class ClockWidgetTest(unittest.TestCase):
             card = "widgetCard:clock"
             w, h = named(s, card, "width"), named(s, card, "height")
             self.assertEqual(named(s, card, "x"), 1920 - w - 28)
-            self.assertEqual(named(s, card, "y"), 1080 - h - 96)
+            # the screen's edge margin: there is no dock to clear any more
+            self.assertEqual(named(s, card, "y"), 1080 - h - 28)
         finally:
             s.close()
 

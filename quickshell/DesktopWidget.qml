@@ -37,9 +37,12 @@ PanelWindow {
     property real pad: Theme.padLg
     property real cornerMargin: 28
     property real topClearance: 76      // the bar
-    property real bottomClearance: 96   // the dock
+    property real bottomClearance: 28   // the screen's edge (there is no dock)
     property string surface: "glass"
     property bool interactive: true
+    // a widget you type into (reminders) takes the keyboard when clicked,
+    // never otherwise
+    property bool takesKeys: false
     readonly property bool worldAttached: Theme.data["widget_" + root.name + "_world"] === true
     // the pan, smoothed between the daemon's ~30 updates a second
     property real panX: root.worldAttached ? Viewport.x : 0
@@ -58,8 +61,13 @@ PanelWindow {
     readonly property string corner: Theme.widgetCorner(root.name, root.defaultCorner)
     readonly property bool active: root.on && root.wanted
     property real shown: 0
-    onActiveChanged: { arrive.stop(); arrive.to = root.active ? 1 : 0; arrive.duration = root.active ? Theme.durationDefault : Theme.durationFast; arrive.start(); }
-    Component.onCompleted: if (root.active) root.shown = 1
+    // others in the same corner come first (WidgetStack); this one sits past them
+    readonly property real stackOffset: WidgetStack.offsetOf(root.name)
+    function _report() { WidgetStack.report(root.name, root.corner, surface.height, root.active); }
+    onCornerChanged: root._report()
+    Component.onDestruction: WidgetStack.report(root.name, root.corner, 0, false)
+    onActiveChanged: { arrive.stop(); arrive.to = root.active ? 1 : 0; arrive.duration = root.active ? Theme.durationDefault : Theme.durationFast; arrive.start(); root._report(); }
+    Component.onCompleted: { if (root.active) root.shown = 1; root._report(); }
 
     visible: root.shown > 0
     color: "transparent"
@@ -67,7 +75,7 @@ PanelWindow {
     aboveWindows: false
     WlrLayershell.layer: WlrLayer.Bottom
     WlrLayershell.namespace: "dxrice-widget-" + root.name
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: root.takesKeys ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
     anchors { top: true; left: true; right: true; bottom: true }
     implicitWidth: root.screen && root.screen.width ? root.screen.width : 1920
     implicitHeight: root.screen && root.screen.height ? root.screen.height : 1080
@@ -91,8 +99,9 @@ PanelWindow {
         readonly property bool atLeft: root.corner.endsWith("left")
         x: (atLeft ? root.cornerMargin : parent.width - width - root.cornerMargin) + root.panX
         // rises 12 px into place on arrival (falls 12 px when leaving)
-        y: (atTop ? root.topClearance : parent.height - height - root.bottomClearance) + root.panY
+        y: (atTop ? root.topClearance + root.stackOffset : parent.height - height - root.bottomClearance - root.stackOffset) + root.panY
            + (1 - root.shown) * (atTop ? -12 : 12)
+        onHeightChanged: root._report()
         // the hover lift is drawn, not a move: `y` has to follow a pan at once
         transform: Translate {
             y: root.interactive && hover.hovered ? -2 : 0

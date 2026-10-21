@@ -215,6 +215,16 @@ PanelWindow {
     property bool widget_timer: false
     property string widget_battery_pos: "top-right"
     property string widget_timer_pos: "bottom-right"
+    property bool widget_reminders: false
+    property bool widget_cpu: false
+    property bool widget_memory: false
+    property bool widget_disk: false
+    property string widget_reminders_pos: "top-left"
+    property string widget_cpu_pos: "top-right"
+    property string widget_memory_pos: "top-right"
+    property string widget_disk_pos: "top-right"
+    property string clock_face: "numerals"
+    property string weather_style: "card"
     property string widget_weather_pos: "bottom-right"
     property string weather_location: ""
     property string weather_units: "metric"
@@ -223,6 +233,12 @@ PanelWindow {
     property bool widget_music_world: false
     property bool widget_system_world: false
     property bool widget_weather_world: false
+    property bool widget_battery_world: false
+    property bool widget_timer_world: false
+    property bool widget_reminders_world: false
+    property bool widget_cpu_world: false
+    property bool widget_memory_world: false
+    property bool widget_disk_world: false
 
     property string font_family: "JetBrainsMono Nerd Font"
     // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
@@ -299,7 +315,7 @@ PanelWindow {
         { key: "clock_24h", objectName: "clock24hSwitch", label: "24-hour clock", sub: "Off shows AM and PM." },
         { key: "clock_seconds", objectName: "clockSecondsSwitch", label: "Show seconds", sub: "Beside the time, ticking once a second." },
         { key: "widget_music", objectName: "widgetMusicSwitch", label: "Now playing",
-          sub: "The track from whichever media player is open, with play, skip and a seekable bar. Nothing shows while nothing plays." },
+          sub: "The track from whichever media player is open, with play, skip and a seekable bar. With nothing playing it says so." },
         { key: "widget_visualizer", objectName: "widgetVisualizerSwitch", label: "Audio visualizer",
           sub: "A real spectrum of what is playing (from cava), along the bottom of the desktop. It runs only while music plays." },
         { key: "widget_weather", objectName: "widgetWeatherSwitch", label: "Weather",
@@ -307,7 +323,15 @@ PanelWindow {
         { key: "widget_battery", objectName: "widgetBatterySwitch", label: "Battery ring",
           sub: "The charge as a ring, with the percentage and whether it is charging. Only on a machine with a battery." },
         { key: "widget_timer", objectName: "widgetTimerSwitch", label: "Timer and stopwatch",
-          sub: "A stopwatch, or a countdown that sends a notification when it ends." },
+          sub: "A stopwatch with laps, or a countdown that sends a notification when it ends." },
+        { key: "widget_reminders", objectName: "widgetRemindersSwitch", label: "Reminders",
+          sub: "Today's date and what's coming up, from the reminders you add here or in the calendar. Kept on this machine only." },
+        { key: "widget_cpu", objectName: "widgetCpuSwitch", label: "Processor meter",
+          sub: "Processor use as a pentagon filled to its level, with the temperature when there is a sensor." },
+        { key: "widget_memory", objectName: "widgetMemorySwitch", label: "Memory meter",
+          sub: "Memory in use as a tank filled to its level." },
+        { key: "widget_disk", objectName: "widgetDiskSwitch", label: "Disk meter",
+          sub: "How full the main disk is, as a scalloped disc." },
         { key: "widget_system", objectName: "widgetSystemSwitch", label: "System monitor",
           sub: "Processor, memory, graphics and network, with the last minute of each. Measured only while it is on." },
     ]
@@ -358,7 +382,10 @@ PanelWindow {
         keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style", "visualizer_style",
                    "widget_weather_pos", "weather_location", "weather_units",
                    "widget_clock_world", "widget_music_world", "widget_system_world", "widget_weather_world",
-                   "widget_battery_pos", "widget_timer_pos");
+                   "widget_battery_pos", "widget_timer_pos",
+                   "widget_reminders_pos", "widget_cpu_pos", "widget_memory_pos", "widget_disk_pos", "clock_face", "weather_style",
+                   "widget_battery_world", "widget_timer_world", "widget_reminders_world", "widget_cpu_world",
+                   "widget_memory_world", "widget_disk_world");
         return keys;
     }
 
@@ -2090,6 +2117,11 @@ PanelWindow {
                         options: [{ value: "type", label: "Type" }, { value: "blocks", label: "Blocks" }, { value: "analog", label: "Analog" }]
                     }
                     ChoiceRow {
+                        visible: root.clock_style === "analog"
+                        settingKey: "clock_face"; idPrefix: "clockFace:"; label: "Analog face"
+                        options: [{ value: "numerals", label: "Numerals" }, { value: "ticks", label: "Ticks" }]
+                    }
+                    ChoiceRow {
                         settingKey: "visualizer_style"; idPrefix: "visualizerStyle:"; label: "Visualizer style"
                         options: [{ value: "bars", label: "Bars" }, { value: "blocks", label: "Blocks" }]
                     }
@@ -2122,6 +2154,10 @@ PanelWindow {
                         }
                     }
                     ChoiceRow {
+                        settingKey: "weather_style"; idPrefix: "weatherStyle:"; label: "Weather style"
+                        options: [{ value: "card", label: "Card" }, { value: "tile", label: "Tile" }]
+                    }
+                    ChoiceRow {
                         settingKey: "weather_units"; idPrefix: "weatherUnits:"; label: "Weather units"
                         options: [{ value: "metric", label: "°C · km/h" }, { value: "imperial", label: "°F · mph" }]
                     }
@@ -2135,12 +2171,19 @@ PanelWindow {
                         CornerRow { settingKey: "widget_weather_pos"; idPrefix: "widgetPos:weather:"; label: "Weather" }
                         CornerRow { settingKey: "widget_battery_pos"; idPrefix: "widgetPos:battery:"; label: "Battery ring" }
                         CornerRow { settingKey: "widget_timer_pos"; idPrefix: "widgetPos:timer:"; label: "Timer" }
+                        CornerRow { settingKey: "widget_reminders_pos"; idPrefix: "widgetPos:reminders:"; label: "Reminders" }
+                        CornerRow { settingKey: "widget_cpu_pos"; idPrefix: "widgetPos:cpu:"; label: "Processor meter" }
+                        CornerRow { settingKey: "widget_memory_pos"; idPrefix: "widgetPos:memory:"; label: "Memory meter" }
+                        CornerRow { settingKey: "widget_disk_pos"; idPrefix: "widgetPos:disk:"; label: "Disk meter" }
                     }
                     ToggleChips {
                         label: "Move with the desktop"
                         sub: "These travel with your windows when you pan the infinite desktop; the rest stay on the screen."
                         options: [{ key: "widget_clock_world", label: "Clock" }, { key: "widget_music_world", label: "Now playing" },
-                                  { key: "widget_system_world", label: "System monitor" }, { key: "widget_weather_world", label: "Weather" }]
+                                  { key: "widget_system_world", label: "System monitor" }, { key: "widget_weather_world", label: "Weather" },
+                                  { key: "widget_battery_world", label: "Battery" }, { key: "widget_timer_world", label: "Timer" },
+                                  { key: "widget_reminders_world", label: "Reminders" }, { key: "widget_cpu_world", label: "Processor" },
+                                  { key: "widget_memory_world", label: "Memory" }, { key: "widget_disk_world", label: "Disk" }]
                     }
                 }
             }
