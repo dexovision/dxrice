@@ -124,7 +124,13 @@ Item {
     function _syncPerformanceActive() {
         PerformanceService.active = (root.currentTab === "performance");
     }
+    // which way a tab change goes: +1 to a tab further right, -1 to the left
+    property int tabDirection: 1
+    property int _tabIndex: 0
     onCurrentTabChanged: {
+        const i = Math.max(0, root.tabs.findIndex((t) => t.id === root.currentTab));
+        root.tabDirection = i >= root._tabIndex ? 1 : -1;
+        root._tabIndex = i;
         root._syncPerformanceActive();
         tabFade.restart();
     }
@@ -364,6 +370,7 @@ Item {
 
                 Loader {
                     id: paneLoader
+                    objectName: "qsPaneLoader"
                     x: Theme.padXl
                     // Top-aligned. This used to centre each pane vertically
                     // in the fixed viewport, which split any leftover space
@@ -383,10 +390,12 @@ Item {
                             duration: Theme.durationFadeIn
                             easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard
                         }
+                        // from the side of the tab that was picked: right of
+                        // the old one, the new pane comes in from the right
                         NumberAnimation {
-                            target: tabRise; property: "y"; from: Theme.contentShift; to: 0
-                            duration: Theme.durationEnter
-                            easing.type: Theme.easingType; easing.bezierCurve: Theme.curveEnter
+                            target: tabRise; property: "x"; from: root.tabDirection * 28; to: 0
+                            duration: Theme.durationSpring
+                            easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpring
                         }
                     }
                     sourceComponent: {

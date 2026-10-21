@@ -77,6 +77,26 @@ class PerformanceTabTest(unittest.TestCase):
         self.assertFalse(self.s.ev(f"{t}.visible"))
 
 
+class TabMotionTest(unittest.TestCase):
+    def test_a_tab_change_slides_in_from_the_side_it_was_picked_on(self):
+        s = Scene(width=1920, height=1080)
+        try:
+            s.ev("panels.open('quicksettings')")
+            s.wait(900)
+            qs = "findPanel('currentTab')"
+            rise = f"(function(){{ const l = {inside('statusIsland', 'qsPaneLoader')}; return l ? l.transform[0].x : null; }})()"
+            for tab, sign in (("performance", 1), ("media", -1), ("overview", -1), ("media", 1)):
+                s.ev(f"{qs}.currentTab = '{tab}'")
+                s.wait(25)
+                x = s.ev(rise)
+                self.assertIsNotNone(x)
+                self.assertGreater(x * sign, 4, f"to {tab}: started at {x}")
+                s.wait(700)
+                self.assertAlmostEqual(s.ev(rise), 0, delta=0.01)
+        finally:
+            s.close()
+
+
 class MediaTabTest(unittest.TestCase):
     def setUp(self):
         self.s = Scene(width=1920, height=1080)
