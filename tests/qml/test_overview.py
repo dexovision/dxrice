@@ -195,7 +195,7 @@ class TestOverview(unittest.TestCase):
         p0 = self.o.ov("progress")
         self.assertTrue(0 < p0 < 1, p0)
         import time
-        T = self.o.ov("zoomMs")
+        T = self.o.ov("zoomOutMs")      # the closing zoom's own duration
         t0 = time.perf_counter()
         self.o.call("hide")
         seen = [(0.0, p0)]

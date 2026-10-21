@@ -415,8 +415,8 @@ QtObject {
     // tab, a pill widening, a scroll glide, a handle growing): instant
     // under reduce_motion. durationFast itself stays for colour/opacity.
     readonly property int durationMove: root.reduceMotion ? 1 : durationFast
-    readonly property int durationDefault: root.reduceMotion ? 1 : Math.round(animMs * 2.2)
-    readonly property int durationEnter: root.reduceMotion ? 1 : Math.round(animMs * 2.8)
+    readonly property int durationDefault: root.reduceMotion ? 1 : Math.round(animMs * 1.8)
+    readonly property int durationEnter: root.reduceMotion ? 1 : Math.round(animMs * 1.6)
 
     // ---- the open/close grammar every expanding surface shares (islands,
     // branches, popovers, accordions) ----
@@ -430,9 +430,9 @@ QtObject {
     // symmetric curve is what left text fully drawn inside a shrinking
     // surface until the very last frame. Behaviors retarget from wherever
     // they are, so reversing mid-way never jumps.
-    readonly property int durationExit: root.reduceMotion ? 1 : Math.round(animMs * 2.0)
-    readonly property int durationFadeIn: Math.round(animMs * (root.reduceMotion ? 1.0 : 1.8))
-    readonly property int durationFadeOut: Math.round(animMs * 0.8)
+    readonly property int durationExit: root.reduceMotion ? 1 : Math.round(animMs * 1.2)
+    readonly property int durationFadeIn: Math.round(animMs * 1.2)
+    readonly property int durationFadeOut: Math.round(animMs * 0.7)
     // Opening is a spring: the surface grows a touch past its size and
     // settles back (Material 3 Expressive's default spatial curve, peaking
     // about 5% over). Closing never bounces -- it tucks away.
@@ -451,8 +451,8 @@ QtObject {
     readonly property var curveSpring: root.reduceMotion ? curveStandard : curveExpressiveDefault
     readonly property var curveSpringFast: root.reduceMotion ? curveStandard : curveExpressiveFast
     readonly property var curveSettle: curveEmphasizedDecel
-    readonly property int durationSpring: root.reduceMotion ? 1 : Math.round(animMs * 3.0)
-    readonly property int durationSpringFast: root.reduceMotion ? 1 : Math.round(animMs * 1.6)
+    readonly property int durationSpring: root.reduceMotion ? 1 : Math.round(animMs * 2.2)
+    readonly property int durationSpringFast: root.reduceMotion ? 1 : Math.round(animMs * 1.5)
 
     // theme.json "reduce_motion": true (Settings > Experience > Reduce
     // motion). Surfaces then appear and disappear in place (opacity only)
@@ -483,6 +483,12 @@ QtObject {
     readonly property real contentShift: root.reduceMotion ? 0 : 8
 
     // ---- the motion table: which timing each kind of change uses ----
+    // At the default anim_duration_ms (150): hover feedback 150 ms, a panel
+    // grows out of the bar in 240 ms (a slight overshoot that settles) and
+    // tucks back in 180 ms -- leaving is quicker than arriving -- its content
+    // fading in over 180 ms and out over 105 ms; size and layout changes take
+    // 270 ms, springs settle in 330 ms (225 ms for small ones), the overview
+    // zooms in 270 ms and back in 225 ms. Everything scales with the setting.
     //   hover / press colour     durationFast, curveStandard
     //   press sink, small pop    durationSpringFast, curveSpringFast
     //   a pill or reading resizing in place   durationMove, curveStandard

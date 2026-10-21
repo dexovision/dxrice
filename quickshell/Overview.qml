@@ -161,7 +161,9 @@ PanelWindow {
     }
     // one quick, readable decelerating zoom each way (instant under
     // reduce_motion); the dim runs alongside it, never as a stage of its own
-    readonly property int zoomMs: Theme.reduceMotion ? 1 : Math.round(Theme.animMs * 2)
+    readonly property int zoomMs: Theme.reduceMotion ? 1 : Math.round(Theme.animMs * 1.8)
+    // leaving is quicker than arriving
+    readonly property int zoomOutMs: Theme.reduceMotion ? 1 : Math.round(Theme.animMs * 1.5)
     // Windows a panning click moved with their compositor animation turned
     // off (see _pan); it's turned back on once the overview has let go.
     property var _unanimated: []
@@ -475,10 +477,10 @@ PanelWindow {
         id: exitAnim
         ParallelAnimation {
             NumberAnimation {
-                target: root; property: "progress"; to: 0; duration: root.zoomMs
+                target: root; property: "progress"; to: 0; duration: root.zoomOutMs
                 easing.type: Easing.BezierSpline; easing.bezierCurve: root.zoomCurve
             }
-            NumberAnimation { target: root; property: "fade"; to: 0; duration: root.zoomMs; easing.type: Easing.InQuad }
+            NumberAnimation { target: root; property: "fade"; to: 0; duration: root.zoomOutMs; easing.type: Easing.InQuad }
         }
         // closed: let the tiles (and their capture sessions) go entirely,
         // then give a clicked window its focus once more (see focusLua)
