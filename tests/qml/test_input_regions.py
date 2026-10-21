@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import Scene  # noqa: E402
+from test_customization import with_theme  # noqa: E402
 
 SETTLE_MS = 1100        # > ShellIsland's durationEnter + keep-alive at default anim speed
 SCREENS = [(1920, 1080), (2560, 1440), (1366, 768), (1024, 768)]
@@ -33,7 +34,9 @@ class InputRegionTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.scene = Scene(width=cls.size[0], height=cls.size[1])
+        # The panels' input only: the music widget now stays on the desktop
+        # with no player (its own input is tested in test_widgets.py).
+        cls.scene = Scene(width=cls.size[0], height=cls.size[1], setup=with_theme(widget_music=False))
 
     @classmethod
     def tearDownClass(cls):

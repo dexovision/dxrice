@@ -749,6 +749,11 @@ class GhostRig:
     def setUp(self):
         self.rects = sp.arrange(MIXED[:8], [], (0, 52, 1920, 1012), (32, 56))
         self.o = OverviewScene(clients_for(self.rects), layer_fade_ms=self.LAYER_FADE_MS)
+        # The handover frames compare against a desktop with no widgets: the
+        # overview covers widgets on purpose (test_desktop_widgets_are_covered
+        # ...), and the music card now stays up with no player.
+        self.o.scene.ev("theme.data = Object.assign({}, theme.data, {widget_music: false})")
+        self.o.scene.wait(400)
         # paint one real window (and its picture) a colour nothing else has
         fake = json.loads(self.o.scene.ev("JSON.stringify(fakeWindows)"))
         self.target = self.o.layout["windows"][0]
