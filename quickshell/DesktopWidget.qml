@@ -51,8 +51,13 @@ PanelWindow {
     readonly property bool worldAttached: Theme.widgetWorld(root.name)
     // the pan: Viewport already moves it the way the windows move, so it is
     // used as it is (a second animation here would trail the windows)
-    readonly property real panX: root.worldAttached ? Viewport.x : 0
-    readonly property real panY: root.worldAttached ? Viewport.y : 0
+    // While arranging, it is drawn at home instead (eased there and back):
+    // the layout is what is being arranged, and one panned away could
+    // neither be reached nor dropped where it was meant to go.
+    property real panWeight: WidgetStack.arranging ? 0 : 1
+    Behavior on panWeight { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+    readonly property real panX: root.worldAttached ? Viewport.x * root.panWeight : 0
+    readonly property real panY: root.worldAttached ? Viewport.y * root.panWeight : 0
     default property alias content: holder.data
     readonly property alias card: surface
     readonly property alias hovered: hover.hovered

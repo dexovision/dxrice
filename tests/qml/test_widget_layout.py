@@ -321,6 +321,31 @@ class ArrangeTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_arranging_a_panned_desktop_arranges_the_layout_on_screen(self):
+        s = scene(widget_clock=True, widget_clock_pos="top-left")
+        try:
+            s.wait(600)
+            home = rect(s, "clock")
+            w = s.ev("viewport.workspace")
+            s.ev(f"viewport.offsets = ({{ '{w}': [-1500, 300] }})")
+            s.wait(1500)
+            self.assertLess(rect(s, "clock")[0], 0, "panned away (precondition)")
+            s.ev("widgetStack.arranging = true")
+            s.wait(700)
+            self.assertAlmostEqual(rect(s, "clock")[0], home[0], delta=0.5, msg="not back home to be arranged")
+            r = rect(s, "clock")
+            self.drag(s, (int(r[0] + r[2] / 2), int(r[1] + r[3] / 2)), (1700, 900))
+            s.wait(900)
+            r2 = rect(s, "clock")
+            self.assertAlmostEqual(r2[0] + r2[2], 1920 - 28, delta=1)
+            self.assertLessEqual(r2[1] + r2[3], 1080)
+            # done: it goes back out with the desktop's pan
+            s.ev("widgetStack.arranging = false")
+            s.wait(700)
+            self.assertAlmostEqual(rect(s, "clock")[0], r2[0] - 1500, delta=1)
+        finally:
+            s.close()
+
     def test_the_theme_editor_keeps_a_corner_changed_elsewhere(self):
         s = scene(widget_music=True, widget_music_pos="bottom-left")
         try:
