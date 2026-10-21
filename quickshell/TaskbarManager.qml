@@ -6,10 +6,9 @@ import Quickshell.Io
 
 // The Taskbar editor's content -- deliberately NOT a window.
 //
-// Hosted inside the dock's own ShellIsland (see Dock.qml): the dock slab and
-// this panel are one surface that changes shape, so opening this reads as the
-// dock unfolding upward rather than a wider rectangle appearing above it.
-// See ShellIsland.qml for why that requires sharing the control's item tree.
+// Hosted in the bar's Applications panel (AppsPanel.qml, its Shortcuts tab),
+// which hangs from the bar's left section; TopBar.qml places the Add
+// Shortcut branch beside it.
 //
 // Still the only writer of ~/.config/waybar/config-dock (see the FileView
 // comments below for why that file/schema stays as the storage format).
@@ -24,12 +23,9 @@ Item {
     anchors.fill: parent
     signal closeRequested()
 
-    // Read by Dock.qml (via ShellIsland's panelItem alias) so its own
-    // click-outside-to-dismiss region can suspend itself while the
-    // Add-Shortcut branch is open, and so Dock.qml knows to render that
-    // branch at all -- see AddShortcutBranch.qml for the actual UI this
-    // now drives (no longer a separate FloatingWindow; see that file's
-    // own comment for why).
+    // Read by TopBar.qml so Escape and click-outside close the Add-Shortcut
+    // branch before the panel, and so the branch shows at all -- see
+    // AddShortcutBranch.qml for the UI this drives.
     property bool addPanelOpen: false
 
     // State for AddShortcutBranch.qml, which binds to this Item (passed
@@ -93,17 +89,17 @@ Item {
     // silently clipping Quick Settings' Overview cards with no way to scroll
     // to them. Computing the cap here instead means the outer clamp in
     // Dock.qml is a pure backstop, never the thing actually doing the work.
-    // Header metrics, read by Dock.qml (close-button alignment) and
-    // AddShortcutBranch.qml (where the branch leaves the panel).
+    // Header metrics, read by AddShortcutBranch.qml (where the branch leaves
+    // the panel).
     readonly property real headerHeight: 48
     readonly property real headerCenterY: headerHeight / 2
     readonly property real addAnchorX: addChip.x + addChip.width / 2
     readonly property int shortcutCount: root.loaded ? (root.cfg["modules-left"] || []).length : 0
 
-    // Bounded by the top bar's reserved strip as well: sized to its content
-    // on a short screen the panel otherwise grew up over the clock island.
+    // What the screen leaves under the bar and the Applications tabs above
+    // this editor.
     readonly property real maxAvailableBodyHeight: ShellSurface.screenHeight - ShellSurface.topEdgeHeight
-        - ShellSurface.gap * 2 - ShellSurface.dockUnit - header.height
+        - ShellSurface.gap * 2 - ShellSurface.navHeight - Theme.padMd - header.height
     // Sized to its whole content: panels don't scroll. A flat 360px cap cut
     // the shortcut list off mid-row (at the 6th shortcut) on a 1080p screen
     // with most of it still free. Only a screen too short for the content

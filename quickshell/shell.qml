@@ -144,24 +144,16 @@ ShellRoot {
         id: osd
     }
 
-    // The shell's top and bottom edges -- each an always-on window hosting
-    // its own islands (see TopBar.qml/Dock.qml/ShellIsland.qml). Their
-    // "requested" signals toggle the same shared PanelManager.current every
-    // IPC handler above uses, so a click and a keybind take the exact same
-    // path.
+    // The shell's one bar (see TopBar.qml/ShellIsland.qml): every panel it
+    // opens -- Applications and the shortcut editor, the calendar, each
+    // indicator's section, the Dashboard -- hangs from it, through the same
+    // PanelManager the IPC handlers above use, so a click and a keybind take
+    // the exact same path. (There was a dock at the bottom too; its
+    // shortcuts, running marks and the editor now live in the bar.)
     TopBar {
         id: topBar
         onCalendarRequested: PanelManager.toggle("calendar")
         onQuickSettingsRequested: PanelManager.toggle("quicksettings")
-        onLauncherRequested: appLauncher.toggle()
-    }
-    Dock {
-        id: dock
-        // the focused app's class, from TopBar's startup read + events
-        // (Hyprland.activeToplevel stays null until the first focus change)
-        focusedAppId: topBar.activeAppId
-        onTaskbarRequested: PanelManager.toggle("taskbar")
-        onLauncherRequested: appLauncher.toggle()
     }
 
     // Desktop overview (SUPER+Tab, which also closes it): the current
@@ -173,14 +165,10 @@ ShellRoot {
         id: overview
         objectName: "overview"
     }
-    // The application launcher (SUPER+R): an overlay that opens in place.
-    AppLauncher {
-        id: appLauncher
-        objectName: "launcher"
-    }
+    // SUPER+R: the bar's Applications panel, its search field ready
     IpcHandler {
         target: "launcher"
-        function toggle(): void { appLauncher.toggle(); }
+        function toggle(): void { PanelManager.toggle("apps"); }
     }
     IpcHandler {
         target: "overview"

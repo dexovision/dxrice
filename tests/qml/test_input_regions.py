@@ -49,21 +49,22 @@ class InputRegionTest(unittest.TestCase):
     def assert_idle(self, context):
         s = self.scene
         rs = self.rects()
-        top = [r for r in rs if r["surface"] == "TopBar"]
-        dock = [r for r in rs if r["surface"] == "Dock"]
-        other = [r for r in rs if r["surface"] not in ("TopBar", "Dock")]
-        self.assertEqual(len(top), 3, f"{context}: top bar should expose exactly its 3 capsules, got {top}")
-        self.assertEqual(len(dock), 1, f"{context}: dock should expose exactly its own slab, got {dock}")
+        # (zero-size regions are panels' bodies while closed: no input)
+        top = [r for r in rs if r["surface"] == "TopBar" and r["w"] > 0 and r["h"] > 0]
+        other = [r for r in rs if r["surface"] != "TopBar" and r["w"] > 0 and r["h"] > 0]
+        # one bar: its whole strip takes input (a bar that looks solid must
+        # not pass clicks through its gaps), and nothing below it does
+        self.assertEqual(len(top), 1, f"{context}: the top bar should expose exactly its strip, got {top}")
+        b = top[0]
+        self.assertLessEqual(b["h"], 40, f"{context}: top-bar input taller than the bar: {b}")
+        self.assertLessEqual(b["y"], 10, f"{context}: top-bar input not at the top edge: {b}")
+        self.assertGreaterEqual(b["w"], s.width - 20, f"{context}: the bar's input doesn't span the bar: {b}")
         # the clock (the one widget on by default) is only to look at: it
-        # takes no input, so nothing but the bar and dock does at idle
+        # takes no input, so nothing but the bar does at idle (there is no
+        # dock any more)
         self.assertEqual(other, [], f"{context}: unexpected input surfaces {other}")
-        for r in top:
-            self.assertLessEqual(r["h"], 40, f"{context}: top-bar input taller than a capsule: {r}")
-        d = dock[0]
-        self.assertLessEqual(d["h"], 60, f"{context}: dock input taller than the dock slab: {d}")
-        self.assertGreaterEqual(d["y"], s.height - 70, f"{context}: dock input not at the bottom edge: {d}")
         # Click-through probes across the whole application area, away from
-        # the capsules/dock: every one must reach the app underneath.
+        # the bar: every one must reach the app underneath.
         before = s.ev("appClicks")
         probes = [(x, y) for x in range(int(s.width * 0.15), int(s.width * 0.85), max(40, s.width // 24))
                   for y in range(int(s.height * 0.30), int(s.height - 80), max(40, s.height // 14))]
@@ -124,15 +125,15 @@ class InputRegionTest(unittest.TestCase):
         # close button lives) must be inside the input mask while open.
         for fx, fy in [(0.02, 0.02), (0.98, 0.02), (0.5, 0.5), (0.02, 0.98), (0.98, 0.98)]:
             px, py = bx + bw * fx, by + bh * fy
-            self.assertEqual(s.input_owner(px, py), "Dock", f"open branch point {(px, py)} not in the input mask")
+            self.assertEqual(s.input_owner(px, py), "TopBar", f"open branch point {(px, py)} not in the input mask")
         # The branch's own close button is clickable and closes it.
         cx = s.ev("(function(){ const b = findNamed('addShortcutBranchClose'); const p = b.mapToItem(null, b.width/2, b.height/2); return p.x; })()")
         cy = s.ev("(function(){ const b = findNamed('addShortcutBranchClose'); const p = b.mapToItem(null, b.width/2, b.height/2); return p.y; })()")
-        self.assertEqual(s.click(cx, cy), "Dock", "close button is outside the input mask")
+        self.assertEqual(s.click(cx, cy), "TopBar", "close button is outside the input mask")
         self.settle(700)
         self.assertFalse(s.ev("findPanel('addPanelOpen').addPanelOpen"), "clicking the branch's X did not close it")
         # Closed branch contributes nothing, even though the taskbar is open.
-        self.assertFalse(any(r["surface"] == "Dock" and abs(r["x"] - bx) < 1 and abs(r["y"] - by) < 1 for r in self.rects()),
+        self.assertFalse(any(r["surface"] == "TopBar" and r["w"] > 0 and abs(r["x"] - bx) < 1 and abs(r["y"] - by) < 1 for r in self.rects()),
                          "closed branch still in the input mask")
         # Branch open -> taskbar closed: everything goes away together, and
         # a quick reopen does NOT resurrect the branch.
@@ -150,7 +151,7 @@ class InputRegionTest(unittest.TestCase):
         tops = s.ev("surfaces().filter(function(x){ return x.isToplevelWindow && x.visible; }).length")
         self.assertEqual(tops, 0, "Add Shortcut opened a separate toplevel window")
         names = sorted(set(r["surface"] for r in self.rects()))
-        self.assertEqual(names, ["Dock", "TopBar"], f"unexpected surfaces while Add Shortcut is open: {names}")
+        self.assertEqual(names, ["TopBar"], f"unexpected surfaces while Add Shortcut is open: {names}")
         s.ev("panels.closeCurrent()"); self.settle()
 
     def test_06_single_escape_claim_per_window(self):
@@ -168,14 +169,13 @@ class InputRegionTest(unittest.TestCase):
         s = self.scene
         s.ev("panels.open('taskbar')"); self.settle(700)
         s.ev("findPanel('addPanelOpen').addPanelOpen = true"); self.settle(700)
-        # Call the Dock's single handler directly: in this harness every
-        # surface shares one QQuickView, so TopBar's own (separate-window in
-        # reality) Escape would collide with Dock's here and nowhere else.
-        s.ev("findNamed('dockEscape').activated()")
+        # The bar's single handler, called directly (in this harness every
+        # surface shares one QQuickView).
+        s.ev("findNamed('topBarEscape').activated()")
         self.settle(500)
         self.assertFalse(s.ev("findPanel('addPanelOpen').addPanelOpen"), "Escape did not close the branch first")
         self.assertEqual(s.ev("panels.current"), "taskbar", "Escape closed the taskbar instead of just the branch")
-        s.ev("findNamed('dockEscape').activated()")
+        s.ev("findNamed('topBarEscape').activated()")
         self.settle()
         self.assertEqual(s.ev("panels.current"), "", "second Escape did not close the taskbar")
         self.assert_idle("after Escape x2")
@@ -194,10 +194,9 @@ class InputRegionTest(unittest.TestCase):
         the desktop in that window was swallowed by an invisible catcher.
         Probes the app well away from every island mid-close."""
         s = self.scene
-        # Left of the centred Taskbar panel's own span (640px) at every screen
-        # size: that island is still visibly collapsing 60ms into its close,
-        # and a visible surface taking input is correct.
-        x_max = min(int(s.width * 0.30), (s.width - 640) // 2 - 20)
+        # (a panel's body lets go of input the moment its close begins, so
+        # these probes may cross where it is still visibly retracting)
+        x_max = int(s.width * 0.30)
         probes = [(x, y) for x in range(int(s.width * 0.05), x_max, max(30, s.width // 32))
                   for y in range(int(s.height * 0.55), int(s.height * 0.80), max(40, s.height // 14))]
         for name in ["quicksettings", "calendar", "taskbar", "theme"]:

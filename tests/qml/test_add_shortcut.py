@@ -1,7 +1,8 @@
 """Taskbar Manager's Add Shortcut branch, driven through the real shell QML
 offscreen (see harness.py): behaviour preserved from the old dialog (search,
 installed-app list, custom shortcut, Add, close), its attachment to the
-taskbar panel, and lifecycle under rapid open/close.
+taskbar editor (the Shortcuts tab of the bar's Applications panel), and
+lifecycle under rapid open/close.
 
     python3 tests/qml/test_add_shortcut.py
 """
@@ -142,7 +143,7 @@ class AddShortcutTest(unittest.TestCase):
 
     def open_branch(self):
         x, y = center(self.s, "taskbarAddToggle")
-        self.assertEqual(self.s.click(x, y), "Dock")
+        self.assertEqual(self.s.click(x, y), "TopBar")
         self.s.wait(700)
         self.assertTrue(self.s.ev(f"{TB}.addPanelOpen"))
 
@@ -159,10 +160,13 @@ class AddShortcutTest(unittest.TestCase):
         self.assertEqual(self.s.ev(f"{B}.reveal"), 0)
         self.assertFalse(self.s.ev(f"{B}.visible"))
 
-    def test_header_controls_share_one_line(self):
+    def test_the_add_toggle_sits_on_the_header_line(self):
+        # (the panel has no close button of its own any more: it hangs from
+        # the bar and closes like every bar panel; the Add toggle is the
+        # header's one control, and the branch leaves from its line)
         _, add_y = center(self.s, "taskbarAddToggle")
-        close_y = self.s.ev("(function(){ for (const c of surfaces()) if (String(c).startsWith('Dock')) { const st=[c]; while (st.length) { const it=st.pop(); if (String(it).startsWith('CloseButton') && it.visible) return it.mapToItem(null, 0, it.height/2).y; for (let i=0;i<it.children.length;i++) st.push(it.children[i]); } } })()")
-        self.assertAlmostEqual(add_y, close_y, delta=1.0, msg="Add toggle and close X are not vertically aligned")
+        header_y = self.s.ev(f"{TB}.mapToItem(null, 0, {TB}.headerCenterY).y")
+        self.assertAlmostEqual(add_y, header_y, delta=1.0, msg="the Add toggle is off the header line")
 
     def test_search_filters_and_pick_writes_config(self):
         self.open_branch()
@@ -202,11 +206,12 @@ class AddShortcutTest(unittest.TestCase):
 
     def test_click_outside_peels_branch_then_panel(self):
         self.open_branch()
-        self.assertEqual(self.s.click(60, 400), "Dock")   # far left, over the app
+        out = (self.size[0] - 60, self.size[1] - 60)      # far bottom-right, over the app
+        self.assertEqual(self.s.click(*out), "TopBar")
         self.s.wait(600)
         self.assertFalse(self.s.ev(f"{TB}.addPanelOpen"), "click outside did not close the branch")
         self.assertEqual(self.s.ev("panels.current"), "taskbar", "click outside closed the whole taskbar")
-        self.s.click(60, 400)
+        self.s.click(*out)
         self.s.wait(900)
         self.assertEqual(self.s.ev("panels.current"), "")
 
@@ -236,7 +241,7 @@ class AddShortcutTest(unittest.TestCase):
         self.assertTrue(0 < mid < 1, f"expected a mid-flight close, reveal={mid}")
         s.ev(f"{TB}.addPanelOpen = true"); s.wait(800)
         self.assertEqual(s.ev(f"{B}.reveal"), 1)
-        self.assertEqual(s.input_owner(s.ev(f"{B}.mapToItem(null, 0, 0).x") + 5, s.ev(f"{B}.mapToItem(null, 0, 0).y") + 5), "Dock")
+        self.assertEqual(s.input_owner(s.ev(f"{B}.mapToItem(null, 0, 0).x") + 5, s.ev(f"{B}.mapToItem(null, 0, 0).y") + 5), "TopBar")
 
     def test_attached_to_panel(self):
         self.open_branch()

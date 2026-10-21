@@ -299,9 +299,12 @@ class Scene:
         self.ev("desktopBlocked = false")
         return owner
 
-    def key(self, key):
+    def key(self, key, modifiers=None):
         from PySide6.QtTest import QTest
-        QTest.keyClick(self.view, key)
+        if modifiers is None:
+            QTest.keyClick(self.view, key)
+        else:
+            QTest.keyClick(self.view, key, modifiers)
 
     def close(self):
         self.view.close()

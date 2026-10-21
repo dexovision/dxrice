@@ -12,6 +12,8 @@ QtObject {
     id: root
     readonly property string configPath: Xdg.configHome + "/waybar/config-dock"
     property var list: []
+    // the editor's icon size, for "Custom image" shortcuts
+    property real iconSize: 24
 
     property FileView configFile: FileView {
         path: root.configPath
@@ -27,8 +29,11 @@ QtObject {
                 id,
                 label: cfg[id] ? (cfg[id]["tooltip-format"] || cfg[id]["dxrice_label"] || id) : id,
                 glyph: cfg[id] ? cfg[id]["format"] || "" : "",
+                // a "Custom image" shortcut has a picture instead of a glyph
+                image: cfg[id] && cfg[id]["dxrice_icon_mode"] === "image" ? cfg[id]["path"] || "" : "",
                 onClick: cfg[id] ? cfg[id]["on-click"] || "" : "",
             }));
+            root.iconSize = Number(cfg["dxrice_icon_size"]) || 24;
         } catch (e) {
             console.warn("Shortcuts: could not read", root.configPath, e);
         }

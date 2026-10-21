@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Panel open/close motion: content never outlives its surface.
 
-The reported bug: click an open menu again (the dock's cog with the Taskbar
-open) and it retracts into its small form with its text still fully drawn,
-then the text vanishes in one frame.
+The reported bug: click an open menu again (then the dock's cog with the
+Taskbar open; now the bar's search pill with Applications open) and it
+retracts into its small form with its text still fully drawn, then the text
+vanishes in one frame.
 Cause: island panels (ShellIsland) had no content fade at all -- closing
 was only the surface shrinking around fully opaque content (clip: true).
 Rows nearest the header stayed drawn until the clip edge passed them in the
@@ -34,8 +35,8 @@ except ImportError:  # pragma: no cover
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import Scene  # noqa: E402
 
-PANELS = {"calendar": "clockIsland", "quicksettings": "statusIsland", "taskbar": "dockIsland"}
-ESCAPE = {"calendar": "topBarEscape", "quicksettings": "topBarEscape", "taskbar": "dockEscape"}
+PANELS = {"calendar": "clockIsland", "quicksettings": "statusIsland", "taskbar": "activityIsland", "apps": "activityIsland"}
+ESCAPE = {p: "topBarEscape" for p in PANELS}
 
 STATE_JS = """(function(){
     const i = findNamed('%s');
@@ -46,10 +47,11 @@ STATE_JS = """(function(){
         while (it && it !== i) { op *= it.opacity; if (!it.visible) op = 0; it = it.parent; }
         en = p.enabled;
     }
-    const at = i.mapToItem(null, 0, 0);
+    const b = i.bodyItem;
+    const at = b.mapToItem(null, 0, 0);
     return JSON.stringify({ morph: i.morph, alive: !!p, op: op, enabled: en,
-                            x: at.x, y: at.y, w: i.width, h: i.height,
-                            cw: i.collapsedWidth, ch: i.collapsedHeight, pinX: i.pinX, pinY: i.pinY });
+                            x: at.x, y: at.y, w: b.width, h: b.height,
+                            cw: i.collapsedWidth, full: i.expandedHeight - i.collapsedHeight, pinX: i.pinX });
 })()"""
 
 
@@ -96,8 +98,8 @@ class PanelMotionTest(unittest.TestCase):
                                     " return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
 
     def outside_point(self):
-        # Left edge, mid-height: outside every island and panel at any size.
-        return 20, self.size[1] // 2
+        # Bottom-right corner: outside the bar and every panel at any size.
+        return self.size[0] - 20, self.size[1] - 20
 
     def watch_close(self, panel, ctx, ms=900):
         island = PANELS[panel]
@@ -126,17 +128,17 @@ class PanelMotionTest(unittest.TestCase):
         return frames
 
     # ---- the exact reported bug: click the open menu's own button again ----
-    def test_clicking_the_dock_cog_again_fades_the_taskbar_before_it_retracts(self):
-        self.open_fully("taskbar")
-        owner = self.s.click(*self.center_of("taskbarToggle"))
-        self.assertEqual(owner, "Dock")
-        self.assertEqual(self.s.ev("panels.current"), "", "clicking the cog with the Taskbar open didn't close it")
-        frames = self.watch_close("taskbar", "click the cog again")
-        # The bottom-pinned case specifically: while its content is still
-        # visible at all, it must not have slid down into the dock row.
+    def test_clicking_the_search_pill_again_fades_applications_before_it_retracts(self):
+        self.open_fully("apps")
+        owner = self.s.click(*self.center_of("barLauncher"))
+        self.assertEqual(owner, "TopBar")
+        self.assertEqual(self.s.ev("panels.current"), "", "clicking the pill with Applications open didn't close it")
+        frames = self.watch_close("apps", "click the pill again")
+        # while its content is still visible at all, the body has barely
+        # started back into the bar
         for f in frames:
             if f["alive"] and f["op"] > 0.02:
-                self.assertGreater(f["h"], f["ch"] * 2, f"Taskbar content still visible inside the dock row: {f}")
+                self.assertGreater(f["h"], f["full"] * 0.5, f"Applications content visible in a half-retracted body: {f}")
 
     def test_every_close_path_fades_content_first(self):
         paths = {

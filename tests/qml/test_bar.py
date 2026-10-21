@@ -110,13 +110,13 @@ class BarTest(unittest.TestCase):
     def test_hover_never_takes_the_keyboard_but_a_click_may(self):
         self.hover("audio")
         self.s.wait(400)
-        self.assertFalse(self.s.ev("findNamed('statusIsland').parent.focusable"))
+        self.assertFalse(self.s.ev("findNamed('statusIsland').parent.takesKeys"))
         x, y = self.centre("audio")
         self.s.click(x, y)
         self.s.wait(100)
         self.assertEqual(self.current(), "status:audio", "a click on a hover-opened panel keeps it")
         self.assertEqual(self.s.ev("panels.openedBy"), "click")
-        self.assertTrue(self.s.ev("findNamed('statusIsland').parent.focusable"))
+        self.assertTrue(self.s.ev("findNamed('statusIsland').parent.takesKeys"))
         self.away()
         self.s.wait(700)
         self.assertEqual(self.current(), "status:audio", "a clicked panel stays when the pointer leaves")
@@ -134,15 +134,14 @@ class BarTest(unittest.TestCase):
         self.assertEqual(self.current(), "")
 
     def test_a_closed_panel_does_not_reopen_under_a_resting_pointer(self):
-        # the Dashboard's row shifts when it closes (its close button goes),
-        # sliding its indicator back under a pointer that never moved
+        # closed by a keybind (or Escape) with the pointer still resting on
+        # the indicator that opened it
         x, y = self.centre("dashboard")
         QTest.mouseMove(self.s.view, QPoint(x, 300))
         self.s.wait(20)
         QTest.mouseMove(self.s.view, QPoint(x, y))
         self.s.wait(1200)
         self.assertEqual(self.current(), "quicksettings")
-        self.assertNotEqual(self.centre("dashboard"), [x, y], "the row no longer shifts; this test needs a new setup")
         self.s.ev("panels.closeCurrent()")
         self.s.wait(1200)
         self.assertEqual(self.current(), "", "reopened without the pointer moving")
@@ -160,6 +159,26 @@ class BarTest(unittest.TestCase):
         self.s.wait(50)
         self.assertIn(["makoctl", "mode", "-a", "dnd"], self.s.bridge.exec_log)
         self.assertFalse(self.s.ev(f"{sw}.checked"))
+
+    def test_a_hover_opened_panel_gives_way_to_another_sections(self):
+        self.hover("network")
+        self.s.wait(400)
+        self.assertEqual(self.current(), "status:network")
+        x, y = json.loads(self.s.ev("(function(){ const b = findNamed('clockIsland'); const p = b.mapToItem(null, b.width/2, b.height/2);"
+                                    " return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
+        QTest.mouseMove(self.s.view, QPoint(x, y))
+        self.s.wait(300)
+        self.assertEqual(self.current(), "calendar", "the bar should branch from wherever the pointer settles")
+
+    def test_a_clicked_panel_stays_while_the_pointer_visits_other_sections(self):
+        x, y = self.centre("network")
+        self.s.click(x, y)
+        self.s.wait(300)
+        cx, cy = json.loads(self.s.ev("(function(){ const b = findNamed('clockIsland'); const p = b.mapToItem(null, b.width/2, b.height/2);"
+                                      " return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
+        QTest.mouseMove(self.s.view, QPoint(cx, cy))
+        self.s.wait(400)
+        self.assertEqual(self.current(), "status:network")
 
     def test_the_dashboard_indicator_opens_the_full_dashboard(self):
         x, y = self.centre("dashboard")
@@ -184,9 +203,9 @@ class BarAppsTest(unittest.TestCase):
         return json.loads(self.s.ev(f"(function(){{ const b = findNamed('{name}'); const p = b.mapToItem(null, b.width/2, b.height/2);"
                                     " return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
 
-    def test_the_shortcuts_are_the_docks_minus_the_launcher_duplicate(self):
-        dock = self.s.ev("JSON.stringify(findNamed('dockIsland') ? 1 : 0)")
-        self.assertEqual(dock, "1")
+    def test_the_shortcuts_are_the_saved_list_minus_the_launcher_duplicate(self):
+        # there is no dock any more: the bar is where the shortcuts live
+        self.assertIsNone(self.s.ev("findNamed('dockIsland')"))
         labels = self.s.ev("JSON.stringify((function(){ const r = findNamed('barApps'); const out = [];"
                            " for (let i = 0; i < r.children.length; i++) { const c = r.children[i]; if (c.objectName.indexOf('barShortcut:') === 0) out.push(c.objectName.slice(12)); }"
                            " return out; })())")
@@ -201,11 +220,46 @@ class BarAppsTest(unittest.TestCase):
         self.s.wait(50)
         self.assertEqual(self.s.bridge.exec_log, [[f"{self.s.shell}/../scripts/dxrice_launch.sh", "bar", "sh", "-c", "firefox"]])
 
-    def test_the_launcher_button_opens_the_launcher(self):
+    def test_the_search_pill_opens_applications_with_the_keyboard(self):
         x, y = self.centre("barLauncher")
         self.s.click(x, y)
-        self.s.wait(600)
-        self.assertTrue(self.s.ev("findNamed('launcher').open"))
+        self.s.wait(900)
+        self.assertEqual(self.s.ev("panels.current"), "apps")
+        self.assertTrue(self.s.ev("findNamed('statusIsland').parent.takesKeys"))
+        self.assertTrue(self.s.ev("findNamed('appsSearch').activeFocus"))
+
+    def test_applications_pins_the_saved_shortcuts(self):
+        self.s.ev("panels.open('apps', 'click')")
+        self.s.wait(900)
+        self.assertIsNotNone(self.s.ev("findNamed('appsPin:Firefox')"))
+        x, y = self.centre("appsPin:Firefox")
+        self.s.bridge.exec_log.clear()
+        self.s.click(x, y)
+        self.s.wait(100)
+        self.assertEqual(self.s.bridge.exec_log, [[f"{self.s.shell}/../scripts/dxrice_launch.sh", "bar", "sh", "-c", "firefox"]])
+        self.assertEqual(self.s.ev("panels.current"), "", "launching closes it")
+
+    def test_applications_lists_open_windows_to_focus_or_close(self):
+        self.s.ev("hypr.toplevels = ({ values: [{ address: '0xabc', title: 'Docs', lastIpcObject: { address: '0xabc', class: 'firefox', title: 'Docs', workspace: { id: 2 } } },"
+                  " { address: '0xdef', lastIpcObject: { address: '0xdef', class: 'scratch', title: 'x', workspace: { id: -98 } } }] })")
+        self.s.ev("panels.open('apps', 'click')")
+        self.s.wait(900)
+        self.assertIsNotNone(self.s.ev("findNamed('appsWindow:0xabc')"))
+        self.assertIsNone(self.s.ev("findNamed('appsWindow:0xdef')"), "a special workspace's window is not listed")
+        x, y = self.centre("appsWindowClose")
+        self.s.click(x, y)
+        self.s.wait(50)
+        self.assertIn('hl.dsp.window.close({ window = "address:0xabc" })', json.loads(self.s.ev("JSON.stringify(hypr.dispatchLog)")))
+
+    def test_the_shortcuts_tab_is_the_taskbar_editor(self):
+        self.s.ev("panels.open('apps', 'click')")
+        self.s.wait(900)
+        x, y = self.centre("appsTab:taskbar")
+        self.s.click(x, y)
+        self.s.wait(900)
+        self.assertEqual(self.s.ev("panels.current"), "taskbar")
+        self.assertIsNotNone(self.s.ev("findNamed('appsPanel').manager"))
+        self.assertTrue(self.s.ev("findNamed('statusIsland').parent.takesKeys"))
 
     def test_hovering_a_shortcut_names_it(self):
         x, y = self.centre("barShortcut:Firefox")
@@ -270,6 +324,9 @@ class ClickOnlyTest(BarTest):
         self.skipTest("nothing opens on hover")
 
     def test_a_closed_panel_does_not_reopen_under_a_resting_pointer(self):
+        self.skipTest("nothing opens on hover")
+
+    def test_a_hover_opened_panel_gives_way_to_another_sections(self):
         self.skipTest("nothing opens on hover")
 
 

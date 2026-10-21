@@ -39,12 +39,10 @@ ClipboardBackend 1.0 ClipboardBackend.qml
 LockScreen 1.0 LockScreen.qml
 OSD 1.0 OSD.qml
 Overview 1.0 Overview.qml
-AppLauncher 1.0 AppLauncher.qml
 CalendarPanel 1.0 CalendarPanel.qml
 QuickSettings 1.0 QuickSettings.qml
 TaskbarManager 1.0 TaskbarManager.qml
 TopBar 1.0 TopBar.qml
-Dock 1.0 Dock.qml
 DesktopWidget 1.0 DesktopWidget.qml
 ClockWidget 1.0 ClockWidget.qml
 MusicWidget 1.0 MusicWidget.qml
@@ -59,3 +57,4 @@ singleton Viewport 1.0 Viewport.qml
 singleton MediaSession 1.0 MediaSession.qml
 BatteryWidget 1.0 BatteryWidget.qml
 TimerWidget 1.0 TimerWidget.qml
+AppsPanel 1.0 AppsPanel.qml

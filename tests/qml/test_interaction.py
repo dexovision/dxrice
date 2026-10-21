@@ -165,36 +165,40 @@ class ContentTransitionTest(unittest.TestCase):
             s.close()
 
 
-DOCK = "surfaces().filter(w => _name(w).indexOf('Dock') === 0)[0]"
 
 
 class HoverAffordanceTest(unittest.TestCase):
-    def test_dock_icon_names_itself_without_taking_clicks(self):
+    def test_a_bar_shortcut_names_itself(self):
+        # (the dock's delayed tooltip is gone with the dock: the bar shows a
+        # hovered shortcut's name in its title at once, and every shortcut
+        # carries it as its accessible name)
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
         s = Scene(width=1920, height=1080)
         try:
-            tile = s.ev(f"(function(){{ const d = {DOCK}; const t = findNamed('dockTile:Firefox'); d.hoverTile = t; return t.modelData.label; }})()")
-            self.assertFalse(s.ev("findNamed('dockTooltip').active"), "the name appeared on a fly-past")
-            s.wait(700)
-            self.assertTrue(s.ev("findNamed('dockTooltip').active"))
-            self.assertEqual(s.ev("findNamed('dockTooltip').text"), tile)
-            pos = json.loads(s.ev("(function(){ const t = findNamed('dockTooltip'); const p = t.mapToItem(null, t.width / 2, t.height / 2); return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
-            self.assertNotEqual(s.input_owner(*pos), "Dock", "the tooltip intercepts input")
-            # Pressing the icon hides it; leaving resets.
-            s.ev("findNamed('dockTooltip').dismissed = true")
-            self.assertFalse(s.ev("findNamed('dockTooltip').active"))
-            s.ev(f"{DOCK}.hoverTile = null")
-            self.assertFalse(s.ev("findNamed('dockTooltip').dismissed"))
+            src = (Path(__file__).resolve().parents[2] / "quickshell" / "TopBar.qml").read_text()
+            self.assertIn("Accessible.name: app.label", src)
+            pos = json.loads(s.ev("(function(){ const t = findNamed('barShortcut:Firefox'); const p = t.mapToItem(null, t.width / 2, t.height / 2); return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
+            QTest.mouseMove(s.view, QPoint(pos[0] - 6, pos[1]))
+            QTest.mouseMove(s.view, QPoint(pos[0], pos[1]))
+            s.wait(80)
+            self.assertEqual(s.ev("findNamed('barTitle').text"), "Firefox")
         finally:
             s.close()
 
     def test_bar_islands_brighten_under_the_pointer(self):
         s = Scene(width=1920, height=1080)
         try:
+            # a section of the one bar lightens under the pointer (its state
+            # layer: the sections have no surface of their own any more)
             for name in ("clockIsland", "statusIsland"):
-                rest = s.ev(f"findNamed('{name}').surfaceColor.hslLightness")
                 s.ev(f"findNamed('{name}').hovered = true")
-                self.assertGreater(s.ev(f"findNamed('{name}').surfaceColor.hslLightness"), rest + 0.01, name)
+                s.wait(400)
+                self.assertGreater(s.ev(f"findNamed('{name}Hover').opacity"), 0.99, name)
+                self.assertGreater(s.ev(f"findNamed('{name}Hover').color.hslLightness"), s.ev("theme.panel.hslLightness") + 0.01, name)
                 s.ev(f"findNamed('{name}').hovered = false")
+                s.wait(400)
+                self.assertEqual(s.ev(f"findNamed('{name}Hover').opacity"), 0, name)
         finally:
             s.close()
 

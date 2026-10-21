@@ -58,6 +58,8 @@ Item {
     readonly property QtObject mpris: Mpris
     readonly property QtObject perf: PerformanceService
     readonly property QtObject viewport: Viewport
+    readonly property QtObject shortcuts: Shortcuts
+    readonly property QtObject media: MediaSession
     readonly property QtObject battery: BatteryService
     // The hosted panel Item whose type exposes `prop` (QuickSettings has
     // currentTab, TaskbarManager has addPanelOpen, CalendarPanel viewDate).
@@ -66,6 +68,8 @@ Item {
         while (stack.length) {
             const it = stack.pop();
             if (it.panelItem && it.panelItem[prop] !== undefined) return it.panelItem;
+            // the taskbar editor sits inside Applications (its Shortcuts tab)
+            if (it.panelItem && it.panelItem.manager && it.panelItem.manager[prop] !== undefined) return it.panelItem.manager;
             for (let i = 0; i < it.children.length; i++) stack.push(it.children[i]);
         }
         return null;

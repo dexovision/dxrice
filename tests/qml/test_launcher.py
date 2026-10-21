@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The application launcher (SUPER+R): ranking, keys, launching, closing and
-its motion, through the real shell QML offscreen.
+"""Applications (SUPER+R, the bar's search pill): ranking, keys, launching,
+closing and its motion, through the real shell QML offscreen.
 
     python3 tests/qml/test_launcher.py
 """
@@ -79,10 +79,8 @@ class RankingTest(unittest.TestCase):
 
 
 def click(s, x, y):
-    """A click straight into the scene (the launcher covers the monitor)."""
-    from PySide6.QtCore import QPoint
-    from PySide6.QtTest import QTest
-    QTest.mouseClick(s.view, Qt.LeftButton, Qt.NoModifier, QPoint(int(x), int(y)))
+    """A click as the compositor would route it."""
+    s.click(int(x), int(y))
 
 
 def centre(s, name):
@@ -90,17 +88,25 @@ def centre(s, name):
 
 
 class LauncherTest(unittest.TestCase):
+    """SUPER+R and the bar's search pill open Applications, the panel that
+    hangs from the bar's left section, with its search field ready. (It
+    replaced a separate full-screen launcher overlay; these are that
+    launcher's tests, kept to the same intent.)"""
+
     def setUp(self):
         self.s = Scene(width=1920, height=1080)
         self.s.set_command("dxrice_list_desktop_apps.py", json.dumps(APPS))
-        self.L = "findNamed('launcher')"
+        self.L = "findNamed('appsPanel')"
 
     def tearDown(self):
         self.s.close()
 
     def open(self):
-        self.s.ev(f"{self.L}.show()")
-        self.s.wait(700)
+        self.s.ev("panels.toggle('apps')")
+        self.s.wait(900)
+
+    def is_open(self):
+        return self.s.ev("panels.current") == "apps"
 
     def type(self, text):
         self.s.ev(f"{self.L}.query = {json.dumps(text)}")
@@ -109,20 +115,27 @@ class LauncherTest(unittest.TestCase):
     def names(self):
         return json.loads(self.s.ev(f"JSON.stringify({self.L}.results.map(r => r.app.name))"))
 
-    def test_toggle_opens_and_closes_and_nothing_runs_while_closed(self):
-        self.assertFalse(self.s.ev(f"{self.L}.visible"))
+    def test_toggle_opens_and_closes_and_nothing_is_built_while_closed(self):
+        self.assertIsNone(self.s.ev(self.L))
         self.open()
-        self.assertTrue(self.s.ev(f"{self.L}.open"))
-        self.assertEqual(self.s.ev(f"{self.L}.progress"), 1)
-        self.s.ev(f"{self.L}.toggle()")
-        self.s.wait(500)
-        self.assertFalse(self.s.ev(f"{self.L}.visible"))
-        self.assertEqual(self.s.ev(f"{self.L}.progress"), 0)
+        self.assertTrue(self.is_open())
+        self.assertEqual(self.s.ev("findNamed('activityIsland').morph"), 1)
+        self.s.ev("panels.toggle('apps')")
+        self.s.wait(900)
+        self.assertFalse(self.is_open())
+        self.assertIsNone(self.s.ev(self.L), "the closed panel was not torn down")
 
-    def test_the_panel_opens_with_the_best_eight_and_loads_the_list_once_per_open(self):
+    def test_the_ipc_keybind_opens_it_with_the_keyboard(self):
+        self.s.ev("findNamed('appsSearch')")            # nothing yet
+        self.s.ev("panels.toggle('apps')")             # what `ipc call launcher toggle` runs
+        self.s.wait(900)
+        self.assertTrue(self.s.ev("findNamed('statusIsland').parent.takesKeys"))
+        self.assertTrue(self.s.ev("findNamed('appsSearch').activeFocus"))
+
+    def test_it_opens_with_the_most_used_and_loads_the_list_once_per_open(self):
         self.open()
         self.assertEqual(self.names()[:2], ["Kitty", "Firefox"])
-        self.assertEqual(len(self.names()), 8)
+        self.assertEqual(len(self.names()), 5)
         self.assertEqual(len([r for r in self.s.bridge.run_log if "dxrice_list_desktop_apps.py" in " ".join(r)]), 1)
 
     def test_typing_narrows_and_the_selection_resets_to_the_top(self):
@@ -140,19 +153,19 @@ class LauncherTest(unittest.TestCase):
         self.s.key(Qt.Key_Up)
         self.s.key(Qt.Key_Up)
         self.assertEqual(self.s.ev(f"{self.L}.selected"), n - 1, "up from the first should wrap to the last")
-        self.s.key(Qt.Key_Down)
+        self.s.key(Qt.Key_N, Qt.ControlModifier)
         self.assertEqual(self.s.ev(f"{self.L}.selected"), 0)
 
     def test_the_highlight_glides_to_the_selected_row(self):
         self.open()
-        y0 = self.s.ev("findNamed('launcherHighlight').y")
+        y0 = self.s.ev("findNamed('appsHighlight').y")
         self.s.key(Qt.Key_Down)
         self.s.key(Qt.Key_Down)
         self.s.wait(15)
-        mid = self.s.ev("findNamed('launcherHighlight').y")
+        mid = self.s.ev("findNamed('appsHighlight').y")
         self.s.wait(500)
-        y1 = self.s.ev("findNamed('launcherHighlight').y")
-        self.assertAlmostEqual(y1 - y0, 2 * self.s.ev(f"{self.L}.rowHeight"), delta=1)
+        y1 = self.s.ev("findNamed('appsHighlight').y")
+        self.assertAlmostEqual(y1 - y0, 2 * self.s.ev("findNamed('appsList').rowH"), delta=1)
         self.assertTrue(y0 <= mid <= y1)
 
     def test_enter_launches_the_selected_app_through_the_scope_script_and_records_it(self):
@@ -166,91 +179,89 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(launch[0][1:], ["launcher", "sh", "-c", "/usr/bin/discord --ozone-platform=wayland"])
         hist = [r for r in self.s.bridge.run_log if "dxrice_launcher_history.py" in " ".join(r)]
         self.assertEqual(hist[-1][-2:], ["bump", "Discord"])
-        self.assertFalse(self.s.ev(f"{self.L}.open"), "it should close after launching")
+        self.assertFalse(self.is_open(), "it should close after launching")
 
     def test_nothing_matching_says_so_and_enter_does_nothing(self):
         self.open()
         self.type("zzzzqq")
-        self.assertTrue(self.s.ev("findNamed('launcherEmpty').visible"))
-        self.assertIn("Nothing matches", self.s.ev("findNamed('launcherEmpty').text"))
+        self.assertTrue(self.s.ev("findNamed('appsEmpty').visible"))
+        self.assertIn("Nothing matches", self.s.ev("findNamed('appsEmpty').text"))
         self.s.key(Qt.Key_Return)
         self.s.wait(200)
         self.assertEqual([e for e in self.s.bridge.exec_log if "dxrice_launch.sh" in e[0]], [])
-        self.assertTrue(self.s.ev(f"{self.L}.open"))
+        self.assertTrue(self.is_open())
 
     def test_escape_closes_and_a_reopen_starts_clean(self):
         self.open()
         self.type("fi")
         self.s.key(Qt.Key_Escape)
-        self.s.wait(500)
-        self.assertFalse(self.s.ev(f"{self.L}.open"))
-        self.open()
+        self.s.wait(150)
+        self.assertFalse(self.is_open())
+        self.open()                                    # quick: the panel may still be alive
         self.assertEqual(self.s.ev(f"{self.L}.query"), "")
         self.assertEqual(self.s.ev(f"{self.L}.selected"), 0)
 
     def test_a_click_outside_closes_and_a_click_inside_does_not(self):
         self.open()
-        px, py = centre(self.s, "launcherPanel")
-        click(self.s, px + 200, py - self.s.ev("findNamed('launcherPanel').height") / 2 + 30)   # the search bar
+        px, py = centre(self.s, "appsSearch")
+        click(self.s, px, py)
         self.s.wait(300)
-        self.assertTrue(self.s.ev(f"{self.L}.open"))
-        click(self.s, 60, 540)
+        self.assertTrue(self.is_open())
+        click(self.s, 1500, 700)
         self.s.wait(500)
-        self.assertFalse(self.s.ev(f"{self.L}.open"))
+        self.assertFalse(self.is_open())
 
-    def test_a_resting_pointer_does_not_take_the_selection_but_a_moving_one_does(self):
+    def test_a_resting_pointer_never_takes_the_selection(self):
         from PySide6.QtCore import QPoint
         from PySide6.QtTest import QTest
         self.open()
-        rx, ry = centre(self.s, "launcherRow:3")
+        rx, ry = centre(self.s, "appsRow:3")
         QTest.mouseMove(self.s.view, QPoint(int(rx), int(ry)))
-        self.s.wait(80)
-        self.assertEqual(self.s.ev(f"{self.L}.selected"), 0, "a first event under the pointer took the selection")
         QTest.mouseMove(self.s.view, QPoint(int(rx) + 20, int(ry) + 3))
         self.s.wait(80)
-        self.assertEqual(self.s.ev(f"{self.L}.selected"), 3)
-        self.s.key(Qt.Key_Up)
-        self.assertEqual(self.s.ev(f"{self.L}.selected"), 2, "the keys didn't take over again")
+        self.assertEqual(self.s.ev(f"{self.L}.selected"), 0, "hovering a row took the selection from the keys")
+        self.s.key(Qt.Key_Down)
+        self.assertEqual(self.s.ev(f"{self.L}.selected"), 1)
 
     def test_clicking_a_row_launches_it(self):
         self.open()
-        x, y = centre(self.s, "launcherRow:1")
+        x, y = centre(self.s, "appsRow:1")
         click(self.s, x, y)
         self.s.wait(300)
         self.assertEqual(len([e for e in self.s.bridge.exec_log if "dxrice_launch.sh" in e[0]]), 1)
 
     def test_rapid_toggling_ends_where_the_last_press_says(self):
         for _ in range(7):
-            self.s.ev(f"{self.L}.toggle()")
+            self.s.ev("panels.toggle('apps')")
             self.s.wait(35)
         self.s.wait(900)
-        self.assertTrue(self.s.ev(f"{self.L}.open"))
-        self.assertEqual(self.s.ev(f"{self.L}.progress"), 1)
-        self.s.ev(f"{self.L}.toggle()")
-        self.s.wait(600)
-        self.assertEqual((self.s.ev(f"{self.L}.open"), self.s.ev(f"{self.L}.progress")), (False, 0))
+        self.assertTrue(self.is_open())
+        self.assertEqual(self.s.ev("findNamed('activityIsland').morph"), 1)
+        self.s.ev("panels.toggle('apps')")
+        self.s.wait(900)
+        self.assertEqual((self.is_open(), self.s.ev("findNamed('activityIsland').morph")), (False, 0))
 
     def test_html_in_an_app_name_is_shown_as_text(self):
         self.open()
         self.type("fire alarm")
         self.assertEqual(self.names()[0], "Fire Alarm <b>")
-        self.assertIn("&lt;b>", self.s.ev("findNamed('launcherRow:0').children[1].children[0].text"))
+        self.assertIn("&lt;b>", self.s.ev("findNamed('appsRow:0').children[2].text"))
 
-    def test_the_panel_rises_while_it_fades_in(self):
-        self.s.ev(f"{self.L}.show()")
-        self.s.wait(40)
-        mid = self.s.ev(f"{self.L}.progress")
-        o_mid = self.s.ev("findNamed('launcherPanel').opacity")
-        self.s.wait(700)
-        self.assertTrue(0 < mid < 1, mid)
-        self.assertAlmostEqual(o_mid, mid, delta=0.01)
-        self.assertEqual(self.s.ev("findNamed('launcherPanel').opacity"), 1)
+    def test_it_drops_out_of_the_bar_while_it_fades_in(self):
+        self.s.ev("panels.toggle('apps')")
+        self.s.wait(60)
+        body = self.s.ev("findNamed('activityIslandBody').height")
+        self.s.wait(900)
+        self.assertGreater(body, 0)
+        self.assertLess(body, self.s.ev("findNamed('activityIslandBody').height"))
 
     def test_while_closed_no_input_is_taken(self):
+        rects = lambda: [r for r in self.s.surface_rects().toVariant() if r["surface"] == "TopBar" and r["w"] > 0 and r["h"] > 0]
         self.open()
-        self.assertGreater(self.s.ev(f"{self.L}.mask.width"), 0)
-        self.s.ev(f"{self.L}.hide()")
-        self.assertEqual(self.s.ev(f"{self.L}.mask.width"), 0)
+        self.assertTrue(any(r["h"] > 400 for r in rects()))
+        self.s.ev("panels.closeCurrent()")
+        self.s.wait(50)
+        self.assertEqual([r for r in rects() if r["h"] > 100], [], "input outlived the close")
 
 
 if __name__ == "__main__":

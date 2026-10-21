@@ -137,46 +137,50 @@ class NoScrollingTest(unittest.TestCase):
             s.close()
 
 
-class PanelsStayBetweenTheBarsTest(unittest.TestCase):
-    """Sized to their content, panels must still stop at the other edge's
-    reserved strip (the top bar's and the dock's are both 52px): on a
-    short screen the Taskbar grew up over the clock island."""
+class PanelsStayOnScreenTest(unittest.TestCase):
+    """Sized to their content, panels still stop short of the screen's
+    bottom edge, and hang from the bar's lower edge -- never over the bar.
+    (There was a dock at the bottom with its own 52px strip; with it gone,
+    the bound is the screen edge less the shell's gap.)"""
 
-    STRIP = 52
+    GAP = 8
+    BAR_BOTTOM = 44
 
-    def island_span(self, s, name):
-        return json.loads(s.ev(f"(function(){{ const i = findNamed('{name}'); const p = i.mapToItem(null, 0, 0);"
-                               " return JSON.stringify([p.y, p.y + i.height]); })()"))
+    def body_span(self, s, island):
+        return json.loads(s.ev(f"(function(){{ const b = findNamed('{island}Body'); const p = b.mapToItem(null, 0, 0);"
+                               " return JSON.stringify([p.y, p.y + b.height]); })()"))
 
-    def test_taskbar_stays_below_the_top_bar(self):
+    def test_the_shortcut_editor_hangs_from_the_bar_and_fits_the_screen(self):
         for w, h in ((1366, 768), (1280, 720), (1024, 768)):
             with self.subTest(size=f"{w}x{h}"):
                 s = Scene(width=w, height=h, dock_config=ten_shortcut_dock())
                 try:
                     s.ev("panels.open('taskbar')")
                     s.wait(1000)
-                    top, _ = self.island_span(s, "dockIsland")
-                    self.assertGreaterEqual(top, self.STRIP, f"Taskbar top at {top}px covers the top bar")
+                    top, bottom = self.body_span(s, "activityIsland")
+                    self.assertEqual(top, self.BAR_BOTTOM, f"the editor starts at {top}px, not at the bar's edge")
+                    self.assertLessEqual(bottom, h - self.GAP, f"the editor runs off the screen ({bottom}px)")
                 finally:
                     s.close()
 
-    def test_quick_settings_stays_above_the_dock(self):
+    def test_quick_settings_fits_a_short_screen(self):
         s = Scene(width=1024, height=600)
         try:
             s.ev("addAudioDevices()")
             s.ev("panels.open('quicksettings')")
             s.wait(1200)
-            _, bottom = self.island_span(s, "statusIsland")
-            self.assertLessEqual(bottom, 600 - self.STRIP, f"Quick Settings bottom at {bottom}px covers the dock")
+            top, bottom = self.body_span(s, "statusIsland")
+            self.assertEqual(top, self.BAR_BOTTOM)
+            self.assertLessEqual(bottom, 600 - self.GAP, f"Quick Settings bottom at {bottom}px runs off the screen")
         finally:
             s.close()
 
 
 class ThemeEditorFitTest(unittest.TestCase):
-    def test_editor_stays_above_the_dock_on_a_short_screen(self):
-        """A taller editor reached over the dock at 1024x768; the colour
-        picker (kept within the editor's span) then put its buttons under
-        the dock, which took their clicks."""
+    def test_editor_stays_on_a_short_screen(self):
+        """A taller editor reached over the (former) dock at 1024x768, and
+        the colour picker then put its buttons under it; with the dock gone
+        the editor must still end inside the screen's margin."""
         s = Scene(width=1024, height=768)
         try:
             s.ev("panels.open('theme')")
@@ -185,9 +189,8 @@ class ThemeEditorFitTest(unittest.TestCase):
                 const st = [te]; while (st.length) { const i = st.pop(); if (i.revealProgress !== undefined) {
                     const p = i.mapToItem(null, 0, 0); return p.y + i.height; }
                     for (let k = 0; k < i.children.length; k++) st.push(i.children[k]); } return -1; })()""")
-            dock_top = 768 - 52  # the dock's reserved strip (ShellSurface.dockUnit)
             self.assertGreater(bottom, 0)
-            self.assertLessEqual(bottom, dock_top, f"Theme editor bottom {bottom} reaches the dock (top {dock_top})")
+            self.assertLessEqual(bottom, 768 - 8, f"Theme editor bottom {bottom} runs off the screen")
         finally:
             s.close()
 

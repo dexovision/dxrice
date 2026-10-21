@@ -30,19 +30,20 @@ QML_DIR = REPO / "quickshell"
 SHORT_LIVED = {"brightnessctl", "bluetoothctl", "nmcli", "makoctl", "loginctl", "systemctl", "notify-send"}
 
 
-class DockLaunchTest(unittest.TestCase):
-    def test_dock_tile_launches_through_the_scope_launcher(self):
+class ShortcutLaunchTest(unittest.TestCase):
+    def test_a_bar_shortcut_launches_through_the_scope_launcher(self):
+        # (the saved shortcuts were the dock's; they live in the bar now)
         s = Scene(width=1920, height=1080)
         try:
-            pos = json.loads(s.ev('(function(){ const t = findNamed("dockTile:Firefox");'
+            pos = json.loads(s.ev('(function(){ const t = findNamed("barShortcut:Firefox");'
                                   ' const p = t.mapToItem(null, t.width / 2, t.height / 2);'
                                   ' return JSON.stringify([p.x, p.y]); })()'))
             s.bridge.exec_log.clear()
             owner = s.click(int(pos[0]), int(pos[1]))
-            self.assertEqual(owner, "Dock", "the click didn't reach the dock")
+            self.assertEqual(owner, "TopBar", "the click didn't reach the bar")
             s.wait(50)
             self.assertEqual(s.bridge.exec_log,
-                             [[f"{s.shell}/../scripts/dxrice_launch.sh", "dock", "sh", "-c", "firefox"]])
+                             [[f"{s.shell}/../scripts/dxrice_launch.sh", "bar", "sh", "-c", "firefox"]])
         finally:
             s.close()
 
