@@ -58,3 +58,5 @@ singleton MediaSession 1.0 MediaSession.qml
 BatteryWidget 1.0 BatteryWidget.qml
 TimerWidget 1.0 TimerWidget.qml
 AppsPanel 1.0 AppsPanel.qml
+singleton NotificationService 1.0 NotificationService.qml
+singleton CaptureService 1.0 CaptureService.qml

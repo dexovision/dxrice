@@ -62,6 +62,8 @@ class NoBareAppLaunchTest(unittest.TestCase):
                     continue  # Log Out: ends the session itself
                 if prog == "sh" and tail.lstrip(", ").startswith('Quickshell.shellDir + "/../scripts/dxrice_power.sh"'):
                     continue  # reboot/power-off: execs systemctl or loginctl
+                if prog == "sh" and path.name == "CaptureService.qml" and tail.lstrip(", ").startswith("root.script"):
+                    continue  # a screenshot or `stop`: grim/slurp/kill, short-lived (a recording is its own Process)
                 line = src.count("\n", 0, m.start()) + 1
                 problems.append(f"{path.name}:{line}: execDetached([\"{prog}\", ...]) -- use Launcher.launch")
         self.assertEqual(problems, [])

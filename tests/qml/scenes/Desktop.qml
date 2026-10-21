@@ -60,6 +60,9 @@ Item {
     readonly property QtObject viewport: Viewport
     readonly property QtObject shortcuts: Shortcuts
     readonly property QtObject media: MediaSession
+    readonly property QtObject notifications: NotificationService
+    readonly property QtObject capture: CaptureService
+    readonly property QtObject pipewire: Pipewire
     readonly property QtObject battery: BatteryService
     // The hosted panel Item whose type exposes `prop` (QuickSettings has
     // currentTab, TaskbarManager has addPanelOpen, CalendarPanel viewDate).

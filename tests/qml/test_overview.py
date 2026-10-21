@@ -908,7 +908,12 @@ class TestNoGhosting(GhostRig, unittest.TestCase):
         self.o.call("hide")
         self.o.scene.wait(SETTLE)
         after = self.o.scene.view.grabWindow().copy(area)
-        self.assertLessEqual(max_diff(before, after, 3), 6, "the clock card did not come back after the overview")
+        # Back means the card's own pixels again, not the overview's wallpaper
+        # (~240 apart). Up to 8 levels on glyph edges is the software
+        # rasteriser re-drawing the digits after other text sizes went through
+        # its glyph cache (seen with the bar's workspace number, and depending
+        # on which tests ran first) -- not the card moving or fading.
+        self.assertLessEqual(max_diff(before, after, 3), 16, "the clock card did not come back after the overview")
 
     def test_the_handover_frames_are_the_desktop_itself(self):
         """The first frame the overview covers, and the last before it goes,

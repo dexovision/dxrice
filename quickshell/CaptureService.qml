@@ -1,0 +1,42 @@
+pragma Singleton
+import QtQuick
+import Quickshell
+import Quickshell.Io
+
+// Screenshots and screen recordings (scripts/dxrice_capture.sh: grim, slurp,
+// wf-recorder). A recording runs as long as its process does, so
+// `recording` is the process itself, not a guess; `elapsed` counts seconds
+// from its start for the bar's timer. Whoever asks for a capture closes its
+// own panel first: the shot waits a moment so the panel is not in it.
+QtObject {
+    id: root
+    readonly property string script: Quickshell.shellDir + "/../scripts/dxrice_capture.sh"
+    readonly property bool recording: recorder.running
+    property int elapsed: 0
+    property string _pendingShot: ""
+
+    property Process recorder: Process {
+        onRunningChanged: if (running) root.elapsed = 0
+    }
+    property Timer tick: Timer {
+        interval: 1000; repeat: true
+        running: root.recording
+        onTriggered: root.elapsed += 1
+    }
+    property Timer shotDelay: Timer {
+        interval: 280
+        onTriggered: Quickshell.execDetached(["sh", root.script, "shot", root._pendingShot])
+    }
+
+    function shot(mode) {
+        root._pendingShot = mode === "screen" ? "screen" : "region";
+        root.shotDelay.restart();
+    }
+    function record(mode) {
+        if (root.recording) return;
+        root.recorder.command = ["sh", root.script, "record", mode === "region" ? "region" : "screen"];
+        root.recorder.running = true;
+    }
+    function stop() { if (root.recording) Quickshell.execDetached(["sh", root.script, "stop"]); }
+    function clock(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+}

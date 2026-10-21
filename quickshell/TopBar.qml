@@ -499,11 +499,24 @@ PanelWindow {
                         required property var modelData
                         objectName: "workspacePill:" + modelData.id
                         readonly property bool active: modelData.focused
-                        width: active ? 22 : 8
-                        height: 8
+                        Accessible.role: Accessible.Button
+                        Accessible.name: "Workspace " + modelData.id
+                        // the focused one is a pill with its number; the others dots
+                        width: active ? 24 : 8
+                        height: active ? 16 : 8
                         radius: Theme.roundingFull
                         anchors.verticalCenter: parent.verticalCenter
                         color: active ? Theme.accent : (wsArea.containsMouse ? Theme.layer2Hover : Theme.borderIdle)
+                        Behavior on height { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
+                        Text {
+                            objectName: "workspaceNumber"
+                            anchors.centerIn: parent
+                            text: wsPill.modelData.id
+                            opacity: wsPill.active ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
+                            color: Theme.panelTone
+                            font.family: Theme.fontMono; font.pixelSize: 10; font.weight: Font.Bold
+                        }
 
                         Behavior on width { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
                         Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
@@ -723,24 +736,53 @@ PanelWindow {
                 id: indicatorRow
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 2
+                // what is playing: only while there is a player at all
+                BarIndicator {
+                    name: "status:media"
+                    accessibleName: "Media"
+                    visible: MediaSession.player !== null
+                    glyph: MediaSession.player && MediaSession.player.isPlaying ? "\u{f075a}" : "\u{f03e4}"
+                    label: {
+                        const p = MediaSession.player;
+                        const t = p ? String(p.trackTitle || MediaSession.nameOf(p)) : "";
+                        return t.length > 22 ? t.slice(0, 21) + "\u2026" : t;
+                    }
+                }
+                // a running recording shows here, red, with its time
+                BarIndicator {
+                    name: "status:capture"
+                    accessibleName: CaptureService.recording ? "Recording" : "Capture"
+                    glyph: CaptureService.recording ? "\u{f044a}" : "\uf030"
+                    tint: CaptureService.recording ? "#e5534b" : "transparent"
+                    label: CaptureService.recording ? CaptureService.clock(CaptureService.elapsed) : ""
+                }
+                BarIndicator { name: "status:performance"; accessibleName: "Performance"; glyph: "\u{f04c5}" }
                 BarIndicator {
                     name: "status:network"
+                    accessibleName: "Network"
                     glyph: root.netKind === "ethernet" ? "\u{f0200}" : (root.netKind === "wifi" ? "\uf1eb" : "\u{f092e}")
                     dim: root.netKind === ""
                 }
-                BarIndicator { name: "status:bluetooth"; glyph: "\uf294" }
+                BarIndicator { name: "status:bluetooth"; accessibleName: "Bluetooth"; glyph: "\uf294" }
                 BarIndicator {
                     name: "status:audio"
+                    accessibleName: "Sound"
                     glyph: root.muted ? "\u{f075f}" : "\uf028"
                     label: root.volumePercent + "%"
                 }
                 BarIndicator {
                     name: "status:power"
+                    accessibleName: "Power"
                     glyph: BatteryService.available ? (BatteryService.charging ? "\u{f0084}" : "\u{f0079}") : "\uf011"
                     label: BatteryService.available ? BatteryService.percent + "%" : ""
                 }
-                BarIndicator { name: "status:notifications"; glyph: "\uf0f3" }
-                BarIndicator { name: "quicksettings"; glyph: "\u{f0570}"; objectName: "barIndicator:dashboard" }
+                BarIndicator {
+                    name: "status:notifications"
+                    accessibleName: "Notifications"
+                    glyph: "\uf0f3"
+                    badge: NotificationService.unread
+                }
+                BarIndicator { name: "quicksettings"; accessibleName: "Dashboard"; glyph: "\u{f0570}"; objectName: "barIndicator:dashboard" }
             }
         }
         onPointerInsideChanged: root.islandLeft("status", pointerInside)
@@ -846,12 +888,22 @@ PanelWindow {
         property string glyph: ""
         property string label: ""
         property bool dim: false
+        // what it is, for anything that reads the bar aloud (each indicator's
+        // section also names itself in its heading)
+        property string accessibleName: ""
+        Accessible.role: Accessible.Button
+        Accessible.name: ind.accessibleName
+        // a count, shown as a small accent badge (unread notifications)
+        property int badge: 0
+        // a state colour of its own (a recording in progress)
+        property color tint: "transparent"
         readonly property bool open: PanelManager.current === ind.name
         objectName: "barIndicator:" + ind.name.replace("status:", "")
         height: ShellSurface.chip
-        width: indRow.implicitWidth + ShellSurface.pad
+        width: visible ? indRow.implicitWidth + ShellSurface.pad : 0
         radius: ShellSurface.chipRadius
-        color: ind.open ? Theme.mix(Theme.layer1, Theme.accent, 0.22) : (indArea.containsMouse ? Theme.layer1Hover : "transparent")
+        color: ind.open ? Theme.mix(Theme.layer1, Theme.accent, 0.22)
+             : (ind.tint.a > 0 ? Qt.rgba(ind.tint.r, ind.tint.g, ind.tint.b, 0.22) : (indArea.containsMouse ? Theme.layer1Hover : "transparent"))
         Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         Row {
             id: indRow
@@ -860,7 +912,7 @@ PanelWindow {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: ind.glyph
-                color: ind.open ? Theme.accent : Theme.textActive
+                color: ind.tint.a > 0 ? ind.tint : (ind.open ? Theme.accent : Theme.textActive)
                 opacity: ind.dim ? 0.45 : 1
                 font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
             }
@@ -870,6 +922,22 @@ PanelWindow {
                 text: ind.label
                 color: Theme.textActive
                 font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
+                font.features: { "tnum": 1 }
+            }
+        }
+        Rectangle {
+            objectName: "barBadge"
+            visible: ind.badge > 0
+            anchors.right: parent.right; anchors.top: parent.top
+            anchors.rightMargin: 1; anchors.topMargin: 1
+            width: Math.max(13, badgeText.implicitWidth + 6); height: 13; radius: 6.5
+            color: Theme.accent
+            Text {
+                id: badgeText
+                anchors.centerIn: parent
+                text: ind.badge > 9 ? "9+" : String(ind.badge)
+                color: Theme.panelTone
+                font.family: Theme.fontFamily; font.pixelSize: 9; font.weight: Font.Bold
             }
         }
         MouseArea {
@@ -882,16 +950,21 @@ PanelWindow {
         }
     }
 
+    // a section's "open the Dashboard on this tab" (Performance's graphs)
+    property string pendingDashboardTab: ""
     Component {
         id: quickSettingsComponent
-        QuickSettings { onCloseRequested: PanelManager.close("quicksettings") }
+        QuickSettings {
+            onCloseRequested: PanelManager.close("quicksettings")
+            Component.onCompleted: if (root.pendingDashboardTab) { currentTab = root.pendingDashboardTab; root.pendingDashboardTab = ""; }
+        }
     }
     Component {
         id: statusPanelComponent
         StatusPanel {
             section: PanelManager.current.indexOf("status:") === 0 ? PanelManager.current.slice(7) : section
             onCloseRequested: PanelManager.closeCurrent()
-            onDashboardRequested: PanelManager.open("quicksettings", "click")
+            onDashboardRequested: (tab) => { root.pendingDashboardTab = tab; PanelManager.open("quicksettings", "click"); }
         }
     }
 }
