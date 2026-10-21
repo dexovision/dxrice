@@ -1049,17 +1049,52 @@ class TestMethodGeometry(_MethodBase):
                 self.assertAlmostEqual(self.nearest_gap(f"0xw{i}"), dxrice_expansion.spacing(), delta=1.5)
         self.assert_no_overlap()
 
-    def test_expansion_grows_into_the_most_open_side(self):
-        r = self.stage("expansion", SIZES5[:3])
-        cen = {a: (x + w / 2, y + h / 2) for a, (x, y, w, h) in r.items()}
-        area = {a: w * h for a, (_x, _y, w, h) in r.items()}
-        first_two = ("0xw0", "0xw1")
-        tot = sum(area[a] for a in first_two)
-        g = (sum(cen[a][0] * area[a] for a in first_two) / tot, sum(cen[a][1] * area[a] for a in first_two) / tot)
-        ang = {a: math.atan2(cen[a][1] - g[1], cen[a][0] - g[0]) for a in cen}
-        for a in first_two:
-            apart = abs((ang["0xw2"] - ang[a] + math.pi) % (2 * math.pi) - math.pi)
-            self.assertGreater(math.degrees(apart), 60, f"the third window went toward {a}, not into the empty side")
+    def test_expansion_grows_ring_by_ring_around_the_screen_centre(self):
+        r = self.stage("expansion", [(900, 600)] * 5)
+        centre = ((MON[0] + MON[2]) / 2, (MON[1] + MON[3]) / 2)
+        c = {a: (x + w / 2, y + h / 2) for a, (x, y, w, h) in r.items()}
+        self.assertLess(math.hypot(c["0xw0"][0] - centre[0], c["0xw0"][1] - centre[1]), 2, "the first window opens at the anchor")
+        d = [math.hypot(c[f"0xw{i}"][0] - centre[0], c[f"0xw{i}"][1] - centre[1]) for i in range(5)]
+        self.assertEqual(d, sorted(d), f"each new window is no nearer the centre than the last: {d}")
+        # the second and third do not end up on the same side (no streak)
+        v1 = (c["0xw1"][0] - centre[0], c["0xw1"][1] - centre[1])
+        v2 = (c["0xw2"][0] - centre[0], c["0xw2"][1] - centre[1])
+        self.assertLess(v1[0] * v2[0] + v1[1] * v2[1], 1, "the third window piled onto the second's side")
+
+    def test_expansion_fills_the_same_spots_whatever_the_opening_order(self):
+        import itertools
+        spots = set()
+        for order in itertools.islice(itertools.permutations(range(4)), 0, 24, 5):
+            self.hypr.clients.clear()
+            L = self.listener({"window_layout": "expansion"})
+            for i in order:
+                self.open(L, f"0xs{i}", 800, 500)
+            spots.add(frozenset((x, y) for x, y, _w, _h in self.rects().values()))
+        self.assertEqual(len(spots), 1, "the arrangement depended on which window opened first")
+
+    def test_expansion_is_not_anchored_on_the_window_that_launched_it(self):
+        # a terminal off to one side; a new window from the same program (same
+        # pid, same size) still goes to the screen's middle, not beside it
+        self.hypr.add("0xterm", 60, 60, 700, 450, pid=4242, **{"class": "kitty"})
+        L = self.listener({"window_layout": "expansion"})
+        self.hypr.open("0xnew", 700, 450, pid=4242, **{"class": "kitty"})
+        L.handle_line("openwindow>>new,1,kitty,x")
+        x, y, w, h = self.rects()["0xnew"]
+        centre = ((MON[0] + MON[2]) / 2, (MON[1] + MON[3]) / 2)
+        t = self.rects()["0xterm"]
+        self.assertLess(math.hypot(x + w / 2 - centre[0], y + h / 2 - centre[1]),
+                        math.hypot(x + w / 2 - (t[0] + t[2] / 2), y + h / 2 - (t[1] + t[3] / 2)),
+                        "placed by its sibling, not by the composition")
+
+    def test_expansion_ignores_windows_panned_out_of_view(self):
+        # windows far off screen (the user panned away) are obstacles only:
+        # they must not drag a new window off to them
+        self.hypr.add("0xfar1", 5000, 3000, 900, 600)
+        self.hypr.add("0xfar2", 6000, 3000, 900, 600)
+        L = self.listener({"window_layout": "expansion"})
+        self.open(L, "0xnew", 900, 600)
+        x, y, w, h = self.rects()["0xnew"]
+        self.assertTrue(MON[0] <= x and x + w <= MON[2] and MON[1] <= y and y + h <= MON[3], (x, y))
 
     def test_the_three_methods_place_the_same_windows_differently(self):
         placed = {}
@@ -1165,13 +1200,21 @@ class TestExpansionAlgorithm(unittest.TestCase):
         wins = [(100 + 40 * i, 80 + 30 * i, w, h) for i, (w, h) in enumerate(SIZES5)]
         self.assertEqual(self.arrange(wins), self.arrange(wins))
 
-    def test_join_goes_to_the_widest_empty_angle(self):
-        # windows left and right of the centre: the next one goes up or down
-        layout = [(200, 400, 600, 300), (1120, 400, 600, 300)]
+    def test_join_takes_the_nearest_free_spot_to_the_monitor_centre(self):
+        layout = [(510, 240, 900, 600)]                  # one window, centred
         x, y = self.E.join((500, 300), layout, layout, MON, self.band)
-        cx, cy = x + 250, y + 150
-        self.assertLess(abs(cx - 960), 260)
-        self.assertGreater(abs(cy - 550), 250)
+        gap = self.E.spacing(self.band)
+        r = (x, y, x + 500, y + 300)
+        apart = max(r[0] - 1410, 510 - r[2], r[1] - 840, 240 - r[3])
+        self.assertAlmostEqual(apart, gap, delta=1.5, msg="it sits one spacing from the centre window")
+
+    def test_each_monitor_uses_its_own_centre(self):
+        left = (0, 0, 1920, 1080)
+        right = (1920, 0, 4480, 1440)
+        for mon in (left, right):
+            x, y = self.E.join((800, 500), [], [], mon, self.band)
+            self.assertAlmostEqual(x + 400, (mon[0] + mon[2]) / 2, delta=1)
+            self.assertAlmostEqual(y + 250, (mon[1] + mon[3]) / 2, delta=1)
 
     def test_it_is_not_the_spiral(self):
         sizes = SIZES5

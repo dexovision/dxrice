@@ -2453,7 +2453,10 @@ def place_new_window(address, workspace_id, gap, reflow=None, method="galaxy"):
             arm = ()
         elif method == "expansion":
             import dxrice_expansion
-            target = dxrice_expansion.join_composition((new_w, new_h), members if on_screen else [], obstacles,
+            # the composition is what is on screen; windows panned away are
+            # only obstacles (they must not drag the new one off to them)
+            in_view = [m for m in members if m[0] < mx1 and m[0] + m[2] > mx0 and m[1] < my1 and m[1] + m[3] > my0]
+            target = dxrice_expansion.join_composition((new_w, new_h), in_view, obstacles,
                                                        (mx0, my0, mx1, my1), gap)
             arm = ()
         else:

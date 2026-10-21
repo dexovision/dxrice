@@ -17,11 +17,14 @@ SUPER+G (arrange):
   order.
 
 A new window (join):
-  goes into the widest empty angle around the group -- measured from the
-  group's area-weighted centre -- and is pushed out along the middle of
-  that angle until it is clear by the spacing. So the group grows evenly
-  outward, filling the side that is most open, and no existing window
-  moves.
+  the anchor is the centre of the usable area of the monitor it opened on
+  -- the same origin SUPER+G uses, never the window that launched it nor
+  wherever the group happens to have drifted. From the anchor it is pushed
+  out along each of 24 directions until it clears every window by the
+  spacing, and it takes the nearest of those spots (a tie goes to the
+  direction with the most room around it). So the composition grows ring
+  by ring around the middle of the screen, and no existing window moves.
+  On an empty screen it opens at the anchor.
 
 Like the Galaxy Spiral, the group may grow past the screen edges (this is
 the infinite desktop); unlike it, nothing follows creation order or a
@@ -131,43 +134,46 @@ def arrange(windows, fixed, monitor, band=None):
     return rects
 
 
-def widest_gap_angle(layout_centres, centre):
-    """The middle of the widest empty angle around `centre` between the
-    directions of `layout_centres` (ties: the smallest angle from 0, i.e.
-    to the right, going clockwise on screen). One direction: the opposite
-    one."""
-    angles = sorted(math.atan2(cy - centre[1], cx - centre[0]) % (2 * math.pi) for cx, cy in layout_centres)
-    if not angles:
-        return 0.0
-    if len(angles) == 1:
-        return (angles[0] + math.pi) % (2 * math.pi)
-    best, best_gap = 0.0, -1.0
-    for k, a in enumerate(angles):
-        b = angles[(k + 1) % len(angles)] + (2 * math.pi if k == len(angles) - 1 else 0)
-        gap = b - a
-        mid = (a + gap / 2) % (2 * math.pi)
-        if gap > best_gap + 1e-9 or (abs(gap - best_gap) <= 1e-9 and mid < best):
-            best, best_gap = mid, gap
+DIRECTIONS = 24
+
+
+def _angular_room(angle, centres, anchor):
+    """How far `angle` is from the nearest direction of `centres` around
+    `anchor` (radians; pi with nothing around)."""
+    best = math.pi
+    for cx, cy in centres:
+        if math.hypot(cx - anchor[0], cy - anchor[1]) < 1:
+            continue
+        d = abs((math.atan2(cy - anchor[1], cx - anchor[0]) - angle + math.pi) % (2 * math.pi) - math.pi)
+        best = min(best, d)
     return best
 
 
 def join(new_size, layout, obstacles, monitor, band=None):
     """A new window, every other one held where it is. `layout`: [(x, y,
-    w, h)] the group it joins (the windows on screen); `obstacles`: [(x, y,
-    w, h)] everything to stay clear of (layout included). Returns its
-    integer top-left (x, y)."""
+    w, h)] the windows on screen (the composition it joins); `obstacles`:
+    [(x, y, w, h)] everything to stay clear of (layout and off-screen
+    windows included); `monitor`: the usable area (x0, y0, x1, y1) of the
+    monitor it opened on. Returns its integer top-left (x, y)."""
     w, h = int(new_size[0]), int(new_size[1])
     gap = spacing(band)
     others = [(int(x), int(y), int(x + ow), int(y + oh)) for x, y, ow, oh in obstacles]
+    anchor = _centre(monitor)
     if not layout:
-        r = _push_out(_centre(monitor), -math.pi / 2, w, h, others, gap)
+        r = _push_out(anchor, -math.pi / 2, w, h, others, gap)
         return r[0], r[1]
-    areas = [lw * lh for _x, _y, lw, lh in layout]
-    total = sum(areas) or 1
-    cx = sum((x + lw / 2) * a for (x, _y, lw, _lh), a in zip(layout, areas)) / total
-    cy = sum((y + lh / 2) * a for (_x, y, _lw, lh), a in zip(layout, areas)) / total
-    angle = widest_gap_angle([(x + lw / 2, y + lh / 2) for x, y, lw, lh in layout], (cx, cy))
-    r = _push_out((cx, cy), angle, w, h, others, gap)
+    centres = [(x + lw / 2, y + lh / 2) for x, y, lw, lh in layout]
+    best = None
+    for k in range(DIRECTIONS):
+        angle = -math.pi / 2 + 2 * math.pi * k / DIRECTIONS
+        r = _push_out(anchor, angle, w, h, others, gap)
+        c = ((r[0] + r[2]) / 2, (r[1] + r[3]) / 2)
+        dist = round(math.hypot(c[0] - anchor[0], c[1] - anchor[1]))
+        room = _angular_room(math.atan2(c[1] - anchor[1], c[0] - anchor[0]), centres, anchor)
+        key = (dist, -round(room, 3), k)
+        if best is None or key < best[0]:
+            best = (key, r)
+    r = best[1]
     return r[0], r[1]
 
 
