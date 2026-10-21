@@ -5,12 +5,15 @@ use come first.
     dxrice_launcher_history.py bump NAME     one more launch of NAME
     dxrice_launcher_history.py dump          the counts, as JSON
 
-Kept in $XDG_STATE_HOME/dxrice/launcher_history.json: {name: count}. A
-missing or damaged file is an empty history, never an error.
+Kept in $XDG_STATE_HOME/dxrice/launcher_history.json: {name: count}, and
+when each was last launched in launcher_recent.json: {name: unix time}
+(the most recent MAX_RECENT). A missing or damaged file is an empty
+history, never an error.
 """
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dxrice_manifest  # noqa: E402
@@ -33,7 +36,35 @@ def load(p=None):
         return {}
 
 
+MAX_RECENT = 30
+
+
+def recent_path():
+    return os.path.join(dxrice_xdg.state_dir(), "launcher_recent.json")
+
+
+def load_recent(p=None):
+    try:
+        with open(p or recent_path()) as f:
+            data = json.load(f)
+        return {str(k): float(v) for k, v in data.items() if isinstance(v, (int, float))} if isinstance(data, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def touch_recent(name, p=None, now=None):
+    p = p or recent_path()
+    data = load_recent(p)
+    data[name] = float(now if now is not None else time.time())
+    data = dict(sorted(data.items(), key=lambda kv: -kv[1])[:MAX_RECENT])
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    dxrice_manifest.atomic_write_bytes(p, (json.dumps(data) + "\n").encode())
+    return data
+
+
 def bump(name, p=None):
+    if p is None:
+        touch_recent(name)
     p = p or path()
     data = load(p)
     data[name] = min(MAX_COUNT, data.get(name, 0) + 1)

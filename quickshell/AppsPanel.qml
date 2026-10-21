@@ -41,11 +41,14 @@ Item {
     property string query: ""
     property int selected: 0
     readonly property int maxRows: 8
-    // typed: every installed app, ranked; nothing typed: only apps you have
-    // actually launched from here, most first (with no history yet the
-    // section stays empty rather than listing the alphabet)
+    // typed: every installed app, ranked (the ones you use most first among
+    // equals); nothing typed: the apps you launched from here most recently,
+    // newest first (with no history yet the section stays empty rather than
+    // listing the alphabet)
+    readonly property var recent: root.allApps.filter((a) => Number(a.last) > 0)
+        .sort((a, b) => Number(b.last) - Number(a.last)).slice(0, 5)
     readonly property var results: root.query.length > 0 ? Search.rank(root.allApps, root.query, root.maxRows)
-        : Search.rank(root.allApps.filter((a) => Number(a.uses) > 0), "", 5)
+        : root.recent.map((a) => ({ app: a, score: 0, start: 0, len: 0 }))
     onQueryChanged: root.selected = 0
     onResultsChanged: if (root.selected >= root.results.length) root.selected = Math.max(0, root.results.length - 1)
     Process {
@@ -326,7 +329,7 @@ Item {
         }
 
         // the ranked apps: the most used with nothing typed, else matches
-        SectionLabel { text: root.query.length > 0 ? "Applications" : "Most used"; visible: root.results.length > 0 }
+        SectionLabel { text: root.query.length > 0 ? "Applications" : "Recent"; visible: root.results.length > 0 }
         Item {
             id: list
             objectName: "appsList"

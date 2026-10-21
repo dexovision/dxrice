@@ -19,6 +19,21 @@ TEMPLATE = os.path.join(HERE, "..", "hypr", "hyprland.lua")
 
 
 class History(unittest.TestCase):
+    def test_recent_launches_are_kept_newest_first_and_capped(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "dxrice", "launcher_recent.json")
+            for i in range(hist.MAX_RECENT + 5):
+                hist.touch_recent(f"App {i}", p, now=1000 + i)
+            data = hist.load_recent(p)
+            self.assertEqual(len(data), hist.MAX_RECENT)
+            self.assertEqual(max(data, key=data.get), f"App {hist.MAX_RECENT + 4}")
+            self.assertNotIn("App 0", data, "the oldest should be forgotten")
+            hist.touch_recent("App 0", p, now=5000)
+            self.assertEqual(hist.load_recent(p)["App 0"], 5000)
+            with open(p, "w") as f:
+                f.write("{torn")
+            self.assertEqual(hist.load_recent(p), {})
+
     def test_bump_counts_and_survives_a_missing_or_torn_file(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "sub", "h.json")

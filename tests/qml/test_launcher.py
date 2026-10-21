@@ -21,16 +21,16 @@ from PySide6.QtCore import Qt  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 APPS = [
-    {"name": "Firefox", "cmd": "firefox", "icon": "firefox", "uses": 40},
-    {"name": "Files", "cmd": "nautilus", "icon": "", "uses": 3},
-    {"name": "Visual Studio Code", "cmd": "code", "icon": "", "uses": 12},
-    {"name": "Kitty", "cmd": "kitty", "icon": "", "uses": 90},
+    {"name": "Firefox", "cmd": "firefox", "icon": "firefox", "uses": 40, "last": 1700000500},
+    {"name": "Files", "cmd": "nautilus", "icon": "", "uses": 3, "last": 1700000100},
+    {"name": "Visual Studio Code", "cmd": "code", "icon": "", "uses": 12, "last": 1700000900},
+    {"name": "Kitty", "cmd": "kitty", "icon": "", "uses": 90, "last": 1700000300},
     {"name": "GNU Image Manipulation Program", "cmd": "gimp", "icon": "", "uses": 0},
-    {"name": "Discord", "cmd": "/usr/bin/discord --ozone-platform=wayland", "icon": "", "uses": 20},
+    {"name": "Discord", "cmd": "/usr/bin/discord --ozone-platform=wayland", "icon": "", "uses": 20, "last": 1700000700},
     {"name": "Fire Alarm <b>", "cmd": "alarm", "icon": "", "uses": 0},
-    {"name": "Steam", "cmd": "steam", "icon": "", "uses": 5},
+    {"name": "Steam", "cmd": "steam", "icon": "", "uses": 5, "last": 1700000200},
     {"name": "Settings", "cmd": "gnome-control-center", "icon": "", "uses": 0},
-    {"name": "Terminal Emulator", "cmd": "xterm", "icon": "", "uses": 1},
+    {"name": "Terminal Emulator", "cmd": "xterm", "icon": "", "uses": 1, "last": 1700000050},
 ]
 
 
@@ -132,16 +132,17 @@ class LauncherTest(unittest.TestCase):
         self.assertTrue(self.s.ev("findNamed('statusIsland').parent.takesKeys"))
         self.assertTrue(self.s.ev("findNamed('appsSearch').activeFocus"))
 
-    def test_it_opens_with_the_most_used_and_loads_the_list_once_per_open(self):
+    def test_it_opens_with_the_most_recent_and_loads_the_list_once_per_open(self):
         self.open()
-        self.assertEqual(self.names()[:2], ["Kitty", "Firefox"])
-        self.assertEqual(len(self.names()), 5)
+        # newest launch first, whatever the counts (Kitty is the most used)
+        self.assertEqual(self.names(), ["Visual Studio Code", "Discord", "Firefox", "Kitty", "Steam"])
+        self.assertEqual(self.s.ev("findNamed('appsPanel').recent.length"), 5)
         self.assertEqual(len([r for r in self.s.bridge.run_log if "dxrice_list_desktop_apps.py" in " ".join(r)]), 1)
 
     def test_with_no_launch_history_nothing_typed_lists_no_alphabet(self):
         # (live, before any launch from here: "Most used" was the first five
         # installed apps by name -- Advanced Network Configuration, Avahi...)
-        self.s.set_command("dxrice_list_desktop_apps.py", json.dumps([dict(a, uses=0) for a in APPS]))
+        self.s.set_command("dxrice_list_desktop_apps.py", json.dumps([dict(a, uses=0, last=0) for a in APPS]))
         self.open()
         self.assertEqual(self.names(), [])
         self.assertEqual(self.s.ev("findNamed('appsEmpty').text"), "Type to search every installed app")
