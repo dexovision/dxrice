@@ -211,6 +211,10 @@ PanelWindow {
     property string clock_style: "type"
     property bool widget_visualizer: true
     property string visualizer_style: "bars"
+    property bool widget_weather: false
+    property string widget_weather_pos: "bottom-right"
+    property string weather_location: ""
+    property string weather_units: "metric"
 
     property string font_family: "JetBrainsMono Nerd Font"
     // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
@@ -290,6 +294,8 @@ PanelWindow {
           sub: "The track from whichever media player is open, with play, skip and a seekable bar. Nothing shows while nothing plays." },
         { key: "widget_visualizer", objectName: "widgetVisualizerSwitch", label: "Audio visualizer",
           sub: "A real spectrum of what is playing (from cava), along the bottom of the desktop. It runs only while music plays." },
+        { key: "widget_weather", objectName: "widgetWeatherSwitch", label: "Weather",
+          sub: "Now and the next three days, from Open-Meteo, for the place you type below. Nothing is shown for a place you haven't set." },
         { key: "widget_system", objectName: "widgetSystemSwitch", label: "System monitor",
           sub: "Processor, memory, graphics and network, with the last minute of each. Measured only while it is on." },
     ]
@@ -337,7 +343,8 @@ PanelWindow {
         for (const f of behaviorFields) keys.push(f.key);
         keys.push("layout_auto_place", "layout_super_g");
         for (const f of widgetFields) keys.push(f.key);
-        keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style", "visualizer_style");
+        keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style", "visualizer_style",
+                   "widget_weather_pos", "weather_location", "weather_units");
         return keys;
     }
 
@@ -2020,11 +2027,44 @@ PanelWindow {
                     }
                     Column {
                         width: parent.width
+                        spacing: Theme.padSm
+                        Text { text: "Weather location"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium }
+                        Text {
+                            width: parent.width
+                            text: "A town or city, optionally with its region or country (\"Austin, Texas\"). Sent to Open-Meteo to look up its forecast; nothing else is."
+                            color: Theme.text; opacity: Theme.opacityMuted
+                            font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; wrapMode: Text.WordWrap
+                        }
+                        InputField {
+                            width: parent.width
+                            placeholder: "Not set"
+                            input: weatherInput
+                            TextInput {
+                                id: weatherInput
+                                objectName: "weatherLocationInput"
+                                anchors.fill: parent
+                                clip: true
+                                text: root.weather_location
+                                color: Theme.textActive
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeNormal
+                                verticalAlignment: TextInput.AlignVCenter
+                                onEditingFinished: if (text.trim() !== root.weather_location) { root.weather_location = text.trim(); root.dirty = true; }
+                            }
+                        }
+                    }
+                    ChoiceRow {
+                        settingKey: "weather_units"; idPrefix: "weatherUnits:"; label: "Weather units"
+                        options: [{ value: "metric", label: "°C · km/h" }, { value: "imperial", label: "°F · mph" }]
+                    }
+                    Column {
+                        width: parent.width
                         spacing: Theme.padMd
                         Text { text: "Corners"; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium }
                         CornerRow { settingKey: "widget_clock_pos"; idPrefix: "widgetPos:clock:"; label: "Clock" }
                         CornerRow { settingKey: "widget_music_pos"; idPrefix: "widgetPos:music:"; label: "Now playing" }
                         CornerRow { settingKey: "widget_system_pos"; idPrefix: "widgetPos:system:"; label: "System monitor" }
+                        CornerRow { settingKey: "widget_weather_pos"; idPrefix: "widgetPos:weather:"; label: "Weather" }
                     }
                 }
             }
