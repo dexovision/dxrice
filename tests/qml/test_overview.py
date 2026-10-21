@@ -1296,6 +1296,63 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
         finally:
             o.scene.close()
 
+    def test_after_a_chip_the_tiles_go_where_the_windows_really_are(self):
+        """The arrangement moves real windows and Hyprland sends no event for
+        a floating window's move: the overview reads them again when the
+        chip's process is done, so the tiles show the new layout."""
+        o = self.scene(n=4, focused=0)
+        try:
+            moved = json.loads(json.dumps(o.clients))
+            for i, c in enumerate(moved):
+                c["at"] = [c["at"][0] + 260 * (i % 2) - 120, c["at"][1] + 140 * (i // 2) - 60]
+            o.scene.set_command("hyprctl -j clients", json.dumps(moved))
+            x, y = o.scene.ev("(function(){ const b = findNamed('overviewLayout:compact'); const p = b.mapToItem(null, b.width/2, b.height/2); return [p.x, p.y]; })()").toVariant()
+            o.click(x, y)
+            o.scene.wait(1200)
+            want = ov.overview(moved, [o.mon])["windows"]
+            for w in want:
+                tile = f"findNamed('overviewTile:{w['address']}')"
+                self.assertAlmostEqual(o.scene.ev(f"{tile}.x"), w["tx"], delta=1.0, msg=w["address"])
+                self.assertAlmostEqual(o.scene.ev(f"{tile}.y"), w["ty"], delta=1.0, msg=w["address"])
+        finally:
+            o.scene.close()
+
+    def test_an_uncaptured_window_is_a_card_that_says_why(self):
+        rects = [(400, 200, 1300, 800), (2400, 300, 3200, 800)]      # the second is off screen
+        clients = clients_for(rects)
+        clients[1].update({"class": "org.gnome.Nautilus", "title": "Files"})
+        o = OverviewScene(clients, uncapturable={clients[1]["address"]})
+        try:
+            o.call("show")
+            o.scene.wait(SETTLE)
+            card = f"(function(){{ const t = findNamed('overviewTile:{clients[1]['address']}'); const st = [t];"
+            card += " while (st.length) { const it = st.pop(); if (it.objectName === 'overviewPlaceholder') return it;"
+            card += " for (let k = 0; k < it.children.length; k++) st.push(it.children[k]); } return null; })()"
+            self.assertTrue(o.scene.ev(f"{card}.visible"))
+            reason = f"(function(){{ const c = {card}; for (let k = 0; k < c.children.length; k++) if (c.children[k].objectName === 'overviewCardReason') return c.children[k].children[0].text; return null; }})()"
+            self.assertEqual(o.scene.ev(reason), "OFF SCREEN")
+            # the captured, on-screen window shows its picture, not a card
+            card0 = card.replace(clients[1]["address"], clients[0]["address"])
+            self.assertFalse(o.scene.ev(f"{card0}.visible"))
+        finally:
+            o.scene.close()
+
+    def test_the_screen_is_outlined_when_the_view_zooms_out(self):
+        rects = [(400, 200, 1300, 800), (2400, 300, 3200, 800), (-900, -500, -100, 100)]
+        o = OverviewScene(clients_for(rects))
+        try:
+            o.call("show")
+            o.scene.wait(SETTLE)
+            L = o.layout
+            self.assertLess(L["scale"], 1)
+            f = "findNamed('overviewScreenFrame')"
+            self.assertTrue(o.scene.ev(f"{f}.visible"))
+            self.assertAlmostEqual(o.scene.ev(f"{f}.x"), L["dx"], delta=0.5)
+            self.assertAlmostEqual(o.scene.ev(f"{f}.y"), L["dy"], delta=0.5)
+            self.assertAlmostEqual(o.scene.ev(f"{f}.width"), L["monitor"]["width"] * L["scale"], delta=0.5)
+        finally:
+            o.scene.close()
+
     def test_the_galaxy_chip_is_offered_and_saves_galaxy(self):
         o = self.scene(n=4, focused=0)
         try:

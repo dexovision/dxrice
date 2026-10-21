@@ -134,7 +134,16 @@ PanelWindow {
         layoutProc.command = ["python3", Quickshell.shellDir + "/../scripts/dxrice_layout_apply.py", "--mode", mode, "--save"];
         layoutProc.running = true;
     }
-    Process { id: layoutProc }
+    // The chip's arrangement moves real windows, and Hyprland sends no
+    // event for a floating window being moved: read them again when it is
+    // done, and once more after Hyprland's move animation has settled, so
+    // the tiles go to where the windows really are now.
+    Process {
+        id: layoutProc
+        objectName: "overviewLayoutProc"
+        onExited: { if (root.open) { root.refresh(); relayoutSettle.restart(); } }
+    }
+    Timer { id: relayoutSettle; interval: 450; onTriggered: if (root.open) root.refresh() }
     function activateSelected() {
         const t = root._tileItem(root.selectedAddress);
         if (t) root.activate(t);
@@ -599,6 +608,34 @@ PanelWindow {
             id: usable
             x: root.reserved[0]; y: root.reserved[1]
             width: root.usableWidth; height: root.usableHeight
+        // The screen you were looking at, inside the larger desktop: it
+        // shrinks with the zoom, so you can see where everything lies
+        // relative to it (only when the view has to zoom out at all).
+        Rectangle {
+            id: screenFrame
+            objectName: "overviewScreenFrame"
+            readonly property real sc: root.layout && root.layout.scale ? root.layout.scale : 1
+            readonly property real fdx: root.layout && root.layout.dx !== undefined ? root.layout.dx : 0
+            readonly property real fdy: root.layout && root.layout.dy !== undefined ? root.layout.dy : 0
+            readonly property real p: root.progress
+            visible: root.covering && sc < 0.999
+            x: fdx * p
+            y: fdy * p
+            width: root.usableWidth * (1 + (sc - 1) * p)
+            height: root.usableHeight * (1 + (sc - 1) * p)
+            color: Qt.rgba(1, 1, 1, 0.03 * p)
+            radius: 8 * p
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.35)
+            opacity: p
+            Text {
+                anchors.left: parent.left; anchors.bottom: parent.top
+                anchors.bottomMargin: 4
+                text: "SCREEN"
+                color: "white"; opacity: 0.55
+                font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.DemiBold; font.letterSpacing: 1.5
+            }
+        }
         Repeater {
             id: tiles
             model: tileModel
@@ -647,26 +684,90 @@ PanelWindow {
                 Behavior on height { enabled: root._settled; NumberAnimation { duration: Theme.durationDefault; easing.type: Easing.InOutQuad } }
                 Component.onCompleted: root.tilesBuilt += 1
 
-                // Placeholder when a window can't be captured (no live
-                // picture yet, or the compositor declines): its card, title
-                // and class, never an empty hole. Drawn only once the
-                // overview covers (the handover waits up to 150 ms for it).
+                // A window with no live picture -- most often one panned out
+                // of view, which Hyprland doesn't draw and so can't export --
+                // is shown as what it is: a card with its app's icon (or a
+                // monogram), its title and class, and a mark saying why there
+                // is no picture. Never a grey box that looks like a thumbnail.
                 Rectangle {
+                    id: card
                     objectName: "overviewPlaceholder"
                     anchors.fill: parent
                     visible: !capture.hasContent
-                    color: Theme.panel
+                    color: Theme.mix(Theme.panel, Theme.accent, 0.08)
                     radius: 6 * tile.p
-                    border.color: Theme.border
+                    border.color: Theme.mix(Theme.borderIdle, Theme.accent, 0.25)
                     border.width: 1
-                    Text {
+                    readonly property real u: Math.max(10, Math.min(parent.width, parent.height * 1.6) / 9)
+                    readonly property string icon: tile.cls ? String(Quickshell.iconPath(tile.cls.toLowerCase(), true) || "") : ""
+                    Column {
                         anchors.centerIn: parent
                         width: parent.width - 16
-                        horizontalAlignment: Text.AlignHCenter
-                        elide: Text.ElideRight
-                        color: Theme.text
-                        font.pixelSize: Math.max(9, Math.min(16, parent.height * 0.12))
-                        text: tile.title || tile.cls
+                        spacing: card.u * 0.25
+                        Item {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: card.u * 2.2; height: width
+                            Image {
+                                objectName: "overviewCardIcon"
+                                anchors.fill: parent
+                                source: card.icon
+                                visible: card.icon.length > 0 && status === Image.Ready
+                                sourceSize: Qt.size(128, 128)
+                                fillMode: Image.PreserveAspectFit
+                                asynchronous: true
+                            }
+                            Rectangle {     // no icon: the app's initial
+                                objectName: "overviewCardMonogram"
+                                anchors.fill: parent
+                                visible: !(card.icon.length > 0)
+                                radius: width / 2
+                                color: Theme.mix(Theme.layer1, Theme.accent, 0.35)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: (tile.cls || tile.title || "?").replace(/^.*\./, "").charAt(0).toUpperCase()
+                                    color: Theme.textActive
+                                    font.family: Theme.fontFamily; font.weight: Font.DemiBold
+                                    font.pixelSize: parent.height * 0.48
+                                }
+                            }
+                        }
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            color: Theme.textActive
+                            font.family: Theme.fontFamily; font.weight: Font.Medium
+                            font.pixelSize: Math.max(9, Math.min(15, card.u * 0.62))
+                            text: tile.title || tile.cls
+                        }
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            visible: tile.title.length > 0 && tile.cls.length > 0
+                            color: Theme.text; opacity: Theme.opacityMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Math.max(8, Math.min(12, card.u * 0.48))
+                            text: tile.cls
+                        }
+                    }
+                    // why there is no picture
+                    Rectangle {
+                        objectName: "overviewCardReason"
+                        anchors.top: parent.top; anchors.right: parent.right
+                        anchors.margins: Math.max(3, card.u * 0.3)
+                        width: reasonText.implicitWidth + 10; height: reasonText.implicitHeight + 4
+                        radius: height / 2
+                        color: Qt.rgba(0, 0, 0, 0.35)
+                        visible: card.u > 14
+                        Text {
+                            id: reasonText
+                            anchors.centerIn: parent
+                            text: tile.onScreen ? "NO PICTURE" : "OFF SCREEN"
+                            color: Theme.textActive; opacity: 0.8
+                            font.family: Theme.fontFamily; font.weight: Font.DemiBold
+                            font.pixelSize: Math.max(8, Math.min(10, card.u * 0.42)); font.letterSpacing: 1
+                        }
                     }
                 }
                 ScreencopyView {

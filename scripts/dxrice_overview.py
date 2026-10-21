@@ -158,7 +158,7 @@ def overview(clients, monitors, monitor_name=None, margin=OVERVIEW_MARGIN):
     from `hyprctl clients -j` / `hyprctl monitors -j` data."""
     m = pick_monitor(monitors, monitor_name)
     if m is None:
-        return {"monitor": None, "reserved": [0, 0, 0, 0], "workspace": None, "scale": 1.0, "fits": True,
+        return {"monitor": None, "reserved": [0, 0, 0, 0], "workspace": None, "scale": 1.0, "dx": 0, "dy": 0, "fits": True,
                 "clipped": False, "windows": []}
     (mx0, my0, mx1, my1), reserved = monitor_rect(m)
     wins = members(clients, m)
@@ -181,7 +181,7 @@ def overview(clients, monitors, monitor_name=None, margin=OVERVIEW_MARGIN):
         "monitor": {"name": m.get("name", ""), "x": mx0, "y": my0, "width": mx1 - mx0, "height": my1 - my0},
         "reserved": list(reserved),
         "workspace": (m.get("activeWorkspace") or {}).get("id"),
-        "scale": scale, "fits": fits, "clipped": clipped, "windows": out,
+        "scale": scale, "dx": round(dx, 2), "dy": round(dy, 2), "fits": fits, "clipped": clipped, "windows": out,
     }
 
 

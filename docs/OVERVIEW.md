@@ -270,9 +270,19 @@ key would silently do nothing, so the proven path is kept.
 
 - **The look of the live captures** can only be judged on the real desktop.
   - The tests use stand-in pictures.
-  - It's unconfirmed whether Hyprland exports windows that are off screen.
-    A window that can't be captured within 150 ms of the data arriving
-    shows a card with its title; the handover waits that long for it.
+  - Windows panned off screen get no picture: on a real recording
+    (2026-10-20) every window outside the view stayed without one, and the
+    pictures came the moment the windows were back on screen. A window
+    without a picture is drawn as a card -- its app icon (or initial),
+    title and class, marked OFF SCREEN or NO PICTURE -- never as a grey
+    stand-in for a thumbnail. The handover still waits up to 150 ms for
+    pictures that can come.
+  - When the view has to zoom out, the screen you were looking at is
+    outlined inside it, so the larger desktop reads relative to it.
+  - A layout chip moves the real windows; Hyprland reports no event for a
+    floating window moving, so the overview reads the windows again when
+    the chip's arrangement is done (and once more after the move
+    animation), and the tiles go to where the windows really are.
 - **Window decorations.** The pictures are the windows' own contents.
   Hyprland's borders, rounded corners and shadows aren't part of them.
 - **Bar and dock.** They are dimmed at first, then covered at the handover,

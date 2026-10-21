@@ -91,7 +91,7 @@ function fit(rects, area, margin) {
 function overview(clients, monitors, monitorName, margin) {
     if (margin === undefined || margin === null) margin = OVERVIEW_MARGIN;
     var m = pickMonitor(monitors, monitorName);
-    if (!m) return { monitor: null, reserved: [0, 0, 0, 0], workspace: null, scale: 1.0, fits: true, clipped: false, windows: [] };
+    if (!m) return { monitor: null, reserved: [0, 0, 0, 0], workspace: null, scale: 1.0, dx: 0, dy: 0, fits: true, clipped: false, windows: [] };
     var mr = monitorRect(m), a = mr.rect;
     var wins = members(clients, m);
     var local = wins.map(function (c) {
@@ -111,7 +111,7 @@ function overview(clients, monitors, monitorName, margin) {
     return {
         monitor: { name: m.name || "", x: a[0], y: a[1], width: a[2] - a[0], height: a[3] - a[1] },
         reserved: mr.reserved, workspace: (m.activeWorkspace || {}).id,
-        scale: f.scale, fits: f.fits, clipped: f.clipped, windows: out
+        scale: f.scale, dx: _round2(f.dx), dy: _round2(f.dy), fits: f.fits, clipped: f.clipped, windows: out
     };
 }
 
