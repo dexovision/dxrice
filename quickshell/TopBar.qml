@@ -78,7 +78,7 @@ PanelWindow {
     aboveWindows: true
     // Only grab keys while something is actually open, so the bar doesn't hold
     // focus away from the focused application the rest of the time.
-    focusable: PanelManager.current !== ""
+    focusable: PanelManager.current !== "" && PanelManager.openedBy === "click"
     Shortcut { objectName: "topBarEscape"; sequence: "Escape"; enabled: root.focusable; onActivated: PanelManager.closeCurrent() }
 
     // Whether Quick Settings' Wifi-password dialog is open -- a real,
@@ -93,7 +93,8 @@ PanelWindow {
     // Whether one of THIS window's own panels (not Taskbar, that's Dock's)
     // is open -- the click-outside-to-dismiss region below only ever
     // expands while this is true.
-    readonly property bool anyIslandOpen: (PanelManager.isOpen("calendar") || PanelManager.isOpen("quicksettings"))
+    readonly property bool statusOpen: PanelManager.isOpen("quicksettings") || PanelManager.current.indexOf("status:") === 0
+    readonly property bool anyIslandOpen: (PanelManager.isOpen("calendar") || root.statusOpen)
                                            && !root.statusModalOpen
 
     // Without this the transparent full-screen surface would swallow every
@@ -172,6 +173,89 @@ PanelWindow {
     Binding { target: ShellSurface; property: "topEdgeHeight"; value: root.exclusiveZone }
     Binding { target: ShellSurface; property: "screenHeight"; value: root.screen ? root.screen.height : 1080 }
 
+    // ---- hover intent: each bar element opens its own panel ----
+    // Hovering an element opens its panel after a short pause (so passing
+    // over the bar opens nothing); while a panel of the same island is open,
+    // moving to a neighbouring element switches it at once (no close and
+    // reopen, no flicker). A hover-opened panel closes a moment after the
+    // pointer has left both the element and its panel, and never takes the
+    // keyboard from the app you are in; a click opens it to stay (and may).
+    // theme.json "bar_hover_open": false makes it click-only.
+    readonly property bool hoverOpens: Theme.data.bar_hover_open !== false
+    property string _hoverWant: ""
+    Timer {
+        id: hoverOpenTimer
+        interval: 150
+        onTriggered: if (root._hoverWant && PanelManager.current === "") PanelManager.open(root._hoverWant, "hover")
+    }
+    function elementHovered(name, on, island) {
+        if (on) {
+            const cur = PanelManager.current;
+            const sameIsland = (island === "status" && root.statusOpen) || (island === "clock" && cur === "calendar");
+            if (sameIsland) {
+                hoverOpenTimer.stop();
+                root._hoverWant = "";
+                if (cur !== name && island === "status") PanelManager.open(name, PanelManager.openedBy);
+                return;
+            }
+            if (!root.hoverOpens || cur !== "") return;
+            root._hoverWant = name;
+            hoverOpenTimer.restart();
+        } else if (root._hoverWant === name) {
+            root._hoverWant = "";
+            hoverOpenTimer.stop();
+        }
+    }
+    function elementClicked(name) {
+        hoverOpenTimer.stop();
+        root._hoverWant = "";
+        PanelManager.toggle(name);
+    }
+    Timer {
+        id: hoverCloseTimer
+        interval: 320
+        property string island: ""
+        onTriggered: {
+            if (PanelManager.openedBy !== "hover") return;
+            if (hoverCloseTimer.island === "status" && root.statusOpen && !statusIsland.pointerInside) PanelManager.closeCurrent();
+            if (hoverCloseTimer.island === "clock" && PanelManager.isOpen("calendar") && !clockIsland.pointerInside) PanelManager.closeCurrent();
+        }
+    }
+    function islandLeft(island, inside) {
+        if (inside) { if (hoverCloseTimer.island === island) hoverCloseTimer.stop(); return; }
+        hoverCloseTimer.island = island;
+        hoverCloseTimer.restart();
+    }
+
+    // ---- network, for its indicator: nmcli monitor reports every change,
+    // so the state is re-read only when something happened (no polling) ----
+    property string netKind: ""          // "wifi" | "ethernet" | ""
+    property string netName: ""
+    Process {
+        id: netState
+        command: ["nmcli", "-t", "-f", "TYPE,STATE,CONNECTION", "device"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let kind = "", name = "";
+                for (const line of this.text.split("\n")) {
+                    const f = line.split(":");
+                    if (f.length < 3 || f[1] !== "connected") continue;
+                    if (f[0] === "ethernet") { kind = "ethernet"; name = f.slice(2).join(":"); break; }
+                    if (f[0] === "wifi" && !kind) { kind = "wifi"; name = f.slice(2).join(":"); }
+                }
+                root.netKind = kind;
+                root.netName = name;
+            }
+        }
+    }
+    Process {
+        id: netMonitor
+        command: ["nmcli", "monitor"]
+        running: true
+        stdout: SplitParser { onRead: (line) => netDebounce.restart() }
+    }
+    Timer { id: netDebounce; interval: 300; onTriggered: netState.running = true }
+
     // ---- workspaces (native Hyprland IPC -- no hyprctl subprocess) ----
     // Ordinary workspaces only: special ones (scratchpads, negative ids) are
     // toggled, not switched to, and don't belong in the row.
@@ -225,7 +309,7 @@ PanelWindow {
             }
         }
     }
-    Component.onCompleted: activeWindowProc.running = true
+    Component.onCompleted: { activeWindowProc.running = true; netState.running = true; }
 
     // Title first: onActiveAppIdChanged reads activeTitle at once.
     function setActive(cls, title) {
@@ -420,13 +504,15 @@ PanelWindow {
         }
         hovered: clockArea.containsMouse
         pressed: clockArea.pressed
+        onPointerInsideChanged: root.islandLeft("clock", pointerInside)
         MouseArea {
             id: clockArea
             anchors.fill: parent
             enabled: !clockIsland.expanded
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.calendarRequested()
+            onContainsMouseChanged: root.elementHovered("calendar", containsMouse, "clock")
+            onClicked: root.elementClicked("calendar")
         }
     }
 
@@ -452,7 +538,10 @@ PanelWindow {
         y: root.edgeMargin
         pinX: "right"
         pinY: "top"
-        expanded: PanelManager.isOpen("quicksettings")
+        expanded: root.statusOpen
+        readonly property bool dashboard: PanelManager.isOpen("quicksettings")
+        // the indicators are hover targets: keep them still under the pointer
+        closeButtonShown: statusIsland.dashboard
         collapsedWidth: statusRow.implicitWidth + ShellSurface.pad * 2
         collapsedHeight: root.islandHeight
         // Wider than before (was 640) and paired with a much shorter
@@ -460,12 +549,12 @@ PanelWindow {
         // is modeled on are wide, short dashboards, not tall narrow ones --
         // trading width for height gets the aspect ratio closer without
         // cutting real content.
-        expandedWidth: ShellSurface.panelWidthWide
+        expandedWidth: statusIsland.dashboard ? ShellSurface.panelWidthWide : Math.max(420, statusIsland.collapsedWidth)
         // The status row IS Quick Settings' header now -- see clockIsland's
         // identical comment just above.
         expandedHeight: root.clampToScreen(collapsedHeight + ((panelItem && panelItem.contentHeight) ? panelItem.contentHeight : 380))
-        panel: quickSettingsComponent
-        onCloseRequested: PanelManager.close("quicksettings")
+        panel: statusIsland.dashboard ? quickSettingsComponent : statusPanelComponent
+        onCloseRequested: PanelManager.closeCurrent()
 
         Row {
             id: statusRow
@@ -506,55 +595,90 @@ PanelWindow {
                 color: Theme.borderIdle
             }
 
-            // The shell's second material level. The reference bar carries its
-            // readouts in small filled pills INSIDE the capsule rather than as
-            // bare text sitting directly on it, and that nesting is most of
-            // what makes it read as designed chrome instead of a label
-            // floating on a slab. One capsule, one chip inside it, same
-            // corner language at both levels (chipRadius is chip/2, exactly
-            // as radius is unit/2 a level up).
-            Rectangle {
-                height: ShellSurface.chip
-                width: volRow.implicitWidth + ShellSurface.pad
-                radius: ShellSurface.chipRadius
-                color: Theme.layer1
+            // One indicator per thing, each opening its own panel (see the
+            // hover-intent block above). Real state only: an indicator for
+            // something this machine doesn't have isn't shown.
+            Row {
+                id: indicatorRow
                 anchors.verticalCenter: parent.verticalCenter
-
-                Row {
-                    id: volRow
-                    anchors.centerIn: parent
-                    spacing: Theme.padXs
-                    Text {
-                        text: root.muted ? "󰝟" : ""
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmaller
-                        color: Theme.text
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    Text {
-                        text: root.volumePercent + "%"
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmaller
-                        color: Theme.textActive
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
+                spacing: 2
+                BarIndicator {
+                    name: "status:network"
+                    glyph: root.netKind === "ethernet" ? "\u{f0200}" : (root.netKind === "wifi" ? "\uf1eb" : "\u{f092e}")
+                    dim: root.netKind === ""
                 }
+                BarIndicator { name: "status:bluetooth"; glyph: "\uf294" }
+                BarIndicator {
+                    name: "status:audio"
+                    glyph: root.muted ? "\u{f075f}" : "\uf028"
+                    label: root.volumePercent + "%"
+                }
+                BarIndicator {
+                    name: "status:power"
+                    glyph: BatteryService.available ? (BatteryService.charging ? "\u{f0084}" : "\u{f0079}") : "\uf011"
+                    label: BatteryService.available ? BatteryService.percent + "%" : ""
+                }
+                BarIndicator { name: "status:notifications"; glyph: "\uf0f3" }
+                BarIndicator { name: "quicksettings"; glyph: "\u{f0570}"; objectName: "barIndicator:dashboard" }
             }
         }
-        hovered: statusArea.containsMouse
-        pressed: statusArea.pressed
+        onPointerInsideChanged: root.islandLeft("status", pointerInside)
+    }
+
+    // A bar element: an icon (and a short reading), a soft pill under the
+    // pointer and while its own panel is open.
+    component BarIndicator: Rectangle {
+        id: ind
+        property string name: ""
+        property string glyph: ""
+        property string label: ""
+        property bool dim: false
+        readonly property bool open: PanelManager.current === ind.name
+        objectName: "barIndicator:" + ind.name.replace("status:", "")
+        height: ShellSurface.chip
+        width: indRow.implicitWidth + ShellSurface.pad
+        radius: ShellSurface.chipRadius
+        color: ind.open ? Theme.mix(Theme.layer1, Theme.accent, 0.22) : (indArea.containsMouse ? Theme.layer1Hover : "transparent")
+        Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+        Row {
+            id: indRow
+            anchors.centerIn: parent
+            spacing: Theme.padXs
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: ind.glyph
+                color: ind.open ? Theme.accent : Theme.textActive
+                opacity: ind.dim ? 0.45 : 1
+                font.family: Theme.iconFamily; font.pixelSize: Theme.fontSizeSmall
+            }
+            Text {
+                visible: ind.label.length > 0
+                anchors.verticalCenter: parent.verticalCenter
+                text: ind.label
+                color: Theme.textActive
+                font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
+            }
+        }
         MouseArea {
-            id: statusArea
+            id: indArea
             anchors.fill: parent
-            enabled: !statusIsland.expanded
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.quickSettingsRequested()
+            onContainsMouseChanged: root.elementHovered(ind.name, containsMouse, "status")
+            onClicked: root.elementClicked(ind.name)
         }
     }
 
     Component {
         id: quickSettingsComponent
         QuickSettings { onCloseRequested: PanelManager.close("quicksettings") }
+    }
+    Component {
+        id: statusPanelComponent
+        StatusPanel {
+            section: PanelManager.current.indexOf("status:") === 0 ? PanelManager.current.slice(7) : section
+            onCloseRequested: PanelManager.closeCurrent()
+            onDashboardRequested: PanelManager.open("quicksettings", "click")
+        }
     }
 }

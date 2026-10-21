@@ -53,6 +53,14 @@ Item {
     // every expanded panel, so the corner is literally invariant through a
     // morph rather than easing between two different roundings.
     property real maxRadius: ShellSurface.radius
+    // false: no close button, and the header never moves while the surface
+    // grows -- for a header made of hover targets (the bar's indicators),
+    // which must stay under the pointer that opened them. Such a panel closes
+    // by leaving it, Escape, a click outside or its indicator again.
+    property bool closeButtonShown: true
+    // the pointer is over the island -- its header or, open, any of its panel
+    readonly property alias pointerInside: islandHover.hovered
+    HoverHandler { id: islandHover }
     // An island that opens a panel lightens slightly under the pointer
     // (the host sets `hovered` from its own MouseArea) -- the same state
     // layer every button uses, so the bar reads as clickable before the
@@ -263,7 +271,7 @@ Item {
             // the header left, only once there is a close button to make
             // room for, keeps the collapsed capsule untouched (morph is 0,
             // so no shift) and only steps aside once one actually appears.
-            x: surface.pinnedX(width) - (root.pinX === "right" ? root.sub(root.morph, 0.3, 0.7) * 34 : 0)
+            x: surface.pinnedX(width) - (root.pinX === "right" && root.closeButtonShown ? root.sub(root.morph, 0.3, 0.7) * 34 : 0)
             y: root.pinY === "bottom" ? surface.height - height : 0
         }
 
@@ -304,7 +312,7 @@ Item {
             // high against Taskbar's taller header row.
             y: Math.round(root.closeCenterY - height / 2)
             opacity: Math.min(root.contentFade, root.sub(root.morph, 0.35, 0.7))
-            visible: opacity > 0.01
+            visible: root.closeButtonShown && opacity > 0.01
             enabled: root.expanded
             onClicked: root.closeRequested()
         }

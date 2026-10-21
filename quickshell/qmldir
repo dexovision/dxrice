@@ -52,3 +52,5 @@ SystemWidget 1.0 SystemWidget.qml
 AudioVisualizer 1.0 AudioVisualizer.qml
 WeatherWidget 1.0 WeatherWidget.qml
 HistoryGraph 1.0 HistoryGraph.qml
+singleton BatteryService 1.0 BatteryService.qml
+StatusPanel 1.0 StatusPanel.qml

@@ -19,12 +19,17 @@ QtObject {
     // any panel implicitly closes whatever was open before it, matching the
     // shell's existing rule that only one branch is ever expanded at once.
     property string current: ""
+    // how the open panel was opened: "click" (it may take the keyboard) or
+    // "hover" (it must never take focus from the app you are typing in, and
+    // closes when the pointer leaves it)
+    property string openedBy: "click"
 
     function isOpen(name) {
         return root.current === name;
     }
 
-    function open(name) {
+    function open(name, by) {
+        root.openedBy = by === "hover" ? "hover" : "click";
         root.current = name;
     }
 
@@ -41,7 +46,9 @@ QtObject {
     }
 
     function toggle(name) {
+        // a click on what a hover opened keeps it open (and now it's clicked)
+        if (root.current === name && root.openedBy === "hover") { root.openedBy = "click"; return; }
         if (root.current === name) root.close(name);
-        else root.open(name);
+        else root.open(name, "click");
     }
 }
