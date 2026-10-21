@@ -202,11 +202,11 @@ deployed, so none of them are live yet.
 |---|---|---|
 | Widgets pan with the desktop | On by default (`widgets_world`, per-widget `widget_<name>_world`). One shared spring with hyprland.lua's window constants, so they move in step with the windows; every camera move reports to the viewport (drag, SUPER+arrows, SUPER+G recentre, overview, edge push); a workspace switch cuts | **Done** (61bdb69); keeping pace with real windows is **not verified live** |
 | Analog clock with numerals | `clock_style: analog`, `clock_face` | **Done** (89bc47c) |
-| Stacked digital clock | none | **Not done** |
+| Stacked digital clock | `clock_style: stacked`: hours over minutes, a thin hand at the minute's angle, the date beside | **Done** (this pass) |
 | Calendar / reminders | Reminders widget + calendar agenda, kept locally | **Done** (89bc47c, 57b23c1) |
 | Date tile | Part of the reminders widget | **Partial** |
 | Shaped disk / RAM / CPU | Meter widgets, one 150 px footprint, liquid level | **Done** (89bc47c, 57b23c1) |
-| Weather card and tile | `weather_style` card or tile | **Done**; the Today/Tomorrow chips and wavy "feels like" meter are not |
+| Weather card and tile | `weather_style` card (now, feels like, humidity, wind, the next three days) or tile | **Done**; the days are a row, not round chips, and there is no wavy "feels like" meter |
 | Stopwatch | Timer widget with laps | **Done** (89bc47c) |
 | Mini player | Music widget | **Done**; scalloped cover and wavy line not done (styling only) |
 | Sensor waves, pixel blobs | none | **Not done** (no humidity source; blobs unclear) |

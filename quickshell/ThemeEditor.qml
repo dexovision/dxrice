@@ -2118,7 +2118,7 @@ PanelWindow {
                     SwitchList { width: parent.width; fields: root.widgetFields }
                     ChoiceRow {
                         settingKey: "clock_style"; idPrefix: "clockStyle:"; label: "Clock style"
-                        options: [{ value: "type", label: "Type" }, { value: "blocks", label: "Blocks" }, { value: "analog", label: "Analog" }]
+                        options: [{ value: "type", label: "Type" }, { value: "stacked", label: "Stacked" }, { value: "blocks", label: "Blocks" }, { value: "analog", label: "Analog" }]
                     }
                     ChoiceRow {
                         visible: root.clock_style === "analog"

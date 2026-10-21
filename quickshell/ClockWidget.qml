@@ -7,6 +7,8 @@ import QtQuick
 //             colour, both heavy, a light colon raised between them; a thin
 //             accent bar, then the month, the day and the weekday stacked
 //   "blocks"  tty-clock's block digits, drawn as cells in the accent
+//   "stacked" the hours over the minutes, both large, with a thin accent
+//             hand crossing them at the minute's angle and the date beside
 //   "analog"  a round face: hour ticks, the hands, a second hand in the
 //             accent when seconds are on, and the date under it
 //
@@ -20,13 +22,14 @@ DesktopWidget {
     defaultOn: true
     surface: "none"
     interactive: false
-    contentWidth: root.analog ? analogFace.width : (root.blocks ? blockFace.implicitWidth : typeFace.implicitWidth)
-    contentHeight: root.analog ? analogFace.height : (root.blocks ? blockFace.implicitHeight : typeFace.implicitHeight)
+    contentWidth: root.analog ? analogFace.width : (root.blocks ? blockFace.implicitWidth : (root.stacked ? stackFace.implicitWidth : typeFace.implicitWidth))
+    contentHeight: root.analog ? analogFace.height : (root.blocks ? blockFace.implicitHeight : (root.stacked ? stackFace.implicitHeight : typeFace.implicitHeight))
 
     readonly property bool h24: Theme.data.clock_24h !== false
     readonly property bool seconds: Theme.data.clock_seconds === true
     readonly property bool blocks: Theme.data.clock_style === "blocks"
     readonly property bool analog: Theme.data.clock_style === "analog"
+    readonly property bool stacked: Theme.data.clock_style === "stacked"
     property date now: new Date()
     readonly property real dayFraction: (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400
     readonly property string hours: Qt.formatDateTime(root.now, root.h24 ? "HH" : "h")
@@ -66,7 +69,7 @@ DesktopWidget {
     Row {
         id: typeFace
         objectName: "clockTypeFace"
-        visible: !root.blocks && !root.analog
+        visible: !root.blocks && !root.analog && !root.stacked
         spacing: Math.round(22 * root.k)
         Row {
             id: digits
@@ -138,6 +141,69 @@ DesktopWidget {
                 text: Qt.formatDateTime(root.now, "dddd")
                 color: Theme.textActive; opacity: 0.75
                 font.family: Theme.fontFamily; font.pixelSize: Math.round(15 * root.k); font.letterSpacing: 2
+            }
+        }
+    }
+
+    // ---- "stacked" ----
+    Row {
+        id: stackFace
+        objectName: "clockStackedFace"
+        visible: root.stacked
+        spacing: 20
+        Item {
+            id: stackDigits
+            width: Math.max(stackH.implicitWidth, stackM.implicitWidth)
+            height: stackH.implicitHeight + stackM.implicitHeight - 40
+            Roll {
+                id: stackH
+                objectName: "clockStackedHours"
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: root.hours.length < 2 ? "0" + root.hours : root.hours
+                color: Theme.accent
+                font.family: Theme.fontFamily; font.pixelSize: 110; font.weight: Font.Black
+                font.letterSpacing: -4
+            }
+            Roll {
+                id: stackM
+                objectName: "clockStackedMinutes"
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: stackH.implicitHeight - 40
+                text: root.minutes
+                color: Theme.textActive
+                font.family: Theme.fontFamily; font.pixelSize: 110; font.weight: Font.Black
+                font.letterSpacing: -4
+            }
+            // a thin hand through both, pointing where the minute hand would
+            Item {
+                objectName: "clockStackedHand"
+                anchors.centerIn: parent
+                width: 4; height: parent.height * 0.92
+                rotation: root.now.getMinutes() * 6 + root.now.getSeconds() * 0.1
+                Behavior on rotation { enabled: !Theme.reduceMotion; RotationAnimation { direction: RotationAnimation.Clockwise; duration: 260; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSpringFast } }
+                Rectangle { width: 3; radius: 1.5; height: parent.height / 2; x: 0.5; color: Theme.accentText; opacity: 0.9 }
+                Rectangle { width: 9; height: 9; radius: 4.5; anchors.centerIn: parent; color: Theme.accentText }
+            }
+        }
+        Column {
+            anchors.verticalCenter: stackDigits.verticalCenter
+            spacing: 2
+            Eyebrow { text: Qt.formatDateTime(root.now, "ddd") }
+            Text {
+                text: Qt.formatDateTime(root.now, "d")
+                color: Theme.textActive
+                font.family: Theme.fontFamily; font.pixelSize: 34; font.weight: Font.Bold
+            }
+            Text {
+                text: Qt.formatDateTime(root.now, "MMM")
+                color: Theme.text
+                font.family: Theme.fontFamily; font.pixelSize: 14; font.letterSpacing: 1
+            }
+            Text {
+                visible: root.seconds
+                text: Qt.formatDateTime(root.now, "ss")
+                color: Theme.accentText
+                font.family: Theme.fontMono; font.pixelSize: 14
             }
         }
     }

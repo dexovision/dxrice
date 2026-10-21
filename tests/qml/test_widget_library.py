@@ -160,6 +160,22 @@ class SmallerPiecesTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_the_stacked_clock_puts_hours_over_minutes_with_a_minute_hand(self):
+        s = scene(clock_style="stacked")
+        try:
+            s.wait(600)
+            self.assertTrue(s.ev("findNamed('clockStackedFace').visible"))
+            self.assertFalse(s.ev("findNamed('clockTypeFace').visible"))
+            s.ev("findNamed('clockWidget').now = new Date(2026, 9, 21, 8, 1, 0)")
+            s.wait(500)
+            self.assertEqual(s.ev("findNamed('clockStackedHours').text"), "08")
+            self.assertEqual(s.ev("findNamed('clockStackedMinutes').text"), "01")
+            self.assertLess(s.ev("findNamed('clockStackedHours').mapToItem(null, 0, 0).y"),
+                            s.ev("findNamed('clockStackedMinutes').mapToItem(null, 0, 0).y"))
+            self.assertAlmostEqual(s.ev("findNamed('clockStackedHand').rotation") % 360, 6, delta=0.5)
+        finally:
+            s.close()
+
     def test_the_weather_tile_is_compact_and_still_honest(self):
         s = scene(widget_weather=True, weather_style="tile")
         try:
