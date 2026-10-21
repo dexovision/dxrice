@@ -262,16 +262,36 @@ PanelWindow {
         root._hoverWant = "";
         PanelManager.toggle(name);
     }
+    // A hover-opened panel closes a moment after the pointer has left the
+    // section that owns it -- its trigger and its panel, which are one region
+    // (ShellIsland.pointerInside) -- unless the pointer comes back first.
+    // The owner is always the open panel's own section (`_ownerIsland`),
+    // never "whichever section the pointer left last": that used to be the
+    // rule, and leaving along the bar across another section re-aimed the
+    // close at a section with nothing open, so the real panel stayed open.
+    function _ownerIsland() {
+        if (PanelManager.isOpen("calendar")) return clockIsland;
+        if (root.appsOpen) return activityIsland;
+        if (root.statusOpen) return statusIsland;
+        return null;
+    }
+    function _checkHoverClose() {
+        const o = root._ownerIsland();
+        if (!o || PanelManager.openedBy !== "hover" || o.pointerInside) { hoverCloseTimer.stop(); return; }
+        if (!hoverCloseTimer.running) hoverCloseTimer.start();
+    }
     Timer {
         id: hoverCloseTimer
         interval: Theme.hoverCloseDelay
-        property string island: ""
         onTriggered: {
-            if (PanelManager.openedBy !== "hover") return;
-            if (hoverCloseTimer.island === "status" && root.statusOpen && !statusIsland.pointerInside) PanelManager.closeCurrent();
-            if (hoverCloseTimer.island === "clock" && PanelManager.isOpen("calendar") && !clockIsland.pointerInside) PanelManager.closeCurrent();
-            if (hoverCloseTimer.island === "activity" && root.appsOpen && !activityIsland.pointerInside) PanelManager.closeCurrent();
+            const o = root._ownerIsland();
+            if (o && PanelManager.openedBy === "hover" && !o.pointerInside) PanelManager.closeCurrent();
         }
+    }
+    Connections {
+        target: PanelManager
+        function onCurrentChanged() { root._checkHoverClose(); }
+        function onOpenedByChanged() { root._checkHoverClose(); }
     }
     // A panel that closes (Escape, a keybind, a click on its element) can
     // leave the pointer resting on a bar element -- that is not a hover, and
@@ -295,11 +315,7 @@ PanelWindow {
         target: PanelManager
         function onCurrentChanged() { if (PanelManager.current === "") root._closedAt = barPointer.point.scenePosition; }
     }
-    function islandLeft(island, inside) {
-        if (inside) { if (hoverCloseTimer.island === island) hoverCloseTimer.stop(); return; }
-        hoverCloseTimer.island = island;
-        hoverCloseTimer.restart();
-    }
+    function islandLeft(island, inside) { root._checkHoverClose(); }
 
     // ---- network, for its indicator: nmcli monitor reports every change,
     // so the state is re-read only when something happened (no polling) ----

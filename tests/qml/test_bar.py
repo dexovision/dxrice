@@ -146,6 +146,41 @@ class BarTest(unittest.TestCase):
         self.s.wait(400)
         self.assertEqual(self.current(), "")
 
+    def leave_along_the_bar_across(self, start, section):
+        x, y = self.centre(start)
+        QTest.mouseMove(self.s.view, QPoint(x, 70))
+        self.s.wait(20)
+        self.hover(start)
+        self.s.wait(450)
+        self.assertEqual(self.current(), "status:" + start if start != "clockIsland" else "calendar")
+        cx, _ = json.loads(self.s.ev(f"(function(){{ const b = findNamed('{section}'); const p = b.mapToItem(null, b.width/2, b.height/2);"
+                                     " return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()"))
+        for i in range(1, 21):
+            QTest.mouseMove(self.s.view, QPoint(int(x + (cx - x) * i / 20), y))
+            self.s.wait(8)
+        QTest.mouseMove(self.s.view, QPoint(cx, 400))
+        self.s.wait(10)
+        self.away()
+
+    def test_leaving_along_the_bar_across_another_section_still_closes(self):
+        # (seen live: a panel stayed open after the pointer left it. The close
+        # timer followed whichever section the pointer left last; crossing
+        # the clock on the way out aimed it at the clock, which had nothing open)
+        self.leave_along_the_bar_across("network", "clockIsland")
+        self.s.wait(900)
+        self.assertEqual(self.current(), "", "the panel stayed open after the pointer left across the clock")
+        self.leave_along_the_bar_across("audio", "activityIsland")
+        self.s.wait(900)
+        self.assertEqual(self.current(), "", "the panel stayed open after the pointer left across the left section")
+
+    def test_a_clicked_panel_stays_when_the_pointer_leaves(self):
+        x, y = self.centre("network")
+        self.s.click(x, y)
+        self.s.wait(400)
+        self.away()
+        self.s.wait(900)
+        self.assertEqual(self.current(), "status:network")
+
     def test_moving_into_the_panel_keeps_it_open(self):
         self.hover("network")
         self.s.wait(1200)
@@ -360,6 +395,9 @@ class ClickOnlyTest(BarTest):
         self.skipTest("nothing opens on hover")
 
     def test_moving_into_the_panel_keeps_it_open(self):
+        self.skipTest("nothing opens on hover")
+
+    def test_leaving_along_the_bar_across_another_section_still_closes(self):
         self.skipTest("nothing opens on hover")
 
     def test_hover_never_takes_the_keyboard_but_a_click_may(self):
