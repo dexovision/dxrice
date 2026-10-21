@@ -150,6 +150,17 @@ class BarTest(unittest.TestCase):
         self.s.wait(400)
         self.assertEqual(self.current(), "quicksettings", "moving on the element it rests on opens it")
 
+    def test_the_notifications_switch_is_on_when_notifications_show(self):
+        x, y = self.centre("notifications")
+        self.s.click(x, y)
+        self.s.wait(900)
+        sw = "findNamed('statusSection:notifications').children[0].children[2]"
+        self.assertTrue(self.s.ev(f"{sw}.checked"), "mako is not in do-not-disturb, so the switch is on")
+        self.s.ev(f"{sw}.toggled(false)")
+        self.s.wait(50)
+        self.assertIn(["makoctl", "mode", "-a", "dnd"], self.s.bridge.exec_log)
+        self.assertFalse(self.s.ev(f"{sw}.checked"))
+
     def test_the_dashboard_indicator_opens_the_full_dashboard(self):
         x, y = self.centre("dashboard")
         self.s.click(x, y)

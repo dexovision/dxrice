@@ -375,8 +375,10 @@ Item {
                 SectionHead {
                     glyph: root.dnd ? "" : ""; title: "Notifications"
                     detail: root.dnd ? "Do not disturb" : (root.notifications.length ? "Recent" : "Nothing recent")
-                    hasSwitch: true; checked: root.dnd
-                    onToggled: (next) => root.setDnd(next)
+                    // on = notifications show, like Wi-Fi and Bluetooth's
+                    // switches; off is do not disturb
+                    hasSwitch: true; checked: !root.dnd
+                    onToggled: (next) => root.setDnd(!next)
                 }
                 Hairline {}
                 Repeater {
