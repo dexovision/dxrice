@@ -166,6 +166,9 @@ class HarnessBridge(QObject):
         p = Path(path)
         if str(p).startswith(str(self.config_home)) and p.is_file():
             return p.read_text()
+        # the shell's own files (a template it reads, like cava.conf)
+        if getattr(self, "_shell_dir", None) and str(p).startswith(str(self._shell_dir)) and p.is_file():
+            return p.read_text()
         return None
 
     @Slot(str, str)
@@ -191,7 +194,7 @@ def _prepare_shell(dest: Path):
     """Copy the real shell sources, stripping only window-protocol lines a
     stub Item cannot carry (layer-shell anchors / WlrLayershell.*)."""
     for src in SHELL_SRC.iterdir():
-        if src.suffix not in (".qml", ".js") and src.name != "qmldir":
+        if src.suffix not in (".qml", ".js", ".conf") and src.name != "qmldir":
             continue
         if src.is_dir():
             continue

@@ -17,6 +17,19 @@ import Quickshell.Wayland
 // while one plays, so pausing doesn't shuffle the widgets), it reports the
 // band's height to WidgetStack and bottom-corner widgets sit above it.
 //
+// What it listens to (theme.json "visualizer_source", chosen in the bar's
+// Sound section):
+//   "auto"              PipeWire's own choice: what the default output plays
+//   "monitor:<sink>"    one output device, through its monitor
+//   "app:<name>"        one application's playback only (its stream, found by
+//                       its application name each time cava starts)
+// A microphone is never a source here: choosing what the visualizer shows
+// must not start capturing the room. The choice takes effect at once: cava
+// is restarted with a config written for it (in $XDG_RUNTIME_DIR, the
+// shipped cava.conf is only the template). A chosen app that isn't playing,
+// or a source cava can't open, is said in `sourceState`, never replaced by
+// another source.
+//
 // Styles ("visualizer_style"):
 //   "bars"    (default) rounded bars rising from the bottom edge, the accent
 //             at the base fading toward the top
@@ -31,11 +44,85 @@ PanelWindow {
     // 150 px on a 1080 px screen, in proportion elsewhere
     readonly property real barHeight: Math.round(Math.max(90, Math.min(180, (root.screen && root.screen.height ? root.screen.height : 1080) * 0.139)))
     MediaBackend { id: media; objectName: "visualizerMedia" }
-    readonly property bool reserves: root.on && root.available && media.available
+    readonly property bool reserves: root.on && root.available && (root.chosen || media.available)
     Binding { target: WidgetStack; property: "visualizerBand"; value: root.reserves ? root.barHeight : 0 }
-    readonly property bool active: root.on && media.playing && root.available
+    Binding { target: WidgetStack; property: "visualizerState"; value: !root.on ? "off" : root.sourceState }
+    // on automatic it follows the media player; a chosen source (a game has
+    // no media player) runs while it is on, and fades while it is silent
+    readonly property bool chosen: root.source !== "auto"
+    readonly property bool active: root.on && root.available && (root.chosen || media.playing)
     property bool available: true          // false once cava turns out not to start
     property var values: []                // 0..1 per bar, from the last frame
+
+    // ---- the source ----
+    readonly property string source: String(Theme.data.visualizer_source || "auto")
+    // "ok", "missing" (the chosen app isn't playing), "failed" (cava couldn't use it)
+    property string sourceState: "ok"
+    readonly property string runtimeConfig: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/dxrice/cava.conf"
+    property FileView template: FileView { path: Quickshell.shellDir + "/cava.conf"; blockLoading: true }
+    property FileView runtimeFile: FileView { path: root.runtimeConfig }
+    // the cava [input] lines for a resolved source
+    function configFor(method, src) {
+        return root.template.text()
+            .replace(/^method = pipewire$/m, "method = " + method)
+            .replace(/^source = auto$/m, "source = " + src);
+    }
+    property bool _resolving: false
+    Process {
+        id: streams
+        objectName: "visualizerStreams"
+        command: ["pactl", "-f", "json", "list", "sink-inputs"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root._resolving = false;
+                let list = [];
+                try { list = JSON.parse(this.text); } catch (e) { list = []; }
+                const want = root.source.slice(4);
+                const hit = list.find((x) => { const p = x.properties || {}; return (p["application.name"] || p["node.name"]) === want && !x.corked; })
+                    || list.find((x) => { const p = x.properties || {}; return (p["application.name"] || p["node.name"]) === want; });
+                if (!hit) { root.sourceState = "missing"; return; }
+                root._start("pipewire", String((hit.properties || {})["object.serial"] || hit.index));
+            }
+        }
+    }
+    function _start(method, src) {
+        root.runtimeFile.setText(root.configFor(method, src));
+        root.sourceState = "ok";
+        root._frames = 0;
+        Qt.callLater(() => { if (root.active) cava.running = true; });
+    }
+    // starts cava for the current source (resolving an app's stream first)
+    function _launch() {
+        if (root.source.indexOf("app:") === 0) {
+            if (!root._resolving) { root._resolving = true; streams.running = true; }
+        } else if (root.source.indexOf("monitor:") === 0) {
+            root._start("pulse", root.source.slice(8) + ".monitor");
+        } else {
+            root._start("pipewire", "auto");
+        }
+    }
+    // a new choice: cava restarts on it straight away
+    onSourceChanged: {
+        root.available = true;
+        root.sourceState = "ok";
+        retry.stop();
+        if (cava.running) { root._switching = true; cava.running = false; }
+        else root._sync();
+    }
+    property bool _switching: false
+    // the chosen app isn't playing yet: look again every few seconds
+    Timer {
+        running: root.active && root.sourceState === "missing"
+        interval: 3000; repeat: true
+        onTriggered: root._launch()
+    }
+    // silence (nothing above the floor for a while) fades the bars out
+    property bool quiet: false
+    Timer { id: quietTimer; interval: 1500; onTriggered: root.quiet = true }
+    onValuesChanged: {
+        if (root.values.some((v) => v > 0.02)) { root.quiet = false; quietTimer.stop(); }
+        else if (!root.quiet && !quietTimer.running) quietTimer.start();
+    }
 
     // cava's frame: "v;v;v;...;" with 0..1000 per bar
     function feed(line) {
@@ -58,23 +145,27 @@ PanelWindow {
     Process {
         id: cava
         objectName: "visualizerCava"
-        command: ["cava", "-p", Quickshell.shellDir + "/cava.conf"]
+        command: ["cava", "-p", root.runtimeConfig]
         running: false
         stdout: SplitParser { onRead: (data) => { root._frames += 1; root.feed(data); } }
-        onRunningChanged: if (!running && root.active) {
-            if (root._frames === 0) root.available = false;
+        onRunningChanged: if (!running) {
+            if (root._switching) { root._switching = false; root.values = []; root._sync(); return; }
+            if (!root.active) return;
+            // never a frame: on automatic that means no cava/PipeWire here at
+            // all; on a chosen source, that this source didn't work
+            if (root._frames === 0) { if (root.source === "auto") root.available = false; else root.sourceState = "failed"; }
             else retry.start();
         }
     }
     Timer { id: retry; interval: 2000; onTriggered: root._sync() }
     function _sync() {
-        if (root.active && !cava.running) cava.running = true;
+        if (root.active && !cava.running) root._launch();
         else if (!root.active && cava.running) cava.running = false;
     }
     onActiveChanged: { if (!root.active) { root.values = []; retry.stop(); } root._sync(); }
     Component.onCompleted: root._sync()
 
-    property real shown: root.active ? 1 : 0
+    property real shown: root.active && !(root.chosen && root.quiet) ? 1 : 0
     Behavior on shown { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
     visible: root.shown > 0
     color: "transparent"

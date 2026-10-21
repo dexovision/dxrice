@@ -5,6 +5,7 @@ machine without cava shows nothing.
 
     python3 tests/qml/test_visualizer.py
 """
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -154,6 +155,113 @@ class VisualizerTest(unittest.TestCase):
             self.assertTrue(s.ev("findNamed('visualizerBlocks').visible"))
             self.assertFalse(s.ev("findNamed('visualizerBars').visible"))
             self.assertTrue(s.ev("findNamed('visualizerBlocks').text").startswith("  ▂ ▄ █"))
+        finally:
+            s.close()
+
+
+SINKS = json.dumps([{"name": "alsa_output.usb-headset", "description": "USB Headset"},
+                    {"name": "alsa_output.pci-speakers", "description": "Speakers"}])
+STREAMS = json.dumps([{"index": 51, "corked": False, "properties": {"application.name": "Brave", "object.serial": "1582"}},
+                      {"index": 52, "corked": False, "properties": {"node.name": "java", "object.serial": "1708"}}])
+
+
+class SourceTest(unittest.TestCase):
+    """What the visualizer listens to, chosen in the bar's Sound section:
+    automatic, one output's monitor, or one application's stream -- a real
+    change of what cava reads, never a microphone."""
+
+    def scene(self, frames=FRAME, **theme):
+        themed = with_theme(**theme)
+
+        def setup(bridge):
+            themed(bridge)
+            # in place before the shell loads (it looks at once)
+            bridge.commands.insert(0, ("cava -p", frames))
+            bridge.commands.insert(0, ("pactl -f json list sinks", SINKS))
+            bridge.commands.insert(0, ("pactl -f json list sink-inputs", STREAMS))
+        return Scene(width=1920, height=1080, setup=setup)
+
+    def config(self, s):
+        return s.ev(f"{V}.runtimeFile.text()")
+
+    def saved(self, s):
+        return json.loads((Path(s.bridge.config_home) / "dxrice" / "theme.json").read_text()).get("visualizer_source")
+
+    def open_sound(self, s):
+        s.ev("panels.open('status:audio', 'click')")
+        s.wait(900)
+
+    def test_the_sound_section_offers_outputs_and_apps_but_never_a_microphone(self):
+        s = self.scene()
+        try:
+            self.open_sound(s)
+            names = s.ev("(function(){ const out = []; const st = [findNamed('statusPanel')]; while (st.length) { const it = st.pop();"
+                         " if (String(it.objectName).indexOf('vizSource:') === 0 && it.visible) out.push(it.objectName);"
+                         " for (let k = 0; k < it.children.length; k++) st.push(it.children[k]); } return out.sort().join(','); })()").split(",")
+            self.assertEqual(names, sorted(["vizSource:auto", "vizSource:monitor:alsa_output.usb-headset", "vizSource:monitor:alsa_output.pci-speakers",
+                                            "vizSource:app:Brave", "vizSource:app:java"]))
+            self.assertFalse(any("input" in n or "mic" in n.lower() for n in names))
+            self.assertTrue(s.ev("findNamed('vizSource:auto').selected"))
+        finally:
+            s.close()
+
+    def test_choosing_an_output_restarts_cava_on_its_monitor_and_is_saved(self):
+        s = self.scene()
+        try:
+            s.ev("setPlayer({ trackTitle: 'x', isPlaying: true })")
+            s.wait(500)
+            self.assertIn("method = pipewire", self.config(s))
+            self.assertIn("source = auto", self.config(s))
+            runs = len(cava_runs(s))
+            self.open_sound(s)
+            s.ev("findNamed('vizSource:monitor:alsa_output.usb-headset').picked()")
+            s.wait(400)
+            self.assertEqual(self.saved(s), "monitor:alsa_output.usb-headset")
+            self.assertIn("method = pulse", self.config(s))
+            self.assertIn("source = alsa_output.usb-headset.monitor", self.config(s))
+            self.assertGreater(len(cava_runs(s)), runs, "cava wasn't restarted on the new source")
+        finally:
+            s.close()
+
+    def test_an_app_is_found_by_its_stream_and_runs_without_a_media_player(self):
+        s = self.scene(visualizer_source="app:java")
+        try:
+            s.wait(500)
+            self.assertTrue(s.ev(f"{V}.active"), "a chosen app must not wait for a media player (a game has none)")
+            self.assertIn("method = pipewire", self.config(s))
+            self.assertIn("source = 1708", self.config(s))
+            self.assertEqual(s.ev("widgetStack.visualizerState"), "ok")
+        finally:
+            s.close()
+
+    def test_an_app_that_is_not_playing_is_said_and_waited_for(self):
+        s = self.scene(visualizer_source="app:Spotify")
+        try:
+            s.wait(500)
+            self.assertEqual(s.ev(f"{V}.sourceState"), "missing")
+            self.assertEqual(cava_runs(s), [], "cava ran on some other source")
+            self.open_sound(s)
+            self.assertTrue(s.ev("findNamed('vizSource:app:Spotify').selected"), "the chosen app should stay listed")
+            self.assertTrue(s.ev("findNamed('vizSourceNote').visible"))
+            self.assertIn("Spotify", s.ev("findNamed('vizSourceNote').text"))
+            # it starts playing: picked up on the next look
+            s.set_command("pactl -f json list sink-inputs", json.dumps([{"index": 9, "corked": False,
+                          "properties": {"application.name": "Spotify", "object.serial": "77"}}]))
+            s.wait(3400)
+            self.assertEqual(s.ev(f"{V}.sourceState"), "ok")
+            self.assertIn("source = 77", self.config(s))
+        finally:
+            s.close()
+
+    def test_a_source_cava_cannot_use_is_said_and_does_not_disable_the_visualizer(self):
+        s = self.scene(frames="", visualizer_source="monitor:alsa_output.gone")     # cava starts, never a frame
+        try:
+            s.wait(800)
+            self.assertEqual(s.ev(f"{V}.sourceState"), "failed")
+            self.assertTrue(s.ev(f"{V}.available"), "a bad choice must not switch the visualizer off for good")
+            s.ev("theme.setKeys({ visualizer_source: 'auto' })")
+            s.wait(300)
+            self.assertEqual(s.ev(f"{V}.sourceState"), "ok")
         finally:
             s.close()
 

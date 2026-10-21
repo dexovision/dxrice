@@ -68,9 +68,13 @@ Item {
         root.refresh();
         root._countSampling();
         if (root.shown === "notifications") NotificationService.markSeen();
+        if (root.shown === "audio") root.refreshVizSources();
     }
     // looking at the notifications reads them
-    onShownChanged: if (root.shown === "notifications") NotificationService.markSeen()
+    onShownChanged: {
+        if (root.shown === "notifications") NotificationService.markSeen();
+        if (root.shown === "audio") root.refreshVizSources();
+    }
 
     // ---- media (the shell's one chosen player) ----
     MediaBackend { id: media; objectName: "statusMedia" }
@@ -110,6 +114,42 @@ Item {
         interval: 5000; repeat: true; triggeredOnStart: true
         onTriggered: pingProc.running = true
     }
+    // ---- what the desktop visualizer listens to (theme.json
+    // "visualizer_source"; AudioVisualizer.qml): automatic, one output's
+    // monitor, or one playing application. Microphones are never offered. ----
+    property var vizOutputs: []      // [{ name, label }]
+    property var vizApps: []         // [names]
+    Process {
+        id: vizSinks
+        command: ["pactl", "-f", "json", "list", "sinks"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let l = [];
+                try { l = JSON.parse(this.text); } catch (e) { l = []; }
+                root.vizOutputs = l.map((x) => ({ name: x.name, label: x.description || x.name }));
+            }
+        }
+    }
+    Process {
+        id: vizStreams
+        command: ["pactl", "-f", "json", "list", "sink-inputs"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let l = [];
+                try { l = JSON.parse(this.text); } catch (e) { l = []; }
+                const names = [];
+                for (const x of l) {
+                    const p = x.properties || {};
+                    const n = p["application.name"] || p["node.name"];
+                    if (n && names.indexOf(n) < 0) names.push(n);
+                }
+                root.vizApps = names;
+            }
+        }
+    }
+    function refreshVizSources() { vizSinks.running = true; vizStreams.running = true; }
+    readonly property string vizSource: String(Theme.data.visualizer_source || "auto")
+    function setVizSource(id) { Theme.setKeys({ visualizer_source: id }); }
     function rate(kbs) { return kbs >= 1024 ? (kbs / 1024).toFixed(1) + " MB/s" : Math.round(kbs) + " KB/s"; }
     function uptime(s) {
         const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
@@ -499,6 +539,50 @@ Item {
                         selected: root.source === modelData
                         onPicked: audioDevices.setInput(modelData)
                     }
+                }
+                // what the desktop visualizer shows
+                Text {
+                    text: "VISUALIZER"; topPadding: 4
+                    color: Theme.text; opacity: Theme.opacityMuted
+                    font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1.5
+                }
+                Choice {
+                    objectName: "vizSource:auto"
+                    width: body.width
+                    label: "Automatic \u00b7 what the media player plays"
+                    selected: root.vizSource === "auto"
+                    onPicked: root.setVizSource("auto")
+                }
+                Repeater {
+                    model: root.vizOutputs
+                    delegate: Choice {
+                        required property var modelData
+                        objectName: "vizSource:monitor:" + modelData.name
+                        width: body.width
+                        label: "Output \u00b7 " + modelData.label
+                        selected: root.vizSource === "monitor:" + modelData.name
+                        onPicked: root.setVizSource("monitor:" + modelData.name)
+                    }
+                }
+                Repeater {
+                    // the chosen app stays listed while it isn't playing
+                    model: root.vizSource.indexOf("app:") === 0 && root.vizApps.indexOf(root.vizSource.slice(4)) < 0
+                           ? root.vizApps.concat([root.vizSource.slice(4)]) : root.vizApps
+                    delegate: Choice {
+                        required property var modelData
+                        objectName: "vizSource:app:" + modelData
+                        width: body.width
+                        label: "App \u00b7 " + modelData
+                        selected: root.vizSource === "app:" + modelData
+                        onPicked: root.setVizSource("app:" + modelData)
+                    }
+                }
+                Note {
+                    objectName: "vizSourceNote"
+                    visible: WidgetStack.visualizerState !== "ok"
+                    text: WidgetStack.visualizerState === "off" ? "The visualizer is switched off (Settings > Experience)."
+                        : (WidgetStack.visualizerState === "missing" ? root.vizSource.slice(4) + " isn't playing anything right now; the visualizer waits for it."
+                           : "cava couldn't listen to this source.")
                 }
             }
 
