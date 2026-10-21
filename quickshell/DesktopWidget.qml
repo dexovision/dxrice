@@ -16,6 +16,9 @@ import Quickshell.Wayland
 //                  alike: "none" (bare, with a soft shadow for legibility on
 //                  any wallpaper), "glass" (the shell's panel glass) or
 //                  "terminal" (a dark, square-edged plate with a hairline)
+//   worldAttached  theme.json "widget_<name>_world": true makes it part of the
+//                  infinite desktop -- it travels with the windows when you
+//                  pan (Viewport); false (default) keeps it on the screen
 //   interactive    false for something only to look at (the clock): it then
 //                  takes no input at all and the desktop under it stays
 //                  clickable; true takes input over the card only
@@ -37,6 +40,12 @@ PanelWindow {
     property real bottomClearance: 96   // the dock
     property string surface: "glass"
     property bool interactive: true
+    readonly property bool worldAttached: Theme.data["widget_" + root.name + "_world"] === true
+    // the pan, smoothed between the daemon's ~30 updates a second
+    property real panX: root.worldAttached ? Viewport.x : 0
+    property real panY: root.worldAttached ? Viewport.y : 0
+    Behavior on panX { NumberAnimation { duration: 45; easing.type: Easing.Linear } }
+    Behavior on panY { NumberAnimation { duration: 45; easing.type: Easing.Linear } }
     default property alias content: holder.data
     readonly property alias card: surface
     readonly property alias hovered: hover.hovered
@@ -80,11 +89,15 @@ PanelWindow {
         height: root.contentHeight + 2 * root.pad
         readonly property bool atTop: root.corner.indexOf("top") === 0
         readonly property bool atLeft: root.corner.endsWith("left")
-        x: atLeft ? root.cornerMargin : parent.width - width - root.cornerMargin
+        x: (atLeft ? root.cornerMargin : parent.width - width - root.cornerMargin) + root.panX
         // rises 12 px into place on arrival (falls 12 px when leaving)
-        y: (atTop ? root.topClearance : parent.height - height - root.bottomClearance)
-           + (1 - root.shown) * (atTop ? -12 : 12) - (root.interactive && hover.hovered ? 2 : 0)
-        Behavior on y { enabled: !arrive.running; NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+        y: (atTop ? root.topClearance : parent.height - height - root.bottomClearance) + root.panY
+           + (1 - root.shown) * (atTop ? -12 : 12)
+        // the hover lift is drawn, not a move: `y` has to follow a pan at once
+        transform: Translate {
+            y: root.interactive && hover.hovered ? -2 : 0
+            Behavior on y { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+        }
         opacity: root.shown
         scale: 0.97 + 0.03 * root.shown
         transformOrigin: surface.atTop ? (surface.atLeft ? Item.TopLeft : Item.TopRight) : (surface.atLeft ? Item.BottomLeft : Item.BottomRight)

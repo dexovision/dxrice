@@ -214,6 +214,11 @@ PanelWindow {
     property string widget_weather_pos: "bottom-right"
     property string weather_location: ""
     property string weather_units: "metric"
+    // world-attached widgets travel with the infinite desktop when you pan
+    property bool widget_clock_world: false
+    property bool widget_music_world: false
+    property bool widget_system_world: false
+    property bool widget_weather_world: false
 
     property string font_family: "JetBrainsMono Nerd Font"
     // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
@@ -343,7 +348,8 @@ PanelWindow {
         keys.push("window_layout");
         for (const f of widgetFields) keys.push(f.key);
         keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style", "visualizer_style",
-                   "widget_weather_pos", "weather_location", "weather_units");
+                   "widget_weather_pos", "weather_location", "weather_units",
+                   "widget_clock_world", "widget_music_world", "widget_system_world", "widget_weather_world");
         return keys;
     }
 
@@ -732,6 +738,51 @@ PanelWindow {
                     MouseArea {
                         anchors.fill: parent
                         onClicked: { root[choiceRow.settingKey] = opt.modelData.value; root.dirty = true; }
+                    }
+                }
+            }
+        }
+    }
+
+    // Several on/off settings as a row of toggle chips (each its own key).
+    component ToggleChips: Item {
+        id: tchips
+        property string label: ""
+        property string sub: ""
+        property var options: []        // [{ key, label }]
+        width: parent.width
+        height: tcol.implicitHeight
+        Column {
+            id: tcol
+            width: parent.width
+            spacing: Theme.padSm
+            Text { text: tchips.label; color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium }
+            Text { visible: tchips.sub.length > 0; width: parent.width; text: tchips.sub; color: Theme.text; opacity: Theme.opacityMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall; wrapMode: Text.WordWrap }
+            Flow {
+                width: parent.width
+                spacing: Theme.padSm
+                Repeater {
+                    model: tchips.options
+                    delegate: Rectangle {
+                        id: tc
+                        required property var modelData
+                        readonly property bool on: root[tc.modelData.key] === true
+                        objectName: "toggleChip:" + tc.modelData.key
+                        width: tcText.implicitWidth + 28; height: 30
+                        radius: height / 2
+                        color: Theme.mix(Theme.layer1, Theme.accent, tc.on ? 0.22 : (tcHover.hovered ? 0.07 : 0))
+                        border.width: tc.on ? 2 : 1
+                        border.color: tc.on ? Theme.accent : Theme.borderIdle
+                        Behavior on color { ColorAnimation { duration: Theme.durationFast } }
+                        HoverHandler { id: tcHover; cursorShape: Qt.PointingHandCursor }
+                        Text {
+                            id: tcText
+                            anchors.centerIn: parent
+                            text: tc.modelData.label
+                            color: tc.on ? Theme.textActive : Theme.text
+                            font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; font.weight: tc.on ? Font.DemiBold : Font.Normal
+                        }
+                        MouseArea { anchors.fill: parent; onClicked: { root[tc.modelData.key] = !tc.on; root.dirty = true; } }
                     }
                 }
             }
@@ -2073,6 +2124,12 @@ PanelWindow {
                         CornerRow { settingKey: "widget_music_pos"; idPrefix: "widgetPos:music:"; label: "Now playing" }
                         CornerRow { settingKey: "widget_system_pos"; idPrefix: "widgetPos:system:"; label: "System monitor" }
                         CornerRow { settingKey: "widget_weather_pos"; idPrefix: "widgetPos:weather:"; label: "Weather" }
+                    }
+                    ToggleChips {
+                        label: "Move with the desktop"
+                        sub: "These travel with your windows when you pan the infinite desktop; the rest stay on the screen."
+                        options: [{ key: "widget_clock_world", label: "Clock" }, { key: "widget_music_world", label: "Now playing" },
+                                  { key: "widget_system_world", label: "System monitor" }, { key: "widget_weather_world", label: "Weather" }]
                     }
                 }
             }

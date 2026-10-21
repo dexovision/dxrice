@@ -196,6 +196,61 @@ class ClockSizeAndMotionTest(unittest.TestCase):
             s.close()
 
 
+class WorldAttachedTest(unittest.TestCase):
+    """A world-attached widget travels with the infinite desktop's pan
+    (Viewport, fed by the pan daemon); a screen-fixed one and the bar never
+    move."""
+
+    def ws(self, s):
+        return s.ev("viewport.workspace")
+
+    def test_a_world_attached_widget_follows_the_pan_and_a_fixed_one_does_not(self):
+        s = scene(widget_clock_world=True, widget_system=True, widget_system_world=None)
+        try:
+            s.wait(600)
+            cx, cy = named(s, "widgetCard:clock", "x"), named(s, "widgetCard:clock", "y")
+            sx = named(s, "widgetCard:system", "x")
+            bar = s.ev("findNamed('statusIsland').x")
+            w = self.ws(s)
+            self.assertIsNotNone(w)
+            s.ev(f"viewport.offsets = ({{ '{w}': [-300, 120] }})")
+            s.wait(200)
+            self.assertAlmostEqual(named(s, "widgetCard:clock", "x"), cx - 300, delta=0.5)
+            self.assertAlmostEqual(named(s, "widgetCard:clock", "y"), cy + 120, delta=0.5)
+            self.assertAlmostEqual(named(s, "widgetCard:system", "x"), sx, delta=0.5, msg="a screen-fixed widget moved")
+            self.assertAlmostEqual(s.ev("findNamed('statusIsland').x"), bar, delta=0.5, msg="the bar moved")
+            s.ev(f"viewport.offsets = ({{ '{w}': [0, 0] }})")
+            s.wait(200)
+            self.assertAlmostEqual(named(s, "widgetCard:clock", "x"), cx, delta=0.5)
+        finally:
+            s.close()
+
+    def test_another_workspaces_pan_does_not_move_it(self):
+        s = scene(widget_clock_world=True)
+        try:
+            s.wait(600)
+            cx = named(s, "widgetCard:clock", "x")
+            s.ev("viewport.offsets = ({ '999': [500, 500] })")
+            s.wait(200)
+            self.assertAlmostEqual(named(s, "widgetCard:clock", "x"), cx, delta=0.5)
+        finally:
+            s.close()
+
+    def test_the_choice_is_made_in_settings(self):
+        s = scene()
+        try:
+            s.ev("panels.open('theme')")
+            s.wait(700)
+            s.ev(f"{TE}.currentCategory = 'experience'")
+            s.wait(600)
+            s.ev("(function(){ const c = findNamed('toggleChip:widget_music_world'); c.children[c.children.length - 1].clicked(null); })()")
+            self.assertTrue(s.ev(f"{TE}.widget_music_world"))
+            self.assertTrue(s.ev(f"{TE}.dirty"))
+            self.assertIn("widget_music_world", s.ev(f"{TE}.allKeys().join(',')").split(","))
+        finally:
+            s.close()
+
+
 class MusicWidgetTest(unittest.TestCase):
     def setUp(self):
         self.s = scene(widget_music=None)

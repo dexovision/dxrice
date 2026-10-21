@@ -546,6 +546,10 @@ def pan_held():
     return super_pressed and alt_pressed
 
 
+# how far each workspace has been panned, for world-attached widgets
+import dxrice_viewport  # noqa: E402
+_viewport = dxrice_viewport.Viewport()
+
 _was_active = False
 while True:
     if not _was_active:
@@ -561,6 +565,8 @@ while True:
         acc_x = 0.0
         acc_y = 0.0
 
+    if _was_active and not active_drag:
+        _viewport.flush()           # the pan ended: its final offset
     _was_active = active_drag
     if not active_drag:
         _drag_cache_workspace = None
@@ -599,5 +605,6 @@ while True:
             exprs.append(move_window_exact_lua(pos[0], pos[1], addr))
 
         batch_async(exprs)
+        _viewport.record(workspace_id, idx, idy)
     except Exception:
         pass
