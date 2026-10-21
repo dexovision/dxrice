@@ -154,6 +154,9 @@ ShellRoot {
     }
     Dock {
         id: dock
+        // the focused app's class, from TopBar's startup read + events
+        // (Hyprland.activeToplevel stays null until the first focus change)
+        focusedAppId: topBar.activeAppId
         onTaskbarRequested: PanelManager.toggle("taskbar")
         onLauncherRequested: appLauncher.toggle()
     }

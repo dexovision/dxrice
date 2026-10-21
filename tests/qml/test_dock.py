@@ -58,10 +58,25 @@ class DockTest(unittest.TestCase):
         self.s.wait(400)
         self.assertGreater(self.s.ev(f"{mark}.opacity"), 0)
         narrow = self.s.ev(f"{mark}.width")
-        self.s.ev("hypr.activeToplevel = hypr.toplevels.values[0]")
+        self.s.ev(f"{DOCK}.focusedAppId = 'firefox'")      # what TopBar reports as focused
         self.s.wait(500)
         self.assertGreater(self.s.ev(f"{mark}.width"), narrow)
         self.assertEqual(self.s.ev(f"{mark}.color.toString()"), self.s.ev("theme.accent.toString()"))
+
+    def test_the_focused_mark_works_before_any_focus_change(self):
+        # Hyprland.activeToplevel is null until the first focus change; the
+        # dock reads the focused class TopBar already knows
+        mark = child(self.s, "Firefox", "dockRunning")
+        self.s.ev("hypr.activeToplevel = null")
+        self.s.ev("hypr.toplevels = ({ values: [{ address: '0x1', wayland: { appId: 'firefox' } }] })")
+        self.s.ev(f"{DOCK}.focusedAppId = 'firefox'")
+        self.s.wait(500)
+        self.assertGreater(self.s.ev(f"{mark}.opacity"), 0.9, "running, from the Wayland app id")
+        self.assertEqual(self.s.ev(f"{mark}.width"), 14)
+
+    def test_the_shell_feeds_the_dock_from_the_top_bar(self):
+        src = (Path(__file__).resolve().parents[2] / "quickshell" / "shell.qml").read_text()
+        self.assertIn("focusedAppId: topBar.activeAppId", src)
 
     def test_launching_hops_the_icon_and_it_lands_back(self):
         pos = json.loads(self.s.ev('(function(){ const t = findNamed("dockTile:Firefox");'

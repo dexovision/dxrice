@@ -22,11 +22,12 @@ DesktopWidget {
     contentHeight: body.implicitHeight
 
     readonly property int history: 24
-    property var cpu: []
-    property var gpu: []
-    property var mem: []
-    property var net: []
-    function _push(list, v) { const a = list.slice(-(root.history - 1)); a.push(v); return a; }
+    // the last `history` samples of each, from PerformanceService (which
+    // keeps them for every graph in the shell)
+    readonly property var cpu: PerformanceService.cpuHistory.slice(-root.history)
+    readonly property var gpu: PerformanceService.gpuHistory.slice(-root.history)
+    readonly property var mem: PerformanceService.memHistory.slice(-root.history)
+    readonly property var net: PerformanceService.netDownHistory.slice(-root.history)
 
     // count in and out of the shared sampler only while this card is shown
     property bool _counted: false
@@ -36,18 +37,6 @@ DesktopWidget {
     }
     Component.onCompleted: if (root.active && !root._counted) { PerformanceService.widgetUsers += 1; root._counted = true; }
     Component.onDestruction: if (root._counted) PerformanceService.widgetUsers -= 1
-
-    Connections {
-        target: PerformanceService
-        enabled: root.active
-        function onSampled() {
-            const P = PerformanceService;
-            root.cpu = root._push(root.cpu, P.cpuPercent);
-            root.mem = root._push(root.mem, P.memPercent);
-            if (P.gpuAvailable) root.gpu = root._push(root.gpu, P.gpuPercent);
-            root.net = root._push(root.net, P.netDownKBs);
-        }
-    }
 
     // ---- formatting (pure, so tests can check it) ----
     readonly property string ramp: "▁▂▃▄▅▆▇█"

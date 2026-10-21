@@ -335,7 +335,11 @@ PanelWindow {
         for (let i = 0; i < list.length; i++) { const c = root.classOf(list[i]); if (c) out.push(c); }
         return out;
     }
-    readonly property string focusedClass: root.classOf(Hyprland.activeToplevel)
+    // set by shell.qml from TopBar, which knows the focused window from the
+    // start; Hyprland.activeToplevel only as a fallback (null until the
+    // first focus change after the shell starts)
+    property string focusedAppId: ""
+    readonly property string focusedClass: root.focusedAppId || root.classOf(Hyprland.activeToplevel)
     function isRunning(key) {
         if (!key) return false;
         for (const c of root.runningClasses) if (root.matches(c, key)) return true;

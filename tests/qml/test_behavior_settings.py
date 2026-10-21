@@ -130,6 +130,29 @@ class LayoutPickerTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_apply_writes_only_what_was_changed(self):
+        """A minimal theme.json: changing one switch adds exactly that key --
+        no editor default for anything untouched (window_layout included)."""
+        def minimal(bridge):
+            path = Path(bridge.config_home) / "dxrice" / "theme.json"
+            full = json.loads(path.read_text())
+            keep = {k: full[k] for k in ("glass_bg", "glass_bg_active", "glass_text", "glass_text_active",
+                                         "glass_border", "accent", "font_family", "wallpaper") if k in full}
+            path.write_text(json.dumps(keep))
+        s = Scene(width=1920, height=1080, setup=minimal)
+        try:
+            before = theme_json(s)
+            self.open_experience(s)
+            s.ev(f"{TE}.widget_system = true; {TE}.dirty = true")
+            s.ev(f"{TE}.apply()")
+            s.wait(500)
+            after = theme_json(s)
+            added = {k: after[k] for k in after if k not in before}
+            self.assertEqual(added, {"widget_system": True})
+            self.assertEqual({k: after[k] for k in before}, before)
+        finally:
+            s.close()
+
     def test_the_shell_and_the_scripts_read_old_files_the_same_way(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
         import dxrice_layout_apply as lap

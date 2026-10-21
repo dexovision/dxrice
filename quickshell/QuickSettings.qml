@@ -218,6 +218,14 @@ Item {
         idleInhibitProc.running = on;
     }
     Timer { id: refreshTimer; interval: 800; onTriggered: root.refreshToggleStates() }
+    // A read-back that never comes (the tool missing, hung) must not leave a
+    // tile pulsing for good: after 3 s it stops waiting and reads again.
+    Timer {
+        id: pendingTimeout
+        interval: 3000
+        running: root.wifiPending || root.bluetoothPending
+        onTriggered: { root.wifiPending = false; root.bluetoothPending = false; root.refreshToggleStates(); }
+    }
 
     // ---- screenshots ----
     function takeScreenshot(region) {

@@ -374,7 +374,13 @@ PanelWindow {
         root.window_layout = Theme.windowLayoutOf(data);
         root.dirty = false;
         root._draftBase = JSON.stringify(data);
+        root._loaded = root.snapshot();
     }
+    // What the fields held right after loading: Apply writes a field only if
+    // the file already has it or it was changed since, so a setting you never
+    // touched is never written in with the editor's default (that is how a
+    // layout once got saved that nobody had chosen).
+    property var _loaded: ({})
 
     // ---- unapplied edits survive closing (see ThemeDraft.qml) ----
     // The theme.json content the current edits are relative to. Follows the
@@ -434,10 +440,17 @@ PanelWindow {
         // per Apply, rotating real pre-migration backups out of the 10 kept.
         const obj = {};
         for (const key in Theme.data) obj[key] = Theme.data[key];
-        for (const key of allKeys()) obj[key] = root[key];
-        // one window-arrangement setting: the two an earlier build had go
-        delete obj.layout_auto_place;
-        delete obj.layout_super_g;
+        for (const key of allKeys()) {
+            if (key in Theme.data || JSON.stringify(root[key]) !== JSON.stringify(root._loaded[key]))
+                obj[key] = root[key];
+        }
+        // one window-arrangement setting: the two an earlier build had are
+        // replaced by it (the one migration Apply performs)
+        if ("layout_auto_place" in obj || "layout_super_g" in obj) {
+            obj.window_layout = root.window_layout;
+            delete obj.layout_auto_place;
+            delete obj.layout_super_g;
+        }
         writer.setText(JSON.stringify(obj, null, 4));
         // Written to theme.json, so there is no longer anything unapplied
         // to keep (even if rendering it fails -- see applyProc).

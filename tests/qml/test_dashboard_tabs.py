@@ -113,6 +113,17 @@ class ToggleStateTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_pending_never_sticks_when_the_read_back_never_comes(self):
+        s = self.scene()
+        try:
+            s.set_command("nmcli radio wifi", "__NOSTART__")
+            s.ev("findPanel('currentTab').setWifi(false)")
+            self.assertTrue(s.ev("findNamed('toggle:wifi').pending"))
+            s.wait(3400)
+            self.assertFalse(s.ev("findNamed('toggle:wifi').pending"), "still pulsing after the timeout")
+        finally:
+            s.close()
+
     def test_no_bluetooth_adapter_dims_the_tile_and_it_switches_nothing(self):
         s = self.scene(bt="No default controller available\n")
         try:
