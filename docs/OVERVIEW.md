@@ -272,13 +272,21 @@ key would silently do nothing, so the proven path is kept.
   - The tests use stand-in pictures.
   - Windows panned off screen get no picture: on a real recording
     (2026-10-20) every window outside the view stayed without one, and the
-    pictures came the moment the windows were back on screen. A window
-    without a picture is drawn as a card -- its app icon (or initial),
-    title and class, marked OFF SCREEN or NO PICTURE -- never as a grey
-    stand-in for a thumbnail. The handover still waits up to 150 ms for
-    pictures that can come.
-  - When the view has to zoom out, the screen you were looking at is
-    outlined inside it, so the larger desktop reads relative to it.
+    pictures came the moment the windows were back on screen. (Quickshell's
+    ScreencopyView drops its picture when a copy is refused.) So each
+    window's picture is also kept from the last time it was on screen: two
+    still captures per window, refreshed every 8 s while the overview is
+    closed and the moment a pan starts, a refresh replacing the kept
+    picture only once it has a frame. A window off screen shows that
+    picture, marked "OFF SCREEN · n min ago"; one never seen on screen since
+    the shell started is drawn as a card -- its app icon (or initial), title
+    and class, marked OFF SCREEN or NO PICTURE -- never as a grey stand-in.
+    Whether a still capture taken while the overview's surface is unmapped
+    works on Hyprland is **not verified live yet**; if it doesn't, the cards
+    are what shows. `"overview_keep_pictures": false` turns it off.
+  - A translucent window gets a solid ground under its picture once the
+    view zooms out, so the overview's wallpaper doesn't show through it.
+  - The screen you were looking at is no longer outlined.
   - A layout chip moves the real windows; Hyprland reports no event for a
     floating window moving, so the overview reads the windows again when
     the chip's arrangement is done (and once more after the move

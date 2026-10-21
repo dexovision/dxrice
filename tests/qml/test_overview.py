@@ -1364,19 +1364,83 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
         finally:
             o.scene.close()
 
-    def test_the_screen_is_outlined_when_the_view_zooms_out(self):
+    def test_no_box_is_drawn_around_the_screen(self):
+        # (the zoomed-out view used to outline the screen you were looking at:
+        # it read as a stray box over the desktop)
         rects = [(400, 200, 1300, 800), (2400, 300, 3200, 800), (-900, -500, -100, 100)]
         o = OverviewScene(clients_for(rects))
         try:
             o.call("show")
             o.scene.wait(SETTLE)
-            L = o.layout
-            self.assertLess(L["scale"], 1)
-            f = "findNamed('overviewScreenFrame')"
-            self.assertTrue(o.scene.ev(f"{f}.visible"))
-            self.assertAlmostEqual(o.scene.ev(f"{f}.x"), L["dx"], delta=0.5)
-            self.assertAlmostEqual(o.scene.ev(f"{f}.y"), L["dy"], delta=0.5)
-            self.assertAlmostEqual(o.scene.ev(f"{f}.width"), L["monitor"]["width"] * L["scale"], delta=0.5)
+            self.assertLess(o.layout["scale"], 1)
+            self.assertIsNone(o.scene.ev("findNamed('overviewScreenFrame')"))
+            n = o.scene.ev("(function(){ let n = 0; const st = [findNamed('overview')]; while (st.length) { const it = st.pop();"
+                           " if (it.text === 'SCREEN' && it.visible) n++; for (let k = 0; k < it.children.length; k++) st.push(it.children[k]); } return n; })()")
+            self.assertEqual(n, 0)
+        finally:
+            o.scene.close()
+
+    def kept(self, o, address, what):
+        return o.scene.ev(f"(function(){{ const t = findNamed('overviewTile:{address}'); const st = [t];"
+                          f" while (st.length) {{ const it = st.pop(); if (it.objectName === '{what}') return it.visible;"
+                          " for (let k = 0; k < it.children.length; k++) st.push(it.children[k]); } return null; })()")
+
+    def test_a_window_panned_off_screen_shows_the_picture_kept_from_when_it_was_on_it(self):
+        on = [(400, 200, 1300, 800), (1400, 300, 1800, 700)]
+        o = OverviewScene(clients_for(on))
+        try:
+            # while the overview is closed, the windows on screen are kept
+            o.scene.ev("findNamed('overview').keepOnScreen()")
+            o.scene.wait(300)
+            a1 = o.clients[1]["address"].replace("0x", "")
+            self.assertTrue(o.scene.ev(f"findNamed('overview').keptViewFor('{a1}') !== null"))
+            # the desktop pans: the second window is now off screen, and
+            # Hyprland refuses to picture it
+            off = clients_for([(400, 200, 1300, 800), (2600, 300, 3000, 700)])
+            o.load(off, uncapturable={off[1]["address"]})
+            o.call("show")
+            o.scene.wait(SETTLE)
+            self.assertTrue(self.kept(o, off[1]["address"], "overviewKept"), "the kept picture is not shown")
+            self.assertFalse(self.kept(o, off[1]["address"], "overviewPlaceholder"), "an icon card instead of the kept picture")
+            self.assertTrue(self.kept(o, off[1]["address"], "overviewKeptMark"), "a kept picture must say it is not live")
+            # the on-screen window still shows its live picture, unmarked
+            self.assertFalse(self.kept(o, off[0]["address"], "overviewKept"))
+            self.assertFalse(self.kept(o, off[0]["address"], "overviewPlaceholder"))
+            o.call("hide")
+            o.scene.wait(SETTLE)
+            self.assertTrue(o.scene.ev(f"findNamed('overview').keptViewFor('{a1}') !== null"), "the kept picture was lost on close")
+        finally:
+            o.scene.close()
+
+    def test_a_refused_refresh_keeps_the_picture_already_kept(self):
+        o = OverviewScene(clients_for([(400, 200, 1300, 800)]))
+        try:
+            ov = "findNamed('overview')"
+            a0 = o.clients[0]["address"].replace("0x", "")
+            o.scene.ev(f"{ov}.keepOnScreen()")
+            o.scene.wait(300)
+            self.assertTrue(o.scene.ev(f"{ov}.keptViewFor('{a0}') !== null"))
+            # Hyprland says on screen, but refuses the copy this time
+            o.load(o.clients, uncapturable={o.clients[0]["address"]})
+            o.scene.ev(f"{ov}.keepOnScreen()")
+            o.scene.wait(300)
+            self.assertTrue(o.scene.ev(f"{ov}.keptViewFor('{a0}') !== null"), "a refused refresh threw the kept picture away")
+        finally:
+            o.scene.close()
+
+    def test_a_translucent_window_gets_a_solid_ground_once_zoomed(self):
+        o = OverviewScene(clients_for([(400, 200, 1300, 800), (2400, 300, 3200, 800)]))
+        try:
+            o.call("show")
+            o.scene.wait(SETTLE)
+            g = f"(function(){{ const t = findNamed('overviewTile:{o.clients[0]['address']}'); for (let k = 0; k < t.children.length; k++)"
+            g += " if (t.children[k].objectName === 'overviewPictureGround') return t.children[k]; return null; })()"
+            self.assertTrue(o.scene.ev(f"{g}.visible"))
+            self.assertAlmostEqual(o.scene.ev(f"{g}.opacity"), 1, delta=0.01)
+            # at the handover (not zoomed yet) it isn't there: the frame matches the desktop
+            o.scene.ev("findNamed('overview').progress = 0")
+            o.scene.wait(30)
+            self.assertFalse(o.scene.ev(f"{g}.visible"))
         finally:
             o.scene.close()
 

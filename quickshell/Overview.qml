@@ -460,6 +460,105 @@ PanelWindow {
         return null;
     }
 
+    // ---- pictures kept for windows the compositor can't picture now ----
+    // Hyprland's toplevel export refuses a window it isn't drawing -- one
+    // panned off screen -- and a refused copy ends that capture: Quickshell's
+    // ScreencopyView then has no picture at all (src/wayland/screencopy/
+    // view.cpp clears it when its context stops). On an infinite desktop
+    // that is most windows, which is why the overview showed app icons. So
+    // each window's picture is also kept from the last time it was on screen:
+    // two still captures per window, refreshed only while the window is
+    // known to be on screen -- every few seconds while the overview is closed,
+    // and the moment a pan starts, before the windows move away -- each
+    // refresh going into the spare one and taking over only once it has a
+    // frame, so a refused refresh never costs the picture already kept.
+    // The overview shows a kept picture, marked with its age, only where
+    // there is no live one. theme.json "overview_keep_pictures": false turns
+    // it off (the cards come back).
+    readonly property bool keepPictures: Theme.data.overview_keep_pictures !== false
+    property var keptAddresses: []          // a slot per window seen on screen (stable order)
+    property int keptVersion: 0             // bumped whenever a kept picture changes
+    function keptViewFor(address) {
+        const want = String(address).replace(/^0x/, "");
+        for (let i = 0; i < keptRepeater.count; i++) {
+            const e = keptRepeater.itemAt(i);
+            if (e && e.address === want) return e.kept;
+        }
+        return null;
+    }
+    function keptAgeFor(address) {
+        const want = String(address).replace(/^0x/, "");
+        for (let i = 0; i < keptRepeater.count; i++) {
+            const e = keptRepeater.itemAt(i);
+            if (e && e.address === want && e.kept) return Date.now() - e.takenAt;
+        }
+        return -1;
+    }
+    // the windows on screen right now, from a fresh read (nothing to do if
+    // a read is already on its way)
+    function keepOnScreen() {
+        if (!root.keepPictures || keptClients.running || keptMonitors.running) return;
+        root._keptData = { clients: null, monitors: null };
+        keptClients.running = true;
+        keptMonitors.running = true;
+    }
+    property var _keptData: ({})
+    function _keptArrived() {
+        const d = root._keptData;
+        if (!d.clients || !d.monitors) return;
+        const on = [];
+        for (const m of d.monitors) {
+            const sc = Number(m.scale) || 1;
+            const mx = m.x, my = m.y, mw = m.width / sc, mh = m.height / sc;
+            const ws = m.activeWorkspace ? m.activeWorkspace.id : null;
+            for (const c of d.clients) {
+                if (!c.mapped || c.hidden || !c.workspace || c.workspace.id !== ws) continue;
+                const x0 = Math.max(mx, c.at[0]), y0 = Math.max(my, c.at[1]);
+                const x1 = Math.min(mx + mw, c.at[0] + c.size[0]), y1 = Math.min(my + mh, c.at[1] + c.size[1]);
+                const seen = Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+                // whole enough to be worth keeping (Hyprland draws what's on the monitor)
+                if (seen >= 0.6 * c.size[0] * c.size[1]) on.push(String(c.address).replace(/^0x/, ""));
+            }
+        }
+        const alive = d.clients.map((c) => String(c.address).replace(/^0x/, ""));
+        const keep = root.keptAddresses.filter((a) => alive.indexOf(a) >= 0);
+        for (const a of on) if (keep.indexOf(a) < 0) keep.push(a);
+        if (JSON.stringify(keep) !== JSON.stringify(root.keptAddresses)) root.keptAddresses = keep;
+        Qt.callLater(() => {
+            for (let i = 0; i < keptRepeater.count; i++) {
+                const e = keptRepeater.itemAt(i);
+                if (e && on.indexOf(e.address) >= 0) e.refresh();
+            }
+        });
+    }
+    Process {
+        id: keptClients
+        command: ["hyprctl", "-j", "clients"]
+        stdout: StdioCollector { onStreamFinished: { try { root._keptData.clients = JSON.parse(this.text); } catch (e) { root._keptData.clients = []; } root._keptArrived(); } }
+    }
+    Process {
+        id: keptMonitors
+        command: ["hyprctl", "-j", "monitors"]
+        stdout: StdioCollector { onStreamFinished: { try { root._keptData.monitors = JSON.parse(this.text); } catch (e) { root._keptData.monitors = []; } root._keptArrived(); } }
+    }
+    Timer {
+        id: keptTick
+        interval: 8000; repeat: true; triggeredOnStart: true
+        running: root.keepPictures && !root.showing
+        onTriggered: root.keepOnScreen()
+    }
+    Connections {
+        target: Viewport
+        function onPanningChanged() { if (Viewport.panning && !root.showing) root.keepOnScreen(); }
+    }
+    // a kept picture moves into the tile that shows it, and back afterwards
+    function _attachKept(holder, view) {
+        if (holder.view === view) return;
+        if (holder.view && holder.view.parent === holder) { holder.view.anchors.fill = undefined; holder.view.parent = holder.view.home; }
+        holder.view = view;
+        if (view) { view.parent = holder; view.anchors.fill = holder; }
+    }
+
     // ---- motion ----
     // One decelerating zoom each way, the dim alongside it. Every animation
     // runs from wherever the value is, so toggling mid-way reverses with no
@@ -618,32 +717,45 @@ PanelWindow {
             id: usable
             x: root.reserved[0]; y: root.reserved[1]
             width: root.usableWidth; height: root.usableHeight
-        // The screen you were looking at, inside the larger desktop: it
-        // shrinks with the zoom, so you can see where everything lies
-        // relative to it (only when the view has to zoom out at all).
-        Rectangle {
-            id: screenFrame
-            objectName: "overviewScreenFrame"
-            readonly property real sc: root.layout && root.layout.scale ? root.layout.scale : 1
-            readonly property real fdx: root.layout && root.layout.dx !== undefined ? root.layout.dx : 0
-            readonly property real fdy: root.layout && root.layout.dy !== undefined ? root.layout.dy : 0
-            readonly property real p: root.progress
-            visible: root.covering && sc < 0.999
-            x: fdx * p
-            y: fdy * p
-            width: root.usableWidth * (1 + (sc - 1) * p)
-            height: root.usableHeight * (1 + (sc - 1) * p)
-            color: Qt.rgba(1, 1, 1, 0.03 * p)
-            radius: 8 * p
-            border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.35)
-            opacity: p
-            Text {
-                anchors.left: parent.left; anchors.bottom: parent.top
-                anchors.bottomMargin: 4
-                text: "SCREEN"
-                color: "white"; opacity: 0.55
-                font.family: Theme.fontFamily; font.pixelSize: 10; font.weight: Font.DemiBold; font.letterSpacing: 1.5
+        // (The screen you were looking at used to be outlined inside the
+        // zoomed-out desktop; it read as a stray box and is gone. The
+        // geometry still knows where it lies -- layout.dx/dy -- for placing
+        // and panning.)
+        // the kept pictures' slots (not drawn here: a tile borrows one)
+        Item {
+            id: keptShelf
+            visible: false
+            Repeater {
+                id: keptRepeater
+                model: root.keptAddresses
+                delegate: Item {
+                    id: entry
+                    required property string modelData
+                    readonly property string address: modelData
+                    property int front: -1          // which still holds the kept picture
+                    property int pending: -1
+                    property real takenAt: 0
+                    readonly property var views: [viewA, viewB]
+                    readonly property var kept: entry.front >= 0 && entry.views[entry.front].hasContent ? entry.views[entry.front] : null
+                    onKeptChanged: root.keptVersion += 1
+                    function refresh() {
+                        const tl = root.toplevelFor(entry.address);
+                        if (!tl || !tl.wayland) return;
+                        const back = entry.front === 0 ? 1 : 0;
+                        if (entry.views[back].parent !== entry) return;     // being shown
+                        entry.pending = back;
+                        entry.views[back].captureSource = null;
+                        entry.views[back].captureSource = tl.wayland;
+                        entry._arrived(back);
+                    }
+                    function _arrived(i) {
+                        if (entry.pending !== i || !entry.views[i].hasContent) return;
+                        entry.front = i; entry.pending = -1; entry.takenAt = Date.now();
+                        root.keptVersion += 1;
+                    }
+                    ScreencopyView { id: viewA; objectName: "overviewKeptA:" + entry.address; readonly property Item home: entry; live: false; paintCursor: false; onHasContentChanged: entry._arrived(0) }
+                    ScreencopyView { id: viewB; objectName: "overviewKeptB:" + entry.address; readonly property Item home: entry; live: false; paintCursor: false; onHasContentChanged: entry._arrived(1) }
+                }
             }
         }
         Repeater {
@@ -703,7 +815,7 @@ PanelWindow {
                     id: card
                     objectName: "overviewPlaceholder"
                     anchors.fill: parent
-                    visible: !capture.hasContent
+                    visible: !capture.hasContent && !cachedHolder.hasPicture
                     color: Theme.mix(Theme.panel, Theme.accent, 0.08)
                     radius: 6 * tile.p
                     border.color: Theme.mix(Theme.borderIdle, Theme.accent, 0.25)
@@ -780,6 +892,20 @@ PanelWindow {
                         }
                     }
                 }
+                // A solid ground under the picture, faded in with the zoom: a
+                // translucent window (a terminal with a see-through
+                // background) otherwise showed the overview's wallpaper
+                // through it, which read as a hole in the picture. At the
+                // handover (progress 0) it is not there at all, so the first
+                // frame still matches the real desktop exactly.
+                Rectangle {
+                    objectName: "overviewPictureGround"
+                    anchors.fill: parent
+                    radius: 6 * tile.p
+                    color: Theme.mix(Theme.panel, "#000000", 0.35)
+                    opacity: tile.p
+                    visible: (capture.hasContent || cachedHolder.hasPicture) && tile.p > 0
+                }
                 ScreencopyView {
                     id: capture
                     anchors.fill: parent
@@ -787,6 +913,38 @@ PanelWindow {
                     captureSource: root.showing && tile.toplevel ? tile.toplevel.wayland : null
                     live: root.showing
                     paintCursor: false
+                }
+                // no live picture: the one kept from when it was last on
+                // screen, marked as such
+                Item {
+                    id: cachedHolder
+                    objectName: "overviewKept"
+                    anchors.fill: parent
+                    property var view: null
+                    readonly property bool hasPicture: cachedHolder.view !== null && cachedHolder.view.hasContent && !capture.hasContent
+                    visible: cachedHolder.hasPicture
+                    readonly property var want: (root.keptVersion >= 0 && root.keepPictures && root.covering && !capture.hasContent)
+                                                ? root.keptViewFor(tile.address) : null
+                    onWantChanged: root._attachKept(cachedHolder, cachedHolder.want)
+                    Component.onDestruction: root._attachKept(cachedHolder, null)
+                    Rectangle {
+                        objectName: "overviewKeptMark"
+                        z: 2
+                        anchors.top: parent.top; anchors.right: parent.right
+                        anchors.margins: 6
+                        width: keptText.implicitWidth + 12; height: keptText.implicitHeight + 6
+                        radius: height / 2
+                        color: Qt.rgba(0, 0, 0, 0.55)
+                        visible: tile.width > 120
+                        Text {
+                            id: keptText
+                            anchors.centerIn: parent
+                            readonly property real age: cachedHolder.hasPicture ? root.keptAgeFor(tile.address) : -1
+                            text: "OFF SCREEN · " + (age < 60000 ? "just now" : Math.round(age / 60000) + " min ago")
+                            color: "white"; opacity: 0.85
+                            font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: 9; font.letterSpacing: 1
+                        }
+                    }
                 }
                 // Rings: a hairline on every picture; the window that had
                 // focus gets a soft accent line, the selected one a full
