@@ -115,7 +115,12 @@ PanelWindow {
     Behavior on slotY { enabled: root._placed; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle } }
     Behavior on bottomClearance { enabled: root._placed; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle } }
     // drawn at the desktop's scale (WidgetStack.scale), from its own corner
-    readonly property real uiScale: WidgetStack.scale
+    // theme.json "widget_<name>_size": "s", "m" (default) or "l" -- the
+    // arrange mode's size buttons; the layout makes room either way
+    readonly property string sizeKey: "widget_" + root.name + "_size"
+    readonly property string size: ["s", "l"].indexOf(String(Theme.data[root.sizeKey])) >= 0 ? String(Theme.data[root.sizeKey]) : "m"
+    readonly property real sizeFactor: root.size === "s" ? 0.85 : (root.size === "l" ? 1.2 : 1)
+    readonly property real uiScale: WidgetStack.scale * root.sizeFactor
     function _report() { WidgetStack.report(root.name, root.corner, surface.width * root.uiScale, surface.height * root.uiScale, root.active); }
     onUiScaleChanged: root._report()
     onCornerChanged: root._report()
@@ -238,6 +243,45 @@ PanelWindow {
                 onPressed: (m) => { settle.stop(); const p = mapToItem(null, m.x, m.y); root._grab = Qt.point(p.x - root.dragX, p.y - root.dragY); }
                 onPositionChanged: (m) => { const p = mapToItem(null, m.x, m.y); root.dragX = p.x - root._grab.x; root.dragY = p.y - root._grab.y; }
                 onReleased: { const c = surface.mapToItem(null, surface.width / 2, surface.height / 2); root.dropAt(c.x, c.y); }
+            }
+            // its size, and hiding it (saved at once; Settings brings a
+            // hidden one back)
+            Row {
+                anchors.top: parent.top; anchors.right: parent.right
+                anchors.margins: 12
+                spacing: 4
+                component ArrangeChip: Rectangle {
+                    id: chip
+                    property string label: ""
+                    property bool selected: false
+                    signal clicked()
+                    width: Math.max(26, chipText.implicitWidth + 14); height: 24; radius: 12
+                    color: chip.selected ? Theme.accent : (chipArea.containsMouse ? Theme.layer1Hover : Theme.panel)
+                    border.width: 1; border.color: Theme.borderIdle
+                    Text {
+                        id: chipText
+                        anchors.centerIn: parent
+                        text: chip.label
+                        color: chip.selected ? Theme.panelTone : Theme.textActive
+                        font.family: Theme.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold
+                    }
+                    MouseArea { id: chipArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: chip.clicked() }
+                }
+                Repeater {
+                    model: ["s", "m", "l"]
+                    delegate: ArrangeChip {
+                        required property string modelData
+                        objectName: "widgetSize:" + root.name + ":" + modelData
+                        label: modelData.toUpperCase()
+                        selected: root.size === modelData
+                        onClicked: Theme.setKeys({ [root.sizeKey]: modelData === "m" ? null : modelData })
+                    }
+                }
+                ArrangeChip {
+                    objectName: "widgetHide:" + root.name
+                    label: "Hide"
+                    onClicked: Theme.setKeys({ ["widget_" + root.name]: false })
+                }
             }
         }
     }

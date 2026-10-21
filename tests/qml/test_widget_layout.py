@@ -346,6 +346,42 @@ class ArrangeTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_arranging_sizes_hides_and_resets(self):
+        s = scene(widget_clock=True, widget_music=True, widget_music_pos="top-right")
+        try:
+            s.wait(700)
+            w0 = rect(s, "music")[2]
+            s.ev("widgetStack.arranging = true")
+            s.wait(300)
+            self.assertTrue(s.ev("findNamed('widgetSize:music:m').selected"))
+            # (the bar's own window was once too short for it: Reset and Done took no clicks)
+            for b in ("arrangeReset", "arrangeDone"):
+                self.assertEqual(s.input_owner(*self.centre(s, b)), "arrangeBar", f"{b} takes no clicks")
+            s.click(*self.centre(s, "widgetSize:music:l"))
+            s.wait(700)
+            self.assertEqual(self.saved(s).get("widget_music_size"), "l")
+            self.assertAlmostEqual(rect(s, "music")[2] / w0, 1.2, delta=0.01)
+            s.click(*self.centre(s, "widgetSize:music:m"))
+            s.wait(500)
+            self.assertNotIn("widget_music_size", self.saved(s), "medium is the default: the key should go")
+            # reset: every widget back to its own corner (music: bottom-left)
+            s.click(*self.centre(s, "arrangeReset"))
+            s.wait(900)
+            self.assertNotIn("widget_music_pos", self.saved(s))
+            r = rect(s, "music")
+            self.assertAlmostEqual(r[0], 28, delta=1)
+            # hide: off, and saved off
+            s.click(*self.centre(s, "widgetHide:clock"))
+            s.wait(600)
+            self.assertIs(self.saved(s).get("widget_clock"), False)
+            self.assertIsNone(rect(s, "clock"))
+        finally:
+            s.close()
+
+    def centre(self, s, name):
+        return tuple(json.loads(s.ev(f"(function(){{ const b = findNamed('{name}'); const p = b.mapToItem(null, b.width/2, b.height/2);"
+                                     " return JSON.stringify([Math.round(p.x), Math.round(p.y)]); })()")))
+
     def test_the_theme_editor_keeps_a_corner_changed_elsewhere(self):
         s = scene(widget_music=True, widget_music_pos="bottom-left")
         try:

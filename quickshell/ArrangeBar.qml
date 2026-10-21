@@ -11,7 +11,8 @@ PanelWindow {
     visible: WidgetStack.arranging
     color: "transparent"
     anchors { top: true; left: true; right: true }
-    implicitHeight: 64
+    // tall enough for the pill under the bar (it sits below the bar's strip)
+    implicitHeight: ShellSurface.topEdgeHeight + 56
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "dxrice-arrange"
@@ -35,9 +36,21 @@ PanelWindow {
             spacing: Theme.padMd
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Drag a widget to any corner"
+                text: "Drag a widget to any corner, or size or hide it"
                 color: Theme.textActive
                 font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall
+            }
+            CompactChip {
+                objectName: "arrangeReset"
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Reset layout"
+                // every widget back to its own corner and size (which are on
+                // stays as it is)
+                onClicked: {
+                    const out = {};
+                    for (const k in Theme.data) if (/^widget_.+_(pos|size)$/.test(k)) out[k] = null;
+                    Theme.setKeys(out);
+                }
             }
             CompactChip {
                 objectName: "arrangeDone"
