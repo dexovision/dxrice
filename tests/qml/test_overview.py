@@ -1300,6 +1300,8 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
             o.scene.wait(50)
             self.assertEqual(o.ov("layoutMode"), "compact")
             self.assertEqual(o.scene.ev("findNamed('overviewLayout:galaxy').children[0].text"), "Galaxy")
+            # the row says which selector it sets: SUPER+G, never Auto Place
+            self.assertEqual(o.scene.ev("findNamed('overviewLayoutLabel').text"), "SUPER+G")
             x, y = o.scene.ev("(function(){ const b = findNamed('overviewLayout:galaxy'); const p = b.mapToItem(null, b.width/2, b.height/2); return [p.x, p.y]; })()").toVariant()
             o.click(x, y)
             o.scene.wait(300)

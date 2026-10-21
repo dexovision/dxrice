@@ -33,12 +33,32 @@ QtObject {
     // owns), and sampling runs while either wants it.
     property int widgetUsers: 0
     readonly property bool sampling: root.active || root.widgetUsers > 0
+    // once per sample, after every reading above is updated (a history that
+    // only grew when a value changed would never draw a steady reading)
+    signal sampled()
 
     readonly property real cpuPercent: _cpuPercent
     readonly property real memPercent: _memPercent
     readonly property real diskPercent: _diskPercent
     readonly property string diskUsedLabel: _diskUsedLabel
     readonly property real networkRateKBs: _networkRateKBs
+    readonly property real netDownKBs: _netDownKBs
+    readonly property real netUpKBs: _netUpKBs
+    readonly property real memUsedGiB: _memUsedGiB
+    readonly property real memTotalGiB: _memTotalGiB
+
+    // Sensors and system facts, all plain sysfs/procfs reads. Each is -1 /
+    // "" until a real source is found (sensorsProc, once per session); the
+    // UI shows that as missing, never as a made-up reading.
+    readonly property real cpuTempC: _cpuTempC
+    readonly property real gpuTempC: _gpuTempC
+    readonly property real diskTempC: _diskTempC
+    readonly property int batteryPercent: _batteryPercent
+    readonly property string batteryStatus: _batteryStatus
+    readonly property real uptimeS: _uptimeS
+    readonly property real load1: _load1
+    readonly property string hostName: hostFile.text().trim()
+    readonly property string kernel: kernelFile.text().trim()
 
     // GPU: no single cross-vendor interface exists (AMD publishes a sysfs
     // busy-percent file; NVIDIA requires nvidia-smi; Intel has neither in
@@ -61,6 +81,19 @@ QtObject {
     property string _diskUsedLabel: ""
     property var _prevCpuTimes: null
     property real _networkRateKBs: 0
+    property real _netDownKBs: 0
+    property real _netUpKBs: 0
+    property var _prevNetSplit: null
+    property real _memUsedGiB: 0
+    property real _memTotalGiB: 0
+    property real _cpuTempC: -1
+    property real _gpuTempC: -1
+    property real _diskTempC: -1
+    property int _batteryPercent: -1
+    property string _batteryStatus: ""
+    property real _uptimeS: 0
+    property real _load1: 0
+    property var _sensorPaths: ({})
     property var _prevNetBytes: null
     property var _prevNetTime: null
 
@@ -73,6 +106,15 @@ QtObject {
     // Path is empty until GPU detection (below) finds a real sysfs file;
     // an empty path just means "nothing loaded yet," not an error.
     property FileView gpuFile: FileView { path: root._gpuSysfsPath }
+    property FileView cpuTempFile: FileView { path: root._sensorPaths.cpu || "" }
+    property FileView gpuTempFile: FileView { path: root._sensorPaths.gputemp || "" }
+    property FileView diskTempFile: FileView { path: root._sensorPaths.disk || "" }
+    property FileView batCapFile: FileView { path: root._sensorPaths.bat ? root._sensorPaths.bat + "/capacity" : "" }
+    property FileView batStatusFile: FileView { path: root._sensorPaths.bat ? root._sensorPaths.bat + "/status" : "" }
+    property FileView uptimeFile: FileView { path: "/proc/uptime" }
+    property FileView loadFile: FileView { path: "/proc/loadavg" }
+    property FileView hostFile: FileView { path: "/proc/sys/kernel/hostname" }
+    property FileView kernelFile: FileView { path: "/proc/sys/kernel/osrelease" }
 
     function _sampleCpu() {
         const line = statFile.text().split("\n")[0];
@@ -99,13 +141,15 @@ QtObject {
         const total = info.MemTotal || 1;
         const avail = info.MemAvailable !== undefined ? info.MemAvailable : total;
         root._memPercent = Math.max(0, Math.min(100, (total - avail) / total * 100));
+        root._memUsedGiB = (total - avail) / 1048576;
+        root._memTotalGiB = total / 1048576;
     }
 
     // ---- network: total rx+tx bytes across every non-loopback interface,
     // sampled at the same 1.5s cadence as CPU/mem so the rate reads live. ----
     function _sampleNetwork() {
         const now = Date.now();
-        let total = 0;
+        let total = 0, rx = 0, tx = 0;
         const lines = netFile.text().split("\n").slice(2);
         for (const line of lines) {
             const parts = line.trim().split(":");
@@ -116,12 +160,19 @@ QtObject {
             // rx bytes is field 0, tx bytes is field 8 (per /proc/net/dev's
             // documented column layout).
             total += fields[0] + fields[8];
+            rx += fields[0];
+            tx += fields[8];
         }
         if (root._prevNetBytes !== null && root._prevNetTime !== null) {
             const elapsedS = (now - root._prevNetTime) / 1000;
             const deltaBytes = total - root._prevNetBytes;
             root._networkRateKBs = elapsedS > 0 ? Math.max(0, deltaBytes / elapsedS / 1024) : 0;
+            if (root._prevNetSplit && elapsedS > 0) {
+                root._netDownKBs = Math.max(0, (rx - root._prevNetSplit[0]) / elapsedS / 1024);
+                root._netUpKBs = Math.max(0, (tx - root._prevNetSplit[1]) / elapsedS / 1024);
+            }
         }
+        root._prevNetSplit = [rx, tx];
         root._prevNetBytes = total;
         root._prevNetTime = now;
     }
@@ -138,6 +189,50 @@ QtObject {
         if (root._gpuDetected) return;
         root._gpuDetected = true;
         gpuDetectProc.running = true;
+        sensorsProc.running = true;
+    }
+    // ---- sensors: found once (hwmon names, the GPU's own hwmon, the
+    // system battery -- not a mouse's, whose scope is "Device"), then read
+    // as files on every tick like everything else ----
+    property Process sensorsProc: Process {
+        command: ["sh", "-c",
+            "for h in /sys/class/hwmon/hwmon*; do case \"$(cat $h/name 2>/dev/null)\" in "
+            + "k10temp|coretemp|zenpower|cpu_thermal) echo cpu=$h/temp1_input;; nvme) echo disk=$h/temp1_input;; esac; done; "
+            + "g=$(ls /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null | head -1); "
+            + "[ -n \"$g\" ] && for h in $(dirname $g)/hwmon/hwmon*; do [ -f $h/temp1_input ] && echo gputemp=$h/temp1_input; done; "
+            + "for b in /sys/class/power_supply/*; do [ \"$(cat $b/type 2>/dev/null)\" = Battery ] && [ \"$(cat $b/scope 2>/dev/null)\" != Device ] "
+            + "&& [ -f $b/capacity ] && echo bat=$b; done"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const found = {};
+                for (const line of this.text.split("\n")) {
+                    const i = line.indexOf("=");
+                    if (i > 0 && found[line.slice(0, i)] === undefined) found[line.slice(0, i)] = line.slice(i + 1).trim();
+                }
+                root._sensorPaths = found;
+            }
+        }
+    }
+    function _readTemp(file, has) {
+        if (!has) return -1;
+        file.reload();
+        const v = Number(file.text().trim());
+        return isNaN(v) || v <= 0 ? -1 : v / 1000;
+    }
+    function _sampleSensors() {
+        const p = root._sensorPaths;
+        root._cpuTempC = root._readTemp(cpuTempFile, !!p.cpu);
+        root._gpuTempC = root._readTemp(gpuTempFile, !!p.gputemp);
+        root._diskTempC = root._readTemp(diskTempFile, !!p.disk);
+        if (p.bat) {
+            batCapFile.reload(); batStatusFile.reload();
+            const c = parseInt(batCapFile.text().trim());
+            root._batteryPercent = isNaN(c) ? -1 : Math.max(0, Math.min(100, c));
+            root._batteryStatus = batStatusFile.text().trim();
+        }
+        uptimeFile.reload(); loadFile.reload();
+        root._uptimeS = Number(uptimeFile.text().split(" ")[0]) || 0;
+        root._load1 = Number(loadFile.text().split(" ")[0]) || 0;
     }
     property Process gpuDetectProc: Process {
         // Finds the first AMD-style busy-percent sysfs file, if any.
@@ -199,7 +294,8 @@ QtObject {
         triggeredOnStart: true
         onTriggered: {
             root.statFile.reload(); root.memFile.reload(); root.netFile.reload();
-            root._sampleCpu(); root._sampleMem(); root._sampleNetwork(); root._sampleGpu();
+            root._sampleCpu(); root._sampleMem(); root._sampleNetwork(); root._sampleGpu(); root._sampleSensors();
+            root.sampled();
         }
     }
     property Timer diskTimer: Timer {

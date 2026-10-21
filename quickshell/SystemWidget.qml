@@ -1,21 +1,30 @@
 import QtQuick
+import Quickshell
 
-// CPU, memory, GPU and network at a glance, each with the last minute as a
-// strip of bars. Numbers come from PerformanceService (/proc and sysfs), and
-// only while this card is shown: hidden, it samples nothing. A reading the
-// machine can't give (no readable GPU) says "n/a" -- never a made-up zero.
+// The machine, read like a terminal: a user@host header and a rule, then a
+// row per reading -- label, value, the last minute drawn in block
+// characters, and a temperature where there is a sensor -- and the theme's
+// own colours as a strip at the end (the fastfetch look).
+//
+// Everything comes from PerformanceService (/proc and sysfs), sampled only
+// while this card is shown. A reading this machine can't give is not shown
+// as zero: the GPU says "n/a", and a row with nothing behind it (no
+// battery, no temperature sensor) is left out.
 DesktopWidget {
     id: root
     name: "system"
     defaultCorner: "top-right"
     defaultOn: false
-    contentWidth: 232
-    contentHeight: 164
+    surface: "terminal"
+    interactive: false
+    pad: 18
+    contentWidth: 372
+    contentHeight: body.implicitHeight
 
-    readonly property int history: 36
+    readonly property int history: 24
     property var cpu: []
-    property var mem: []
     property var gpu: []
+    property var mem: []
     property var net: []
     function _push(list, v) { const a = list.slice(-(root.history - 1)); a.push(v); return a; }
 
@@ -31,74 +40,138 @@ DesktopWidget {
     Connections {
         target: PerformanceService
         enabled: root.active
-        function onCpuPercentChanged() { root.cpu = root._push(root.cpu, PerformanceService.cpuPercent); }
-        function onMemPercentChanged() { root.mem = root._push(root.mem, PerformanceService.memPercent); }
-        function onGpuPercentChanged() { if (PerformanceService.gpuAvailable) root.gpu = root._push(root.gpu, PerformanceService.gpuPercent); }
-        function onNetworkRateKBsChanged() { root.net = root._push(root.net, Math.min(100, PerformanceService.networkRateKBs / 50)); }
+        function onSampled() {
+            const P = PerformanceService;
+            root.cpu = root._push(root.cpu, P.cpuPercent);
+            root.mem = root._push(root.mem, P.memPercent);
+            if (P.gpuAvailable) root.gpu = root._push(root.gpu, P.gpuPercent);
+            root.net = root._push(root.net, P.netDownKBs);
+        }
     }
 
-    function rateLabel(kbs) { return kbs >= 1024 ? (kbs / 1024).toFixed(1) + " MB/s" : Math.round(kbs) + " KB/s"; }
+    // ---- formatting (pure, so tests can check it) ----
+    readonly property string ramp: "▁▂▃▄▅▆▇█"
+    // values 0..max as block characters, oldest first, padded to `history`
+    function spark(values, max) {
+        let out = "";
+        for (let i = 0; i < root.history - values.length; i++) out += " ";
+        for (const v of values) {
+            const f = max > 0 ? Math.max(0, Math.min(1, v / max)) : 0;
+            out += root.ramp.charAt(Math.min(7, Math.floor(f * 7.999)));
+        }
+        return out;
+    }
+    function gauge(fraction, cells) {
+        const n = Math.round(Math.max(0, Math.min(1, fraction)) * cells);
+        return "█".repeat(n) + "░".repeat(cells - n);
+    }
+    function rate(kbs) { return kbs >= 1024 ? (kbs / 1024).toFixed(1) + " MB/s" : Math.round(kbs) + " KB/s"; }
+    function temp(c) { return c < 0 ? "" : Math.round(c) + "°"; }
+    function uptime(s) {
+        const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+        return (d > 0 ? d + "d " : "") + (d > 0 || h > 0 ? h + "h " : "") + m + "m";
+    }
+    readonly property real netMax: Math.max(64, ...root.net)
+
+    readonly property var rows: {
+        const P = PerformanceService;
+        const out = [
+            { id: "cpu", label: "cpu", value: Math.round(P.cpuPercent) + "%", graph: root.spark(root.cpu, 100), tail: root.temp(P.cpuTempC) },
+            { id: "gpu", label: "gpu", value: P.gpuAvailable ? Math.round(P.gpuPercent) + "%" : "n/a",
+              graph: P.gpuAvailable ? root.spark(root.gpu, 100) : "", tail: root.temp(P.gpuTempC) },
+            { id: "mem", label: "mem", value: P.memUsedGiB.toFixed(1) + " / " + P.memTotalGiB.toFixed(1) + " GiB",
+              graph: root.gauge(P.memPercent / 100, 12), tail: Math.round(P.memPercent) + "%" },
+        ];
+        if (P.diskUsedLabel.length > 0)
+            out.push({ id: "disk", label: "disk", value: P.diskUsedLabel, graph: root.gauge(P.diskPercent / 100, 12), tail: root.temp(P.diskTempC) });
+        out.push({ id: "net", label: "net", value: "↓ " + root.rate(P.netDownKBs),
+                   graph: root.spark(root.net, root.netMax), tail: "↑ " + root.rate(P.netUpKBs) });
+        if (P.batteryPercent >= 0)
+            out.push({ id: "bat", label: "bat", value: P.batteryPercent + "%  " + P.batteryStatus.toLowerCase(),
+                       graph: root.gauge(P.batteryPercent / 100, 12), tail: "" });
+        out.push({ id: "up", label: "up", value: root.uptime(P.uptimeS), graph: "", tail: "load " + P.load1.toFixed(2) });
+        return out;
+    }
 
     Column {
-        anchors.fill: parent
-        spacing: 12
+        id: body
+        width: parent.width
+        spacing: 6
+        Row {
+            spacing: 0
+            Text {
+                objectName: "systemUser"
+                text: Quickshell.env("USER") || "user"
+                color: Theme.accent
+                font.family: Theme.fontMono; font.pixelSize: 14; font.weight: Font.Bold
+            }
+            Text { text: "@"; color: Theme.textActive; opacity: 0.6; font.family: Theme.fontMono; font.pixelSize: 14 }
+            Text {
+                objectName: "systemHost"
+                text: PerformanceService.hostName
+                color: Theme.accent
+                font.family: Theme.fontMono; font.pixelSize: 14; font.weight: Font.Bold
+            }
+            Text {
+                text: PerformanceService.kernel.length > 0 ? "  " + PerformanceService.kernel : ""
+                color: Theme.textActive; opacity: 0.5
+                font.family: Theme.fontMono; font.pixelSize: 12
+                anchors.baseline: parent.children[0].baseline
+            }
+        }
+        Text {
+            width: parent.width
+            text: "─".repeat(Math.ceil(width / 7))
+            clip: true
+            color: Theme.textActive; opacity: 0.25
+            font.family: Theme.fontMono; font.pixelSize: 12
+        }
         Repeater {
-            model: [
-                { id: "cpu", label: "CPU" },
-                { id: "mem", label: "MEMORY" },
-                { id: "gpu", label: "GPU" },
-                { id: "net", label: "NETWORK" },
-            ]
+            model: root.rows
             delegate: Item {
                 id: row
                 required property var modelData
                 objectName: "systemRow:" + row.modelData.id
-                width: parent.width; height: 32
-                readonly property var samples: root[row.modelData.id]
-                readonly property bool missing: row.modelData.id === "gpu" && !PerformanceService.gpuAvailable
-                readonly property string value: {
-                    if (row.missing) return "n/a";
-                    switch (row.modelData.id) {
-                    case "cpu": return Math.round(PerformanceService.cpuPercent) + "%";
-                    case "mem": return Math.round(PerformanceService.memPercent) + "%";
-                    case "gpu": return Math.round(PerformanceService.gpuPercent) + "%";
-                    default: return root.rateLabel(PerformanceService.networkRateKBs);
-                    }
-                }
+                width: body.width; height: 18
                 Text {
+                    width: 44
                     text: row.modelData.label
-                    color: Theme.text; opacity: Theme.opacityMuted
-                    font.family: Theme.fontFamily; font.pixelSize: 9; font.weight: Font.DemiBold; font.letterSpacing: 2
+                    color: Theme.accent
+                    font.family: Theme.fontMono; font.pixelSize: 13; font.weight: Font.Bold
                 }
                 Text {
                     objectName: "systemValue:" + row.modelData.id
+                    x: 44; width: 150
+                    text: row.modelData.value
+                    elide: Text.ElideRight
+                    color: row.modelData.value === "n/a" ? Theme.text : Theme.textActive
+                    opacity: row.modelData.value === "n/a" ? 0.5 : 1
+                    font.family: Theme.fontMono; font.pixelSize: 13
+                }
+                Text {
+                    objectName: "systemGraph:" + row.modelData.id
+                    x: 196
+                    text: row.modelData.graph
+                    color: Theme.mix(Theme.textActive, Theme.accent, 0.55)
+                    font.family: Theme.fontMono; font.pixelSize: 13
+                }
+                Text {
                     anchors.right: parent.right
-                    text: row.value
-                    color: row.missing ? Theme.text : Theme.textActive
-                    opacity: row.missing ? Theme.opacityFaint : 1
-                    font.family: Theme.fontFamily; font.pixelSize: 13; font.weight: Font.Medium
+                    text: row.modelData.tail
+                    color: Theme.textActive; opacity: 0.65
+                    font.family: Theme.fontMono; font.pixelSize: 12
                 }
-                // the last minute as bars; each is its own height, easing to it
-                Row {
-                    anchors.bottom: parent.bottom
-                    width: parent.width; height: 16
-                    spacing: 2
-                    visible: !row.missing
-                    Repeater {
-                        model: root.history
-                        delegate: Rectangle {
-                            required property int index
-                            readonly property real v: row.samples.length > (root.history - 1 - index) && root.history - 1 - index >= 0
-                                ? (row.samples[row.samples.length - 1 - (root.history - 1 - index)] || 0) : 0
-                            width: (parent.width - 2 * (root.history - 1)) / root.history
-                            height: Math.max(2, parent.height * Math.min(100, v) / 100)
-                            anchors.bottom: parent.bottom
-                            radius: 1
-                            color: index === root.history - 1 ? Theme.accent : Theme.mix(Theme.borderIdle, Theme.accent, 0.45)
-                            Behavior on height { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
-                        }
-                    }
-                }
+            }
+        }
+        // the theme's colours, as fastfetch prints the terminal's
+        Row {
+            objectName: "systemPalette"
+            topPadding: 4
+            spacing: 0
+            Repeater {
+                model: [Theme.panel, Theme.layer1, Theme.borderIdle, Theme.text, Theme.textActive, Theme.accent,
+                        "#" + String(Theme.data.hypr_active_border_1 || "8090a0"), "#" + String(Theme.data.hypr_active_border_2 || "c0a0b0")]
+                delegate: Rectangle { required property var modelData; width: 26; height: 12; color: modelData }
             }
         }
     }

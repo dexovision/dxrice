@@ -87,14 +87,14 @@ class ClockWidgetTest(unittest.TestCase):
         s = scene(clock_24h=True, clock_seconds=False)
         try:
             s.wait(300)
-            self.assertRegex(named(s, "clockTime", "text"), r"^\d{2}:\d{2}$")
+            self.assertRegex(named(s, "clockWidget", "timeText"), r"^\d{2}:\d{2}$")
             self.assertFalse(named(s, "clockMeridiem", "visible"))
         finally:
             s.close()
         s = scene(clock_24h=False, clock_seconds=True)
         try:
             s.wait(300)
-            self.assertRegex(named(s, "clockTime", "text"), r"^\d{1,2}:\d{2}$")
+            self.assertRegex(named(s, "clockWidget", "timeText"), r"^\d{1,2}:\d{2}$")
             self.assertTrue(named(s, "clockMeridiem", "visible"))
             self.assertIn(named(s, "clockMeridiem", "text"), ("AM", "PM"))
             self.assertTrue(named(s, "clockSeconds", "visible"))
@@ -110,12 +110,45 @@ class ClockWidgetTest(unittest.TestCase):
         finally:
             s.close()
 
-    def test_input_goes_to_the_card_only(self):
+    def test_it_takes_no_input_so_the_desktop_under_it_stays_clickable(self):
         s = scene()
         try:
             s.wait(500)
-            self.assertEqual(s.input_owner(28 + 40, 76 + 40), "clockWidget")
-            self.assertNotEqual(s.input_owner(900, 500), "clockWidget")
+            self.assertIsNone(s.input_owner(28 + 40, 76 + 40))
+        finally:
+            s.close()
+
+    def test_the_type_style_is_bare_heavy_type_with_the_date_beside_it(self):
+        s = scene(clock_style=None)
+        try:
+            s.wait(500)
+            self.assertTrue(named(s, "clockTypeFace", "visible"))
+            self.assertFalse(named(s, "clockBlockFace", "visible"))
+            self.assertFalse(named(s, "widgetCard:clock", "children[1].visible"))   # no glass card
+            self.assertEqual(named(s, "clockHours", "font.weight"), 700)
+            self.assertEqual(s.ev("findNamed('clockHours').color.toString()"), s.ev("theme.accent.toString()"))
+            self.assertEqual(named(s, "clockMonth", "text"), named(s, "clockMonth", "text").upper())
+        finally:
+            s.close()
+
+    def test_the_blocks_style_draws_the_time_as_tty_clock_cells(self):
+        s = scene(clock_style="blocks", clock_24h=True, clock_seconds=False)
+        try:
+            s.wait(500)
+            self.assertTrue(named(s, "clockBlockFace", "visible"))
+            self.assertFalse(named(s, "clockTypeFace", "visible"))
+            # each digit is a 3x5 grid; the lit cells spell the real time
+            lit = s.ev("""(function() {
+                var face = findNamed('clockBlockFace'); var row = face.children[0]; var out = [];
+                for (var i = 0; i < row.children.length; i++) { var g = row.children[i]; if (!g.ch) continue;
+                  var bits = ''; for (var j = 0; j < g.children.length; j++) if (g.children[j].lit !== undefined) bits += g.children[j].lit ? '1' : '0';
+                  out.push(g.ch + '=' + bits); }
+                return out.join(' '); })()""")
+            t = named(s, "clockWidget", "timeText")
+            glyphs = {"0": "111101101101111", "1": "001001001001001", "2": "111001111100111", "3": "111001111001111",
+                      "4": "101101111001001", "5": "111100111001111", "6": "111100111101111", "7": "111001001001001",
+                      "8": "111101111101111", "9": "111101111001111", ":": "01010"}
+            self.assertEqual(lit, " ".join(f"{c}={glyphs[c]}" for c in t))
         finally:
             s.close()
 
@@ -216,8 +249,8 @@ class SystemWidgetTest(unittest.TestCase):
             self.assertEqual(s.ev("perf.widgetUsers"), 1)
             self.assertTrue(s.ev("perf.sampling"))
             self.assertRegex(named(s, "systemValue:cpu", "text"), r"^\d+%$")
-            self.assertRegex(named(s, "systemValue:mem", "text"), r"^\d+%$")
-            self.assertRegex(named(s, "systemValue:net", "text"), r"^[\d.]+ (KB|MB)/s$")
+            self.assertRegex(named(s, "systemValue:mem", "text"), r"^\d+\.\d / \d+\.\d GiB$")
+            self.assertRegex(named(s, "systemValue:net", "text"), r"^↓ [\d.]+ (KB|MB)/s$")
         finally:
             s.close()
 
@@ -229,6 +262,43 @@ class SystemWidgetTest(unittest.TestCase):
                 self.assertEqual(named(s, "systemValue:gpu", "text"), "n/a")
             else:
                 self.assertRegex(named(s, "systemValue:gpu", "text"), r"^\d+%$")
+        finally:
+            s.close()
+
+    def test_a_steady_reading_still_draws_its_history(self):
+        s = scene(widget_system=True)
+        try:
+            s.wait(5000)   # three samples at 1.5 s, the fake /proc never changes
+            self.assertGreaterEqual(s.ev("findNamed('systemWidget').cpu.length"), 3)
+            graph = named(s, "systemGraph:cpu", "text")
+            self.assertGreaterEqual(len(graph.strip()), 3)
+            self.assertTrue(set(graph.strip()) <= set("▁▂▃▄▅▆▇█"))
+        finally:
+            s.close()
+
+    def test_the_block_graphs_and_gauges_are_exact(self):
+        s = scene(widget_system=True)
+        try:
+            s.wait(300)
+            W = "findNamed('systemWidget')"
+            self.assertEqual(s.ev(f"{W}.spark([0, 50, 100], 100).trim()"), "▁▄█")
+            self.assertEqual(len(s.ev(f"{W}.spark([1], 100)")), s.ev(f"{W}.history"))
+            self.assertEqual(s.ev(f"{W}.gauge(0.5, 8)"), "████░░░░")
+            self.assertEqual(s.ev(f"{W}.gauge(1.7, 4)"), "████")
+            self.assertEqual(s.ev(f"{W}.uptime(90061)"), "1d 1h 1m")
+            self.assertEqual(s.ev(f"{W}.temp(-1)"), "")
+        finally:
+            s.close()
+
+    def test_rows_without_a_source_are_left_out(self):
+        s = scene(widget_system=True)
+        try:
+            s.wait(800)
+            ids = s.ev("findNamed('systemWidget').rows.map(r => r.id).join(',')").split(",")
+            if s.ev("perf.batteryPercent") < 0:
+                self.assertNotIn("bat", ids)
+            for must in ("cpu", "gpu", "mem", "net", "up"):
+                self.assertIn(must, ids)
         finally:
             s.close()
 
@@ -284,13 +354,25 @@ class WidgetSettingsTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_the_clock_style_is_chosen_here(self):
+        s = scene(clock_style=None)
+        try:
+            self.open(s)
+            self.assertTrue(s.ev("findNamed('clockStyle:type').picked"))
+            self.tap(s, "clockStyle:blocks")
+            self.assertEqual(s.ev(f"{TE}.clock_style"), "blocks")
+            self.assertFalse(s.ev("findNamed('clockStyle:type').picked"))
+            self.assertTrue(s.ev(f"{TE}.dirty"))
+        finally:
+            s.close()
+
     def test_the_widget_keys_are_saved_with_everything_else(self):
         s = scene()
         try:
             self.open(s)
             keys = s.ev(f"{TE}.allKeys().join(',')").split(",")
             for k in ("widget_clock", "widget_music", "widget_system", "clock_24h", "clock_seconds",
-                      "widget_clock_pos", "widget_music_pos", "widget_system_pos"):
+                      "widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style"):
                 self.assertIn(k, keys)
         finally:
             s.close()

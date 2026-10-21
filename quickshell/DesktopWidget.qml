@@ -12,11 +12,17 @@ import Quickshell.Wayland
 //   defaultOn / defaultCorner   what a theme.json without those keys means
 //   wanted         the widget's own reason to be shown (music: a player exists)
 //   content        the card's contents, sized by contentWidth / contentHeight
+//   surface        what it sits on, chosen per widget so they don't all look
+//                  alike: "none" (bare, with a soft shadow for legibility on
+//                  any wallpaper), "glass" (the shell's panel glass) or
+//                  "terminal" (a dark, square-edged plate with a hairline)
+//   interactive    false for something only to look at (the clock): it then
+//                  takes no input at all and the desktop under it stays
+//                  clickable; true takes input over the card only
 //
-// The window spans the monitor but takes input only over the card, so the
-// desktop underneath stays clickable. It arrives by rising a little as it
-// fades in, leaves the same way, and a hover warms the card's edge and
-// lifts it 2 px. Reduced motion makes all of it instant.
+// It arrives by rising a little as it fades in and leaves the same way. An
+// interactive one warms its edge and lifts 2 px under the pointer. Reduced
+// motion makes all of it instant.
 PanelWindow {
     id: root
     property string name: ""
@@ -29,10 +35,16 @@ PanelWindow {
     property real cornerMargin: 28
     property real topClearance: 76      // the bar
     property real bottomClearance: 96   // the dock
+    property string surface: "glass"
+    property bool interactive: true
     default property alias content: holder.data
     readonly property alias card: surface
     readonly property alias hovered: hover.hovered
 
+    // Shader effects (soft shadows, blur, masks) need the GPU scene graph;
+    // under the software renderer they would draw nothing at all, so every
+    // effect in a widget is gated on this and degrades to plain drawing.
+    readonly property bool effects: surface.GraphicsInfo.api !== GraphicsInfo.Software
     readonly property bool on: Theme.widgetOn(root.name, root.defaultOn)
     readonly property string corner: Theme.widgetCorner(root.name, root.defaultCorner)
     readonly property bool active: root.on && root.wanted
@@ -50,8 +62,10 @@ PanelWindow {
     anchors { top: true; left: true; right: true; bottom: true }
     implicitWidth: root.screen && root.screen.width ? root.screen.width : 1920
     implicitHeight: root.screen && root.screen.height ? root.screen.height : 1080
-    // input only over the card
-    mask: Region { item: surface }
+    // input only over the card, or none at all
+    mask: root.interactive ? root._cardRegion : root._noRegion
+    property Region _cardRegion: Region { item: surface }
+    property Region _noRegion: Region {}
 
     NumberAnimation {
         id: arrive
@@ -69,13 +83,14 @@ PanelWindow {
         x: atLeft ? root.cornerMargin : parent.width - width - root.cornerMargin
         // rises 12 px into place on arrival (falls 12 px when leaving)
         y: (atTop ? root.topClearance : parent.height - height - root.bottomClearance)
-           + (1 - root.shown) * (atTop ? -12 : 12) - (hover.hovered ? 2 : 0)
+           + (1 - root.shown) * (atTop ? -12 : 12) - (root.interactive && hover.hovered ? 2 : 0)
         Behavior on y { enabled: !arrive.running; NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         opacity: root.shown
         scale: 0.97 + 0.03 * root.shown
         transformOrigin: surface.atTop ? (surface.atLeft ? Item.TopLeft : Item.TopRight) : (surface.atLeft ? Item.BottomLeft : Item.BottomRight)
 
         RectangularShadow {
+            visible: root.surface === "glass"
             anchors.fill: glass
             radius: glass.radius
             color: Theme.shadowColor
@@ -85,6 +100,7 @@ PanelWindow {
         }
         Rectangle {
             id: glass
+            visible: root.surface === "glass"
             anchors.fill: parent
             anchors.margins: 0
             radius: Theme.radius
@@ -93,11 +109,32 @@ PanelWindow {
             border.color: hover.hovered ? Theme.mix(Theme.borderIdle, Theme.accent, 0.5) : Theme.borderIdle
             Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         }
-        HoverHandler { id: hover }
+        // the terminal plate: square-edged, darker, a hairline and a lit top edge
+        Rectangle {
+            objectName: "widgetPlate:" + root.name
+            visible: root.surface === "terminal"
+            anchors.fill: parent
+            radius: 4
+            color: Qt.rgba(Theme.panel.r * 0.6, Theme.panel.g * 0.6, Theme.panel.b * 0.6, 0.78)
+            border.width: 1
+            border.color: root.interactive && hover.hovered ? Theme.mix(Theme.borderIdle, Theme.accent, 0.5) : Theme.borderIdle
+            Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+            Rectangle { x: 1; y: 1; width: parent.width - 2; height: 1; color: Theme.accent; opacity: 0.55 }
+        }
+        HoverHandler { id: hover; enabled: root.interactive }
         Item {
             id: holder
             x: root.pad; y: root.pad
             width: root.contentWidth; height: root.contentHeight
+            // bare widgets carry their own soft shadow so they read on any wallpaper
+            layer.enabled: root.surface === "none" && root.effects
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#000000"
+                shadowOpacity: 0.55
+                shadowBlur: 0.6
+                shadowVerticalOffset: 2
+            }
         }
     }
 }

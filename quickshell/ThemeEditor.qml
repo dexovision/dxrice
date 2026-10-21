@@ -208,6 +208,7 @@ PanelWindow {
     property string widget_system_pos: "top-right"
     property bool clock_24h: true
     property bool clock_seconds: false
+    property string clock_style: "type"
 
     property string font_family: "JetBrainsMono Nerd Font"
     // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
@@ -332,7 +333,7 @@ PanelWindow {
         for (const f of behaviorFields) keys.push(f.key);
         keys.push("layout_auto_place", "layout_super_g");
         for (const f of widgetFields) keys.push(f.key);
-        keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos");
+        keys.push("widget_clock_pos", "widget_music_pos", "widget_system_pos", "clock_style");
         return keys;
     }
 
@@ -664,6 +665,54 @@ PanelWindow {
     // (wrapped, never elided -- these are the explanations), the switch.
     // One of the three layouts as a card: the picture is the real layout
     // (LayoutPreviews.js is generated from it), drawn for four windows.
+    // One setting with a few named values, as a row of chips.
+    component ChoiceRow: Item {
+        id: choiceRow
+        property string settingKey: ""
+        property string idPrefix: ""
+        property string label: ""
+        property var options: []        // [{ value, label }]
+        width: parent.width
+        height: 34
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: choiceRow.label
+            color: Theme.textActive; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeNormal; font.weight: Font.Medium
+        }
+        Row {
+            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+            spacing: Theme.padSm
+            Repeater {
+                model: choiceRow.options
+                delegate: Rectangle {
+                    id: opt
+                    required property var modelData
+                    readonly property bool picked: root[choiceRow.settingKey] === opt.modelData.value
+                    objectName: choiceRow.idPrefix + opt.modelData.value
+                    width: Math.max(92, optLabel.implicitWidth + 28); height: 30
+                    radius: Theme.roundingSm
+                    color: Theme.mix(Theme.layer1, Theme.accent, opt.picked ? 0.2 : (optHover.hovered ? 0.07 : 0))
+                    border.width: opt.picked ? 2 : 1
+                    border.color: opt.picked ? Theme.accent : Theme.borderIdle
+                    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    Behavior on border.color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    HoverHandler { id: optHover; cursorShape: Qt.PointingHandCursor }
+                    Text {
+                        id: optLabel
+                        anchors.centerIn: parent
+                        text: opt.modelData.label
+                        color: opt.picked ? Theme.textActive : Theme.text
+                        font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller; font.weight: opt.picked ? Font.DemiBold : Font.Normal
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { root[choiceRow.settingKey] = opt.modelData.value; root.dirty = true; }
+                    }
+                }
+            }
+        }
+    }
+
     // One widget's corner: four small chips laid out like the corners they name.
     component CornerRow: Item {
         id: cornerRow
@@ -1957,6 +2006,10 @@ PanelWindow {
                     width: parent.width
                     spacing: Theme.pad2xl
                     SwitchList { width: parent.width; fields: root.widgetFields }
+                    ChoiceRow {
+                        settingKey: "clock_style"; idPrefix: "clockStyle:"; label: "Clock style"
+                        options: [{ value: "type", label: "Type" }, { value: "blocks", label: "Blocks" }]
+                    }
                     Column {
                         width: parent.width
                         spacing: Theme.padMd

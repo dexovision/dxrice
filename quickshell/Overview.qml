@@ -737,10 +737,11 @@ PanelWindow {
 
         }
 
-        // Layout switcher: apply Expansion, Spiral or Compact to this
-        // workspace and keep it as SUPER+G's choice. The real windows move
-        // (Hyprland animates them) and the pictures follow as the overview
-        // re-reads them.
+        // Layout switcher for SUPER+G only (new windows keep their own
+        // choice, set in Settings): apply Galaxy, Expansion, Spiral or
+        // Compact to this workspace and keep it as SUPER+G's. The real
+        // windows move (Hyprland animates them) and the pictures follow as
+        // the overview re-reads them. The label says which selector it is.
         Row {
             id: layoutChips
             objectName: "overviewLayoutChips"
@@ -749,6 +750,18 @@ PanelWindow {
             spacing: 8
             opacity: root.open ? root.progress : 0
             visible: opacity > 0.01 && root.windows.length > 1
+            Text {
+                objectName: "overviewLayoutLabel"
+                anchors.verticalCenter: parent.verticalCenter
+                rightPadding: 4
+                text: "SUPER+G"
+                color: "white"
+                opacity: 0.6
+                font.family: Theme.fontFamily
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                font.letterSpacing: 1.5
+            }
             Repeater {
                 model: root.layoutModes
                 delegate: Rectangle {

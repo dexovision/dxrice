@@ -48,18 +48,12 @@ class InputRegionTest(unittest.TestCase):
         rs = self.rects()
         top = [r for r in rs if r["surface"] == "TopBar"]
         dock = [r for r in rs if r["surface"] == "Dock"]
-        widgets = [r for r in rs if r["surface"].endswith("Widget")]
-        other = [r for r in rs if r["surface"] not in ("TopBar", "Dock") and r not in widgets]
+        other = [r for r in rs if r["surface"] not in ("TopBar", "Dock")]
         self.assertEqual(len(top), 3, f"{context}: top bar should expose exactly its 3 capsules, got {top}")
         self.assertEqual(len(dock), 1, f"{context}: dock should expose exactly its own slab, got {dock}")
+        # the clock (the one widget on by default) is only to look at: it
+        # takes no input, so nothing but the bar and dock does at idle
         self.assertEqual(other, [], f"{context}: unexpected input surfaces {other}")
-        # the clock is the one widget on by default (no player, monitor off):
-        # a card in the top-left corner, over the wallpaper and nothing else
-        self.assertEqual([r["surface"] for r in widgets], ["clockWidget"], f"{context}: widgets claiming input: {widgets}")
-        c = widgets[0]
-        self.assertEqual(c["x"], 28, f"{context}: clock card is not in the top-left corner: {c}")
-        # 76, or up to 2 px less while a hover lifts it (the lift is animated)
-        self.assertTrue(74 <= c["y"] <= 76, f"{context}: clock card is not in the top-left corner: {c}")
         for r in top:
             self.assertLessEqual(r["h"], 40, f"{context}: top-bar input taller than a capsule: {r}")
         d = dock[0]
@@ -70,8 +64,7 @@ class InputRegionTest(unittest.TestCase):
         before = s.ev("appClicks")
         probes = [(x, y) for x in range(int(s.width * 0.15), int(s.width * 0.85), max(40, s.width // 24))
                   for y in range(int(s.height * 0.30), int(s.height - 80), max(40, s.height // 14))]
-        # the clock card is meant to take input over itself; nothing else may
-        blocked = [(x, y) for (x, y) in probes if s.input_owner(x, y) not in (None, "clockWidget")]
+        blocked = [(x, y) for (x, y) in probes if s.input_owner(x, y) is not None]
         self.assertEqual(blocked, [], f"{context}: {len(blocked)} points over the app are intercepted by the shell, e.g. {blocked[:5]}")
         # And one real routed click lands on the app.
         s.click(int(s.width * 0.7), int(s.height * 0.75))
@@ -154,7 +147,7 @@ class InputRegionTest(unittest.TestCase):
         tops = s.ev("surfaces().filter(function(x){ return x.isToplevelWindow && x.visible; }).length")
         self.assertEqual(tops, 0, "Add Shortcut opened a separate toplevel window")
         names = sorted(set(r["surface"] for r in self.rects()))
-        self.assertEqual(names, ["Dock", "TopBar", "clockWidget"], f"unexpected surfaces while Add Shortcut is open: {names}")
+        self.assertEqual(names, ["Dock", "TopBar"], f"unexpected surfaces while Add Shortcut is open: {names}")
         s.ev("panels.closeCurrent()"); self.settle()
 
     def test_06_single_escape_claim_per_window(self):
