@@ -109,6 +109,34 @@ QtObject {
         root.offsets = o;
     }
 
+    // ---- a pan in progress (scripts/dxrice_pan_presence.py) ----
+    // "1 <unix time>" while the pan daemon has the bar stepped aside, kept
+    // fresh every half second; "0" otherwise. A "1" that has gone stale (a
+    // daemon killed outright) counts as over, so the bar always comes back.
+    readonly property string panPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/dxrice/panning"
+    property bool _panFlag: false
+    property real _panStamp: 0
+    property real _now: Date.now() / 1000
+    readonly property bool panning: root._panFlag && root._now - root._panStamp < 2.0
+    function _readPan(text) {
+        const f = String(text).trim().split(/\s+/);
+        root._panFlag = f[0] === "1";
+        root._panStamp = Number(f[1]) || 0;
+        root._now = Date.now() / 1000;
+    }
+    property Timer _panStale: Timer {
+        running: root._panFlag
+        interval: 400; repeat: true
+        onTriggered: root._now = Date.now() / 1000
+    }
+    property FileView panFile: FileView {
+        path: root.panPath
+        watchChanges: true
+        printErrors: false
+        onFileChanged: this.reload()
+        onLoaded: root._readPan(this.text())
+    }
+
     property FileView file: FileView {
         path: root.path
         watchChanges: true

@@ -550,6 +550,18 @@ def pan_held():
 import dxrice_viewport  # noqa: E402
 _viewport = dxrice_viewport.Viewport()
 
+# while a pan is on, the bar steps aside and the cursor hides
+# (dxrice_pan_presence.py); both are shown at start, so a crash mid-pan is
+# undone by the restart, and again on the way out
+import atexit  # noqa: E402
+import signal  # noqa: E402
+import dxrice_pan_presence  # noqa: E402
+_presence = dxrice_pan_presence.PanPresence()
+_presence.restore()
+atexit.register(_presence.restore)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+signal.signal(signal.SIGHUP, lambda *_: sys.exit(0))
+
 _was_active = False
 while True:
     if not _was_active:
@@ -565,6 +577,7 @@ while True:
         acc_x = 0.0
         acc_y = 0.0
 
+    _presence.tick(active_drag)
     if _was_active and not active_drag:
         _viewport.flush()           # the pan ended: its final offset
     _was_active = active_drag
@@ -597,6 +610,7 @@ while True:
 
         if idx == 0 and idy == 0:
             continue
+        _presence.motion(idx, idy)
 
         exprs = []
         for addr, pos in _drag_cache.items():

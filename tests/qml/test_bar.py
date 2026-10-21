@@ -419,5 +419,64 @@ class ClickOnlyTest(BarTest):
         self.skipTest("nothing opens on hover")
 
 
+class PanTest(unittest.TestCase):
+    """While the infinite desktop is panned (the pan daemon's flag,
+    Viewport.panning) the bar steps aside -- slides up, fades, takes no input,
+    closes its panel -- and comes back the moment the pan ends, or when the
+    flag goes stale (a daemon killed mid-pan)."""
+
+    def setUp(self):
+        self.s = Scene(width=1920, height=1080)
+        self.s.wait(500)
+
+    def tearDown(self):
+        self.s.close()
+
+    def bar(self):
+        return json.loads(self.s.ev("(function(){ const b = findNamed('barStrip'); const p = b.mapToItem(null, 0, 0);"
+                                    " let o = 1, it = b; while (it) { o *= it.opacity; it = it.parent; }"
+                                    " return JSON.stringify([p.y, o]); })()"))
+
+    def pan(self, on, age=0):
+        self.s.ev(f"viewport._readPan('{'1' if on else '0'} ' + (Date.now() / 1000 - {age}))")
+
+    def test_the_bar_steps_aside_during_a_pan_and_comes_back(self):
+        y0, o0 = self.bar()
+        self.s.ev("panels.open('status:network', 'hover')")
+        self.s.wait(400)
+        self.pan(True)
+        self.s.wait(400)
+        y1, o1 = self.bar()
+        self.assertLess(o1, 0.05, "the bar is still showing during the pan")
+        self.assertLess(y1, y0, "it should slide up out of the way")
+        self.assertEqual(self.s.ev("panels.current"), "", "a panel stayed open during the pan")
+        self.assertIsNone(self.s.input_owner(400, 25), "the hidden bar still takes the pointer")
+        self.pan(False)
+        self.s.wait(500)
+        y2, o2 = self.bar()
+        self.assertAlmostEqual(o2, 1, delta=0.01)
+        self.assertAlmostEqual(y2, y0, delta=0.5)
+        self.assertEqual(self.s.input_owner(400, 25), "TopBar")
+
+    def test_its_reserved_strip_stays_so_no_window_moves(self):
+        zone = "findNamed('barStrip').parent.exclusiveZone"
+        zone0 = self.s.ev(zone)
+        self.assertGreater(zone0, 0)
+        self.pan(True)
+        self.s.wait(400)
+        self.assertEqual(self.s.ev(zone), zone0)
+
+    def test_a_stale_flag_brings_the_bar_back(self):
+        # the daemon refreshes the flag every half second; one 3 s old means it died mid-pan
+        self.pan(True, age=3)
+        self.s.wait(600)
+        self.assertGreater(self.bar()[1], 0.99, "a stale pan flag kept the bar away")
+        self.pan(True)
+        self.s.wait(400)
+        self.assertLess(self.bar()[1], 0.05)
+        self.s.wait(2600)          # no refresh comes
+        self.assertGreater(self.bar()[1], 0.99, "the bar never came back after the flag went stale")
+
+
 if __name__ == "__main__":
     unittest.main()

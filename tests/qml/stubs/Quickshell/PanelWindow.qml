@@ -15,6 +15,8 @@ Item {
     property bool aboveWindows: true
     property bool focusable: false
     property var mask: null
+    // a real window's root item; here the stub itself is the surface's content
+    readonly property Item contentItem: root
     component Margins: QtObject { property real top: 0; property real bottom: 0; property real left: 0; property real right: 0 }
     property Margins margins: Margins {}
     // OSD-style single-edge panels are centred by the compositor on the free axis.

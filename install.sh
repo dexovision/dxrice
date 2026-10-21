@@ -866,6 +866,8 @@ StartLimitBurst=5
 
 [Service]
 ExecStart=$python_bin $REPO_DIR/scripts/dxrice_infinite_desktop_core.py 1.6
+# however it stopped, the bar and the cursor are shown again (a pan hides them)
+ExecStopPost=$python_bin $REPO_DIR/scripts/dxrice_pan_presence.py restore
 Restart=on-failure
 RestartSec=1
 EOF

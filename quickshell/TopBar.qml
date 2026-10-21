@@ -110,7 +110,19 @@ PanelWindow {
     // open, input extends to the whole window so a click that misses
     // everything reaches `dismissArea` and closes it; the instant
     // anyIslandOpen goes false it collapses back to 0x0.
-    mask: Region {
+    // ---- while the infinite desktop is panned (Viewport.panning), the bar
+    // steps aside: it slides up and fades, takes no input, and any panel
+    // closes -- the desktop moves under nothing. Its reserved strip stays,
+    // so no window jumps when it goes or comes back. ----
+    readonly property bool panHidden: Viewport.panning
+    property real panAway: root.panHidden ? 1 : 0
+    Behavior on panAway { NumberAnimation { duration: root.panHidden ? Theme.durationExit : Theme.durationEnter; easing.type: Theme.easingType; easing.bezierCurve: root.panHidden ? Theme.curveExit : Theme.curveStandard } }
+    onPanHiddenChanged: if (root.panHidden) PanelManager.closeCurrent()
+    Binding { target: root.contentItem; property: "opacity"; value: 1 - root.panAway }
+    Binding { target: root.contentItem; property: "y"; value: -(root.edgeMargin + root.islandHeight) * 0.6 * root.panAway }
+    property Region _noInput: Region {}
+    mask: root.panHidden ? root._noInput : root._input
+    property Region _input: Region {
         Region { item: barStrip }
         Region { item: activityIsland.expanded ? activityIsland.bodyItem : null }
         Region { item: clockIsland.expanded ? clockIsland.bodyItem : null }
