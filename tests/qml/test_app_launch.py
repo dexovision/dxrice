@@ -62,6 +62,8 @@ class NoBareAppLaunchTest(unittest.TestCase):
                     continue  # Log Out: ends the session itself
                 if prog == "sh" and tail.lstrip(", ").startswith('Quickshell.shellDir + "/../scripts/dxrice_power.sh"'):
                     continue  # reboot/power-off: execs systemctl or loginctl
+                if prog == "python3" and "dxrice_viewport.py" in tail[:120]:
+                    continue  # one pan step added to the viewport file, then it exits
                 if prog == "sh" and path.name == "CaptureService.qml" and tail.lstrip(", ").startswith("root.script"):
                     continue  # a screenshot or `stop`: grim/slurp/kill, short-lived (a recording is its own Process)
                 line = src.count("\n", 0, m.start()) + 1

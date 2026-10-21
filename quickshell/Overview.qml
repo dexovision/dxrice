@@ -405,6 +405,11 @@ PanelWindow {
             tileModel.setProperty(i, "ry", t.ry + d[1]);
         }
         root._unanimated = moved;
+        // the camera moved: world-attached widgets follow (the same running
+        // total the pan daemon keeps; scripts/dxrice_viewport.py)
+        if (Viewport.workspace !== null)
+            Quickshell.execDetached(["python3", Quickshell.shellDir + "/../scripts/dxrice_viewport.py", "add",
+                                     String(Viewport.workspace), String(d[0]), String(d[1])]);
     }
     function _restoreAnimations() {
         for (let i = 0; i < root._unanimated.length; i++)

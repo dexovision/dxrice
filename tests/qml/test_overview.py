@@ -706,6 +706,23 @@ class TestPanWithoutCompositorAnimation(unittest.TestCase):
         self.assertFalse(any("set_prop" in d or "window.move(" in d for d in sent), sent)
         self.assertTrue(any(d.startswith("hl.dsp.focus") for d in sent))
 
+    def test_a_pan_is_reported_to_the_viewport_so_widgets_follow(self):
+        o = self.scene((2600, 200, 3300, 650))     # off screen: a pan
+        try:
+            o.scene.bridge.exec_log.clear()
+            self.click(o)
+            o.scene.wait(SETTLE)
+            steps = [e for e in o.scene.bridge.exec_log if len(e) > 2 and e[1].endswith("dxrice_viewport.py")]
+            moves = run_in_lua(o.dispatches())
+        finally:
+            o.scene.close()
+        self.assertEqual(len(steps), 1, o.scene.bridge.exec_log)
+        self.assertEqual(steps[0][2], "add")
+        # the step is the pan every window got (window 0xa001 moved by it)
+        dx, dy = float(steps[0][4]), float(steps[0][5])
+        self.assertTrue(dx or dy)
+        self.assertTrue(any(c.startswith("move ") for c in moves))
+
     def test_the_close_is_the_zoom_length_even_after_a_pan(self):
         import time
         for rect in ((2600, 200, 3300, 650), (100, 120, 600, 500)):

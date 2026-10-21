@@ -13,6 +13,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, move_window_exact_lua, batch_async, dispatch
 import dxrice_monitor
+import dxrice_viewport
 
 STEP = 90
 
@@ -90,6 +91,11 @@ def main():
             oy = w["at"][1] - dy
             exprs.append(move_window_exact_lua(ox, oy, w["address"]))
         batch_async(exprs)
+        # the rest of the desktop moved: so do world-attached widgets
+        try:
+            dxrice_viewport.add_steps(dxrice_viewport.default_path(), {workspace_id: (-dx, -dy)})
+        except OSError:
+            pass
     else:
         dispatch(move_window_exact_lua(new_x, new_y, addr))
 
