@@ -30,6 +30,20 @@ DesktopWidget {
     readonly property string minutes: Qt.formatDateTime(root.now, "mm")
     readonly property string timeText: root.hours + ":" + root.minutes
     readonly property string meridiem: Qt.formatDateTime(root.now, "AP")
+    // sized to the screen: the design is for 1080 px tall, held to 0.72-1.3x
+    readonly property real k: Math.max(0.72, Math.min(1.3, root.implicitHeight / 1080))
+    // a new minute (or hour) rises into place; seconds just change
+    component Roll: Text {
+        id: roll
+        property real lift: 0
+        transform: Translate { y: roll.lift }
+        onTextChanged: if (root.active && !Theme.reduceMotion) rollIn.restart()
+        ParallelAnimation {
+            id: rollIn
+            NumberAnimation { target: roll; property: "lift"; from: 14 * root.k; to: 0; duration: Theme.durationSpring; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle }
+            NumberAnimation { target: roll; property: "opacity"; from: 0.15; to: 1; duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+        }
+    }
 
     Timer {
         // ticks each second with seconds shown, else just after each minute
@@ -49,32 +63,32 @@ DesktopWidget {
         id: typeFace
         objectName: "clockTypeFace"
         visible: !root.blocks
-        spacing: 22
+        spacing: Math.round(22 * root.k)
         Row {
             id: digits
             spacing: 2
-            Text {
+            Roll {
                 objectName: "clockHours"
                 text: root.hours
                 color: Theme.accent
-                font.family: Theme.fontFamily; font.pixelSize: 96; font.weight: Font.Bold
+                font.family: Theme.fontFamily; font.pixelSize: Math.round(96 * root.k); font.weight: Font.Bold
                 font.letterSpacing: -2
             }
             Text {
                 text: ":"
-                anchors.top: parent.top; anchors.topMargin: -8
+                anchors.top: parent.top; anchors.topMargin: -8 * root.k
                 color: Theme.textActive; opacity: 0.45
-                font.family: Theme.fontFamily; font.pixelSize: 96; font.weight: Font.Light
+                font.family: Theme.fontFamily; font.pixelSize: Math.round(96 * root.k); font.weight: Font.Light
             }
-            Text {
+            Roll {
                 objectName: "clockMinutes"
                 text: root.minutes
                 color: Theme.textActive
-                font.family: Theme.fontFamily; font.pixelSize: 96; font.weight: Font.Bold
+                font.family: Theme.fontFamily; font.pixelSize: Math.round(96 * root.k); font.weight: Font.Bold
                 font.letterSpacing: -2
             }
             Column {
-                anchors.top: parent.top; anchors.topMargin: 22
+                anchors.top: parent.top; anchors.topMargin: 22 * root.k
                 spacing: 2
                 leftPadding: 6
                 Text {
@@ -82,21 +96,21 @@ DesktopWidget {
                     visible: root.seconds
                     text: Qt.formatDateTime(root.now, "ss")
                     color: Theme.accent
-                    font.family: Theme.fontMono; font.pixelSize: 18; font.weight: Font.Medium
+                    font.family: Theme.fontMono; font.pixelSize: Math.round(18 * root.k); font.weight: Font.Medium
                 }
                 Text {
                     objectName: "clockMeridiem"
                     visible: !root.h24
                     text: root.meridiem
                     color: Theme.textActive; opacity: 0.7
-                    font.family: Theme.fontFamily; font.pixelSize: 16; font.weight: Font.DemiBold
+                    font.family: Theme.fontFamily; font.pixelSize: Math.round(16 * root.k); font.weight: Font.DemiBold
                     font.letterSpacing: 1
                 }
             }
         }
         Rectangle {
             width: 3; radius: 1.5
-            height: digits.height - 34
+            height: digits.height - 34 * root.k
             anchors.verticalCenter: digits.verticalCenter
             color: Theme.accent; opacity: 0.85
         }
@@ -107,19 +121,19 @@ DesktopWidget {
                 objectName: "clockMonth"
                 text: Qt.formatDateTime(root.now, "MMMM").toUpperCase()
                 color: Theme.accent
-                font.family: Theme.fontFamily; font.pixelSize: 15; font.weight: Font.Bold; font.letterSpacing: 4
+                font.family: Theme.fontFamily; font.pixelSize: Math.round(15 * root.k); font.weight: Font.Bold; font.letterSpacing: 4
             }
             Text {
                 objectName: "clockDate"
                 text: Qt.formatDateTime(root.now, "dd")
                 color: Theme.textActive
-                font.family: Theme.fontFamily; font.pixelSize: 40; font.weight: Font.Medium; font.letterSpacing: 1
+                font.family: Theme.fontFamily; font.pixelSize: Math.round(40 * root.k); font.weight: Font.Medium; font.letterSpacing: 1
             }
             Text {
                 objectName: "clockWeekday"
                 text: Qt.formatDateTime(root.now, "dddd")
                 color: Theme.textActive; opacity: 0.75
-                font.family: Theme.fontFamily; font.pixelSize: 15; font.letterSpacing: 2
+                font.family: Theme.fontFamily; font.pixelSize: Math.round(15 * root.k); font.letterSpacing: 2
             }
         }
     }
@@ -130,7 +144,7 @@ DesktopWidget {
         "4": "101101111001001", "5": "111100111001111", "6": "111100111101111", "7": "111001001001001",
         "8": "111101111101111", "9": "111101111001111", " ": "000000000000000"
     })
-    readonly property int cell: 17
+    readonly property int cell: Math.round(17 * root.k)
     component BlockGlyph: Grid {
         id: g
         property string ch: "0"

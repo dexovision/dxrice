@@ -168,6 +168,34 @@ class ClockWidgetTest(unittest.TestCase):
             s.close()
 
 
+class ClockSizeAndMotionTest(unittest.TestCase):
+    def test_it_scales_with_the_screen_within_bounds(self):
+        for (w, h), k in (((1366, 768), 0.72), ((1920, 1080), 1.0), ((2560, 1440), 1.3)):   # 1440/1080 = 1.33, held to 1.3
+            s = Scene(width=w, height=h)
+            try:
+                s.wait(300)
+                self.assertAlmostEqual(named(s, "clockWidget", "k"), k, places=3)
+                self.assertEqual(named(s, "clockHours", "font.pixelSize"), round(96 * k))
+                card = named(s, "widgetCard:clock", "width")
+                self.assertLess(card, w * 0.45, f"{w}x{h}: the clock takes too much of the screen ({card}px)")
+            finally:
+                s.close()
+
+    def test_a_new_minute_rises_into_place(self):
+        s = scene()
+        try:
+            s.wait(400)
+            s.ev("findNamed('clockWidget').now = new Date(2026, 9, 20, 12, 34, 0)")
+            s.wait(20)
+            mid = named(s, "clockMinutes", "lift")
+            s.wait(900)
+            self.assertGreater(mid, 0, "the new minute did not rise")
+            self.assertEqual(named(s, "clockMinutes", "lift"), 0)
+            self.assertEqual(named(s, "clockMinutes", "opacity"), 1)
+        finally:
+            s.close()
+
+
 class MusicWidgetTest(unittest.TestCase):
     def setUp(self):
         self.s = scene(widget_music=None)
