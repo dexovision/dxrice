@@ -16,12 +16,20 @@ import Quickshell.Wayland
 //                  alike: "none" (bare, with a soft shadow for legibility on
 //                  any wallpaper), "glass" (the shell's panel glass) or
 //                  "terminal" (a dark, square-edged plate with a hairline)
-//   worldAttached  theme.json "widget_<name>_world": true makes it part of the
-//                  infinite desktop -- it travels with the windows when you
-//                  pan (Viewport); false (default) keeps it on the screen
+//   worldAttached  part of the infinite desktop: it travels with the windows
+//                  when you pan (Viewport). theme.json "widgets_world"
+//                  (default true) is the default for every widget, and
+//                  "widget_<name>_world" overrides it for one
 //   interactive    false for something only to look at (the clock): it then
 //                  takes no input at all and the desktop under it stays
 //                  clickable; true takes input over the card only
+//
+// Where it sits is the desktop's layout (WidgetStack: its corner, the ones
+// before it there, the visualizer's band); when that place changes -- a
+// neighbour comes or goes, the visualizer's band is taken or given back, the
+// screen changes size -- it slides there. The pan is not part of that slide:
+// it is added on top, from Viewport, which moves it exactly as the windows
+// move.
 //
 // It arrives by rising a little as it fades in and leaves the same way. An
 // interactive one warms its edge and lifts 2 px under the pointer. Reduced
@@ -35,20 +43,16 @@ PanelWindow {
     property real contentWidth: 320
     property real contentHeight: 140
     property real pad: Theme.padLg
-    property real cornerMargin: 28
-    property real topClearance: 76      // the bar
-    property real bottomClearance: 28   // the screen's edge (there is no dock)
     property string surface: "glass"
     property bool interactive: true
     // a widget you type into (reminders) takes the keyboard when clicked,
     // never otherwise
     property bool takesKeys: false
-    readonly property bool worldAttached: Theme.data["widget_" + root.name + "_world"] === true
-    // the pan, smoothed between the daemon's ~30 updates a second
-    property real panX: root.worldAttached ? Viewport.x : 0
-    property real panY: root.worldAttached ? Viewport.y : 0
-    Behavior on panX { NumberAnimation { duration: 45; easing.type: Easing.Linear } }
-    Behavior on panY { NumberAnimation { duration: 45; easing.type: Easing.Linear } }
+    readonly property bool worldAttached: Theme.widgetWorld(root.name)
+    // the pan: Viewport already moves it the way the windows move, so it is
+    // used as it is (a second animation here would trail the windows)
+    readonly property real panX: root.worldAttached ? Viewport.x : 0
+    readonly property real panY: root.worldAttached ? Viewport.y : 0
     default property alias content: holder.data
     readonly property alias card: surface
     readonly property alias hovered: hover.hovered
@@ -61,13 +65,29 @@ PanelWindow {
     readonly property string corner: Theme.widgetCorner(root.name, root.defaultCorner)
     readonly property bool active: root.on && root.wanted
     property real shown: 0
-    // others in the same corner come first (WidgetStack); this one sits past them
-    readonly property real stackOffset: WidgetStack.offsetOf(root.name)
-    function _report() { WidgetStack.report(root.name, root.corner, surface.height, root.active); }
+    // its place in the desktop's layout (WidgetStack), eased when it changes
+    // -- but taken at once the first time, so it doesn't fly in from 0,0
+    readonly property var place: WidgetStack.placeOf(root.name)
+    property real slotX: root.place.dx
+    property real slotY: root.place.dy
+    property real bottomClearance: WidgetStack.bottomClearance
+    property bool _placed: false
+    Behavior on slotX { enabled: root._placed; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle } }
+    Behavior on slotY { enabled: root._placed; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle } }
+    Behavior on bottomClearance { enabled: root._placed; NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveSettle } }
+    function _report() { WidgetStack.report(root.name, root.corner, surface.width, surface.height, root.active); }
     onCornerChanged: root._report()
-    Component.onDestruction: WidgetStack.report(root.name, root.corner, 0, false)
+    Component.onDestruction: WidgetStack.report(root.name, root.corner, 0, 0, false)
     onActiveChanged: { arrive.stop(); arrive.to = root.active ? 1 : 0; arrive.duration = root.active ? Theme.durationDefault : Theme.durationFast; arrive.start(); root._report(); }
-    Component.onCompleted: { if (root.active) root.shown = 1; root._report(); }
+    onHeightChanged: if (root.height > 0) WidgetStack.screenHeight = root.height
+    onWidthChanged: if (root.width > 0) WidgetStack.screenWidth = root.width
+    Component.onCompleted: {
+        if (root.active) root.shown = 1;
+        if (root.height > 0) WidgetStack.screenHeight = root.height;
+        if (root.width > 0) WidgetStack.screenWidth = root.width;
+        root._report();
+        Qt.callLater(() => { root._placed = true; });
+    }
 
     visible: root.shown > 0
     color: "transparent"
@@ -97,11 +117,12 @@ PanelWindow {
         height: root.contentHeight + 2 * root.pad
         readonly property bool atTop: root.corner.indexOf("top") === 0
         readonly property bool atLeft: root.corner.endsWith("left")
-        x: (atLeft ? root.cornerMargin : parent.width - width - root.cornerMargin) + root.panX
+        x: (atLeft ? WidgetStack.sideMargin + root.slotX : parent.width - width - WidgetStack.sideMargin - root.slotX) + root.panX
         // rises 12 px into place on arrival (falls 12 px when leaving)
-        y: (atTop ? root.topClearance + root.stackOffset : parent.height - height - root.bottomClearance - root.stackOffset) + root.panY
+        y: (atTop ? WidgetStack.topClearance + root.slotY : parent.height - height - root.bottomClearance - root.slotY) + root.panY
            + (1 - root.shown) * (atTop ? -12 : 12)
         onHeightChanged: root._report()
+        onWidthChanged: root._report()
         // the hover lift is drawn, not a move: `y` has to follow a pan at once
         transform: Translate {
             y: root.interactive && hover.hovered ? -2 : 0

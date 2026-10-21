@@ -16,6 +16,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, move_focus, move_window_exact_lua, focus_window, batch_async
 import dxrice_monitor
+import dxrice_viewport
 
 PROTECTED_APPS = ['brave-browser', 'chromium', 'chromium-browser', 'google-chrome',
                   'firefox', 'firefoxdeveloperedition', 'librewolf', 'vivaldi',
@@ -105,7 +106,7 @@ def find_target(floating, current_bounds, center, direction):
     return None
 
 
-def pan_to_window(floating, target_addr, center_x, center_y):
+def pan_to_window(floating, target_addr, center_x, center_y, workspace_id=None):
     target = next((w for w in floating if w["address"] == target_addr), None)
     if not target:
         return
@@ -122,6 +123,12 @@ def pan_to_window(floating, target_addr, center_x, center_y):
         exprs.append(move_window_exact_lua(int(nx), int(ny), w["address"]))
 
     batch_async(exprs)
+    # the camera moved: the desktop's widgets follow (dxrice_viewport.py)
+    if workspace_id is not None and (dx or dy):
+        try:
+            dxrice_viewport.add_steps(dxrice_viewport.default_path(), {workspace_id: (dx, dy)})
+        except OSError:
+            pass
 
     if not is_protected(target):
         focus_window(target_addr)
@@ -168,13 +175,13 @@ def main():
                 + (1000 if is_protected(w) else 0)
             )
         )
-        pan_to_window(floating, closest["address"], center_x, center_y)
+        pan_to_window(floating, closest["address"], center_x, center_y, workspace_id)
         return
 
     current_bounds = get_window_bounds(focused)
     target = find_target(floating, current_bounds, (center_x, center_y), direction)
     if target:
-        pan_to_window(floating, target["address"], center_x, center_y)
+        pan_to_window(floating, target["address"], center_x, center_y, workspace_id)
 
 
 if __name__ == "__main__":

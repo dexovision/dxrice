@@ -206,7 +206,7 @@ class WorldAttachedTest(unittest.TestCase):
         return s.ev("viewport.workspace")
 
     def test_a_world_attached_widget_follows_the_pan_and_a_fixed_one_does_not(self):
-        s = scene(widget_clock_world=True, widget_system=True, widget_system_world=None)
+        s = scene(widget_clock_world=True, widget_system=True, widget_system_world=False)
         try:
             s.wait(600)
             cx, cy = named(s, "widgetCard:clock", "x"), named(s, "widgetCard:clock", "y")
@@ -215,13 +215,13 @@ class WorldAttachedTest(unittest.TestCase):
             w = self.ws(s)
             self.assertIsNotNone(w)
             s.ev(f"viewport.offsets = ({{ '{w}': [-300, 120] }})")
-            s.wait(200)
+            s.wait(1500)        # (it follows on the windows' spring)
             self.assertAlmostEqual(named(s, "widgetCard:clock", "x"), cx - 300, delta=0.5)
             self.assertAlmostEqual(named(s, "widgetCard:clock", "y"), cy + 120, delta=0.5)
             self.assertAlmostEqual(named(s, "widgetCard:system", "x"), sx, delta=0.5, msg="a screen-fixed widget moved")
             self.assertAlmostEqual(s.ev("findNamed('statusIsland').x"), bar, delta=0.5, msg="the bar moved")
             s.ev(f"viewport.offsets = ({{ '{w}': [0, 0] }})")
-            s.wait(200)
+            s.wait(1500)
             self.assertAlmostEqual(named(s, "widgetCard:clock", "x"), cx, delta=0.5)
         finally:
             s.close()
@@ -244,8 +244,10 @@ class WorldAttachedTest(unittest.TestCase):
             s.wait(700)
             s.ev(f"{TE}.currentCategory = 'experience'")
             s.wait(600)
-            s.ev("(function(){ const c = findNamed('toggleChip:widget_music_world'); c.children[c.children.length - 1].clicked(null); })()")
+            # on by default (they all travel with the desktop): one click keeps it on the screen
             self.assertTrue(s.ev(f"{TE}.widget_music_world"))
+            s.ev("(function(){ const c = findNamed('toggleChip:widget_music_world'); c.children[c.children.length - 1].clicked(null); })()")
+            self.assertFalse(s.ev(f"{TE}.widget_music_world"))
             self.assertTrue(s.ev(f"{TE}.dirty"))
             self.assertIn("widget_music_world", s.ev(f"{TE}.allKeys().join(',')").split(","))
         finally:

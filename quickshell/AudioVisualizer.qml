@@ -12,6 +12,11 @@ import Quickshell.Wayland
 // player is playing. Otherwise cava isn't running at all. Without cava
 // installed it simply never appears -- nothing here invents bars.
 //
+// Its band along the bottom is kept clear of the desktop's widgets: while it
+// could show (it is on, cava works here, and a player exists -- not only
+// while one plays, so pausing doesn't shuffle the widgets), it reports the
+// band's height to WidgetStack and bottom-corner widgets sit above it.
+//
 // Styles ("visualizer_style"):
 //   "bars"    (default) rounded bars rising from the bottom edge, the accent
 //             at the base fading toward the top
@@ -23,8 +28,11 @@ PanelWindow {
     readonly property bool on: Theme.widgetOn("visualizer", true)
     readonly property string style: Theme.data.visualizer_style === "blocks" ? "blocks" : "bars"
     readonly property int bars: 48
-    readonly property real barHeight: 150
+    // 150 px on a 1080 px screen, in proportion elsewhere
+    readonly property real barHeight: Math.round(Math.max(90, Math.min(180, (root.screen && root.screen.height ? root.screen.height : 1080) * 0.139)))
     MediaBackend { id: media; objectName: "visualizerMedia" }
+    readonly property bool reserves: root.on && root.available && media.available
+    Binding { target: WidgetStack; property: "visualizerBand"; value: root.reserves ? root.barHeight : 0 }
     readonly property bool active: root.on && media.playing && root.available
     property bool available: true          // false once cava turns out not to start
     property var values: []                // 0..1 per bar, from the last frame

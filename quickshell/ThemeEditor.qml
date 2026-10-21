@@ -229,16 +229,16 @@ PanelWindow {
     property string weather_location: ""
     property string weather_units: "metric"
     // world-attached widgets travel with the infinite desktop when you pan
-    property bool widget_clock_world: false
-    property bool widget_music_world: false
-    property bool widget_system_world: false
-    property bool widget_weather_world: false
-    property bool widget_battery_world: false
-    property bool widget_timer_world: false
-    property bool widget_reminders_world: false
-    property bool widget_cpu_world: false
-    property bool widget_memory_world: false
-    property bool widget_disk_world: false
+    property bool widget_clock_world: true
+    property bool widget_music_world: true
+    property bool widget_system_world: true
+    property bool widget_weather_world: true
+    property bool widget_battery_world: true
+    property bool widget_timer_world: true
+    property bool widget_reminders_world: true
+    property bool widget_cpu_world: true
+    property bool widget_memory_world: true
+    property bool widget_disk_world: true
 
     property string font_family: "JetBrainsMono Nerd Font"
     // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
@@ -2178,7 +2178,7 @@ PanelWindow {
                     }
                     ToggleChips {
                         label: "Move with the desktop"
-                        sub: "These travel with your windows when you pan the infinite desktop; the rest stay on the screen."
+                        sub: "Lit ones travel with your windows when you pan the infinite desktop (all of them, unless you turn one off); the rest stay on the screen."
                         options: [{ key: "widget_clock_world", label: "Clock" }, { key: "widget_music_world", label: "Now playing" },
                                   { key: "widget_system_world", label: "System monitor" }, { key: "widget_weather_world", label: "Weather" },
                                   { key: "widget_battery_world", label: "Battery" }, { key: "widget_timer_world", label: "Timer" },

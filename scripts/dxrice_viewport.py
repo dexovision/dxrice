@@ -12,8 +12,10 @@ starts at zero with the session.
 
 Several processes add to it, so no one of them keeps the total: each
 collects its own steps and adds them to the file under a lock (read, add,
-write atomically) -- at most every `interval` seconds while a pan goes on,
-and once more when it stops.
+write atomically) -- at most every `interval` seconds while a pan goes on
+(60 times a second: the shell runs the window spring on each step, so a
+coarser staircase would show as the widgets trailing the windows), and once
+more when it stops.
 
     dxrice_viewport.py add <workspace> <dx> <dy>     one step, from a script
 """
@@ -55,8 +57,24 @@ def add_steps(path, steps):
         os.replace(tmp, path)
 
 
+def uniform_shift(moves, threshold=1.0):
+    """(dx, dy) when every window in `moves` -- (old_x, old_y, new_x, new_y)
+    each -- moved by the same amount (within `threshold`), else None: a
+    rigid translation of the whole workspace is the camera moving, anything
+    else is a rearrangement and is not reported."""
+    if not moves:
+        return None
+    dx, dy = moves[0][2] - moves[0][0], moves[0][3] - moves[0][1]
+    for ox, oy, nx, ny in moves[1:]:
+        if abs((nx - ox) - dx) > threshold or abs((ny - oy) - dy) > threshold:
+            return None
+    if abs(dx) <= threshold and abs(dy) <= threshold:
+        return None
+    return dx, dy
+
+
 class Viewport:
-    def __init__(self, path=None, interval=1 / 30, clock=time.monotonic):
+    def __init__(self, path=None, interval=1 / 60, clock=time.monotonic):
         self.path = path or default_path()
         self.interval = interval
         self.clock = clock

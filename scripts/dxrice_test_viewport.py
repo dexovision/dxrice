@@ -87,6 +87,35 @@ class TestViewport(unittest.TestCase):
         qml = open(os.path.join(here, "..", "quickshell", "Overview.qml")).read()
         self.assertIn("dxrice_viewport.py", qml)
 
+    def test_keyboard_navigation_reports_its_pan(self):
+        # SUPER+arrows moved every window to centre the next one and never
+        # said so: widgets that follow the desktop stayed where they were
+        import dxrice_navigate_windows as nav
+        sent = []
+        old = (nav.batch_async, nav.focus_window, nav.dxrice_viewport.default_path)
+        nav.batch_async = lambda exprs: sent.extend(exprs)
+        nav.focus_window = lambda a: None
+        nav.dxrice_viewport.default_path = lambda: self.path
+        try:
+            wins = [{"address": "0xa", "at": [100, 200], "size": [400, 300], "class": "kitty"},
+                    {"address": "0xb", "at": [1500, 200], "size": [400, 300], "class": "kitty"}]
+            nav.pan_to_window(wins, "0xb", 960, 540, workspace_id=3)
+        finally:
+            nav.batch_async, nav.focus_window, nav.dxrice_viewport.default_path = old
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(self.read(), {"3": [960 - 1700, 540 - 350]})
+
+    def test_a_rigid_shift_is_a_camera_move_and_a_rearrangement_is_not(self):
+        from dxrice_viewport import uniform_shift
+        self.assertEqual(uniform_shift([(0, 0, 40, -10), (500, 300, 540, 290)]), (40, -10))
+        self.assertIsNone(uniform_shift([(0, 0, 40, -10), (500, 300, 520, 290)]))
+        self.assertIsNone(uniform_shift([(0, 0, 0.4, 0)]), "sub-pixel noise is no move")
+        self.assertIsNone(uniform_shift([]))
+
+    def test_super_g_reports_a_pure_recentre(self):
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_auto_arrange.py")).read()
+        self.assertIn("dxrice_viewport.uniform_shift(", src)
+
     def test_the_daemon_reports_its_pan_steps(self):
         src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_infinite_desktop_core.py")).read()
         self.assertIn("_viewport.record(workspace_id, idx, idy)", src)

@@ -29,6 +29,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxrice_hypr_ipc import hyprctl_json, batch_async, move_window_exact_lua, resize_window_exact_lua
 import dxrice_window_class
+import dxrice_viewport
 import dxrice_spiral
 from dxrice_resize_memory import (resize_state_path as _resize_state_path,
                                   load_resize_state as _load_resize_state,
@@ -259,6 +260,17 @@ def main():
 
     if exprs:
         batch_async(exprs)
+    # A press that only recentred the composition (every window moved by the
+    # same amount, nothing resized) moved the camera: the desktop's widgets
+    # follow it. A real rearrangement is not a camera move and isn't reported.
+    if exprs and not resized:
+        shift = dxrice_viewport.uniform_shift(
+            [(by_addr[a]["at"][0], by_addr[a]["at"][1], nx, ny) for a, nx, ny, _w, _h in results if a in by_addr])
+        if shift:
+            try:
+                dxrice_viewport.add_steps(dxrice_viewport.default_path(), {workspace_id: shift})
+            except OSError:
+                pass
 
     next_state = _next_resize_state(
         resize_state,

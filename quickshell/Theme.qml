@@ -58,6 +58,12 @@ QtObject {
         const v = String(root.data["widget_" + name + "_pos"] || "");
         return root.widgetCorners.indexOf(v) >= 0 ? v : fallback;
     }
+    // whether a desktop widget travels with the infinite desktop when it pans:
+    // "widgets_world" (default true) for all of them, "widget_<name>_world" for one
+    function widgetWorld(name) {
+        const v = root.data["widget_" + name + "_world"];
+        return typeof v === "boolean" ? v : root.data.widgets_world !== false;
+    }
 
     function reload() {
         file.reload();
