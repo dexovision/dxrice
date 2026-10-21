@@ -37,7 +37,10 @@ never touches them.
   opened by hovering closes when the pointer leaves and never takes your
   keyboard; a click (or `SUPER+R` for Applications) gives it the keyboard.
   On a narrow screen the indicators keep their icons and drop their
-  readings. `"bar_hover_open": false` in `theme.json` makes it click-only.
+  readings. Settings > Experience > Top bar chooses which indicators show
+  and whether resting on one opens it (or click-only). While you pan the
+  infinite desktop the bar slides out of the way and the cursor hides; both
+  come back when the pan ends.
   There is no separate dock or launcher window any more: both live in the
   bar.
 - **Panels** (Quickshell, `quickshell/`): the Dashboard (Wi-Fi, Bluetooth,
@@ -81,7 +84,8 @@ never touches them.
   column beside its narrowest widget; everything is drawn in proportion to
   the screen (designed at 1080 px tall). Settings > Experience > Arrange on
   the desktop (or `qs ipc call widgets arrange`) lets you drag any widget
-  to another corner; the corner is saved. They move with the infinite
+  to another corner, make it smaller or larger, hide it, or reset the
+  layout; it is all saved. They move with the infinite
   desktop -- when you pan, use `SUPER`+arrows, recentre with `SUPER+G` or
   bring a window into view from the overview -- on the same spring as the
   windows, so the two keep pace. Turn that off for one widget or all of
@@ -89,7 +93,9 @@ never touches them.
 - **Audio visualizer.** A real spectrum of what's playing, from `cava`, along
   the bottom of the desktop. It only runs while music plays, as bars or as
   block characters. While a player exists its band is kept clear: the
-  widgets in the bottom corners sit above it.
+  widgets in the bottom corners sit above it. The Sound section chooses what
+  it listens to: automatic (what the media player plays), one output device,
+  or one application -- a game included. Microphones are never offered.
 - **Wallpaper browser.** Settings > Wallpaper shows thumbnails of the pictures
   in `~/Pictures/Wallpapers` (and the folder of the wallpaper in use); click
   one and Apply.
@@ -98,7 +104,9 @@ never touches them.
   edge pushes the others along.
 - **Overview.** `SUPER+Tab` zooms the workspace out until every window fits,
   including the parts of the spiral past the screen edges. Click a window
-  to focus it. Details: [docs/OVERVIEW.md](docs/OVERVIEW.md).
+  to focus it. Hyprland can't picture a window that's off screen, so those
+  show the picture kept from when they were last on it, marked as such.
+  Details: [docs/OVERVIEW.md](docs/OVERVIEW.md).
 - **One theme for everything.** `scripts/dxrice_apply_theme.py` renders
   `theme.json` into waybar, wofi, mako, kitty, hyprlock and the GTK apps'
   stylesheet. It can also derive the colours from your wallpaper.

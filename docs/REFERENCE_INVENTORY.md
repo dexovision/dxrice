@@ -165,12 +165,30 @@ it's not obviously a zoom.
 
 ## 6. Mapping to DXrice
 
-Status as of `feat/redesign` at the end of the 2026-10-21 refinement pass.
+Status as of `feat/redesign` at the end of the second 2026-10-21 pass.
 **Done** means implemented and covered by a test. **Partial** means some of
-the reference's behaviour exists and the rest is missing for the reason given.
-**Not done** means it is absent. Nothing in this table has been checked on the
-real desktop unless it says **live**. The pass's own changes have not been
-deployed, so none of them are live yet.
+the reference's behaviour exists and the rest is missing for the reason
+given. **Not done** means it is absent. Nothing here was checked on the real
+desktop unless it says **live**; the live desktop runs `01887ad`, so
+everything after it is offscreen-tested only.
+
+### Interaction matrix
+
+What each surface is attached to, what opens it, and how it moves.
+"Observed" is from the clips; "inferred" is not shown in them.
+
+| Feature | Attached to | Opened by | Motion in DXrice | Reference |
+|---|---|---|---|---|
+| Bar sections' panels | The bar's lower edge, under the section, joined by concave fillets; flush with a bar end it reaches | Resting 150 ms (hover) or a click (stays); SUPER+R for Applications | Grows down out of the bar in 240 ms with a slight overshoot; content fades in once it has room; tucks back in 180 ms, content first | Observed: a card under the bar's right end. Hover vs click: unclear |
+| Moving between sections | Same | Pointer settling 80 ms on a neighbour | Same panel turns: old content out, size eases (270 ms), new content in | Inferred |
+| Leaving a hover-opened panel | -- | Pointer leaving its section and panel | Closes after 320 ms, whatever sections the pointer crosses on the way | Inferred |
+| Control centre / Dashboard | The bar's right end | Its icon | As above; switching between a section and the Dashboard cross-fades | Observed (close: slides right, ~150–200 ms) |
+| Recording card | Hangs from the capture icon | A recording running | Grows from the icon; tucks away while the right panel is open | Observed |
+| Performance panel | Under its icon | Its icon | As above | Observed (opens top-down from under the bar) |
+| Overview | Full screen, over everything | SUPER+Tab | Zooms out in 270 ms, back in 225 ms; window pictures live, or kept from when last on screen (marked) | Not in the clips |
+| Desktop widgets | The infinite desktop (world) | Always there | Follow the pan on the windows' own spring; slide to a new place in the layout | Observed: they pan with the windows |
+| The bar during a pan | The screen | -- | Slides up and fades while SUPER+ALT pans; cursor hidden; both back when it ends | Observed: bar absent mid-pan (B 3.8–10 s); cause unclear |
+| Visualizer | The screen's bottom edge, under windows | Music playing (automatic) or a chosen source | Rises from the edge; widgets keep its band clear | The clip's is a cava window |
 
 ### The bar and its panels
 
@@ -179,6 +197,10 @@ deployed, so none of them are live yet.
 | One continuous bar with grouped sections | One strip: apps/workspaces/window left, clock centre, indicators right (`TopBar.qml`, `ShellIsland.qml`) | **Done** (4f0e2c2), live since 4f0e2c2 was deployed |
 | Panels connected to the bar | Each panel grows down out of the bar under its section, joined by concave fillets; a panel that reaches a bar end squares that corner off | **Done** (4f0e2c2, 8899a80) |
 | Moving between sections | Hover a neighbour: the panel turns into the next section without closing, after an 80 ms settle so a sweep doesn't flick through each one | **Done** (572614b) |
+| Leaving a panel | A hover-opened panel closes once the pointer has left its own section and panel, whatever it crosses (it used to stay open if the pointer left across the clock) | **Done** (21a4535) |
+| The bar during a pan | The bar slides up and fades and the cursor hides while SUPER+ALT pans; restored on release, after a stall, at the daemon's start and exit, and by the unit after it stops; a stale flag brings the bar back | **Done** (ab5f41f), **not live**: needs the daemon restarted |
+| Visualizer source | Sound section: automatic, an output's monitor, or one app's stream (checked with cava on this machine: each delivers real levels); microphones never offered | **Done** (08a4555) |
+| Which indicators show | Settings > Top bar | **Done** (ff2a1cf) |
 | Panel size changes | An open panel eases to its new size (another section, the Dashboard); another panel taking over fades out, then in | **Done** (572614b) |
 | Search field in the bar | Search pill opens Applications (search, pinned shortcuts, open windows with focus/close, most-used, Shortcuts editor tab) | **Done** (4f0e2c2, 98143a6) |
 | Folder button beside the search | none | **Not done**: a shortcut to the file manager does the same; it isn't part of the search pill |
@@ -212,14 +234,19 @@ deployed, so none of them are live yet.
 | Sensor waves, pixel blobs | none | **Not done** (no humidity source; blobs unclear) |
 | Visualizer | `AudioVisualizer`, a 150 px band at 1080p (scaled), kept clear of widgets while a player exists | **Done** (61bdb69) |
 | Widget layout | WidgetStack: corners stack, a full side wraps beside its narrowest neighbour, everything at the screen's scale (0.72x-1.3x) | **Done** (61bdb69, 57b23c1) |
-| Arranging | Drag any widget to a corner (Theme editor > Arrange on the desktop, or `qs ipc call widgets arrange`); saved to theme.json, and the editor no longer writes its stale copy over it | **Done** (this pass) |
+| Arranging | Drag any widget to a corner, size it S/M/L, hide it, or reset the layout (Settings > Arrange on the desktop, or `qs ipc call widgets arrange`); saved to theme.json, and the editor no longer writes its stale copy over it | **Done** (de4e81a, df2566d) |
+| Overview pictures | Live where Hyprland can picture the window; otherwise the picture kept from when it was last on screen, marked with its age; a card only for a window never seen; no box around the screen | **Done** (97d931f), keeping pictures while the overview is closed **not verified live** |
+| Clipboard history | Dashboard card over cliphist: search, delete one, clear all (asked twice); no pinning (cliphist has none) | **Done** (487f6e4) |
+| Applications | Search, pinned, open windows, Shortcuts tab; with nothing typed, the apps launched most recently | **Done** (42debfe); no categories |
 | Dock at the bottom | Removed; shortcuts and their editor live in the bar | **Done** (4f0e2c2) |
 
 ### What only the real desktop can show
 
-Things these tests cannot settle, to check after deploying:
-- Widgets keep pace with the windows during a SUPER+ALT drag and a SUPER+arrow jump.
-- Hover timing feels right moving across the bar and down into a panel.
+To check after deploying (`01887ad` is live; everything since is not):
+- Widgets keep pace with the windows during a SUPER+ALT drag and a SUPER+arrow jump, and panning stays smooth with them.
+- The bar and cursor step aside during a pan and always come back (this needs `dxrice-infinite-desktop` restarted).
+- The overview shows pictures for windows panned off screen (kept while the overview was closed).
+- Hover timing across the bar and down into a panel; a hover-opened panel closes when left in any direction.
+- Picking a visualizer source changes what it shows.
 - The fillets and shadow at the bar/panel joint with the GPU's blur.
-- Typing in the reminders widget (Bottom layer, OnDemand keyboard).
-- SUPER+R gives Applications the keyboard.
+- Typing in the reminders widget, and SUPER+R giving Applications the keyboard.
