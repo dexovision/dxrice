@@ -102,6 +102,24 @@ class BarTest(unittest.TestCase):
             self.s.wait(500)
             self.assertEqual(self.current(), "status:" + name, f"hovering {name} opened nothing")
 
+    def test_clicking_the_neighbour_the_panel_just_turned_into_keeps_it(self):
+        # (moving onto the Dashboard mark with a section open switched to the
+        # Dashboard; the click that followed then closed it)
+        x, y = self.centre("audio")
+        self.s.click(x, y)
+        self.s.wait(400)
+        self.hover("dashboard")
+        self.s.wait(200)
+        self.assertEqual(self.current(), "quicksettings")
+        self.s.click(*self.centre("dashboard"))
+        self.s.wait(100)
+        self.assertEqual(self.current(), "quicksettings", "the click closed the panel it had just switched to")
+        # a later click still closes it
+        self.s.wait(1600)
+        self.s.click(*self.centre("dashboard"))
+        self.s.wait(100)
+        self.assertEqual(self.current(), "")
+
     def test_sweeping_along_the_indicators_does_not_flick_through_each(self):
         x, y = self.centre("network")
         self.s.click(x, y)

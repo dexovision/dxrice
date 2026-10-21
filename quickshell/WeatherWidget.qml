@@ -126,7 +126,7 @@ DesktopWidget {
             visible: !root.ok
             width: parent.width
             wrapMode: Text.WordWrap
-            text: root.report === null ? "Asking Open-Meteo..." : root.report.error
+            text: root.report === null ? "Asking Open-Meteo..." : (root.report.error || "")
             color: Theme.textActive; opacity: 0.75
             font.family: Theme.fontFamily; font.pixelSize: 14
         }

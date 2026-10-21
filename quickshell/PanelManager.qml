@@ -23,6 +23,10 @@ QtObject {
     // "hover" (it must never take focus from the app you are typing in, and
     // closes when the pointer leaves it)
     property string openedBy: "click"
+    // when the pointer last switched the open panel to a neighbour's (the
+    // bar's hover switch): a click on that neighbour right after means
+    // "this one", not "close it"
+    property real switchedAt: 0
 
     function isOpen(name) {
         return root.current === name;
@@ -48,6 +52,7 @@ QtObject {
     function toggle(name) {
         // a click on what a hover opened keeps it open (and now it's clicked)
         if (root.current === name && root.openedBy === "hover") { root.openedBy = "click"; return; }
+        if (root.current === name && Date.now() - root.switchedAt < 1500) { root.switchedAt = 0; return; }
         if (root.current === name) root.close(name);
         else root.open(name, "click");
     }

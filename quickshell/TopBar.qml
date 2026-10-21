@@ -251,7 +251,10 @@ PanelWindow {
         id: switchTimer
         property string target: ""
         interval: Theme.hoverSwitchDelay
-        onTriggered: if (root.statusOpen && PanelManager.current !== target) PanelManager.open(target, PanelManager.openedBy)
+        onTriggered: if (root.statusOpen && PanelManager.current !== target) {
+            PanelManager.open(target, PanelManager.openedBy);
+            PanelManager.switchedAt = Date.now();
+        }
     }
     function elementClicked(name) {
         hoverOpenTimer.stop();
