@@ -18,6 +18,9 @@ coarser staircase would show as the widgets trailing the windows), and once
 more when it stops.
 
     dxrice_viewport.py add <workspace> <dx> <dy>     one step, from a script
+    dxrice_viewport.py home <workspace>               the widgets back where
+                                                      they sit on screen: that
+                                                      workspace's total is 0
 """
 import fcntl
 import json
@@ -73,6 +76,21 @@ def uniform_shift(moves, threshold=1.0):
     return dx, dy
 
 
+def home(path, workspace):
+    """Starts `workspace`'s total again from here: whatever is on screen now is
+    where the desktop's widgets belong (a rearrangement that re-centred the
+    windows, or asking for them back)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        offsets = _read(path)
+        offsets.pop(str(workspace), None)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"offsets": offsets}, f)
+        os.replace(tmp, path)
+
+
 class Viewport:
     def __init__(self, path=None, interval=1 / 60, clock=time.monotonic):
         self.path = path or default_path()
@@ -114,7 +132,10 @@ def main(argv):
         if dx or dy:
             add_steps(default_path(), {ws: (dx, dy)})
         return 0
-    print("usage: dxrice_viewport.py add <workspace> <dx> <dy>", file=sys.stderr)
+    if len(argv) == 2 and argv[0] == "home":
+        home(default_path(), argv[1])
+        return 0
+    print("usage: dxrice_viewport.py add <workspace> <dx> <dy> | home <workspace>", file=sys.stderr)
     return 2
 
 

@@ -157,6 +157,43 @@ class SpringTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_a_total_from_before_the_shell_started_does_not_throw_them_away(self):
+        # (live: the shell started on a total of -2752 px built up all session,
+        # and every widget went off the screen)
+        def setup(bridge):
+            with_theme(widget_clock=True)(bridge)
+            run = bridge.env("XDG_RUNTIME_DIR") or "/tmp"      # where the shell will look
+            bridge.files[run + "/dxrice/viewport.json"] = json.dumps({"offsets": {"1": [-2752, 1430]}})
+        s = Scene(width=1920, height=1080, setup=setup)
+        try:
+            s.wait(700)
+            self.assertAlmostEqual(rect(s, "clock")[0], 28, delta=0.5, msg="the clock started off the screen")
+            # what moves from here on still moves them
+            s.ev("viewport.offsets = ({ '1': [-2652, 1430] })")
+            s.wait(1500)
+            self.assertAlmostEqual(rect(s, "clock")[0], 128, delta=0.5)
+        finally:
+            s.close()
+
+    def test_bring_here_puts_them_back_on_the_screen(self):
+        s = scene(widget_clock=True)
+        try:
+            s.wait(600)
+            s.ev("viewport.offsets = ({ '1': [-3000, 400] })")
+            s.wait(1500)
+            self.assertLess(rect(s, "clock")[0], 0)
+            s.ev("widgetStack.arranging = true")
+            s.wait(300)
+            self.assertTrue(s.ev("findNamed('arrangeHome').visible"))
+            s.ev("findNamed('arrangeHome').clicked()")
+            s.ev("widgetStack.arranging = false")
+            s.wait(1500)
+            self.assertAlmostEqual(rect(s, "clock")[0], 28, delta=0.5)
+            homes = [e for e in s.bridge.exec_log if len(e) >= 3 and e[1].endswith("dxrice_viewport.py") and e[2] == "home"]
+            self.assertEqual([h[2:] for h in homes], [["home", "1"]], "the total wasn't started over for the scripts")
+        finally:
+            s.close()
+
     def test_the_overviews_unanimated_pan_lands_at_once(self):
         s = scene(widget_clock=True)
         try:

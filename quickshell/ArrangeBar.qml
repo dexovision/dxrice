@@ -40,6 +40,14 @@ PanelWindow {
                 color: Theme.textActive
                 font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall
             }
+            // widgets that followed a pan off the screen, back here
+            CompactChip {
+                objectName: "arrangeHome"
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Bring here"
+                visible: Viewport.goalX !== 0 || Viewport.goalY !== 0
+                onClicked: Viewport.home()
+            }
             CompactChip {
                 objectName: "arrangeReset"
                 anchors.verticalCenter: parent.verticalCenter

@@ -36,7 +36,16 @@ QtObject {
         for (let i = 0; i < list.length; i++) if (list[i].focused) return list[i].id;
         return null;
     }
-    readonly property var offset: root.workspace !== null && root.offsets[String(root.workspace)] ? root.offsets[String(root.workspace)] : [0, 0]
+    // The totals as they stood when the shell started count as home: a pan
+    // total built up before (the shell restarting mid-session, a total from
+    // before the widgets followed the desktop) must not throw them off the
+    // screen. Only what moves from here on moves them.
+    property var _baseline: ({})
+    readonly property var offset: {
+        const k = root.workspace !== null ? String(root.workspace) : "";
+        const t = root.offsets[k] || [0, 0], b = root._baseline[k] || [0, 0];
+        return [Number(t[0]) - Number(b[0]), Number(t[1]) - Number(b[1])];
+    }
     readonly property real goalX: Number(root.offset[0]) || 0
     readonly property real goalY: Number(root.offset[1]) || 0
 
@@ -137,6 +146,19 @@ QtObject {
         onLoaded: root._readPan(this.text())
     }
 
+    // the widgets back on screen, here: this workspace's total starts over
+    // (arrange mode's button, and `qs ipc call widgets home`)
+    function home() {
+        if (root.workspace === null) return;
+        const k = String(root.workspace);
+        const o = Object.assign({}, root.offsets); delete o[k];
+        const b = Object.assign({}, root._baseline); delete b[k];
+        root._cut = false;
+        root._baseline = b;
+        root.offsets = o;
+        Quickshell.execDetached(["python3", Quickshell.shellDir + "/../scripts/dxrice_viewport.py", "home", k]);
+    }
+
     property FileView file: FileView {
         path: root.path
         watchChanges: true
@@ -145,7 +167,7 @@ QtObject {
         onLoaded: {
             try {
                 const o = JSON.parse(this.text()).offsets || {};
-                if (!root._read) { root._read = true; root._cut = true; }   // (the shell starting: no slide)
+                if (!root._read) { root._read = true; root._cut = true; root._baseline = o; }   // (the shell starting: home, no slide)
                 root.offsets = o;
                 root._cut = false;
             }

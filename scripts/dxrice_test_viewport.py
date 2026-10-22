@@ -112,9 +112,18 @@ class TestViewport(unittest.TestCase):
         self.assertIsNone(uniform_shift([(0, 0, 0.4, 0)]), "sub-pixel noise is no move")
         self.assertIsNone(uniform_shift([]))
 
-    def test_super_g_reports_a_pure_recentre(self):
+    def test_super_g_reports_a_pure_recentre_and_a_rearrangement_brings_the_widgets_home(self):
         src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_auto_arrange.py")).read()
         self.assertIn("dxrice_viewport.uniform_shift(", src)
+        self.assertIn("dxrice_viewport.home(dxrice_viewport.default_path(), workspace_id)", src)
+
+    def test_home_starts_one_workspace_over(self):
+        from dxrice_viewport import add_steps, home
+        add_steps(self.path, {1: (-4774, 154), 2: (30, 0)})
+        home(self.path, 1)
+        self.assertEqual(self.read(), {"2": [30, 0]})
+        home(self.path, 9)            # nothing there: nothing changes
+        self.assertEqual(self.read(), {"2": [30, 0]})
 
     def test_the_daemon_reports_its_pan_steps(self):
         src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dxrice_infinite_desktop_core.py")).read()

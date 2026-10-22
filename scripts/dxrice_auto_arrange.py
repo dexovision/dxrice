@@ -262,15 +262,18 @@ def main():
         batch_async(exprs)
     # A press that only recentred the composition (every window moved by the
     # same amount, nothing resized) moved the camera: the desktop's widgets
-    # follow it. A real rearrangement is not a camera move and isn't reported.
-    if exprs and not resized:
-        shift = dxrice_viewport.uniform_shift(
+    # follow it. A real rearrangement lays the windows out around the screen
+    # again: the widgets come home with them (the pan total starts over).
+    if exprs:
+        shift = None if resized else dxrice_viewport.uniform_shift(
             [(by_addr[a]["at"][0], by_addr[a]["at"][1], nx, ny) for a, nx, ny, _w, _h in results if a in by_addr])
-        if shift:
-            try:
+        try:
+            if shift:
                 dxrice_viewport.add_steps(dxrice_viewport.default_path(), {workspace_id: shift})
-            except OSError:
-                pass
+            else:
+                dxrice_viewport.home(dxrice_viewport.default_path(), workspace_id)
+        except OSError:
+            pass
 
     next_state = _next_resize_state(
         resize_state,

@@ -118,6 +118,7 @@ ShellRoot {
         target: "widgets"
         function arrange(): void { WidgetStack.arranging = !WidgetStack.arranging; }
         function done(): void { WidgetStack.arranging = false; }
+        function home(): void { Viewport.home(); }
     }
     ClockWidget { objectName: "clockWidget" }
     MusicWidget { objectName: "musicWidget" }
