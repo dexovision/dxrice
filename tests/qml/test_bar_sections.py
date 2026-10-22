@@ -196,6 +196,51 @@ class SectionsTest(unittest.TestCase):
         # looking at them read the history (what is still on screen stays counted)
         self.assertEqual(self.s.ev("notifications.history.filter(n => n.id > notifications.seenId).length"), 0)
 
+    def test_clear_all_empties_the_list_and_stays_cleared(self):
+        # (only what was on screen could be dismissed; "Earlier" piled up for good)
+        def fixtures(bridge):
+            bridge.commands.insert(0, ("makoctl list -j", json.dumps([{"id": 12, "app_name": "Discord", "summary": "ping"}])))
+            bridge.commands.insert(0, ("makoctl history -j", json.dumps([{"id": 11, "app_name": "kitty", "summary": "done"},
+                                                                         {"id": 10, "app_name": "Steam", "summary": "update"}])))
+        self.s.close()
+        self.s = Scene(width=1920, height=1080, setup=fixtures)
+        self.s.wait(500)
+        self.open("notifications")
+        self.s.bridge.exec_log.clear()
+        self.click("statusClearAll")
+        self.assertIn(["makoctl", "dismiss", "--all"], self.s.bridge.exec_log)
+        self.assertEqual(self.s.ev("notifications.history.length"), 0)
+        # mako still has them all (and the dismissed one) in its history
+        self.s.set_command("makoctl list -j", "[]")
+        self.s.set_command("makoctl history -j", json.dumps([{"id": i, "app_name": "a", "summary": "s"} for i in (12, 11, 10)]))
+        self.s.ev("notifications.refresh()")
+        self.s.wait(300)
+        self.assertEqual(self.s.ev("notifications.history.length"), 0, "cleared ones came back")
+        self.assertEqual(self.s.ev("notifications.unread"), 0)
+        self.assertTrue(self.s.ev("findNamed('statusSection:notifications').visible"))
+        # a new one is listed
+        self.s.set_command("makoctl history -j", json.dumps([{"id": i, "app_name": "a", "summary": "s"} for i in (13, 12, 11, 10)]))
+        self.s.ev("notifications.refresh()")
+        self.s.wait(300)
+        self.assertEqual(json.loads(self.s.ev("JSON.stringify(notifications.history.map(n => n.id))")), [13])
+        # kept for the next shell start, where the session's runtime dir is
+        write = [c for c in self.s.bridge.exec_log if c[:2] == ["sh", "-c"]]
+        self.assertEqual(write[-1][-3:], ["/tmp/dxrice/notifications-cleared", "12", "11"])
+        # mako restarted (numbering from 1 again): nothing it has now is hidden
+        self.s.set_command("makoctl history -j", json.dumps([{"id": 2, "app_name": "a", "summary": "new"}, {"id": 1, "app_name": "a", "summary": "s"}]))
+        self.s.ev("notifications.refresh()")
+        self.s.wait(300)
+        self.assertEqual(json.loads(self.s.ev("JSON.stringify(notifications.history.map(n => n.id))")), [2, 1])
+
+    def test_a_clear_survives_a_shell_restart(self):
+        def fixtures(bridge):
+            bridge.files["/tmp/dxrice/notifications-cleared"] = "12 11"
+            bridge.commands.insert(0, ("makoctl history -j", json.dumps([{"id": i, "app_name": "a", "summary": "s"} for i in (13, 12, 11)])))
+        self.s.close()
+        self.s = Scene(width=1920, height=1080, setup=fixtures)
+        self.s.wait(500)
+        self.assertEqual(json.loads(self.s.ev("JSON.stringify(notifications.history.map(n => n.id))")), [13])
+
     # ---- the recording's sound, and its card hanging from the bar ----
     def test_the_recording_sound_is_chosen_first_and_a_card_hangs_while_it_runs(self):
         self.s.set_command("dxrice_capture.sh record", "__HANG__")

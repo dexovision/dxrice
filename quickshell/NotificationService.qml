@@ -52,7 +52,10 @@ QtObject {
         stdout: StdioCollector {
             onStreamFinished: {
                 const list = root.parse(this.text).sort((a, b) => b.id - a.id);
-                root.history = list.slice(0, 8);
+                // mako numbers from 1 again when it restarts (its history
+                // starts empty): what was cleared before means nothing then
+                if (root.clearedId >= 0 && list.length && list[0].id < root._clearFloor) root._setCleared(-1, -1);
+                root.history = list.filter((n) => n.id > root.clearedId).slice(0, 8);
                 if (root._first) { root._first = false; root.markSeen(); }
             }
         }
@@ -90,4 +93,41 @@ QtObject {
     }
     function dismiss(id) { Quickshell.execDetached(["makoctl", "dismiss", "-n", String(id)]); root.soon.restart(); }
     function dismissAll() { Quickshell.execDetached(["makoctl", "dismiss", "--all"]); root.soon.restart(); }
+
+    // ---- clearing ----
+    // mako can't forget its history, so "Clear all" dismisses what is on
+    // screen and the shell stops listing everything up to the newest one
+    // (`clearedId`). Kept in $XDG_RUNTIME_DIR, which lives as long as the
+    // session and mako do, so a shell restart doesn't bring them back.
+    // `_clearFloor` is the newest id mako's history had then: a history
+    // whose newest is older than that is a restarted mako's.
+    property int clearedId: -1
+    property int _clearFloor: -1
+    readonly property string clearedPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/dxrice/notifications-cleared"
+    property FileView clearedFile: FileView {
+        path: root.clearedPath
+        blockLoading: true
+        printErrors: false
+        onLoaded: root._readCleared()
+    }
+    Component.onCompleted: root._readCleared()
+    function _readCleared() {
+        const p = String(root.clearedFile.text()).trim().split(/\s+/).map(Number);
+        if (p.length === 2 && p.every((v) => Number.isFinite(v))) { root.clearedId = p[0]; root._clearFloor = p[1]; }
+    }
+    function _setCleared(id, floor) {
+        root.clearedId = id;
+        root._clearFloor = floor;
+        Quickshell.execDetached(["sh", "-c", 'mkdir -p "${1%/*}" && printf "%s %s" "$2" "$3" > "$1"', "sh", root.clearedPath, String(id), String(floor)]);
+    }
+    function clearAll() {
+        let max = root.clearedId, floor = -1;
+        for (const n of root.history) { max = Math.max(max, n.id); floor = Math.max(floor, n.id); }
+        for (const n of root.onScreen) max = Math.max(max, n.id);
+        if (max < 0) return;
+        root._setCleared(max, floor >= 0 ? floor : max);
+        root.history = [];
+        root.markSeen();
+        if (root.onScreen.length) root.dismissAll();
+    }
 }

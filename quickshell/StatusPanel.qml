@@ -665,28 +665,27 @@ Item {
                     onToggled: (next) => root.setDnd(!next)
                 }
                 Hairline {}
-                // on screen now: each can be dismissed, or all at once
+                // on screen now (each can be dismissed), then earlier ones;
+                // "Clear all" empties both (NotificationService.clearAll)
                 Item {
-                    visible: NotificationService.onScreen.length > 0
+                    visible: NotificationService.onScreen.length > 0 || NotificationService.history.length > 0
                     width: body.width; height: 22
-                    Caption { anchors.verticalCenter: parent.verticalCenter; text: "ON SCREEN" }
+                    Caption { anchors.verticalCenter: parent.verticalCenter; text: NotificationService.onScreen.length > 0 ? "ON SCREEN" : "EARLIER" }
                     Text {
                         objectName: "statusClearAll"
                         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                        // what's on screen; mako has no way to clear its history
-                        text: "Dismiss all"
+                        text: "Clear all"
                         color: clearArea.containsMouse ? Theme.accentText : Theme.text
                         font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmaller
-                        MouseArea { id: clearArea; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: NotificationService.dismissAll() }
+                        MouseArea { id: clearArea; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: NotificationService.clearAll() }
                     }
                 }
                 Repeater {
                     model: NotificationService.onScreen
                     delegate: NoteRow { required property var modelData; note: modelData; dismissable: true }
                 }
-                // earlier: mako keeps these and can't forget them, so they
-                // are listed, not removed
-                Caption { visible: NotificationService.history.length > 0; text: "EARLIER"; topPadding: 4 }
+                // earlier (its caption is the row above when nothing is on screen)
+                Caption { visible: NotificationService.history.length > 0 && NotificationService.onScreen.length > 0; text: "EARLIER"; topPadding: 4 }
                 Repeater {
                     model: NotificationService.history.slice(0, 6)
                     delegate: NoteRow { required property var modelData; note: modelData }
