@@ -309,10 +309,11 @@ PanelWindow {
         { key: "text_scale", label: "Shell text size (bar, panels, this editor)", sub: "Every size of text in the shell together; 1 is the original size.", min: 0.8, max: 1.4, decimals: 2 },
     ]
     readonly property var fontSizeFields: [
-        { key: "font_size_waybar", label: "Taskbar text size", min: 8, max: 24, decimals: 0 },
-        { key: "font_size_waybar_icons", label: "Taskbar app icon size", min: 8, max: 40, decimals: 0 },
-        { key: "font_size_wofi", label: "App launcher font size", min: 8, max: 24, decimals: 0 },
-        { key: "font_size_mako", label: "Notification font size", min: 8, max: 24, decimals: 0 },
+        // (drawn by TypeSizeRow, each with a sample; these are its words too)
+        { key: "font_size_waybar", label: "Waybar text (fallback bar)", sub: "Waybar is the bar used when the shell isn't running.", min: 8, max: 24, decimals: 0 },
+        { key: "font_size_waybar_icons", label: "Waybar icons (fallback bar)", sub: "Its app icons.", min: 8, max: 40, decimals: 0 },
+        { key: "font_size_wofi", label: "App launcher", sub: "wofi: clipboard history (SUPER+SHIFT+V), and the launcher when the shell isn't running.", min: 8, max: 24, decimals: 0 },
+        { key: "font_size_mako", label: "Notifications", sub: "Notification popups (mako).", min: 8, max: 24, decimals: 0 },
     ]
     readonly property var behaviorFields: [
         { key: "auto_place_windows", objectName: "autoPlaceSwitch", label: "Automatic window placement",
@@ -1117,20 +1118,19 @@ PanelWindow {
     // means until you go find the real thing it controls.
     component TypeSizeRow: Column {
         id: typeSizeRoot
-        property string label: ""
+        property var field: ({})          // one of fontSizeFields
         property string sampleText: "Sample"
-        property string key: ""
-        property real min: 8
-        property real max: 24
+        readonly property string key: field.key || ""
         width: parent ? parent.width : implicitWidth
         spacing: Theme.padXs
 
         FillSlider {
             objectName: "field:" + typeSizeRoot.key
             width: parent.width
-            label: typeSizeRoot.label
+            label: typeSizeRoot.field.label || ""
+            description: typeSizeRoot.field.sub || ""
             unit: "px"
-            from: typeSizeRoot.min; to: typeSizeRoot.max; decimals: 0
+            from: typeSizeRoot.field.min; to: typeSizeRoot.field.max; decimals: 0
             value: root[typeSizeRoot.key]
             resettable: !root.isDefault(typeSizeRoot.key)
             onChanged: (v) => { root[typeSizeRoot.key] = Math.round(v); root.dirty = true; }
@@ -2186,10 +2186,10 @@ PanelWindow {
                 padding: Theme.pad2xl
                 title: "Sizes"
                 SliderList { width: parent.width; fields: root.shellTextFields }
-                TypeSizeRow { width: parent.width; label: "Waybar text (fallback bar)"; key: "font_size_waybar"; min: 8; max: 24; sampleText: "12:30 PM   Sep 10" }
-                TypeSizeRow { width: parent.width; label: "Waybar icons (fallback bar)"; key: "font_size_waybar_icons"; min: 8; max: 40; sampleText: "★ ✎ ⚙" }
-                TypeSizeRow { width: parent.width; label: "App launcher"; key: "font_size_wofi"; min: 8; max: 24; sampleText: "Search applications..." }
-                TypeSizeRow { width: parent.width; label: "Notifications"; key: "font_size_mako"; min: 8; max: 24; sampleText: "Battery low -- 12% remaining" }
+                TypeSizeRow { width: parent.width; field: root.fontSizeFields[0]; sampleText: "12:30 PM   Sep 10" }
+                TypeSizeRow { width: parent.width; field: root.fontSizeFields[1]; sampleText: "★ ✎ ⚙" }
+                TypeSizeRow { width: parent.width; field: root.fontSizeFields[2]; sampleText: "Search applications..." }
+                TypeSizeRow { width: parent.width; field: root.fontSizeFields[3]; sampleText: "Battery low -- 12% remaining" }
             }
         }
     }

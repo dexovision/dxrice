@@ -195,6 +195,26 @@ class EditorTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_every_setting_search_finds_is_on_its_page_under_its_name(self):
+        s = Scene(width=1920, height=1080)
+        try:
+            self.open(s)
+            index = json.loads(s.ev(f"JSON.stringify({TE}.settingsIndex)"))
+            self.assertGreater(len(index), 40)
+            wrong = []
+            for f in index:
+                s.ev(f"{TE}.goToSetting('{f['key']}')")
+                s.wait(120)
+                row = f"findNamed('field:{f['key']}')"
+                ok = s.ev(f"(function(){{ const r = {row}; return !!r && r.visible && r.height > 0; }})()")
+                # the name search shows is the name the row shows
+                shown = s.ev(f"(function(){{ const r = {row}; return r ? (r.label !== undefined ? r.label : (r.title !== undefined ? r.title : null)) : null; }})()")
+                if not ok or (shown is not None and shown != f["label"]):
+                    wrong.append((f["key"], f["category"], shown))
+            self.assertEqual(wrong, [])
+        finally:
+            s.close()
+
     def test_shell_text_size_is_saved_by_apply(self):
         s = Scene(width=1920, height=1080)
         try:
