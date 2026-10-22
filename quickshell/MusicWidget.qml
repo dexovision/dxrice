@@ -21,7 +21,7 @@ DesktopWidget {
     // as tall as its words and controls need, never less than the cover's
     // frame: a title that wraps to two lines (or a long artist) pushes the
     // time row down instead of running into it
-    contentHeight: Math.max(148, words.y + words.implicitHeight + 10 + lower.height + 18)
+    contentHeight: Math.ceil(Math.max(148, words.y + words.implicitHeight + 10 + lower.height + 18))   // (whole pixels: text heights are fractional)
 
     MediaBackend { id: media; objectName: "musicMedia" }
     // MPRIS doesn't announce the position: ask once a second, only while playing and shown
@@ -189,7 +189,7 @@ DesktopWidget {
                     anchors.verticalCenter: parent.verticalCenter
                     color: modelData.big ? Theme.accent : (area.containsMouse ? Qt.rgba(1, 1, 1, 0.16) : "transparent")
                     scale: area.pressed ? 0.88 : (area.containsMouse ? 1.08 : 1)
-                    Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
+                    Behavior on scale { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveExpressiveFast } }
                     Behavior on color { ColorAnimation { duration: Theme.durationFast } }
                     Text {
                         anchors.centerIn: parent
@@ -217,7 +217,7 @@ DesktopWidget {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width; height: progressArea.containsMouse ? 5 : 3; radius: height / 2
                 color: Qt.rgba(1, 1, 1, 0.18)
-                Behavior on height { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                Behavior on height { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                 Rectangle {
                     objectName: "musicProgressFill"
                     height: parent.height; radius: parent.radius
