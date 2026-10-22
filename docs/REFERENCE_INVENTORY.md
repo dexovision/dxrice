@@ -235,7 +235,7 @@ What each surface is attached to, what opens it, and how it moves.
 | Visualizer | `AudioVisualizer`, a 150 px band at 1080p (scaled), kept clear of widgets while a player exists | **Done** (61bdb69) |
 | Widget layout | WidgetStack: corners stack, a full side wraps beside its narrowest neighbour, everything at the screen's scale (0.72x-1.3x) | **Done** (61bdb69, 57b23c1) |
 | Arranging | Drag any widget to a corner, size it S/M/L, hide it, or reset the layout (Settings > Arrange on the desktop, or `qs ipc call widgets arrange`); saved to theme.json, and the editor no longer writes its stale copy over it | **Done** (de4e81a, df2566d) |
-| Overview pictures | Live where Hyprland can picture the window; otherwise the picture kept from when it was last on screen, marked with its age; a card only for a window never seen; no box around the screen | **Done** (97d931f), keeping pictures while the overview is closed **not verified live** |
+| Overview pictures | Live where Hyprland can picture the window; off screen, a card saying so (or, with `overview_keep_pictures`, the picture kept from when it was last on screen); no box around the screen | **Partial**: kept pictures worked live for one window but showed another window's frame in a second, so they are **off by default** |
 | Clipboard history | Dashboard card over cliphist: search, delete one, clear all (asked twice); no pinning (cliphist has none) | **Done** (487f6e4) |
 | Applications | Search, pinned, open windows, Shortcuts tab; with nothing typed, the apps launched most recently | **Done** (42debfe); no categories |
 | Dock at the bottom | Removed; shortcuts and their editor live in the bar | **Done** (4f0e2c2) |

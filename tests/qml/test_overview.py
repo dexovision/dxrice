@@ -1389,6 +1389,7 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
         on = [(400, 200, 1300, 800), (1400, 300, 1800, 700)]
         o = OverviewScene(clients_for(on))
         try:
+            o.scene.ev("theme.data = Object.assign({}, theme.data, { overview_keep_pictures: true })")
             # while the overview is closed, the windows on screen are kept
             o.scene.ev("findNamed('overview').keepOnScreen()")
             o.scene.wait(300)
@@ -1418,6 +1419,7 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
         cl[0]["fullscreen"] = 2
         o = OverviewScene(cl)
         try:
+            o.scene.ev("theme.data = Object.assign({}, theme.data, { overview_keep_pictures: true })")
             o.scene.ev("findNamed('overview').keepOnScreen()")
             o.scene.wait(300)
             for c in cl:
@@ -1426,9 +1428,22 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
         finally:
             o.scene.close()
 
+    def test_kept_pictures_are_off_unless_asked_for(self):
+        # (live, a kept picture showed another window's frame: off by default)
+        o = OverviewScene(clients_for([(400, 200, 1300, 800)]))
+        try:
+            o.scene.ev("findNamed('overview').keepOnScreen()")
+            o.scene.wait(300)
+            a0 = o.clients[0]["address"].replace("0x", "")
+            self.assertTrue(o.scene.ev(f"findNamed('overview').keptViewFor('{a0}') === null"))
+            self.assertFalse(o.scene.ev("findNamed('overview').keepPictures"))
+        finally:
+            o.scene.close()
+
     def test_a_refused_refresh_keeps_the_picture_already_kept(self):
         o = OverviewScene(clients_for([(400, 200, 1300, 800)]))
         try:
+            o.scene.ev("theme.data = Object.assign({}, theme.data, { overview_keep_pictures: true })")
             ov = "findNamed('overview')"
             a0 = o.clients[0]["address"].replace("0x", "")
             o.scene.ev(f"{ov}.keepOnScreen()")

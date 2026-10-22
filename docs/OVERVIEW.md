@@ -281,9 +281,12 @@ key would silently do nothing, so the proven path is kept.
     picture, marked "OFF SCREEN · n min ago"; one never seen on screen since
     the shell started is drawn as a card -- its app icon (or initial), title
     and class, marked OFF SCREEN or NO PICTURE -- never as a grey stand-in.
-    Whether a still capture taken while the overview's surface is unmapped
-    works on Hyprland is **not verified live yet**; if it doesn't, the cards
-    are what shows. `"overview_keep_pictures": false` turns it off.
+    **Off by default** (`"overview_keep_pictures": true` turns it on). On
+    the real desktop it did capture while the overview was closed -- an
+    off-screen Minecraft window showed its kept picture -- but another kept
+    picture showed a different window's frame (PrismLauncher's menu bar at
+    full size inside kitty's tile). Until that is understood, the honest
+    card is what shows.
   - A translucent window gets a solid ground under its picture once the
     view zooms out, so the overview's wallpaper doesn't show through it.
   - The screen you were looking at is no longer outlined.

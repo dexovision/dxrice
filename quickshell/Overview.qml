@@ -475,7 +475,13 @@ PanelWindow {
     // The overview shows a kept picture, marked with its age, only where
     // there is no live one. theme.json "overview_keep_pictures": false turns
     // it off (the cards come back).
-    readonly property bool keepPictures: Theme.data.overview_keep_pictures !== false
+    //
+    // OFF by default ("overview_keep_pictures": true turns it on): on the
+    // real desktop (2026-10-21, Quickshell 0.3.1 on Hyprland 0.56) a kept
+    // picture showed another window's frame -- PrismLauncher's menu bar at
+    // full size inside kitty's tile. Until that is understood a card that
+    // says OFF SCREEN is the honest thing to show.
+    readonly property bool keepPictures: Theme.data.overview_keep_pictures === true
     property var keptAddresses: []          // a slot per window seen on screen (stable order)
     property int keptVersion: 0             // bumped whenever a kept picture changes
     function keptViewFor(address) {
