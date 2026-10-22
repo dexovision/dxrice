@@ -29,7 +29,7 @@ never touches them.
   needs a PIN is asked through blueman-applet), sound (outputs and inputs;
   a muted microphone shows beside the volume), power (lock,
   log out, restart and shut down -- the last three ask once more), and
-  notifications (an unread count; dismiss what's on screen), each opening
+  notifications (an unread count; dismiss one, or clear them all), each opening
   its own section, plus the full Dashboard. Every panel hangs from the
   bar's lower edge under what opened it, joined to it with curved corners.
   Rest the pointer on one (or click it) and its panel drops out of the bar;
@@ -85,11 +85,11 @@ never touches them.
   the screen (designed at 1080 px tall). Settings > Experience > Arrange on
   the desktop (or `qs ipc call widgets arrange`) lets you drag any widget
   to another corner, make it smaller or larger, hide it, or reset the
-  layout; it is all saved. They move with the infinite
-  desktop -- when you pan, use `SUPER`+arrows, recentre with `SUPER+G` or
-  bring a window into view from the overview -- on the same spring as the
-  windows, so the two keep pace. Turn that off for one widget or all of
-  them in Settings > Experience > Move with the desktop.
+  layout; it is all saved. They stay on the screen while you pan the
+  infinite desktop and sway a little with the motion, settling when it
+  stops (Settings > Experience > Widget sway; 0 keeps them still). Settings
+  > Experience > Leave on the desktop when panning keeps chosen widgets on
+  the desktop instead, moving with your windows.
 - **Audio visualizer.** A real spectrum of what's playing, from `cava`, along
   the bottom of the desktop. It only runs while music plays, as bars or as
   block characters. While a player exists its band is kept clear: the
@@ -106,7 +106,6 @@ never touches them.
   including the parts of the spiral past the screen edges. Click a window
   to focus it. Hyprland can't picture a window that's off screen, so those
   show the picture kept from when they were last on it, marked as such.
-  Details: [docs/OVERVIEW.md](docs/OVERVIEW.md).
 - **One theme for everything.** `scripts/dxrice_apply_theme.py` renders
   `theme.json` into waybar, wofi, mako, kitty, hyprlock and the GTK apps'
   stylesheet. It can also derive the colours from your wallpaper.
@@ -437,9 +436,6 @@ for t in tests/qml/test_*.py; do python3 "$t"; done
 **Changing `hyprland.lua`.** Template changes never reach existing
 installs on their own. If an existing install needs the change, add an
 exact-text migration to `scripts/dxrice_hypr_migrate.py`.
-
-[docs/AUDIT.md](docs/AUDIT.md) records the October 2026 engineering audit:
-what was found, what changed, and what was measured.
 
 ## Credits
 

@@ -152,7 +152,7 @@ class TestGrowsFromTheFirstWindow(_Growth):
         # Clear of everything, never under the minimum. Not asserted: that it
         # sits within reach of a neighbour -- the arm was wound round the
         # closed anchor, so continuing it round the survivor can land in open
-        # space (REPORT_GEOMETRY.md, limitations); the next SUPER+G re-winds.
+        # space (a known limitation); the next SUPER+G re-winds.
         self.assertEqual(spacing_violations(self.rows()), [])
         self.press()
         assert_composed(self, self.rows())

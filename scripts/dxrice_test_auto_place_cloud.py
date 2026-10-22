@@ -439,8 +439,8 @@ class TestJoinsTheCloud(_Base):
         (117/120). Auto-placement composes in opening order and never moves
         an existing window, while SUPER+G orders the whole set by
         prominence, so SUPER+G now re-winds about half of them (58/120 kept
-        as they are on this seed) -- measured and reported in
-        docs/phase1/REPORT_SPIRAL.md, not hidden behind a looser bound."""
+        as they are on this seed) -- a measured trade-off, not hidden
+        behind a looser bound."""
         rng = random.Random(11)
         wide = 0
         for _ in range(120):

@@ -39,7 +39,7 @@ import "OverviewGeometry.js" as Geo
 // every window twice while the pictures moved. The hyprland.lua template's
 // layer rule `overview-no-anim` turns that off for this namespace only
 // (WlrLayershell.namespace below); the empty frames before the unmap keep
-// the closing clean even without it (see docs/OVERVIEW.md).
+// the closing clean even without it.
 //
 // One click on any window focuses exactly that window (by its Hyprland
 // address) and closes. A window not entirely inside the visible area is
