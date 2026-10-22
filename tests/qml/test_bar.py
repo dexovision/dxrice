@@ -452,7 +452,13 @@ class PanTest(unittest.TestCase):
         self.assertEqual(self.s.ev("panels.current"), "", "a panel stayed open during the pan")
         self.assertIsNone(self.s.input_owner(400, 25), "the hidden bar still takes the pointer")
         self.pan(False)
+        self.s.wait(60)
+        # sliding back: no input yet (a region built mid-slide would sit too high)
+        self.assertIsNone(self.s.input_owner(400, 25))
+        self.assertTrue(self.s.ev("findNamed('barStrip').parent.mask === findNamed('barStrip').parent._noInput"))
         self.s.wait(500)
+        self.assertTrue(self.s.ev("findNamed('barStrip').parent.mask === findNamed('barStrip').parent._input"),
+                        "the input region was not set again once the bar was back")
         y2, o2 = self.bar()
         self.assertAlmostEqual(o2, 1, delta=0.01)
         self.assertAlmostEqual(y2, y0, delta=0.5)

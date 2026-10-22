@@ -121,7 +121,12 @@ PanelWindow {
     Binding { target: root.contentItem; property: "opacity"; value: 1 - root.panAway }
     Binding { target: root.contentItem; property: "y"; value: -(root.edgeMargin + root.islandHeight) * 0.6 * root.panAway }
     property Region _noInput: Region {}
-    mask: root.panHidden ? root._noInput : root._input
+    // Input comes back only once the bar is fully back in place: Quickshell
+    // builds the input region from the items' places when the mask is set
+    // and rebuilds it only when one of those items itself moves -- not when
+    // the whole content slides -- so a region built mid-slide stayed ~28 px
+    // too high and the bar's lower part took no clicks after a pan.
+    mask: root.panAway > 0 ? root._noInput : root._input
     property Region _input: Region {
         Region { item: barStrip }
         Region { item: activityIsland.expanded ? activityIsland.bodyItem : null }
