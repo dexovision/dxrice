@@ -382,10 +382,49 @@ PanelWindow {
     ]
     property string currentCategory: "colors"
     property string searchText: ""
+    // Every setting the search can find: its words, and the page it is on
+    // (each page's rows are named "field:<key>", so a result can be found,
+    // scrolled to and pointed out there).
+    readonly property var settingsIndex: {
+        const out = [];
+        const add = (fields, category) => { for (const f of fields) out.push({ key: f.key, label: f.label, sub: f.sub || "", category: category }); };
+        add(root.colorFields, "colors"); add(root.borderColorFields, "colors");
+        add(root.blurFields, "blur");
+        add(root.layoutFields, "layout");
+        add(root.lockFields, "lock");
+        add(root.shellTextFields, "fonts"); add(root.fontSizeFields, "fonts");
+        add(root.experienceFields, "experience"); add(root.behaviorFields, "experience");
+        add(root.barFields, "experience"); add(root.widgetFields, "experience");
+        return out;
+    }
+    // Words match in any order ("blur lock" finds the lock screen's blur).
+    function _matches(q, ...texts) {
+        const hay = texts.join(" ").toLowerCase();
+        return q.split(/\s+/).every((w) => hay.includes(w));
+    }
+    readonly property var settingResults: {
+        const q = root.searchText.trim().toLowerCase();
+        if (!q) return [];
+        return root.settingsIndex.filter((f) => root._matches(q, f.label, f.sub, f.key.replace(/_/g, " ")));
+    }
     readonly property var filteredCategories: {
         const q = root.searchText.trim().toLowerCase();
         if (!q) return root.categories;
-        return root.categories.filter((c) => c.label.toLowerCase().includes(q) || c.sub.toLowerCase().includes(q));
+        return root.categories.filter((c) => root._matches(q, c.label, c.sub)
+                                             || root.settingResults.some((f) => f.category === c.id));
+    }
+    function categoryLabel(id) {
+        const c = root.categories.find((c) => c.id === id);
+        return c ? c.label : "";
+    }
+    // A search result: its page, scrolled to it, and the row pointed out.
+    property string highlightedKey: ""
+    function goToSetting(key) {
+        const f = root.settingsIndex.find((f) => f.key === key);
+        if (!f) return;
+        root.currentCategory = f.category;
+        root.highlightedKey = key;
+        revealTimer.restart();          // (once the page has laid itself out)
     }
 
     function allKeys() {
@@ -734,6 +773,7 @@ PanelWindow {
         Repeater {
             model: parent.fields
             delegate: SettingRow {
+                objectName: "field:" + modelData.key
                 width: parent.width
                 title: modelData.label
                 subtitle: modelData.sub
@@ -1029,6 +1069,7 @@ PanelWindow {
         Repeater {
             model: parent.fields
             delegate: Item {
+                objectName: "field:" + modelData.key
                 width: parent.width
                 implicitHeight: Math.max(switchText.implicitHeight, fieldSwitch.implicitHeight)
                 Column {
@@ -1278,6 +1319,11 @@ PanelWindow {
                             clip: true
                             text: root.searchText
                             onTextChanged: root.searchText = text
+                            // Enter: the first setting found (or page)
+                            onAccepted: {
+                                if (root.settingResults.length) root.goToSetting(root.settingResults[0].key);
+                                else if (root.filteredCategories.length) root.currentCategory = root.filteredCategories[0].id;
+                            }
                         }
                     }
 
@@ -1370,6 +1416,65 @@ PanelWindow {
                                     }
                                 }
                             }
+
+                            // ---- while searching: the settings themselves ----
+                            Text {
+                                visible: root.settingResults.length > 0
+                                x: Theme.padMd * 1.5            // (in line with the results' text)
+                                topPadding: Theme.padMd
+                                bottomPadding: Theme.padXs
+                                text: "Settings"
+                                color: Theme.text
+                                opacity: Theme.opacityMuted
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
+                                font.weight: Font.Medium
+                            }
+                            Repeater {
+                                model: root.settingResults
+                                delegate: Rectangle {
+                                    id: resultRow
+                                    required property var modelData
+                                    objectName: "searchResult:" + modelData.key
+                                    width: parent.width - Theme.padMd
+                                    x: Theme.padMd / 2
+                                    height: resultText.implicitHeight + Theme.padSm * 2
+                                    radius: Theme.roundingSm
+                                    color: resultArea.containsMouse ? Theme.layer1Hover : "transparent"
+                                    Behavior on color { ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                                    Column {
+                                        id: resultText
+                                        x: Theme.padMd
+                                        width: parent.width - Theme.padMd * 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 1
+                                        Text {
+                                            width: parent.width
+                                            text: resultRow.modelData.label
+                                            color: Theme.textActive
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmaller
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            text: root.categoryLabel(resultRow.modelData.category)
+                                            color: Theme.text
+                                            opacity: Theme.opacityMuted
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmall
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                    MouseArea {
+                                        id: resultArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.goToSetting(resultRow.modelData.key)
+                                    }
+                                }
+                            }
                         }
                         }
 
@@ -1405,6 +1510,51 @@ PanelWindow {
                         contentHeight: paneLoader.item ? paneLoader.item.implicitHeight + Theme.padLg * 2 : 0
                         clip: true
                         Behavior on contentY { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+
+                        // A search result pointed out: a soft accent wash over
+                        // its row that fades away.
+                        Rectangle {
+                            id: searchFlash
+                            objectName: "themeSearchFlash"
+                            z: 1
+                            opacity: 0
+                            visible: opacity > 0.01
+                            radius: Theme.roundingSm
+                            color: Theme.withAlpha(Theme.accent, 0.16)
+                            SequentialAnimation {
+                                id: flashAnim
+                                NumberAnimation { target: searchFlash; property: "opacity"; to: 1; duration: Theme.durationFadeIn; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+                                PauseAnimation { duration: 900 }
+                                NumberAnimation { target: searchFlash; property: "opacity"; to: 0; duration: Theme.durationFadeIn * 3; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard }
+                                ScriptAction { script: root.highlightedKey = "" }
+                            }
+                        }
+                        Timer {
+                            id: revealTimer
+                            interval: 60
+                            onTriggered: {
+                                const page = paneLoader.item;
+                                if (!page || !root.highlightedKey) return;
+                                const want = "field:" + root.highlightedKey;
+                                const stack = [page];
+                                let row = null;
+                                while (stack.length && !row) {
+                                    const it = stack.pop();
+                                    if (it.objectName === want) row = it;
+                                    else for (let i = 0; i < it.children.length; i++) stack.push(it.children[i]);
+                                }
+                                if (!row) return;
+                                // (relative to the page itself: it may still be rising into place)
+                                const r = row.mapToItem(paneLoader, 0, 0);
+                                const p = Qt.point(paneLoader.x + r.x, paneLoader.y + r.y);
+                                const pad = Theme.padSm;
+                                searchFlash.x = p.x - pad; searchFlash.y = p.y - pad;
+                                searchFlash.width = row.width + pad * 2; searchFlash.height = row.height + pad * 2;
+                                const maxY = Math.max(0, contentFlick.contentHeight - contentFlick.height);
+                                contentFlick.contentY = Math.max(0, Math.min(maxY, p.y - contentFlick.height / 3));
+                                flashAnim.restart();
+                            }
+                        }
 
                         Loader {
                             id: paneLoader
@@ -2137,18 +2287,20 @@ PanelWindow {
                 }
             }
 
-            Card {
-                width: parent.width
-                padding: Theme.pad2xl
-                title: "Motion and spacing"
-                SliderList { width: parent.width; fields: root.experienceFields }
-            }
-
+            // (the switches first: they are the page's main settings, and
+            // on a small screen they are in view without scrolling)
             Card {
                 width: parent.width
                 padding: Theme.pad2xl
                 title: "Windows and motion"
                 SwitchList { width: parent.width; fields: root.behaviorFields }
+            }
+
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Motion and spacing"
+                SliderList { width: parent.width; fields: root.experienceFields }
             }
 
             Card {

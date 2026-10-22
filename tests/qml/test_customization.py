@@ -162,6 +162,39 @@ class EditorTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_search_finds_a_setting_and_takes_you_to_it(self):
+        # (it matched page names only: "gaps", "terminal", "seconds" found nothing)
+        s = Scene(width=1920, height=1080)
+        try:
+            self.open(s)
+            s.ev(f"{TE}.searchText = 'terminal'")
+            s.wait(200)
+            self.assertIsNotNone(s.ev("findNamed('searchResult:kitty_opacity')"))
+            self.assertIn("blur", json.loads(s.ev(f"JSON.stringify({TE}.filteredCategories.map(c => c.id))")))
+            s.ev(f"{TE}.searchText = 'blur lock'")        # words in any order
+            s.wait(200)
+            keys = json.loads(s.ev(f"JSON.stringify({TE}.settingResults.map(f => f.key))"))
+            self.assertIn("lock_blur_size", keys)
+            self.assertNotIn("hypr_blur_size", keys)
+            s.click(*self.at(s, "findNamed('searchResult:lock_blur_size')"))
+            s.wait(300)
+            self.assertEqual(s.ev(f"{TE}.currentCategory"), "lock")
+            self.assertTrue(s.ev("findNamed('themeSearchFlash').visible"), "the setting wasn't pointed out")
+            # one far down its page is scrolled into view
+            s.ev(f"{TE}.searchText = 'disk'")
+            s.wait(100)
+            s.ev(f"{TE}.goToSetting('widget_disk')")
+            s.wait(800)
+            self.assertEqual(s.ev(f"{TE}.currentCategory"), "experience")
+            box = json.loads(s.ev("""(function(){ const r = findNamed('field:widget_disk'), c = findNamed('themeContent');
+                const a = r.mapToItem(null, 0, 0), b = c.mapToItem(null, 0, 0);
+                return JSON.stringify([a.y, a.y + r.height, b.y, b.y + c.height]); })()"""))
+            self.assertGreaterEqual(box[0], box[2], f"scrolled past it: {box}")
+            self.assertLessEqual(box[1], box[3], f"not scrolled to it: {box}")
+            self.assertGreater(s.ev("findNamed('themeContent').contentY"), 0)
+        finally:
+            s.close()
+
     def test_shell_text_size_is_saved_by_apply(self):
         s = Scene(width=1920, height=1080)
         try:
