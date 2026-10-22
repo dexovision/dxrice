@@ -325,6 +325,23 @@ class SectionsTest(unittest.TestCase):
         self.assertIn(self.s.ev("findNamed('statusPing').value").split()[0], ("no", "…"))
 
 
+    # ---- notifications: told by the session bus, not polled ----
+    def test_notifications_are_read_when_the_bus_says_one_came(self):
+        n = "notifications"
+        if not self.s.ev(f"{n}.watching"):
+            # (the fixture-less watcher ends at once here: the fallback poll is the 6 s one)
+            self.assertEqual(self.s.ev(f"{n}.poll.interval"), 6000)
+        self.s.ev(f"{n}.watch.running = false")
+        self.s.set_command("dbus-monitor", "__HANG__")
+        self.s.ev(f"{n}.watch.running = true")
+        self.s.wait(50)
+        self.assertTrue(self.s.ev(f"{n}.watching"))
+        self.assertEqual(self.s.ev(f"{n}.poll.interval"), 60000, "still polling every 6 s with the watcher running")
+        self.s.bridge.run_log.clear()
+        self.s.ev(f"{n}.watch.stdout.read('method call time=1 sender=:1.9 -> destination=:1.3 serial=7 path=/org/freedesktop/Notifications; interface=org.freedesktop.Notifications; member=Notify')")
+        self.s.wait(600)
+        self.assertIn(["makoctl", "list", "-j"], self.s.bridge.run_log, "a new notification wasn't read")
+
     # ---- the battery's state, named plainly ----
     def test_a_charger_holding_the_battery_reads_plugged_in(self):
         # (live: plugged in at 97% with a charge limit, the kernel says "Not
