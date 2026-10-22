@@ -325,6 +325,19 @@ class SectionsTest(unittest.TestCase):
         self.assertIn(self.s.ev("findNamed('statusPing').value").split()[0], ("no", "…"))
 
 
+    # ---- the battery's state, named plainly ----
+    def test_a_charger_holding_the_battery_reads_plugged_in(self):
+        # (live: plugged in at 97% with a charge limit, the kernel says "Not
+        # charging", and the bar and widgets said "not charging" as if unplugged)
+        self.s.ev("battery.path = '/sys/class/power_supply/BAT1'; battery.percent = 97; battery.status = 'Not charging'")
+        self.s.wait(50)
+        self.assertEqual(self.s.ev("battery.label"), "plugged in")
+        self.assertEqual(self.s.ev("findNamed('barIndicator:power').glyph"), "\U000f0084", "no plug on the bar's battery")
+        for status, label in (("Charging", "charging"), ("Full", "full"), ("Discharging", "on battery")):
+            self.s.ev(f"battery.status = '{status}'")
+            self.assertEqual(self.s.ev("battery.label"), label)
+        self.assertEqual(self.s.ev("findNamed('barIndicator:power').glyph"), "\U000f0079")
+
     # ---- which indicators the bar shows (Settings > Top bar) ----
     def test_indicators_can_be_hidden_but_a_recording_still_shows(self):
         vis = lambda n: self.s.ev(f"findNamed('barIndicator:{n}').visible")  # noqa: E731

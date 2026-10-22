@@ -593,9 +593,9 @@ Item {
                 width: parent.width
                 spacing: Theme.padSm
                 SectionHead {
-                    glyph: BatteryService.available ? (BatteryService.charging ? "\u{f0084}" : "\u{f0079}") : ""
+                    glyph: BatteryService.available ? (BatteryService.plugged ? "\u{f0084}" : "\u{f0079}") : ""
                     title: BatteryService.available ? BatteryService.percent + "%" : "Power"
-                    detail: BatteryService.available ? BatteryService.status.toLowerCase() : "No battery on this machine"
+                    detail: BatteryService.available ? BatteryService.label : "No battery on this machine"
                 }
                 Hairline {}
                 Item {

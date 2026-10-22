@@ -853,7 +853,7 @@ PanelWindow {
                 BarIndicator {
                     name: "status:power"
                     accessibleName: "Power"
-                    glyph: BatteryService.available ? (BatteryService.charging ? "\u{f0084}" : "\u{f0079}") : "\uf011"
+                    glyph: BatteryService.available ? (BatteryService.plugged ? "\u{f0084}" : "\u{f0079}") : "\uf011"
                     label: BatteryService.available ? BatteryService.percent + "%" : ""
                 }
                 BarIndicator {

@@ -76,7 +76,7 @@ DesktopWidget {
         out.push({ id: "net", label: "net", value: "↓ " + root.rate(P.netDownKBs),
                    graph: root.spark(root.net, root.netMax), tail: "↑ " + root.rate(P.netUpKBs) });
         if (P.batteryPercent >= 0)
-            out.push({ id: "bat", label: "bat", value: P.batteryPercent + "%  " + P.batteryStatus.toLowerCase(),
+            out.push({ id: "bat", label: "bat", value: P.batteryPercent + "%  " + BatteryService.label,
                        graph: root.gauge(P.batteryPercent / 100, 12), tail: "" });
         out.push({ id: "up", label: "up", value: root.uptime(P.uptimeS), graph: "", tail: "load " + P.load1.toFixed(2) });
         return out;

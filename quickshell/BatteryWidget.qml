@@ -60,7 +60,7 @@ DesktopWidget {
             Text {
                 objectName: "batteryBolt"
                 anchors.horizontalCenter: parent.horizontalCenter
-                visible: BatteryService.charging
+                visible: BatteryService.plugged
                 text: "\u{f0e7}"
                 color: Theme.accentText
                 font.family: Theme.iconFamily; font.pixelSize: 14
@@ -72,7 +72,7 @@ DesktopWidget {
         y: ring.height + 6
         width: ring.width
         horizontalAlignment: Text.AlignHCenter
-        text: BatteryService.status.toLowerCase()
+        text: BatteryService.label
         color: Theme.textActive; opacity: 0.7
         font.family: Theme.fontFamily; font.pixelSize: 12; font.letterSpacing: 1
     }

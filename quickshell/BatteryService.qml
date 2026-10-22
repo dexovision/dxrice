@@ -15,6 +15,14 @@ QtObject {
     property string status: ""            // "Charging", "Discharging", "Full", "Not charging"
     readonly property bool charging: root.status === "Charging"
     readonly property bool plugged: root.status === "Charging" || root.status === "Full" || root.status === "Not charging"
+    // What to call it, everywhere it is shown. The kernel's "Not charging"
+    // means plugged in but holding -- a laptop with a charge limit stops
+    // short of full to spare the battery -- which read as if it were
+    // unplugged; it is "plugged in" here.
+    readonly property string label: root.status === "Charging" ? "charging"
+        : (root.status === "Full" ? "full"
+           : (root.status === "Not charging" ? "plugged in"
+              : (root.status === "Discharging" ? "on battery" : root.status.toLowerCase())))
 
     property Process detect: Process {
         command: ["sh", "-c", "for b in /sys/class/power_supply/*; do [ \"$(cat $b/type 2>/dev/null)\" = Battery ] "
