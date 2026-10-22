@@ -105,6 +105,44 @@ class TestViewport(unittest.TestCase):
         self.assertEqual(len(sent), 2)
         self.assertEqual(self.read(), {"3": [960 - 1700, 540 - 350]})
 
+    def go_to(self, address, clients, active_ws=1):
+        import dxrice_navigate_windows as nav
+        sent, focused = [], []
+        old = (nav.batch_async, nav.focus_window, nav.hyprctl_json, nav.dxrice_viewport.default_path)
+        mon = [{"id": 0, "x": 0, "y": 0, "width": 1920, "height": 1080, "scale": 1, "focused": True,
+                "reserved": [0, 0, 0, 0], "transform": 0, "activeWorkspace": {"id": active_ws}}]
+        replies = {"clients": clients, "activeworkspace": {"id": active_ws}, "monitors": mon}
+        nav.batch_async = lambda exprs: sent.extend(exprs)
+        nav.focus_window = focused.append
+        nav.hyprctl_json = lambda args, timeout=2: replies.get(args[0])
+        nav.dxrice_viewport.default_path = lambda: self.path
+        try:
+            rc = nav.go_to(address)
+        finally:
+            nav.batch_async, nav.focus_window, nav.hyprctl_json, nav.dxrice_viewport.default_path = old
+        return rc, sent, focused
+
+    def win(self, addr, x, y, w=600, h=400, ws=1):
+        return {"address": addr, "at": [x, y], "size": [w, h], "floating": True, "workspace": {"id": ws},
+                "mapped": True, "hidden": False, "fullscreen": 0, "pinned": False, "class": "kitty", "title": addr}
+
+    def test_applications_goes_to_a_window_off_screen_by_panning(self):
+        clients = [self.win("0xa", 300, 300), self.win("0xb", 3000, 200)]
+        rc, sent, focused = self.go_to("b", clients)       # (the shell's addresses come without 0x)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(sent), 2, "every window moves, rigidly")
+        self.assertEqual(focused, ["0xb"])
+        dx = self.read()["1"][0]
+        self.assertAlmostEqual(dx, 960 - 3300, delta=1, msg="the pan wasn't reported (the widgets wouldn't sway)")
+
+    def test_a_visible_window_is_just_focused(self):
+        rc, sent, focused = self.go_to("0xa", [self.win("0xa", 300, 300), self.win("0xb", 1000, 200)])
+        self.assertEqual((sent, focused), ([], ["0xa"]))
+
+    def test_a_window_on_another_workspace_is_focused_there(self):
+        rc, sent, focused = self.go_to("0xb", [self.win("0xa", 300, 300), self.win("0xb", 300, 300, ws=4)])
+        self.assertEqual((sent, focused), ([], ["0xb"]))
+
     def test_a_rigid_shift_is_a_camera_move_and_a_rearrangement_is_not(self):
         from dxrice_viewport import uniform_shift
         self.assertEqual(uniform_shift([(0, 0, 40, -10), (500, 300, 540, 290)]), (40, -10))

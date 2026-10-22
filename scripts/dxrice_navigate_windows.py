@@ -8,6 +8,10 @@ Navigates between windows in the active workspace using Super+arrows.
 - Tiled dwindle: movefocus left/right/up/down
 
 Usage: python3 dxrice_navigate_windows.py <left|right|up|down>
+       python3 dxrice_navigate_windows.py --to ADDRESS
+         (Applications' open windows: bring that one into view -- a
+          rigid pan of the infinite desktop if it is off screen or cut
+          off, the windows sliding on their own animation -- and focus it)
 """
 
 import sys
@@ -134,7 +138,38 @@ def pan_to_window(floating, target_addr, center_x, center_y, workspace_id=None):
         focus_window(target_addr)
 
 
+def fully_visible(w, bounds, margin=8):
+    x0, y0, x1, y1 = bounds
+    return (w["at"][0] >= x0 - margin and w["at"][1] >= y0 - margin
+            and w["at"][0] + w["size"][0] <= x1 + margin and w["at"][1] + w["size"][1] <= y1 + margin)
+
+
+def go_to(address):
+    want = address if address.startswith("0x") else "0x" + address
+    clients = hyprctl_json(["clients"]) or []
+    target = next((c for c in clients if c.get("address") == want), None)
+    if not target:
+        return 1
+    ws = hyprctl_json(["activeworkspace"]) or {}
+    workspace_id = ws.get("id")
+    if target.get("workspace", {}).get("id") != workspace_id:
+        focus_window(want)               # Hyprland goes to its workspace
+        return 0
+    ws_clients = [w for w in clients if w.get("workspace", {}).get("id") == workspace_id]
+    floating = [w for w in ws_clients if dxrice_monitor.pans_with_desktop(w, workspace_id)]
+    bounds = dxrice_monitor.bounds(hyprctl_json(["monitors"]) or [])
+    if any(w["address"] == want for w in floating) and not fully_visible(target, bounds):
+        center_x, center_y = (bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2
+        pan_to_window(floating, want, center_x, center_y, workspace_id)
+        if not is_protected(target):
+            return 0                     # (pan_to_window focused it)
+    focus_window(want)                   # asked for by name: focused even if a browser
+    return 0
+
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--to":
+        sys.exit(go_to(sys.argv[2]))
     if len(sys.argv) < 2 or sys.argv[1] not in ("left", "right", "up", "down"):
         print("Usage: dxrice_navigate_windows.py <left|right|up|down>")
         sys.exit(1)

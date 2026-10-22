@@ -113,8 +113,13 @@ Item {
         }
         return out.slice(0, 6);
     }
+    // Goes to it: a window panned off the screen (or cut off by its edge)
+    // is brought into view by panning the infinite desktop -- every window
+    // sliding on its own animation, the widgets swaying along -- then
+    // focused; one on another workspace takes you there
+    // (dxrice_navigate_windows.py --to).
     function focusWindow(address) {
-        Hyprland.dispatch('hl.dsp.focus({ window = "address:' + address + '" })');
+        Quickshell.execDetached(["python3", Quickshell.shellDir + "/../scripts/dxrice_navigate_windows.py", "--to", String(address)]);
         root.closeRequested();
     }
     function closeWindow(address) {

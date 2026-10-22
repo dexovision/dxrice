@@ -334,6 +334,19 @@ class BarAppsTest(unittest.TestCase):
         self.s.wait(50)
         self.assertIn('hl.dsp.window.close({ window = "address:0xabc" })', json.loads(self.s.ev("JSON.stringify(hypr.dispatchLog)")))
 
+    def test_clicking_an_open_window_goes_to_it(self):
+        # (live: a window panned off the screen was focused where nobody could
+        # see it; the navigate script pans the desktop to it first)
+        self.s.ev("hypr.toplevels = ({ values: [{ address: '0xabc', title: 'Docs', lastIpcObject: { address: '0xabc', class: 'firefox', title: 'Docs', workspace: { id: 1 } } }] })")
+        self.s.ev("panels.open('apps', 'click')")
+        self.s.wait(900)
+        r = json.loads(self.s.ev("JSON.stringify((function(){ var i = findNamed('appsWindow:0xabc'); var p = i.mapToItem(null, 24, i.height / 2); return [p.x, p.y]; })())"))
+        self.s.bridge.exec_log.clear()
+        self.s.click(r[0], r[1])
+        self.s.wait(100)
+        self.assertEqual(self.s.bridge.exec_log, [["python3", f"{self.s.shell}/../scripts/dxrice_navigate_windows.py", "--to", "0xabc"]])
+        self.assertEqual(self.s.ev("panels.current"), "", "going to it closes Applications")
+
     def test_the_shortcuts_tab_is_the_taskbar_editor(self):
         self.s.ev("panels.open('apps', 'click')")
         self.s.wait(900)
