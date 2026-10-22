@@ -2202,6 +2202,16 @@ PanelWindow {
 
             Text { text: "Experience"; color: Theme.textActive; font.family: Theme.fontFamily; font.weight: Font.DemiBold; font.pixelSize: Theme.fontSizeLarge }
 
+            // (the switches first: they are the page's main settings, and on a
+            // small screen they are in view without scrolling; the demos below
+            // stay next to the sliders they show)
+            Card {
+                width: parent.width
+                padding: Theme.pad2xl
+                title: "Windows and motion"
+                SwitchList { width: parent.width; fields: root.behaviorFields }
+            }
+
             // ---- three small, honest demonstrations instead of one big
             // Card stretched to fill the panel with nothing in it: this
             // category only has 3 real settings, so it stays exactly as
@@ -2285,15 +2295,6 @@ PanelWindow {
                         }
                     }
                 }
-            }
-
-            // (the switches first: they are the page's main settings, and
-            // on a small screen they are in view without scrolling)
-            Card {
-                width: parent.width
-                padding: Theme.pad2xl
-                title: "Windows and motion"
-                SwitchList { width: parent.width; fields: root.behaviorFields }
             }
 
             Card {
