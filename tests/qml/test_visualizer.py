@@ -70,13 +70,16 @@ class VisualizerTest(unittest.TestCase):
         try:
             self.play(s)
             s.wait(300)
-            # one frame takes a bar three quarters of the way up (a quick rise)
+            # one frame (of 60 a second) takes a bar halfway up: a quick rise
             vals = json.loads(s.ev(f"JSON.stringify({V}.values.slice(0, 4))"))
             for got, want in zip(vals, [0, 0.25, 0.5, 1]):
-                self.assertAlmostEqual(got, want * 0.75, places=6)
+                self.assertAlmostEqual(got, want * 0.5, places=6)
             self.assertEqual(s.ev(f"{V}.values.length"), 48)
             h = [s.ev(f"findNamed('visualizerBars').children[{i}].height") for i in (2, 3)]
             self.assertAlmostEqual(h[1] / h[0], 2.0, delta=0.1)   # 1000 is twice 500
+            # drawn as it comes: no animation between cava's frames (that kept
+            # the strip redrawing at the screen's rate)
+            self.assertFalse(s.ev("findNamed('visualizerBars').children[3].height !== Math.max(3, findNamed('visualizer').values[3] * (findNamed('visualizer').barHeight - 8))"))
         finally:
             s.close()
 
@@ -89,7 +92,7 @@ class VisualizerTest(unittest.TestCase):
             self.assertEqual(s.ev(f"{V}.values[3]"), before)
             s.ev(f"{V}.values = []")
             s.ev(f"{V}.feed('2000;-5;500;')")
-            self.assertEqual(json.loads(s.ev(f"JSON.stringify({V}.values)")), [0.75, 0, 0.375])
+            self.assertEqual(json.loads(s.ev(f"JSON.stringify({V}.values)")), [0.5, 0, 0.25])
         finally:
             s.close()
 
@@ -102,8 +105,8 @@ class VisualizerTest(unittest.TestCase):
             up = s.ev(f"{V}.values[0]")
             s.ev(f"{V}.feed('0;')")
             down = s.ev(f"{V}.values[0]")
-            self.assertAlmostEqual(up, 0.75, places=6)
-            self.assertGreater(down, 0.5, "it dropped as fast as it rose")
+            self.assertAlmostEqual(up, 0.5, places=6)
+            self.assertGreater(down, 0.4, "it dropped as fast as it rose")
         finally:
             s.close()
 
@@ -187,8 +190,8 @@ class VisualizerTest(unittest.TestCase):
             s.wait(300)
             self.assertTrue(s.ev("findNamed('visualizerBlocks').visible"))
             self.assertFalse(s.ev("findNamed('visualizerBars').visible"))
-            # one frame in, three quarters of the way up (0, 0.25, 0.5, 1 -> 0, 0.19, 0.38, 0.75)
-            self.assertTrue(s.ev("findNamed('visualizerBlocks').text").startswith("  ▂ ▃ ▆"))
+            # one frame in, halfway up (0, 0.25, 0.5, 1 -> 0, 0.125, 0.25, 0.5)
+            self.assertTrue(s.ev("findNamed('visualizerBlocks').text").startswith("  ▁ ▂ ▄"))
         finally:
             s.close()
 

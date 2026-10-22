@@ -153,11 +153,12 @@ PanelWindow {
             out.push(Math.max(0, Math.min(1, v / 1000)));
         }
         if (out.length === 0) return;
-        // quick up, slower down (per frame of cava's 30)
+        // quick up, slower down (per frame of cava's 60: three quarters of
+        // the way up in 33 ms, a little over a quarter of the way down)
         const prev = root.values;
         for (let i = 0; i < out.length; i++) {
             const p = i < prev.length ? prev[i] : 0;
-            out[i] = out[i] > p ? p + (out[i] - p) * 0.75 : p + (out[i] - p) * 0.28;
+            out[i] = out[i] > p ? p + (out[i] - p) * 0.5 : p + (out[i] - p) * 0.15;
         }
         root.values = out;
     }
@@ -239,8 +240,10 @@ PanelWindow {
                         GradientStop { position: 0; color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.0) }
                         GradientStop { position: 1; color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45) }
                     }
-                    // just bridges cava's frames (33 ms); the rise/fall is in feed()
-                    Behavior on height { NumberAnimation { duration: 33; easing.type: Easing.Linear } }
+                    // no animation of its own: cava sends 60 frames a second and
+                    // each is drawn as it comes. (A per-bar animation between
+                    // frames kept the strip redrawing at the screen's full rate,
+                    // 144 times a second, for 30 new values.)
                 }
             }
         }
