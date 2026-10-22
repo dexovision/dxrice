@@ -418,6 +418,21 @@ PanelWindow {
     // must go back to it on Revert -- only overwriting keys present in
     // the file left such an edit in place after Revert.
     property var _fieldDefaults: null
+    // Per-setting "back to the default" (the same defaults Revert falls back
+    // to; they match the shipped theme/theme.json). Like any edit it only
+    // reaches theme.json on Apply, and Revert undoes it.
+    function isDefault(key) {
+        const v = root[key];                      // (read first: bindings follow the field)
+        if (!root._fieldDefaults || root._fieldDefaults[key] === undefined) return true;
+        const d = root._fieldDefaults[key];
+        if (typeof d === "number") return Math.abs(Number(v) - d) < 1e-6;
+        return String(v).toLowerCase() === String(d).toLowerCase();
+    }
+    function resetToDefault(key) {
+        if (!root._fieldDefaults || root._fieldDefaults[key] === undefined) return;
+        root[key] = root._fieldDefaults[key];
+        root.dirty = true;
+    }
     function loadFromTheme(data) {
         if (!root._fieldDefaults) root._fieldDefaults = root.snapshot();
         for (const key of allKeys()) {
@@ -722,6 +737,12 @@ PanelWindow {
                 width: parent.width
                 title: modelData.label
                 subtitle: modelData.sub
+                ResetGlyph {
+                    objectName: "reset:" + modelData.key
+                    visible: !root.isDefault(modelData.key)
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: root.resetToDefault(modelData.key)
+                }
                 Rectangle {
                     id: swatch
                     objectName: "swatch_" + modelData.key
@@ -746,12 +767,15 @@ PanelWindow {
         Repeater {
             model: parent.fields
             delegate: FillSlider {
+                objectName: "field:" + modelData.key
                 width: parent.width
                 label: modelData.label
                 unit: modelData.unit || ""
                 from: modelData.min; to: modelData.max; decimals: modelData.decimals
                 value: root[modelData.key]
+                resettable: !root.isDefault(modelData.key)
                 onChanged: (v) => { root[modelData.key] = modelData.decimals === 0 ? Math.round(v) : v; root.dirty = true; }
+                onResetRequested: root.resetToDefault(modelData.key)
             }
         }
     }
@@ -1060,12 +1084,15 @@ PanelWindow {
         spacing: Theme.padXs
 
         FillSlider {
+            objectName: "field:" + typeSizeRoot.key
             width: parent.width
             label: typeSizeRoot.label
             unit: "px"
             from: typeSizeRoot.min; to: typeSizeRoot.max; decimals: 0
             value: root[typeSizeRoot.key]
+            resettable: !root.isDefault(typeSizeRoot.key)
             onChanged: (v) => { root[typeSizeRoot.key] = Math.round(v); root.dirty = true; }
+            onResetRequested: root.resetToDefault(typeSizeRoot.key)
         }
         Text {
             text: typeSizeRoot.sampleText

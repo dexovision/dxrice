@@ -21,10 +21,20 @@ Item {
     property string label: ""
     property string unit: ""
     property real debounceMs: 80
+    // Off its default: a reset sits beside the value (see ResetGlyph).
+    property bool resettable: false
     signal changed(real value)
+    signal resetRequested()
 
-    readonly property real fraction: root.to > root.from ? Math.max(0, Math.min(1, (root.value - root.from) / (root.to - root.from))) : 0
-    readonly property string valueText: (root.decimals > 0 ? root.value.toFixed(root.decimals) : Math.round(root.value)) + root.unit
+    // What the pointer has picked, shown until `changed` has been answered.
+    // `value` itself is never assigned here: that broke its binding, and a
+    // slider once touched no longer followed its setting (Revert, a preset,
+    // a reset all left it where it was dragged).
+    property real _picked: 0
+    property bool _holding: false
+    readonly property real shownValue: root._holding ? root._picked : root.value
+    readonly property real fraction: root.to > root.from ? Math.max(0, Math.min(1, (root.shownValue - root.from) / (root.to - root.from))) : 0
+    readonly property string valueText: (root.decimals > 0 ? root.shownValue.toFixed(root.decimals) : Math.round(root.shownValue)) + root.unit
     readonly property bool dragging: area.pressed
     readonly property bool hovered: area.containsMouse
 
@@ -38,7 +48,7 @@ Item {
         Text {
             id: nameLabel
             anchors.left: parent.left
-            width: parent.width - valueLabel.implicitWidth - Theme.padMd
+            width: parent.width - valueLabel.implicitWidth - Theme.padMd - (resetGlyph.visible ? resetGlyph.width + Theme.padXs : 0)
             text: root.label
             color: Theme.textActive
             font.family: Theme.fontFamily
@@ -56,6 +66,15 @@ Item {
             font.pixelSize: Theme.fontSizeSmaller
             font.features: { "tnum": 1 }
             Behavior on opacity { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+        }
+        ResetGlyph {
+            id: resetGlyph
+            objectName: "fillSliderReset"
+            visible: root.resettable
+            anchors.right: valueLabel.left
+            anchors.rightMargin: Theme.padXs
+            anchors.verticalCenter: valueLabel.verticalCenter
+            onClicked: root.resetRequested()
         }
     }
 
@@ -119,13 +138,22 @@ Item {
             function setFromX(x) {
                 const frac = Math.max(0, Math.min(1, (x - track.x) / track.width));
                 const v = root.from + frac * (root.to - root.from);
-                root.value = root.decimals > 0 ? Number(v.toFixed(root.decimals)) : Math.round(v);
+                root._picked = root.decimals > 0 ? Number(v.toFixed(root.decimals)) : Math.round(v);
+                root._holding = true;
                 debounce.restart();
             }
             onPressed: (mouse) => setFromX(mouse.x)
             onPositionChanged: (mouse) => { if (pressed) setFromX(mouse.x); }
+            onReleased: if (!debounce.running) root._holding = false
         }
     }
 
-    Timer { id: debounce; interval: root.debounceMs; onTriggered: root.changed(root.value) }
+    Timer {
+        id: debounce
+        interval: root.debounceMs
+        onTriggered: {
+            root.changed(root._picked);
+            if (!area.pressed) root._holding = false;
+        }
+    }
 }

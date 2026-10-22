@@ -99,6 +99,48 @@ class EditorTest(unittest.TestCase):
         finally:
             s.close()
 
+    # an item inside another, by objectName (the slider's own parts)
+    IN = ("(function(r, n){ var st = [r]; while (st.length) { var it = st.pop(); if (!it) continue;"
+          " if (it.objectName === n) return it; var k = it.children || []; for (var i = 0; i < k.length; i++) st.push(k[i]); }"
+          " return null; })")
+
+    def at(self, s, expr, fx=0.5, fy=0.5):
+        return json.loads(s.ev(f"(function(){{ var i = {expr}; var p = i.mapToItem(null, i.width * {fx}, i.height * {fy});"
+                               " return JSON.stringify([p.x, p.y]); })()"))
+
+    def test_a_setting_moved_off_its_default_can_be_reset(self):
+        s = Scene(width=1920, height=1080, setup=with_theme(hypr_gaps_in=5, accent="e67878"))
+        try:
+            self.open(s)
+            s.ev(f"{TE}.currentCategory = 'layout'")
+            s.wait(700)
+            slider = "findNamed('field:hypr_gaps_in')"
+            reset = f"{self.IN}({slider}, 'fillSliderReset')"
+            track = f"{self.IN}({slider}, 'fillSliderTrack')"
+            self.assertFalse(s.ev(f"{reset}.visible"), "a reset on a setting already at its default")
+            # a click along the track (that is what breaks the slider's
+            # binding to the field, so the reset must still reach it)
+            s.click(*self.at(s, track, 0.75))
+            s.wait(300)
+            self.assertNotEqual(s.ev(f"{TE}.hypr_gaps_in"), 5)
+            self.assertTrue(s.ev(f"{reset}.visible"))
+            s.click(*self.at(s, reset))
+            s.wait(500)
+            self.assertEqual(s.ev(f"{TE}.hypr_gaps_in"), 5)
+            self.assertEqual(s.ev(f"{slider}.value"), 5, "the slider stayed where it was dragged")
+            self.assertFalse(s.ev(f"{reset}.visible"))
+            self.assertTrue(s.ev(f"{TE}.dirty"), "a reset is an edit like any other (Apply writes it)")
+            # a colour, the same way
+            s.ev(f"{TE}.currentCategory = 'colors'")
+            s.wait(700)
+            s.ev(f"{TE}.accent = '123456'")
+            s.wait(100)
+            s.click(*self.at(s, "findNamed('reset:accent')"))
+            s.wait(200)
+            self.assertEqual(s.ev(f"{TE}.accent"), "e67878")
+        finally:
+            s.close()
+
     def test_shell_text_size_is_saved_by_apply(self):
         s = Scene(width=1920, height=1080)
         try:

@@ -19,6 +19,7 @@ Expandable 1.0 Expandable.qml
 SettingRow 1.0 SettingRow.qml
 GlassButton 1.0 GlassButton.qml
 IconButton 1.0 IconButton.qml
+ResetGlyph 1.0 ResetGlyph.qml
 ToggleChip 1.0 ToggleChip.qml
 Switch 1.0 Switch.qml
 SliderRow 1.0 SliderRow.qml
