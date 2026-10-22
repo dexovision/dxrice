@@ -511,6 +511,10 @@ PanelWindow {
             const sc = Number(m.scale) || 1;
             const mx = m.x, my = m.y, mw = m.width / sc, mh = m.height / sc;
             const ws = m.activeWorkspace ? m.activeWorkspace.id : null;
+            // a fullscreen window (a game, a video) is never copied: copying
+            // it every few seconds is the likeliest way to make it stutter,
+            // and nothing else on that screen can be seen meanwhile anyway
+            if (d.clients.some((c) => c.mapped && !c.hidden && c.workspace && c.workspace.id === ws && Number(c.fullscreen) > 0)) continue;
             for (const c of d.clients) {
                 if (!c.mapped || c.hidden || !c.workspace || c.workspace.id !== ws) continue;
                 const x0 = Math.max(mx, c.at[0]), y0 = Math.max(my, c.at[1]);

@@ -25,7 +25,9 @@ FRAME = ";".join(str(v) for v in [0, 250, 500, 1000] + [100] * 44) + ";"
 
 
 def cava_runs(s):
-    return [r for r in s.bridge.run_log if r and r[0] == "cava"]
+    # cava itself, or cava started by the small shell step that writes a
+    # chosen source's config first
+    return [r for r in s.bridge.run_log if r and (r[0] == "cava" or (r[0] == "sh" and "exec cava -p" in " ".join(r)))]
 
 
 class VisualizerTest(unittest.TestCase):
@@ -56,8 +58,9 @@ class VisualizerTest(unittest.TestCase):
             self.play(s)
             runs = cava_runs(s)
             self.assertGreaterEqual(len(runs), 1)
+            # automatic runs on the shipped config itself
             self.assertEqual(runs[0][1], "-p")
-            self.assertTrue(runs[0][2].endswith("/cava.conf"), runs[0])
+            self.assertTrue(runs[0][2].endswith("/shell/cava.conf") or runs[0][2].endswith("/cava.conf"), runs[0])
             self.assertTrue(s.ev(f"{V}.active"))
         finally:
             s.close()
@@ -182,7 +185,7 @@ class SourceTest(unittest.TestCase):
         return Scene(width=1920, height=1080, setup=setup)
 
     def config(self, s):
-        return s.ev(f"{V}.runtimeFile.text()")
+        return s.ev(f"{V}.lastConfig")
 
     def saved(self, s):
         return json.loads((Path(s.bridge.config_home) / "dxrice" / "theme.json").read_text()).get("visualizer_source")
@@ -219,6 +222,10 @@ class SourceTest(unittest.TestCase):
             self.assertEqual(self.saved(s), "monitor:alsa_output.usb-headset")
             self.assertIn("method = pulse", self.config(s))
             self.assertIn("source = alsa_output.usb-headset.monitor", self.config(s))
+            last = cava_runs(s)[-1]
+            self.assertEqual(last[:2], ["sh", "-c"], "a chosen source is started by the step that writes its config")
+            self.assertIn('mkdir -p "$1"', last[2], "the directory must be made first (a fresh boot has none)")
+            self.assertIn("source = alsa_output.usb-headset.monitor", last[-1])
             self.assertGreater(len(cava_runs(s)), runs, "cava wasn't restarted on the new source")
         finally:
             s.close()

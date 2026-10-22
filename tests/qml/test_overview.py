@@ -1412,6 +1412,20 @@ class TestOverviewKeysAndLayouts(unittest.TestCase):
         finally:
             o.scene.close()
 
+    def test_nothing_is_copied_while_a_window_is_fullscreen(self):
+        # (a game: copying it every few seconds could make it stutter)
+        cl = clients_for([(0, 0, 1920, 1080), (400, 200, 1300, 800)])
+        cl[0]["fullscreen"] = 2
+        o = OverviewScene(cl)
+        try:
+            o.scene.ev("findNamed('overview').keepOnScreen()")
+            o.scene.wait(300)
+            for c in cl:
+                a = c["address"].replace("0x", "")
+                self.assertTrue(o.scene.ev(f"findNamed('overview').keptViewFor('{a}') === null"), f"{a} was copied")
+        finally:
+            o.scene.close()
+
     def test_a_refused_refresh_keeps_the_picture_already_kept(self):
         o = OverviewScene(clients_for([(400, 200, 1300, 800)]))
         try:

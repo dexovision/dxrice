@@ -25,8 +25,11 @@ import Quickshell.Wayland
 //                       its application name each time cava starts)
 // A microphone is never a source here: choosing what the visualizer shows
 // must not start capturing the room. The choice takes effect at once: cava
-// is restarted with a config written for it (in $XDG_RUNTIME_DIR, the
-// shipped cava.conf is only the template). A chosen app that isn't playing,
+// is restarted. Automatic runs on the shipped cava.conf itself; a chosen
+// source on a copy of it with its [input] lines changed, written by the
+// same small shell step that starts cava (it makes the directory first, so
+// a fresh boot's missing $XDG_RUNTIME_DIR/dxrice can't leave cava without
+// a config). A chosen app that isn't playing,
 // or a source cava can't open, is said in `sourceState`, never replaced by
 // another source.
 //
@@ -60,7 +63,8 @@ PanelWindow {
     property string sourceState: "ok"
     readonly property string runtimeConfig: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/dxrice/cava.conf"
     property FileView template: FileView { path: Quickshell.shellDir + "/cava.conf"; blockLoading: true }
-    property FileView runtimeFile: FileView { path: root.runtimeConfig }
+    // the config cava was last started on (for the tests: what it read)
+    property string lastConfig: ""
     // the cava [input] lines for a resolved source
     function configFor(method, src) {
         return root.template.text()
@@ -86,7 +90,15 @@ PanelWindow {
         }
     }
     function _start(method, src) {
-        root.runtimeFile.setText(root.configFor(method, src));
+        if (method === "pipewire" && src === "auto") {
+            root.lastConfig = root.template.text();
+            cava.command = ["cava", "-p", Quickshell.shellDir + "/cava.conf"];
+        } else {
+            const text = root.configFor(method, src);
+            const dir = root.runtimeConfig.slice(0, root.runtimeConfig.lastIndexOf("/"));
+            root.lastConfig = text;
+            cava.command = ["sh", "-c", 'mkdir -p "$1" && printf %s "$2" > "$1/cava.conf" && exec cava -p "$1/cava.conf"', "cava", dir, text];
+        }
         root.sourceState = "ok";
         root._frames = 0;
         Qt.callLater(() => { if (root.active) cava.running = true; });
@@ -145,7 +157,7 @@ PanelWindow {
     Process {
         id: cava
         objectName: "visualizerCava"
-        command: ["cava", "-p", root.runtimeConfig]
+        command: ["cava", "-p", Quickshell.shellDir + "/cava.conf"]
         running: false
         stdout: SplitParser { onRead: (data) => { root._frames += 1; root.feed(data); } }
         onRunningChanged: if (!running) {
