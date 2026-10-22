@@ -79,25 +79,64 @@ QtObject {
         follow.running = false;
         root.x = root.goalX; root.y = root.goalY;
         root._vx = 0; root._vy = 0;
+        // no sway from a jump: nothing on screen moved continuously
+        root._fx = root.x; root._fy = root.y; root._fvx = 0; root._fvy = 0;
     }
+
+    // ---- the widgets' sway ----
+    // The desktop's widgets stay on the screen, but while the desktop pans
+    // they are dragged a little along with it and spring back when it
+    // stops -- as if hung on the screen by something slightly elastic. A
+    // second, softer spring (`sway`) chases the windows' motion (x/y above);
+    // a widget's offset is how far that chaser lags behind, eased by a soft
+    // limit (`swayMax` px, times theme.json "widget_sway", default 1; 0 turns
+    // it off). At a steady pan the lag is steady, so the widgets hold a
+    // small displacement in the direction the desktop moves; when the pan
+    // stops the chaser catches up, overshooting a little, and the offset
+    // settles back to exactly 0. It can't accumulate: it is always the gap
+    // between two springs heading for the same place, and the widgets' saved
+    // places are never touched. Updates arriving at any rate are fine: it
+    // chases the windows' already-smooth motion, not the raw pan steps.
+    // damping ratio 0.35: a fast pan holds the widgets ~54 px back and they
+    // overshoot ~5 px on the way home; a slow one ~15 px with no visible
+    // overshoot; settled within ~0.9 s of the pan stopping (worked out
+    // against the windows' own spring, which this chases)
+    readonly property var sway: ({ stiffness: 200, damping: 9.9, mass: 1 })
+    readonly property real swayStrength: Math.max(0, Math.min(2, Number(Theme.data.widget_sway === undefined ? 1 : Theme.data.widget_sway) || 0))
+    readonly property real swayMax: 64 * root.swayStrength
+    property real _fx: 0
+    property real _fy: 0
+    property real _fvx: 0
+    property real _fvy: 0
+    function _soft(d) { return root.swayMax <= 0 ? 0 : root.swayMax * Math.tanh(d / root.swayMax); }
+    readonly property real swayX: Theme.reduceMotion ? 0 : root._soft(root.x - root._fx)
+    readonly property real swayY: Theme.reduceMotion ? 0 : root._soft(root.y - root._fy)
 
     // one step of the spring, in small sub-steps (semi-implicit Euler: stable
     // at any frame rate, within a fraction of a pixel of the exact motion)
     function step(dt) {
         const s = root.spring;
+        const w = root.sway;
         let x = root.x, y = root.y, vx = root._vx, vy = root._vy;
+        let fx = root._fx, fy = root._fy, fvx = root._fvx, fvy = root._fvy;
         let left = Math.min(dt, 0.1);       // a stalled frame doesn't fling it
         while (left > 0) {
             const h = Math.min(0.00025, left);
             vx += h * (-s.stiffness * (x - root.goalX) - s.damping * vx) / s.mass;
             vy += h * (-s.stiffness * (y - root.goalY) - s.damping * vy) / s.mass;
             x += h * vx; y += h * vy;
+            fvx += h * (-w.stiffness * (fx - x) - w.damping * fvx) / w.mass;
+            fvy += h * (-w.stiffness * (fy - y) - w.damping * fvy) / w.mass;
+            fx += h * fvx; fy += h * fvy;
             left -= h;
         }
         const settled = Math.abs(x - root.goalX) < 0.25 && Math.abs(y - root.goalY) < 0.25
-                        && Math.abs(vx) < 2 && Math.abs(vy) < 2;
-        if (settled) { x = root.goalX; y = root.goalY; vx = 0; vy = 0; follow.running = false; }
+                        && Math.abs(vx) < 2 && Math.abs(vy) < 2
+                        && Math.abs(fx - x) < 0.25 && Math.abs(fy - y) < 0.25 && Math.abs(fvx) < 2 && Math.abs(fvy) < 2;
+        if (settled) { x = root.goalX; y = root.goalY; vx = 0; vy = 0; fx = x; fy = y; fvx = 0; fvy = 0; follow.running = false; }
         root._vx = vx; root._vy = vy;
+        root._fvx = fvx; root._fvy = fvy;
+        root._fx = fx; root._fy = fy;
         root.x = x; root.y = y;
     }
     property FrameAnimation follow: FrameAnimation {
@@ -153,7 +192,7 @@ QtObject {
         const k = String(root.workspace);
         const o = Object.assign({}, root.offsets); delete o[k];
         const b = Object.assign({}, root._baseline); delete b[k];
-        root._cut = false;
+        root._cut = true;
         root._baseline = b;
         root.offsets = o;
         Quickshell.execDetached(["python3", Quickshell.shellDir + "/../scripts/dxrice_viewport.py", "home", k]);

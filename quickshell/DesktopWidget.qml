@@ -16,10 +16,12 @@ import Quickshell.Wayland
 //                  alike: "none" (bare, with a soft shadow for legibility on
 //                  any wallpaper), "glass" (the shell's panel glass) or
 //                  "terminal" (a dark, square-edged plate with a hairline)
-//   worldAttached  part of the infinite desktop: it travels with the windows
-//                  when you pan (Viewport). theme.json "widgets_world"
-//                  (default true) is the default for every widget, and
-//                  "widget_<name>_world" overrides it for one
+//   worldAttached  left on the infinite desktop like a window when you pan
+//                  (theme.json "widget_<name>_world": true, or
+//                  "widgets_world": true for all). By default a widget stays
+//                  on the screen and sways a little with a pan instead
+//                  (Viewport.swayX/Y): dragged along with the moving desktop,
+//                  springing back when it stops.
 //   interactive    false for something only to look at (the clock): it then
 //                  takes no input at all and the desktop under it stays
 //                  clickable; true takes input over the card only
@@ -56,8 +58,10 @@ PanelWindow {
     // neither be reached nor dropped where it was meant to go.
     property real panWeight: WidgetStack.arranging ? 0 : 1
     Behavior on panWeight { NumberAnimation { duration: Theme.durationDefault; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
-    readonly property real panX: root.worldAttached ? Viewport.x * root.panWeight : 0
-    readonly property real panY: root.worldAttached ? Viewport.y * root.panWeight : 0
+    // the sway (on the screen, the default) or the whole pan (left in the
+    // world); either way added on top of its place, never saved into it
+    readonly property real panX: (root.worldAttached ? Viewport.x : Viewport.swayX) * root.panWeight
+    readonly property real panY: (root.worldAttached ? Viewport.y : Viewport.swayY) * root.panWeight
     default property alias content: holder.data
     readonly property alias card: surface
     readonly property alias hovered: hover.hovered

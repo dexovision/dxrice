@@ -245,10 +245,10 @@ class WorldAttachedTest(unittest.TestCase):
             s.wait(700)
             s.ev(f"{TE}.currentCategory = 'experience'")
             s.wait(600)
-            # on by default (they all travel with the desktop): one click keeps it on the screen
-            self.assertTrue(s.ev(f"{TE}.widget_music_world"))
-            s.ev("(function(){ const c = findNamed('toggleChip:widget_music_world'); c.children[c.children.length - 1].clicked(null); })()")
+            # off by default (widgets stay on the screen and sway): one click leaves it on the desktop
             self.assertFalse(s.ev(f"{TE}.widget_music_world"))
+            s.ev("(function(){ const c = findNamed('toggleChip:widget_music_world'); c.children[c.children.length - 1].clicked(null); })()")
+            self.assertTrue(s.ev(f"{TE}.widget_music_world"))
             self.assertTrue(s.ev(f"{TE}.dirty"))
             self.assertIn("widget_music_world", s.ev(f"{TE}.allKeys().join(',')").split(","))
         finally:

@@ -58,11 +58,13 @@ QtObject {
         const v = String(root.data["widget_" + name + "_pos"] || "");
         return root.widgetCorners.indexOf(v) >= 0 ? v : fallback;
     }
-    // whether a desktop widget travels with the infinite desktop when it pans:
-    // "widgets_world" (default true) for all of them, "widget_<name>_world" for one
+    // whether a desktop widget stays behind on the infinite desktop when it
+    // pans (left in the world, like a window) instead of staying on the
+    // screen with a little sway (the default; Viewport.swayX/Y):
+    // "widget_<name>_world": true for one, "widgets_world": true for all
     function widgetWorld(name) {
         const v = root.data["widget_" + name + "_world"];
-        return typeof v === "boolean" ? v : root.data.widgets_world !== false;
+        return typeof v === "boolean" ? v : root.data.widgets_world === true;
     }
 
     function reload() {

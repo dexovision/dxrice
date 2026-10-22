@@ -183,6 +183,7 @@ PanelWindow {
     property real font_size_mako: 11
 
     property real anim_duration_ms: 150
+    property real widget_sway: 1
     property real ui_density: 1.0
     property real shadow_intensity: 1.0
     property real text_scale: 1.0
@@ -228,7 +229,7 @@ PanelWindow {
     property string widget_weather_pos: "bottom-right"
     property string weather_location: ""
     property string weather_units: "metric"
-    // world-attached widgets travel with the infinite desktop when you pan
+    // widgets left on the infinite desktop when you pan (default: on screen, swaying)
     property bool bar_hover_open: true
     property bool bar_show_media: true
     property bool bar_show_capture: true
@@ -238,16 +239,16 @@ PanelWindow {
     property bool bar_show_audio: true
     property bool bar_show_power: true
     property bool bar_show_notifications: true
-    property bool widget_clock_world: true
-    property bool widget_music_world: true
-    property bool widget_system_world: true
-    property bool widget_weather_world: true
-    property bool widget_battery_world: true
-    property bool widget_timer_world: true
-    property bool widget_reminders_world: true
-    property bool widget_cpu_world: true
-    property bool widget_memory_world: true
-    property bool widget_disk_world: true
+    property bool widget_clock_world: false
+    property bool widget_music_world: false
+    property bool widget_system_world: false
+    property bool widget_weather_world: false
+    property bool widget_battery_world: false
+    property bool widget_timer_world: false
+    property bool widget_reminders_world: false
+    property bool widget_cpu_world: false
+    property bool widget_memory_world: false
+    property bool widget_disk_world: false
 
     property string font_family: "JetBrainsMono Nerd Font"
     // Empty = automatic (see Theme.fontFamily): Noto Sans while font_family
@@ -358,6 +359,7 @@ PanelWindow {
         { key: "anim_duration_ms", label: "Animation speed (lower = snappier)", min: 0, max: 500, decimals: 0, unit: "ms" },
         { key: "ui_density", label: "Spacing inside panels", min: 0.5, max: 1.5, decimals: 2 },
         { key: "shadow_intensity", label: "Panel shadow strength (Quickshell only)", min: 0, max: 1.5, decimals: 2 },
+        { key: "widget_sway", label: "Widget sway while panning (0 = none)", min: 0, max: 2, decimals: 1 },
     ]
     readonly property var presets: ({
         "Glass Charcoal": { glass_bg: "12141a", glass_bg_active: "232630", glass_text: "e6e6e6", glass_text_active: "ffffff", glass_border: "ffffff", accent: "e67878", radius: 12, hypr_active_border_1: "8090a0", hypr_active_border_2: "c0a0b0", hypr_inactive_border: "1d2021" },
@@ -2228,8 +2230,8 @@ PanelWindow {
                         CornerRow { settingKey: "widget_disk_pos"; idPrefix: "widgetPos:disk:"; label: "Disk meter" }
                     }
                     ToggleChips {
-                        label: "Move with the desktop"
-                        sub: "Lit ones travel with your windows when you pan the infinite desktop (all of them, unless you turn one off); the rest stay on the screen."
+                        label: "Leave on the desktop when panning"
+                        sub: "Widgets stay on your screen and sway a little as you pan. Lit ones are left behind on the infinite desktop instead, like windows."
                         options: [{ key: "widget_clock_world", label: "Clock" }, { key: "widget_music_world", label: "Now playing" },
                                   { key: "widget_system_world", label: "System monitor" }, { key: "widget_weather_world", label: "Weather" },
                                   { key: "widget_battery_world", label: "Battery" }, { key: "widget_timer_world", label: "Timer" },

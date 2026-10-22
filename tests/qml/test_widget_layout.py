@@ -96,54 +96,98 @@ class SpringTest(unittest.TestCase):
         finally:
             s.close()
 
-    def test_widgets_follow_by_default_gradually_and_together(self):
+    def pan(self, s, steps, dx, dy=0.0, every=16):
+        """A drag as the pan daemon reports it: a small step at a time."""
+        w = s.ev("viewport.workspace")
+        x, y = s.ev("viewport.goalX"), s.ev("viewport.goalY")
+        seen = []
+        for _ in range(steps):
+            x += dx; y += dy
+            s.ev(f"viewport.offsets = ({{ '{w}': [{x}, {y}] }})")
+            s.wait(every)
+            seen.append(rect(s, "clock")[0])
+        return seen
+
+    def test_widgets_stay_on_the_screen_and_sway_with_a_pan(self):
+        # (the requested behaviour: they follow the screen, dragged a little
+        # by the moving desktop, and spring back -- never left behind)
         s = scene(widget_clock=True, widget_music=True, widget_system=True)
         try:
             s.wait(700)
             home = {n: rect(s, n) for n in ("clock", "music", "system")}
-            w = s.ev("viewport.workspace")
-            s.ev(f"viewport.offsets = ({{ '{w}': [-500, 0] }})")
-            s.wait(60)
+            during = self.pan(s, 40, -25)              # a steady pan to the left
+            d = [x - home["clock"][0] for x in during]
+            self.assertLess(min(d), -5, "it didn't sway with the pan")
+            self.assertGreaterEqual(min(d), -s.ev("viewport.swayMax") - 1, "it swayed past its limit")
             mid = {n: rect(s, n) for n in home}
-            moved = [mid[n][0] - home[n][0] for n in home]
-            self.assertLess(moved[0], -5, "it didn't start following")
-            self.assertGreater(moved[0], -480, "it jumped instead of travelling with the windows")
-            for d in moved[1:]:
-                self.assertAlmostEqual(d, moved[0], delta=0.5, msg="widgets drifted apart mid-pan")
-            s.wait(1600)
+            for n in ("music", "system"):
+                self.assertAlmostEqual(mid[n][0] - home[n][0], mid["clock"][0] - home["clock"][0], delta=0.5,
+                                       msg="widgets swayed apart")
+            s.wait(2000)
             for n in home:
-                self.assertAlmostEqual(rect(s, n)[0], home[n][0] - 500, delta=0.5)
+                self.assertAlmostEqual(rect(s, n)[0], home[n][0], delta=0.5, msg=f"{n} didn't come home")
                 self.assertAlmostEqual(rect(s, n)[1], home[n][1], delta=0.5)
-            self.assertFalse(s.ev("viewport.follow.running"), "the spring kept running after settling")
+            self.assertFalse(s.ev("viewport.follow.running"), "the springs kept running after settling")
         finally:
             s.close()
 
-    def test_one_set_to_stay_on_the_screen_stays(self):
-        s = scene(widget_clock=True, widget_clock_world=False, widgets_world=True)
+    def test_on_stopping_it_springs_back_past_home_a_little(self):
+        s = scene(widget_clock=True)
         try:
             s.wait(600)
-            x = rect(s, "clock")[0]
-            w = s.ev("viewport.workspace")
-            s.ev(f"viewport.offsets = ({{ '{w}': [-500, 0] }})")
-            s.wait(900)
-            self.assertAlmostEqual(rect(s, "clock")[0], x, delta=0.5)
+            x0 = rect(s, "clock")[0]
+            self.pan(s, 30, -45)
+            after = []
+            for _ in range(70):
+                s.wait(16)
+                after.append(rect(s, "clock")[0] - x0)
+            self.assertGreater(max(after), 0.5, "no overshoot on the way home")
+            self.assertLess(max(after), 15, "the overshoot should be subtle")
+            self.assertAlmostEqual(after[-1], 0, delta=0.5)
         finally:
             s.close()
 
-    def test_all_can_be_kept_on_the_screen(self):
-        s = scene(widget_clock=True, widgets_world=False)
+    def test_many_pans_leave_no_drift_and_save_nothing(self):
+        s = scene(widget_clock=True, widget_music=True)
+        try:
+            s.wait(600)
+            home = rect(s, "clock")
+            for k in range(4):
+                self.pan(s, 12, -40 if k % 2 else 55, 20 if k % 2 else -10, every=10)
+            s.wait(2200)
+            self.assertAlmostEqual(rect(s, "clock")[0], home[0], delta=0.5)
+            self.assertAlmostEqual(rect(s, "clock")[1], home[1], delta=0.5)
+            saved = json.loads((Path(s.bridge.config_home) / "dxrice" / "theme.json").read_text())
+            self.assertNotIn("widget_clock_pos", saved, "the sway was written into the layout")
+        finally:
+            s.close()
+
+    def test_sway_can_be_turned_off(self):
+        s = scene(widget_clock=True, widget_sway=0)
+        try:
+            s.wait(600)
+            x0 = rect(s, "clock")[0]
+            during = self.pan(s, 20, -40)
+            self.assertTrue(all(abs(x - x0) < 0.5 for x in during))
+        finally:
+            s.close()
+
+    def test_one_left_on_the_desktop_travels_with_it(self):
+        s = scene(widget_clock=True, widget_clock_world=True, widget_system=True)
         try:
             s.wait(600)
             x = rect(s, "clock")[0]
+            sx = rect(s, "system")[0]
             w = s.ev("viewport.workspace")
             s.ev(f"viewport.offsets = ({{ '{w}': [-500, 0] }})")
-            s.wait(900)
-            self.assertAlmostEqual(rect(s, "clock")[0], x, delta=0.5)
+            s.wait(1600)
+            self.assertAlmostEqual(rect(s, "clock")[0], x - 500, delta=0.5)
+            self.assertAlmostEqual(rect(s, "system")[0], sx, delta=0.5, msg="an on-screen widget was left behind")
         finally:
             s.close()
 
     def test_a_workspace_switch_cuts_to_that_workspaces_pan(self):
-        s = scene(widget_clock=True)
+        s = scene(widget_clock=True, widget_clock_world=True)
         try:
             s.wait(600)
             x = rect(s, "clock")[0]
@@ -161,7 +205,7 @@ class SpringTest(unittest.TestCase):
         # (live: the shell started on a total of -2752 px built up all session,
         # and every widget went off the screen)
         def setup(bridge):
-            with_theme(widget_clock=True)(bridge)
+            with_theme(widget_clock=True, widget_clock_world=True)(bridge)
             run = bridge.env("XDG_RUNTIME_DIR") or "/tmp"      # where the shell will look
             bridge.files[run + "/dxrice/viewport.json"] = json.dumps({"offsets": {"1": [-2752, 1430]}})
         s = Scene(width=1920, height=1080, setup=setup)
@@ -176,7 +220,7 @@ class SpringTest(unittest.TestCase):
             s.close()
 
     def test_bring_here_puts_them_back_on_the_screen(self):
-        s = scene(widget_clock=True)
+        s = scene(widget_clock=True, widget_clock_world=True)
         try:
             s.wait(600)
             s.ev("viewport.offsets = ({ '1': [-3000, 400] })")
@@ -195,7 +239,7 @@ class SpringTest(unittest.TestCase):
             s.close()
 
     def test_the_overviews_unanimated_pan_lands_at_once(self):
-        s = scene(widget_clock=True)
+        s = scene(widget_clock=True, widget_clock_world=True)
         try:
             s.wait(600)
             x = rect(s, "clock")[0]
@@ -359,7 +403,7 @@ class ArrangeTest(unittest.TestCase):
             s.close()
 
     def test_arranging_a_panned_desktop_arranges_the_layout_on_screen(self):
-        s = scene(widget_clock=True, widget_clock_pos="top-left")
+        s = scene(widget_clock=True, widget_clock_world=True, widget_clock_pos="top-left")
         try:
             s.wait(600)
             home = rect(s, "clock")
@@ -429,11 +473,11 @@ class ArrangeTest(unittest.TestCase):
             s.wait(200)
             self.assertEqual(s.ev(f"{TE}.widget_music_pos"), "top-right", "the editor kept showing the old corner")
             # an unrelated edit applied afterwards doesn't put it back
-            s.ev(f"{TE}.widget_clock_world = false; {TE}.dirty = true; {TE}.save()")
+            s.ev(f"{TE}.widget_clock_world = true; {TE}.dirty = true; {TE}.save()")
             s.wait(200)
             data = self.saved(s)
             self.assertEqual(data["widget_music_pos"], "top-right")
-            self.assertIs(data["widget_clock_world"], False)
+            self.assertIs(data["widget_clock_world"], True)
         finally:
             s.close()
 
