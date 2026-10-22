@@ -349,7 +349,7 @@ Item {
                 height: list.rowH - 4
                 radius: Theme.roundingSm
                 color: Theme.mix(Theme.layer1, Theme.accent, 0.16)
-                Behavior on y { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                Behavior on y { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
             }
             Repeater {
                 model: root.results

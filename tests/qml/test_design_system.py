@@ -135,6 +135,22 @@ class WifiDialogTest(unittest.TestCase):
             s.close()
 
 
+class MotionTokensTest(unittest.TestCase):
+    """Things that move take Theme.durationMove (1 ms under Reduce motion);
+    durationFast/FadeIn/FadeOut are for colour and opacity and stay as they
+    are. Eight moves (a selection slide, hover lifts and scales, graph bars)
+    used durationFast and kept moving with Reduce motion on."""
+
+    def test_moves_use_the_move_duration(self):
+        import re
+        shell = Path(__file__).resolve().parents[2] / "quickshell"
+        move = re.compile(r"Behavior on (x|y|scale|width|height|rotation|implicitWidth|implicitHeight)\b[^\n]*"
+                          r"duration: Theme\.duration(Fast|FadeIn|FadeOut)\b")
+        found = [f"{f.name}:{n}" for f in sorted(shell.glob("*.qml"))
+                 for n, line in enumerate(f.read_text().splitlines(), 1) if move.search(line)]
+        self.assertEqual(found, [])
+
+
 class ApplyFeedbackTest(unittest.TestCase):
     def test_success_is_shown_briefly_then_clears(self):
         s = Scene(width=1920, height=1080)

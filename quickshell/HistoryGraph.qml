@@ -39,7 +39,7 @@ Item {
             radius: Math.min(width / 2, 1.5)
             color: root.color
             opacity: has ? 0.35 + 0.65 * (index / Math.max(1, root.slots - 1)) : 0
-            Behavior on height { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+            Behavior on height { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         }
     }
 }

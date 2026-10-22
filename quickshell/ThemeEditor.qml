@@ -992,7 +992,7 @@ PanelWindow {
                     width: (picker.width - (Prev.modes.length - 1) * Theme.padMd) / Prev.modes.length
                     height: stage.y + stage.height + Theme.padSm + 62
                     scale: cardHover.hovered && !card.picked ? 1.025 : 1
-                    Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                    Behavior on scale { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                     HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
                     Rectangle {
                         anchors.fill: parent
@@ -2538,7 +2538,7 @@ PanelWindow {
                             width: wallFlow.cellWidth
                             height: width * 9 / 16 + 22
                             scale: wallHover.hovered && !wall.picked ? 1.02 : 1
-                            Behavior on scale { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+                            Behavior on scale { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                             HoverHandler { id: wallHover; cursorShape: Qt.PointingHandCursor }
                             Rectangle {
                                 id: thumbFrame

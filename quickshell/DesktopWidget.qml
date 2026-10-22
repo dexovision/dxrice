@@ -177,7 +177,7 @@ PanelWindow {
         // the hover lift is drawn, not a move: `y` has to follow a pan at once
         transform: Translate {
             y: root.interactive && hover.hovered ? -2 : 0
-            Behavior on y { NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
+            Behavior on y { NumberAnimation { duration: Theme.durationMove; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
         }
         opacity: root.shown
         scale: root.uiScale * (0.97 + 0.03 * root.shown)
