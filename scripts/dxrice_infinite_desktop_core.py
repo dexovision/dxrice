@@ -617,6 +617,10 @@ while True:
             pos[0] += idx
             pos[1] += idy
             exprs.append(move_window_exact_lua(pos[0], pos[1], addr))
+        # the hidden pointer is held where the pan began (dxrice_pan_presence)
+        pin = _presence.pin_expr()
+        if pin:
+            exprs.append(pin)
 
         batch_async(exprs)
         _viewport.record(workspace_id, idx, idy)
