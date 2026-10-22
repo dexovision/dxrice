@@ -100,7 +100,9 @@ class SectionsTest(unittest.TestCase):
         self.s.set_command("dxrice_capture.sh record", "__HANG__")      # wf-recorder runs until stopped
         self.open("capture")
         self.click("statusRecordScreen")
-        self.s.wait(1300)
+        self.s.wait(400)
+        self.s.ev("capture.recorder.stdout.read('started')")     # wf-recorder is up (the script says so)
+        self.s.wait(1300)                                        # the timer counts from here
         self.assertTrue(self.s.ev("capture.recording"))
         self.assertGreaterEqual(self.s.ev("capture.elapsed"), 1)
         self.assertEqual(self.s.ev("findNamed('barIndicator:capture').label"), self.s.ev("capture.clock(capture.elapsed)"))
@@ -201,7 +203,9 @@ class SectionsTest(unittest.TestCase):
         self.click("recordSound:desktop")
         self.assertEqual(self.s.ev("capture.audio"), "desktop")
         self.click("statusRecordScreen")
-        self.s.wait(1300)
+        self.s.wait(400)
+        self.s.ev("capture.recorder.stdout.read('started')")     # wf-recorder is up (the script says so)
+        self.s.wait(1300)                                        # the timer counts from here
         self.assertTrue(self.s.ev("capture.recording"))
         cmd = json.loads(self.s.ev("JSON.stringify(capture.recorder.command)"))
         self.assertEqual(cmd[2:], ["record", "screen", "desktop"])
@@ -221,6 +225,23 @@ class SectionsTest(unittest.TestCase):
         self.s.wait(900)
         self.s.bridge.exec_log.clear()
         self.click("recordingStop")
+        stops = [e for e in self.execs("sh") if e[1].endswith("dxrice_capture.sh")]
+        self.assertEqual([e[2:] for e in stops], [["stop"]])
+
+    def test_choosing_a_region_is_not_recording_yet_and_can_be_cancelled(self):
+        # (live: the region picker never showed, the bar counted a recording
+        # that hadn't started, and Stop did nothing)
+        self.s.set_command("dxrice_capture.sh record", "__HANG__")
+        self.s.ev("capture.record('region')")
+        self.s.wait(500)
+        self.assertTrue(self.s.ev("capture.picking"))
+        self.assertFalse(self.s.ev("capture.recording"), "counted as recording while the region is still being picked")
+        self.assertFalse(self.s.ev("findNamed('recordIsland').expanded"))
+        self.open("capture")
+        self.assertTrue(self.s.ev("findNamed('statusRecordCancel').visible"))
+        self.assertFalse(self.s.ev("findNamed('statusRecordRegion').visible"))
+        self.s.bridge.exec_log.clear()
+        self.click("statusRecordCancel")
         stops = [e for e in self.execs("sh") if e[1].endswith("dxrice_capture.sh")]
         self.assertEqual([e[2:] for e in stops], [["stop"]])
 
@@ -316,7 +337,9 @@ class SectionsTest(unittest.TestCase):
         self.assertTrue(vis("dashboard"), "the Dashboard can't be hidden: it leads to everything")
         self.s.set_command("dxrice_capture.sh record", "__HANG__")
         self.s.ev("capture.record('screen')")
-        self.s.wait(600)
+        self.s.wait(400)
+        self.s.ev("capture.recorder.stdout.read('started')")
+        self.s.wait(200)
         self.assertTrue(vis("capture"), "a running recording must show its time even when capture is hidden")
 
     def test_the_choice_is_in_settings(self):
@@ -345,7 +368,8 @@ class CaptureScriptTest(unittest.TestCase):
         log = tmp / "calls"
         fakes = {
             "grim": 'echo "grim $*" >> "$LOG"; for a; do last="$a"; done; echo png > "$last"',
-            "slurp": f'[ -n "{slurp_out}" ] && echo "{slurp_out}" || exit 1',
+            "slurp": ('trap "exit 1" TERM; while :; do sleep 0.05; done' if slurp_out == "__WAIT__"
+                      else f'[ -n "{slurp_out}" ] && echo "{slurp_out}" || exit 1'),
             "wl-copy": 'cat > /dev/null; echo wl-copy >> "$LOG"',
             "notify-send": 'echo "notify-send $*" >> "$LOG"',
             "pactl": '[ "$1" = get-default-sink ] && echo alsa_output.hdmi; [ "$1" = get-default-source ] && echo alsa_input.mic; true',
@@ -375,6 +399,27 @@ class CaptureScriptTest(unittest.TestCase):
         self.assertIn("grim -g 10,20 300x200", calls)
         self.assertIn("wl-copy", calls)
         self.assertIn("Screenshot saved", calls)
+
+    def test_slurp_never_waits_on_a_pipe(self):
+        # slurp reads preset boxes from a stdin that isn't a terminal and shows
+        # nothing until it ends; from the shell that stdin was an open pipe
+        src = (Path(__file__).resolve().parents[2] / "scripts" / "dxrice_capture.sh").read_text()
+        self.assertIn("slurp < /dev/null", src)
+
+    def test_stop_cancels_a_region_still_being_picked(self):
+        import time
+        tmp, proc, log, env, script = self.run_script("record", "region", wait=False,
+                                                      slurp_out="__WAIT__")
+        pick = tmp / "run" / "dxrice" / "recording.pick"
+        for _ in range(100):
+            if pick.exists():
+                break
+            time.sleep(0.05)
+        self.assertTrue(pick.exists(), "the pick wasn't recorded")
+        import subprocess
+        subprocess.run(["sh", str(script), "stop"], env=env, timeout=10)
+        self.assertNotEqual(proc.wait(timeout=10), 0, "a cancelled pick must record nothing")
+        self.assertFalse((log.exists() and "wf-recorder" in log.read_text()))
 
     def test_a_cancelled_region_does_nothing(self):
         tmp, r, log = self.run_script("shot", "region", slurp_out="")

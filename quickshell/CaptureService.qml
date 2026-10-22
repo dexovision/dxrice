@@ -11,7 +11,12 @@ import Quickshell.Io
 QtObject {
     id: root
     readonly property string script: Quickshell.shellDir + "/../scripts/dxrice_capture.sh"
-    readonly property bool recording: recorder.running
+    // running = the script is up; `recording` only once wf-recorder has really
+    // started (the script prints "started"), `picking` while a region is
+    // still being chosen
+    property bool _started: false
+    readonly property bool recording: recorder.running && root._started
+    readonly property bool picking: recorder.running && !root._started
     property int elapsed: 0
     property string _pendingShot: ""
     // the sound a recording takes: "none", "desktop" (what is playing) or
@@ -21,7 +26,8 @@ QtObject {
     property string recordingAudio: "none"
 
     property Process recorder: Process {
-        onRunningChanged: if (running) root.elapsed = 0
+        onRunningChanged: { root._started = false; root.elapsed = 0; }
+        stdout: SplitParser { onRead: (line) => { if (String(line).trim() === "started") { root.elapsed = 0; root._started = true; } } }
     }
     property Timer tick: Timer {
         interval: 1000; repeat: true
@@ -44,11 +50,11 @@ QtObject {
         onTriggered: root.recorder.running = true
     }
     function record(mode) {
-        if (root.recording || root.recordDelay.running) return;
+        if (root.recorder.running || root.recordDelay.running) return;
         root.recordingAudio = root.audio;
         root.recorder.command = ["sh", root.script, "record", mode === "region" ? "region" : "screen", root.audio];
         root.recordDelay.restart();
     }
-    function stop() { if (root.recording) Quickshell.execDetached(["sh", root.script, "stop"]); }
+    function stop() { if (root.recorder.running) Quickshell.execDetached(["sh", root.script, "stop"]); }
     function clock(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
 }

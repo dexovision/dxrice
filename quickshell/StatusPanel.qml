@@ -894,9 +894,11 @@ Item {
                 Flow {
                     width: parent.width
                     spacing: Theme.padSm
-                    GlassButton { objectName: "statusRecordRegion"; visible: !CaptureService.recording; text: "Region"; variant: "secondary"; onClicked: { root.closeRequested(); CaptureService.record("region"); } }
-                    GlassButton { objectName: "statusRecordScreen"; visible: !CaptureService.recording; text: "Whole screen"; variant: "secondary"; onClicked: { root.closeRequested(); CaptureService.record("screen"); } }
+                    GlassButton { objectName: "statusRecordRegion"; visible: !CaptureService.recording && !CaptureService.picking; text: "Region"; variant: "secondary"; onClicked: { root.closeRequested(); CaptureService.record("region"); } }
+                    GlassButton { objectName: "statusRecordScreen"; visible: !CaptureService.recording && !CaptureService.picking; text: "Whole screen"; variant: "secondary"; onClicked: { root.closeRequested(); CaptureService.record("screen"); } }
                     GlassButton { objectName: "statusRecordStop"; visible: CaptureService.recording; text: "Stop recording"; variant: "primary"; onClicked: CaptureService.stop() }
+                    // a region still being chosen (Esc in the picker cancels too)
+                    GlassButton { objectName: "statusRecordCancel"; visible: CaptureService.picking; text: "Cancel region"; variant: "secondary"; onClicked: CaptureService.stop() }
                 }
                 Note { text: "Screenshots go to ~/Pictures/Screenshots and the clipboard; recordings to ~/Videos/Recordings." }
             }

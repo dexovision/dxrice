@@ -33,8 +33,15 @@ state_dir="${XDG_RUNTIME_DIR:-/tmp}/dxrice"
 pid_file="$state_dir/recording.pid"
 
 pick() {
-    # a region from slurp, or nothing (cancelled)
-    slurp 2>/dev/null
+    # a region from slurp, or nothing (cancelled). Its stdin must not be a
+    # pipe: slurp reads predefined boxes from a stdin that isn't a terminal
+    # and shows nothing until that ends -- run from the shell (a Process with
+    # its stdin held open) it waited there forever, invisible. With a file
+    # given ($1), slurp's own pid goes in it, so `stop` can cancel the pick.
+    slurp < /dev/null 2>/dev/null &
+    picker=$!
+    [ -n "${1:-}" ] && echo "$picker" > "$1"
+    wait "$picker"
 }
 
 case "${1:-}" in
@@ -56,20 +63,26 @@ record)
     dir="$HOME/Videos/Recordings"
     mkdir -p "$dir" "$state_dir"
     file="$dir/$(stamp).mp4"
+    pick_file="$state_dir/recording.pick"
     audio=""
     case "${3:-none}" in
     desktop) dev="$(pactl get-default-sink 2>/dev/null)" && [ -n "$dev" ] && audio="--audio=$dev.monitor" ;;
     mic) dev="$(pactl get-default-source 2>/dev/null)" && [ -n "$dev" ] && audio="--audio=$dev" ;;
     esac
     if [ "${2:-screen}" = "region" ]; then
-        geom="$(pick)" || exit 1
-        [ -n "$geom" ] || exit 1
+        # while the region is being picked, `stop` cancels the pick
+        geom="$(pick "$pick_file")"
+        ok=$?
+        rm -f "$pick_file"
+        [ $ok -eq 0 ] && [ -n "$geom" ] || exit 1
         wf-recorder $audio -g "$geom" -f "$file" >/dev/null 2>&1 &
     else
         wf-recorder $audio -f "$file" >/dev/null 2>&1 &
     fi
     rec=$!
     echo "$rec" > "$pid_file"
+    # the shell's cue that the recording itself has begun (its timer starts here)
+    echo started
     # Whatever stops this script (the shell going away mid-recording) stops
     # the recording with it, so the file is finished rather than the
     # recorder left running unseen; TERM after 3 s, as `stop` does.
@@ -88,6 +101,11 @@ record)
     fi
     ;;
 stop)
+    # still picking a region: cancel the pick (the script then ends, recording nothing)
+    if [ ! -f "$pid_file" ] && [ -f "$state_dir/recording.pick" ]; then
+        kill -TERM "$(cat "$state_dir/recording.pick")" 2>/dev/null
+        exit 0
+    fi
     [ -f "$pid_file" ] || exit 1
     rec="$(cat "$pid_file")"
     kill -INT "$rec" 2>/dev/null || exit 0
