@@ -47,7 +47,9 @@ def default_path():
 # Straight over Hyprland's socket (a tenth of a millisecond) rather than
 # starting `hyprctl` (several ms): these run at the very start of a pan,
 # where any delay showed as the cursor moving before it hid. `hyprctl` is the
-# fallback when the socket can't be reached.
+# fallback when the socket can't be reached -- or answers anything but "ok"
+# (an error reply is not empty, and taking it for success would leave the
+# cursor shown and loose without a word).
 def _socket(cmd):
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -57,14 +59,11 @@ def _socket(cmd):
         return b""
 
 
-def hyprctl_cursor_pos():
-    """(x, y) of the pointer in Hyprland's layout coordinates, or None."""
-    raw = _socket("j/cursorpos")
-    if not raw:
-        try:
-            raw = subprocess.run(["hyprctl", "cursorpos", "-j"], capture_output=True, text=True, timeout=2).stdout
-        except (OSError, subprocess.SubprocessError):
-            return None
+def _socket_ok(cmd):
+    return _socket(cmd).strip() == b"ok"
+
+
+def _parse_pos(raw):
     try:
         d = json.loads(raw)
         return int(d["x"]), int(d["y"])
@@ -72,12 +71,24 @@ def hyprctl_cursor_pos():
         return None
 
 
+def hyprctl_cursor_pos():
+    """(x, y) of the pointer in Hyprland's layout coordinates, or None."""
+    pos = _parse_pos(_socket("j/cursorpos"))
+    if pos is not None:
+        return pos
+    try:
+        raw = subprocess.run(["hyprctl", "cursorpos", "-j"], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _parse_pos(raw)
+
+
 def warp_lua(pos):
     return "hl.dsp.cursor.move({ x = %d, y = %d })" % (pos[0], pos[1])
 
 
 def hyprctl_warp(pos):
-    if _socket("dispatch " + warp_lua(pos)):
+    if _socket_ok("dispatch " + warp_lua(pos)):
         return
     try:
         subprocess.run(["hyprctl", "dispatch", warp_lua(pos)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
@@ -89,7 +100,7 @@ def hyprctl_cursor(hidden):
     """Hyprland's cursor:invisible, at runtime (a failure is ignored: the
     pan must never stop on it)."""
     lua = "hl.config({ cursor = { invisible = %s } })" % ("true" if hidden else "false")
-    if _socket("eval " + lua):
+    if _socket_ok("eval " + lua):
         return
     try:
         subprocess.run(["hyprctl", "eval", lua], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)

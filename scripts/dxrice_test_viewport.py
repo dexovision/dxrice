@@ -136,11 +136,11 @@ class TestViewport(unittest.TestCase):
         self.assertAlmostEqual(dx, 960 - 3300, delta=1, msg="the pan wasn't reported (the widgets wouldn't sway)")
 
     def test_a_visible_window_is_just_focused(self):
-        rc, sent, focused = self.go_to("0xa", [self.win("0xa", 300, 300), self.win("0xb", 1000, 200)])
+        _, sent, focused = self.go_to("0xa", [self.win("0xa", 300, 300), self.win("0xb", 1000, 200)])
         self.assertEqual((sent, focused), ([], ["0xa"]))
 
     def test_a_window_on_another_workspace_is_focused_there(self):
-        rc, sent, focused = self.go_to("0xb", [self.win("0xa", 300, 300), self.win("0xb", 300, 300, ws=4)])
+        _, sent, focused = self.go_to("0xb", [self.win("0xa", 300, 300), self.win("0xb", 300, 300, ws=4)])
         self.assertEqual((sent, focused), ([], ["0xb"]))
 
     def test_a_rigid_shift_is_a_camera_move_and_a_rearrangement_is_not(self):

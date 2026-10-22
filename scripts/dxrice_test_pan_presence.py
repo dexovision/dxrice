@@ -123,6 +123,39 @@ class PresenceTest(unittest.TestCase):
         unit = open(os.path.join(HERE, "..", "install.sh")).read()
         self.assertIn("ExecStopPost=$python_bin $REPO_DIR/scripts/dxrice_pan_presence.py restore", unit)
 
+    def test_an_error_from_the_socket_falls_back_to_hyprctl(self):
+        # (any reply used to count as done: "unknown request" left the cursor shown)
+        import dxrice_pan_presence as pp
+        bindir = os.path.join(self.tmp.name, "bin")
+        os.makedirs(bindir)
+        log = os.path.join(self.tmp.name, "calls")
+        with open(os.path.join(bindir, "hyprctl"), "w") as f:
+            f.write('#!/bin/sh\necho "$*" >> "%s"\n[ "$1" = cursorpos ] && echo \'{"x": 7, "y": 9}\'\nexit 0\n' % log)
+        os.chmod(os.path.join(bindir, "hyprctl"), 0o755)
+        old_socket, old_path = pp._socket, os.environ.get("PATH", "")
+        os.environ["PATH"] = bindir + ":" + old_path
+        try:
+            for reply in (b"unknown request", b"", b"error: bad lua"):
+                with self.subTest(reply=reply):
+                    open(log, "w").close()
+                    pp._socket = lambda _cmd, r=reply: r
+                    pp.hyprctl_cursor(True)
+                    pp.hyprctl_warp((3, 4))
+                    self.assertEqual(pp.hyprctl_cursor_pos(), (7, 9))
+                    calls = open(log).read()
+                    self.assertIn("invisible = true", calls)
+                    self.assertIn("x = 3, y = 4", calls)
+                    self.assertIn("cursorpos", calls)
+            # "ok" is done: hyprctl isn't started
+            open(log, "w").close()
+            pp._socket = lambda _cmd: b"ok"
+            pp.hyprctl_cursor(False)
+            pp.hyprctl_warp((1, 2))
+            self.assertEqual(open(log).read(), "")
+        finally:
+            pp._socket = old_socket
+            os.environ["PATH"] = old_path
+
     def test_the_command_line_restores(self):
         # with a fake hyprctl first on PATH: it records what it was asked
         bindir = os.path.join(self.tmp.name, "bin")
