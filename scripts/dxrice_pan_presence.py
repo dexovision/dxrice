@@ -7,9 +7,9 @@ ends.
 The pan daemon (dxrice_infinite_desktop_core.py) reports motion and its
 state here; this decides:
 
-  - it hides only once the pointer has really moved with the keys held
-    (`threshold` px), never on SUPER+ALT alone -- that is also how other
-    shortcuts start;
+  - it hides on the first movement with the keys held (`threshold` px), so
+    the cursor is gone the instant the desktop starts to move -- never on
+    SUPER+ALT alone, which is also how other shortcuts start;
   - it shows again when the keys are let go, or when no motion has come for
     `idle` seconds with them still held (a key-up the reader missed -- a VT
     switch, an unplugged keyboard -- must not leave either hidden);
@@ -44,13 +44,31 @@ def default_path():
     return os.path.join(base, "dxrice", "panning")
 
 
+# Straight over Hyprland's socket (a tenth of a millisecond) rather than
+# starting `hyprctl` (several ms): these run at the very start of a pan,
+# where any delay showed as the cursor moving before it hid. `hyprctl` is the
+# fallback when the socket can't be reached.
+def _socket(cmd):
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import dxrice_hypr_ipc
+        return dxrice_hypr_ipc._send(cmd, timeout=1)
+    except Exception:
+        return b""
+
+
 def hyprctl_cursor_pos():
     """(x, y) of the pointer in Hyprland's layout coordinates, or None."""
+    raw = _socket("j/cursorpos")
+    if not raw:
+        try:
+            raw = subprocess.run(["hyprctl", "cursorpos", "-j"], capture_output=True, text=True, timeout=2).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
     try:
-        r = subprocess.run(["hyprctl", "cursorpos", "-j"], capture_output=True, text=True, timeout=2)
-        d = json.loads(r.stdout)
+        d = json.loads(raw)
         return int(d["x"]), int(d["y"])
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return None
 
 
@@ -59,6 +77,8 @@ def warp_lua(pos):
 
 
 def hyprctl_warp(pos):
+    if _socket("dispatch " + warp_lua(pos)):
+        return
     try:
         subprocess.run(["hyprctl", "dispatch", warp_lua(pos)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
     except (OSError, subprocess.SubprocessError):
@@ -68,16 +88,18 @@ def hyprctl_warp(pos):
 def hyprctl_cursor(hidden):
     """Hyprland's cursor:invisible, at runtime (a failure is ignored: the
     pan must never stop on it)."""
+    lua = "hl.config({ cursor = { invisible = %s } })" % ("true" if hidden else "false")
+    if _socket("eval " + lua):
+        return
     try:
-        subprocess.run(["hyprctl", "eval", "hl.config({ cursor = { invisible = %s } })" % ("true" if hidden else "false")],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        subprocess.run(["hyprctl", "eval", lua], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
     except (OSError, subprocess.SubprocessError):
         pass
 
 
 class PanPresence:
     def __init__(self, path=None, cursor=hyprctl_cursor, clock=time.monotonic, wall=time.time,
-                 threshold=8.0, idle=1.2, refresh=0.5, cursor_pos=hyprctl_cursor_pos, warp=hyprctl_warp):
+                 threshold=1.0, idle=1.2, refresh=0.5, cursor_pos=hyprctl_cursor_pos, warp=hyprctl_warp):
         self.path = path or default_path()
         self.cursor = cursor
         self.clock = clock
@@ -118,6 +140,15 @@ class PanPresence:
             self.cursor(hidden)
         except Exception:
             pass
+
+    def begin(self):
+        """The keys went down: where the pointer is now is where it goes back
+        to (read before any movement, so it is exact)."""
+        if self.anchor is None and not self.hidden:
+            try:
+                self.anchor = self.cursor_pos()
+            except Exception:
+                self.anchor = None
 
     def motion(self, dx, dy):
         """The desktop moved by (dx, dy) during a pan."""

@@ -568,6 +568,7 @@ while True:
         with state_changed:
             state_changed.wait_for(pan_held)
         forget_workspace()
+        _presence.begin()           # where the pointer goes back to
     time.sleep(get_frame_interval())
 
     with lock:

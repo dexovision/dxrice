@@ -46,10 +46,10 @@ class PresenceTest(unittest.TestCase):
         self.assertFalse(self.p.hidden)
         self.assertEqual(self.cursor, [])
 
-    def test_a_real_pan_hides_both_and_letting_go_shows_both(self):
-        self.p.motion(3, 0)
-        self.assertFalse(self.p.hidden, "a 3 px nudge is not a pan yet")
-        self.p.motion(4, 3)
+    def test_the_first_movement_hides_both_and_letting_go_shows_both(self):
+        # (live: it waited for 8 px and a hyprctl run, so the cursor was seen
+        # moving before it went; now it goes the moment the desktop moves)
+        self.p.motion(1, 0)
         self.assertTrue(self.p.hidden)
         self.assertEqual(self.cursor, [True])
         self.assertTrue(self.flag().startswith("1 "))
@@ -81,7 +81,7 @@ class PresenceTest(unittest.TestCase):
         self.assertTrue(self.p.hidden)
 
     def test_the_pointer_is_held_where_the_pan_began_and_put_back(self):
-        self.p.motion(3, 0)                     # the pan begins here
+        self.p.begin()                          # the keys go down here
         self.assertIsNone(self.p.pin_expr(), "nothing is held until the pointer is hidden")
         self.pos = (1400, 900)                  # the mouse has moved on meanwhile
         self.p.motion(20, 0)
@@ -92,8 +92,8 @@ class PresenceTest(unittest.TestCase):
         self.assertEqual(self.cursor, [True, False])
         self.assertIsNone(self.p.pin_expr())
 
-    def test_a_nudge_puts_nothing_back(self):
-        self.p.motion(2, 0)
+    def test_keys_down_and_up_without_moving_put_nothing_back(self):
+        self.p.begin()
         self.p.tick(False)
         self.assertEqual(self.warps, [])
         self.assertEqual(self.cursor, [])
@@ -119,6 +119,7 @@ class PresenceTest(unittest.TestCase):
         self.assertIn("_presence.tick(active_drag)", src)
         self.assertIn("_presence.motion(idx, idy)", src)
         self.assertIn("pin = _presence.pin_expr()", src)
+        self.assertIn("_presence.begin()", src)
         unit = open(os.path.join(HERE, "..", "install.sh")).read()
         self.assertIn("ExecStopPost=$python_bin $REPO_DIR/scripts/dxrice_pan_presence.py restore", unit)
 
