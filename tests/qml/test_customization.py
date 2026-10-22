@@ -94,5 +94,26 @@ class EditorTest(unittest.TestCase):
             s.close()
 
 
+class RoundingExtremesTest(unittest.TestCase):
+    """(at the largest rounding the Theme editor's corners grew to 80 px and
+    its content ran past the curve: content stays clear of rounded corners)"""
+
+    def test_editor_content_stays_inside_its_rounded_corners(self):
+        for r in (0, 12, 30):
+            s = Scene(width=1920, height=1080, setup=with_theme(radius=r))
+            try:
+                s.ev("panels.open('theme')")
+                s.wait(1300)
+                m = json.loads(s.ev("""(function(){
+                    const surf = findNamed('themePanelSurface'), c = findNamed('themeContent');
+                    const sp = surf.mapToItem(null, 0, 0), cp = c.mapToItem(null, 0, 0);
+                    return JSON.stringify({ surfBottom: sp.y + surf.height, contentBottom: cp.y + c.height,
+                                            corner: surf.bottomLeftRadius, inset: theme.cornerInset(surf.bottomLeftRadius) }); })()"""))
+                self.assertLessEqual(m["contentBottom"], m["surfBottom"] - m["inset"] + 1.5,
+                                     f"radius {r}: content reaches into the rounded corner: {m}")
+            finally:
+                s.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

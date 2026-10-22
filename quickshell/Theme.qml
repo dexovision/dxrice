@@ -339,6 +339,11 @@ QtObject {
     readonly property real roundingLg: Math.round(16 * roundingScale)
     readonly property real roundingXl: Math.round(32 * roundingScale)
     readonly property real roundingFull: 9999
+    // How far content must stay in from a corner rounded to `r` so that its
+    // own square corner doesn't poke out of the curve: r * (1 - 1/sqrt 2).
+    // A surface whose corners grow with the "radius" setting adds this to
+    // its padding, so the largest rounding still shows all of its content.
+    function cornerInset(r) { return Math.ceil(Math.max(0, r) * (1 - Math.SQRT1_2)); }
     // Old name kept as an alias (small elements: chips, entries, inner rows).
     readonly property real entryRadius: roundingSm
 

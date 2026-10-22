@@ -99,6 +99,7 @@ PanelWindow {
         - ShellSurface.topEdgeHeight - ShellSurface.bottomEdgeHeight - ShellSurface.gap)
     readonly property real minPanelHeight: Math.min(root.maxPanelHeight, 480)
     readonly property real contentNaturalHeight: header.height + Theme.padLg * 2 + (paneLoader.item ? paneLoader.item.implicitHeight : 0)
+                                                 + Theme.cornerInset(Theme.roundingXl)
     readonly property real panelHeight: Math.max(root.minPanelHeight, Math.min(root.maxPanelHeight, root.contentNaturalHeight))
     readonly property real panelX: Math.round(((root.screen ? root.screen.width : 1920) - root.panelWidth) / 2)
     readonly property real panelY: ShellSurface.topEdgeHeight
@@ -1123,6 +1124,7 @@ PanelWindow {
 
         Rectangle {
             id: panelSurface
+            objectName: "themePanelSurface"
             anchors.top: parent.top
             anchors.topMargin: (1 - drawer.revealProgress) * -10
             anchors.left: parent.left
@@ -1217,7 +1219,8 @@ PanelWindow {
             Row {
                 id: sidebarLayout
                 width: parent.width
-                height: parent.height - header.height
+                // clear of the rounded bottom corners, however round they are
+                height: parent.height - header.height - Theme.cornerInset(Theme.roundingXl)
 
                 // ---- sidebar: search + category list ----
                 Column {
@@ -1366,6 +1369,7 @@ PanelWindow {
 
                     Flickable {
                         id: contentFlick
+                        objectName: "themeContent"
                         anchors.fill: parent
                         contentHeight: paneLoader.item ? paneLoader.item.implicitHeight + Theme.padLg * 2 : 0
                         clip: true
