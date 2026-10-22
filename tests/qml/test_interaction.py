@@ -21,8 +21,10 @@ from test_customization import TE, with_theme  # noqa: E402
 
 # Walks any object's data/children, so it reaches into components the
 # scene's own findNamed() doesn't index (the lock surface, a Loader's item).
-FIND = """const find = (root, pred) => { const st = [root]; while (st.length) { const o = st.pop(); if (!o) continue;
-    if (pred(o)) return o; const k = o.data !== undefined ? o.data : []; for (let i = 0; i < k.length; i++) st.push(k[i]);
+# (visited objects are skipped: a stub window's contentItem is the window
+# itself, and following it again and again once ran this out of memory)
+FIND = """const find = (root, pred) => { const st = [root]; const seen = new Set(); while (st.length) { const o = st.pop(); if (!o || seen.has(o)) continue;
+    seen.add(o); if (pred(o)) return o; const k = o.data !== undefined ? o.data : []; for (let i = 0; i < k.length; i++) st.push(k[i]);
     if (o.contentItem) st.push(o.contentItem); if (o.item) st.push(o.item); } return null; };"""
 
 
