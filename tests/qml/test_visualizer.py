@@ -70,8 +70,10 @@ class VisualizerTest(unittest.TestCase):
         try:
             self.play(s)
             s.wait(300)
-            vals = s.ev(f"JSON.stringify({V}.values.slice(0, 4))")
-            self.assertEqual(vals, "[0,0.25,0.5,1]")
+            # one frame takes a bar three quarters of the way up (a quick rise)
+            vals = json.loads(s.ev(f"JSON.stringify({V}.values.slice(0, 4))"))
+            for got, want in zip(vals, [0, 0.25, 0.5, 1]):
+                self.assertAlmostEqual(got, want * 0.75, places=6)
             self.assertEqual(s.ev(f"{V}.values.length"), 48)
             h = [s.ev(f"findNamed('visualizerBars').children[{i}].height") for i in (2, 3)]
             self.assertAlmostEqual(h[1] / h[0], 2.0, delta=0.1)   # 1000 is twice 500
@@ -82,10 +84,38 @@ class VisualizerTest(unittest.TestCase):
         s = self.scene()
         try:
             self.play(s)
+            before = s.ev(f"{V}.values[3]")
             s.ev(f"{V}.feed('cava: warning, something')")
-            self.assertEqual(s.ev(f"{V}.values[3]"), 1)
+            self.assertEqual(s.ev(f"{V}.values[3]"), before)
+            s.ev(f"{V}.values = []")
             s.ev(f"{V}.feed('2000;-5;500;')")
-            self.assertEqual(s.ev(f"JSON.stringify({V}.values)"), "[1,0,0.5]")
+            self.assertEqual(json.loads(s.ev(f"JSON.stringify({V}.values)")), [0.75, 0, 0.375])
+        finally:
+            s.close()
+
+    def test_a_bar_rises_quickly_and_falls_slowly(self):
+        s = self.scene()
+        try:
+            self.play(s)
+            s.ev(f"{V}.values = []")
+            s.ev(f"{V}.feed('1000;')")
+            up = s.ev(f"{V}.values[0]")
+            s.ev(f"{V}.feed('0;')")
+            down = s.ev(f"{V}.values[0]")
+            self.assertAlmostEqual(up, 0.75, places=6)
+            self.assertGreater(down, 0.5, "it dropped as fast as it rose")
+        finally:
+            s.close()
+
+    def test_mirrored_puts_the_low_notes_in_the_middle(self):
+        s = self.scene(visualizer_style="mirror")
+        try:
+            self.play(s)
+            bars = "findNamed('visualizerBars')"
+            self.assertTrue(s.ev(f"{bars}.visible"))
+            n = s.ev(f"{bars}.children.length") - 1          # (the Repeater)
+            self.assertEqual(s.ev(f"{bars}.children[0].band"), s.ev(f"{bars}.children[{n - 1}].band"), "not symmetrical")
+            self.assertLessEqual(s.ev(f"{bars}.children[{n // 2}].band"), 1, "the middle should be the lowest band")
         finally:
             s.close()
 
@@ -157,7 +187,8 @@ class VisualizerTest(unittest.TestCase):
             s.wait(300)
             self.assertTrue(s.ev("findNamed('visualizerBlocks').visible"))
             self.assertFalse(s.ev("findNamed('visualizerBars').visible"))
-            self.assertTrue(s.ev("findNamed('visualizerBlocks').text").startswith("  ▂ ▄ █"))
+            # one frame in, three quarters of the way up (0, 0.25, 0.5, 1 -> 0, 0.19, 0.38, 0.75)
+            self.assertTrue(s.ev("findNamed('visualizerBlocks').text").startswith("  ▂ ▃ ▆"))
         finally:
             s.close()
 

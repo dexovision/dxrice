@@ -36,13 +36,19 @@ import Quickshell.Wayland
 // Styles ("visualizer_style"):
 //   "bars"    (default) rounded bars rising from the bottom edge, the accent
 //             at the base fading toward the top
+//   "mirror"  the same bars, low notes in the middle spreading out to both
+//             edges, so the strip is symmetrical
 //   "blocks"  the same values as block characters, a terminal's spectrum
+//
+// Each bar rises quickly to a louder value and falls back more slowly, as
+// a level meter does, so the strip reads as the music's shape rather than
+// flickering frame to frame.
 PanelWindow {
     id: root
     objectName: "visualizer"
 
     readonly property bool on: Theme.widgetOn("visualizer", true)
-    readonly property string style: Theme.data.visualizer_style === "blocks" ? "blocks" : "bars"
+    readonly property string style: ["blocks", "mirror"].indexOf(String(Theme.data.visualizer_style)) >= 0 ? String(Theme.data.visualizer_style) : "bars"
     readonly property int bars: 48
     // 150 px on a 1080 px screen, in proportion elsewhere
     readonly property real barHeight: Math.round(Math.max(90, Math.min(180, (root.screen && root.screen.height ? root.screen.height : 1080) * 0.139)))
@@ -146,7 +152,14 @@ PanelWindow {
             if (isNaN(v)) return;              // not a frame: ignore the line
             out.push(Math.max(0, Math.min(1, v / 1000)));
         }
-        if (out.length > 0) root.values = out;
+        if (out.length === 0) return;
+        // quick up, slower down (per frame of cava's 30)
+        const prev = root.values;
+        for (let i = 0; i < out.length; i++) {
+            const p = i < prev.length ? prev[i] : 0;
+            out[i] = out[i] > p ? p + (out[i] - p) * 0.75 : p + (out[i] - p) * 0.28;
+        }
+        root.values = out;
     }
 
     // started and stopped with `active`. A cava that exits on its own after
@@ -203,7 +216,7 @@ PanelWindow {
         Row {
             id: barRow
             objectName: "visualizerBars"
-            visible: root.style === "bars"
+            visible: root.style === "bars" || root.style === "mirror"
             anchors.bottom: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
             readonly property real gap: 6
@@ -213,7 +226,11 @@ PanelWindow {
                 model: root.bars
                 delegate: Rectangle {
                     required property int index
-                    readonly property real v: index < root.values.length ? root.values[index] : 0
+                    // mirror: the middle bar is the lowest band, both edges the highest
+                    readonly property int band: root.style === "mirror"
+                        ? Math.min(root.bars - 1, Math.round(Math.abs(index - (root.bars - 1) / 2) * 2))
+                        : index
+                    readonly property real v: band < root.values.length ? root.values[band] : 0
                     width: (barRow.width - (root.bars - 1) * barRow.gap) / root.bars
                     height: Math.max(3, v * (root.barHeight - 8))
                     anchors.bottom: parent.bottom
@@ -222,7 +239,8 @@ PanelWindow {
                         GradientStop { position: 0; color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.0) }
                         GradientStop { position: 1; color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45) }
                     }
-                    Behavior on height { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+                    // just bridges cava's frames (33 ms); the rise/fall is in feed()
+                    Behavior on height { NumberAnimation { duration: 33; easing.type: Easing.Linear } }
                 }
             }
         }

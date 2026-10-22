@@ -2166,7 +2166,7 @@ PanelWindow {
                     }
                     ChoiceRow {
                         settingKey: "visualizer_style"; idPrefix: "visualizerStyle:"; label: "Visualizer style"
-                        options: [{ value: "bars", label: "Bars" }, { value: "blocks", label: "Blocks" }]
+                        options: [{ value: "bars", label: "Bars" }, { value: "mirror", label: "Mirrored" }, { value: "blocks", label: "Blocks" }]
                     }
                     Column {
                         width: parent.width
