@@ -207,6 +207,43 @@ class SmallerPiecesTest(unittest.TestCase):
             s.close()
 
 
+class MusicCardLayoutTest(unittest.TestCase):
+    """(seen live: a title that wrapped to two lines pushed the artist into
+    the elapsed/total time)"""
+
+    def box(self, s, name):
+        return json.loads(s.ev(f"(function(){{ const t = findNamed('{name}'); const p = t.mapToItem(null, 0, 0);"
+                               " return JSON.stringify([p.x, p.y, t.width, t.height]); })()"))
+
+    def check(self, title, artist):
+        s = scene(widget_music=True)
+        try:
+            s.ev("setPlayer({ trackTitle: " + json.dumps(title) + ", trackArtist: " + json.dumps(artist) + ", isPlaying: true })")
+            s.wait(700)
+            t = self.box(s, "musicTitle")
+            a = self.box(s, "musicArtist")
+            tm = self.box(s, "musicTime")
+            card = rect(s, "music")
+            words_bottom = (a[1] + a[3]) if artist else (t[1] + t[3])
+            self.assertLessEqual(words_bottom, tm[1] - 2, f"{title!r} / {artist!r}: the words run into the time row")
+            self.assertLessEqual(tm[1] + tm[3], card[1] + card[3], "the time row fell out of the card")
+            for b in ("musicPrev", "musicPlay", "musicNext"):
+                c = self.box(s, b)
+                self.assertLessEqual(c[1] + c[3], card[1] + card[3] + 0.5, f"{b} is outside the card")
+            return card[3]
+        finally:
+            s.close()
+
+    def test_a_long_title_and_artist_never_reach_the_time(self):
+        short = self.check("Blue", "Miles Davis")
+        long_ = self.check("Who Can It Be Now? (Remastered 2023 Extended Twelve-Inch Club Version)",
+                           "Men at Work featuring the Melbourne Symphony Orchestra and Friends")
+        self.assertGreater(long_, short, "the card should grow for a two-line title")
+
+    def test_missing_artist_leaves_the_layout_intact(self):
+        self.check("Untitled stream", "")
+
+
 class ReadableAccentTest(unittest.TestCase):
     def luma(self, s, expr):
         return s.ev(f"theme.luma({expr})")

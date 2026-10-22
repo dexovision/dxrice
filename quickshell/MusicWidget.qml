@@ -18,7 +18,10 @@ DesktopWidget {
     surface: "none"
     pad: 0
     contentWidth: 420
-    contentHeight: 148
+    // as tall as its words and controls need, never less than the cover's
+    // frame: a title that wraps to two lines (or a long artist) pushes the
+    // time row down instead of running into it
+    contentHeight: Math.max(148, words.y + words.implicitHeight + 10 + lower.height + 18)
 
     MediaBackend { id: media; objectName: "musicMedia" }
     // MPRIS doesn't announce the position: ask once a second, only while playing and shown
@@ -130,6 +133,7 @@ DesktopWidget {
             width: parent.width
             text: media.available ? media.artist : "Music from any MPRIS player shows here"
             visible: text.length > 0
+            maximumLineCount: 1
             color: "white"; opacity: 0.72
             font.family: Theme.fontFamily; font.pixelSize: 13; elide: Text.ElideRight
         }
