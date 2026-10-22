@@ -82,6 +82,23 @@ class EditorTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_unapplied_edits_are_said_in_the_header(self):
+        # (they showed only as a small dot on Apply)
+        s = Scene(width=1920, height=1080)
+        try:
+            self.open(s)
+            msg = "findNamed('themeHeaderMessage')"
+            self.assertFalse(s.ev(f"{msg}.visible"))
+            s.ev(f"{TE}.hypr_gaps_in = 9; {TE}.dirty = true")
+            s.wait(400)
+            self.assertIn("Unsaved changes", s.ev(f"{msg}.text"))
+            self.assertTrue(s.ev(f"{msg}.visible"))
+            s.ev(f"{TE}.revert()")
+            s.wait(400)
+            self.assertNotIn("Unsaved", s.ev(f"{msg}.text"))
+        finally:
+            s.close()
+
     def test_shell_text_size_is_saved_by_apply(self):
         s = Scene(width=1920, height=1080)
         try:

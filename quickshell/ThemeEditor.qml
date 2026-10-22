@@ -1163,18 +1163,21 @@ PanelWindow {
                     x: Theme.padLg
                 }
                 // One quiet line between the title and the buttons: an Apply
-                // failure (danger tint), or a dropped draft (muted). Elided;
-                // feedback, never a dialog.
+                // failure (danger tint), a dropped draft (muted), or that
+                // there are edits Apply hasn't written yet (they used to show
+                // only as the dot on Apply). Elided; feedback, never a dialog.
                 Text {
                     id: headerMessage
                     objectName: "themeHeaderMessage"
                     readonly property bool isError: root.applyError.length > 0
                     readonly property bool isSuccess: !isError && root.justApplied
+                    readonly property string quiet: root.draftNotice.length > 0 ? root.draftNotice
+                                                  : (root.dirty ? "Unsaved changes \u2014 Apply to keep them" : "")
                     visible: opacity > 0.01
-                    text: isError ? root.applyError : (isSuccess ? "\u2713  Applied" : root.draftNotice)
+                    text: isError ? root.applyError : (isSuccess ? "\u2713  Applied" : quiet)
                     color: isError ? Theme.dangerTint : (isSuccess ? Theme.textActive : Theme.text)
                     opacity: (isError || isSuccess) ? (isSuccess ? Theme.opacitySecondary : 1)
-                           : (root.draftNotice.length > 0 ? Theme.opacityMuted : 0)
+                           : (quiet.length > 0 ? Theme.opacityMuted : 0)
                     Behavior on opacity { NumberAnimation { duration: Theme.durationFadeIn; easing.type: Theme.easingType; easing.bezierCurve: Theme.curveStandard } }
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmaller
