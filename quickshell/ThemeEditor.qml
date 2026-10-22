@@ -280,33 +280,33 @@ PanelWindow {
         { key: "hypr_inactive_border", label: "Inactive border", sub: "Unfocused window border" },
     ]
     readonly property var blurFields: [
-        { key: "opacity_idle", label: "Panel opacity (idle)", min: 0, max: 1, decimals: 2 },
-        { key: "opacity_active", label: "Panel opacity (active)", min: 0, max: 1, decimals: 2 },
-        { key: "border_opacity_idle", label: "Border opacity (idle)", min: 0, max: 1, decimals: 2 },
-        { key: "border_opacity_active", label: "Border opacity (active)", min: 0, max: 1, decimals: 2 },
-        { key: "kitty_opacity", label: "Terminal opacity", min: 0, max: 1, decimals: 2 },
-        { key: "hypr_blur_size", label: "Window blur size", min: 0, max: 20, decimals: 0, unit: "px" },
-        { key: "hypr_blur_passes", label: "Window blur passes", min: 0, max: 10, decimals: 0 },
-        { key: "hypr_blur_vibrancy", label: "Window blur vibrancy", min: 0, max: 1, decimals: 2 },
+        { key: "opacity_idle", label: "Panel opacity (idle)", sub: "How solid the cards and rows inside panels are. Lower lets more of the wallpaper through.", min: 0, max: 1, decimals: 2 },
+        { key: "opacity_active", label: "Panel opacity (active)", sub: "How solid the bar and its panels are; notifications too.", min: 0, max: 1, decimals: 2 },
+        { key: "border_opacity_idle", label: "Border opacity (idle)", sub: "The hairlines around cards and rows at rest.", min: 0, max: 1, decimals: 2 },
+        { key: "border_opacity_active", label: "Border opacity (active)", sub: "The hairlines around panels, and around things under the pointer.", min: 0, max: 1, decimals: 2 },
+        { key: "kitty_opacity", label: "Terminal opacity", sub: "The kitty terminal's background. 1 is fully solid.", min: 0, max: 1, decimals: 2 },
+        { key: "hypr_blur_size", label: "Window blur size", sub: "How far Hyprland spreads the blur behind see-through windows and panels.", min: 0, max: 20, decimals: 0, unit: "px" },
+        { key: "hypr_blur_passes", label: "Window blur passes", sub: "More passes make a smoother blur and cost more GPU time.", min: 0, max: 10, decimals: 0 },
+        { key: "hypr_blur_vibrancy", label: "Window blur vibrancy", sub: "How much the colours behind the blur are boosted.", min: 0, max: 1, decimals: 2 },
     ]
     readonly property var layoutFields: [
-        { key: "radius", label: "Corner roundness (panels, launcher)", min: 0, max: 30, decimals: 0 },
-        { key: "hypr_rounding", label: "Window corner rounding", min: 0, max: 30, decimals: 0, unit: "px" },
-        { key: "hypr_gaps_in", label: "Gaps between windows", min: 0, max: 40, decimals: 0, unit: "px" },
-        { key: "hypr_gaps_out", label: "Gaps to screen edge", min: 0, max: 60, decimals: 0, unit: "px" },
-        { key: "hypr_border_size", label: "Window border thickness", min: 0, max: 10, decimals: 0, unit: "px" },
-        { key: "hypr_active_opacity", label: "Focused window opacity", min: 0, max: 1, decimals: 2 },
-        { key: "hypr_inactive_opacity", label: "Unfocused window opacity", min: 0, max: 1, decimals: 2 },
-        { key: "hypr_active_border_angle", label: "Active border gradient angle", min: 0, max: 360, decimals: 0, unit: "°" },
+        { key: "radius", label: "Corner roundness (panels, launcher)", sub: "The shell's own corners: bar, panels, cards, launcher and notifications.", min: 0, max: 30, decimals: 0 },
+        { key: "hypr_rounding", label: "Window corner rounding", sub: "Application windows' corners (Hyprland).", min: 0, max: 30, decimals: 0, unit: "px" },
+        { key: "hypr_gaps_in", label: "Gaps between windows", sub: "Space between neighbouring windows; window placement keeps it too.", min: 0, max: 40, decimals: 0, unit: "px" },
+        { key: "hypr_gaps_out", label: "Gaps to screen edge", sub: "Space between tiled windows and the edges of the screen.", min: 0, max: 60, decimals: 0, unit: "px" },
+        { key: "hypr_border_size", label: "Window border thickness", sub: "The coloured outline around every window. 0 turns it off.", min: 0, max: 10, decimals: 0, unit: "px" },
+        { key: "hypr_active_opacity", label: "Focused window opacity", sub: "The window you're typing in. 1 is fully solid.", min: 0, max: 1, decimals: 2 },
+        { key: "hypr_inactive_opacity", label: "Unfocused window opacity", sub: "Every other window, so the focused one stands out.", min: 0, max: 1, decimals: 2 },
+        { key: "hypr_active_border_angle", label: "Active border gradient angle", sub: "Which way the focused window's two-colour outline runs.", min: 0, max: 360, decimals: 0, unit: "°" },
     ]
     readonly property var lockFields: [
-        { key: "lock_blur_passes", label: "Blur passes", min: 0, max: 10, decimals: 0 },
-        { key: "lock_blur_size", label: "Blur size", min: 0, max: 20, decimals: 0, unit: "px" },
-        { key: "lock_blur_vibrancy", label: "Blur vibrancy", min: 0, max: 1, decimals: 2 },
-        { key: "lock_bg_opacity", label: "Input opacity", min: 0, max: 1, decimals: 2 },
+        { key: "lock_blur_passes", label: "Blur passes", sub: "The lock screen (SUPER+L) blurs a capture of the desktop; more passes are smoother.", min: 0, max: 10, decimals: 0 },
+        { key: "lock_blur_size", label: "Blur size", sub: "How far that blur spreads.", min: 0, max: 20, decimals: 0, unit: "px" },
+        { key: "lock_blur_vibrancy", label: "Blur vibrancy", sub: "How much the colours behind it are boosted.", min: 0, max: 1, decimals: 2 },
+        { key: "lock_bg_opacity", label: "Input opacity", sub: "How solid the password field's background is.", min: 0, max: 1, decimals: 2 },
     ]
     readonly property var shellTextFields: [
-        { key: "text_scale", label: "Shell text size (bar, panels, this editor)", min: 0.8, max: 1.4, decimals: 2 },
+        { key: "text_scale", label: "Shell text size (bar, panels, this editor)", sub: "Every size of text in the shell together; 1 is the original size.", min: 0.8, max: 1.4, decimals: 2 },
     ]
     readonly property var fontSizeFields: [
         { key: "font_size_waybar", label: "Taskbar text size", min: 8, max: 24, decimals: 0 },
@@ -357,10 +357,10 @@ PanelWindow {
           sub: "Processor, memory, graphics and network, with the last minute of each. Measured only while it is on." },
     ]
     readonly property var experienceFields: [
-        { key: "anim_duration_ms", label: "Animation speed (lower = snappier)", min: 0, max: 500, decimals: 0, unit: "ms" },
-        { key: "ui_density", label: "Spacing inside panels", min: 0.5, max: 1.5, decimals: 2 },
-        { key: "shadow_intensity", label: "Panel shadow strength (Quickshell only)", min: 0, max: 1.5, decimals: 2 },
-        { key: "widget_sway", label: "Widget sway while panning (0 = none)", min: 0, max: 2, decimals: 1 },
+        { key: "anim_duration_ms", label: "Animation speed (lower = snappier)", sub: "The base length of the shell's motion; every animation scales from it. 0 makes them instant.", min: 0, max: 500, decimals: 0, unit: "ms" },
+        { key: "ui_density", label: "Spacing inside panels", sub: "Padding inside the bar and panels. Lower fits more in.", min: 0.5, max: 1.5, decimals: 2 },
+        { key: "shadow_intensity", label: "Panel shadow strength (Quickshell only)", sub: "The soft shadows under panels and widgets. 0 turns them off.", min: 0, max: 1.5, decimals: 2 },
+        { key: "widget_sway", label: "Widget sway while panning (0 = none)", sub: "How far desktop widgets lag behind and settle when you pan the desktop. 0 keeps them still.", min: 0, max: 2, decimals: 1 },
     ]
     readonly property var presets: ({
         "Glass Charcoal": { glass_bg: "12141a", glass_bg_active: "232630", glass_text: "e6e6e6", glass_text_active: "ffffff", glass_border: "ffffff", accent: "e67878", radius: 12, hypr_active_border_1: "8090a0", hypr_active_border_2: "c0a0b0", hypr_inactive_border: "1d2021" },
@@ -774,6 +774,7 @@ PanelWindow {
                 from: modelData.min; to: modelData.max; decimals: modelData.decimals
                 value: root[modelData.key]
                 resettable: !root.isDefault(modelData.key)
+                description: modelData.sub || ""
                 onChanged: (v) => { root[modelData.key] = modelData.decimals === 0 ? Math.round(v) : v; root.dirty = true; }
                 onResetRequested: root.resetToDefault(modelData.key)
             }

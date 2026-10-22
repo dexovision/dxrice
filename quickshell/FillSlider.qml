@@ -23,6 +23,8 @@ Item {
     property real debounceMs: 80
     // Off its default: a reset sits beside the value (see ResetGlyph).
     property bool resettable: false
+    // What it changes, in a sentence under the track (wrapped, never elided).
+    property string description: ""
     signal changed(real value)
     signal resetRequested()
 
@@ -38,7 +40,7 @@ Item {
     readonly property bool dragging: area.pressed
     readonly property bool hovered: area.containsMouse
 
-    implicitHeight: labelRow.height + Theme.padXs + trackArea.height
+    implicitHeight: labelRow.height + Theme.padXs + trackArea.height + (descriptionText.visible ? Theme.padXs + descriptionText.implicitHeight : 0)
     width: parent ? parent.width : implicitWidth
 
     Item {
@@ -146,6 +148,20 @@ Item {
             onPositionChanged: (mouse) => { if (pressed) setFromX(mouse.x); }
             onReleased: if (!debounce.running) root._holding = false
         }
+    }
+
+    Text {
+        id: descriptionText
+        objectName: "fillSliderDescription"
+        visible: root.description.length > 0
+        y: trackArea.y + trackArea.height + Theme.padXs
+        width: parent.width
+        text: root.description
+        color: Theme.text
+        opacity: Theme.opacityMuted         // (as the Theme editor's switch explanations)
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeSmall
+        wrapMode: Text.WordWrap
     }
 
     Timer {

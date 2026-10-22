@@ -141,6 +141,27 @@ class EditorTest(unittest.TestCase):
         finally:
             s.close()
 
+    def test_every_slider_says_what_it_changes(self):
+        # (switches and colours had a sentence; sliders had only a name)
+        s = Scene(width=1920, height=1080)
+        try:
+            self.open(s)
+            missing = s.ev(f"""(function(){{ const te = {TE}; const out = [];
+                for (const list of [te.blurFields, te.layoutFields, te.lockFields, te.shellTextFields, te.experienceFields])
+                    for (const f of list) if (!f.sub) out.push(f.key);
+                return JSON.stringify(out); }})()""")
+            self.assertEqual(json.loads(missing), [])
+            s.ev(f"{TE}.currentCategory = 'blur'")
+            s.wait(700)
+            d = f"{self.IN}(findNamed('field:kitty_opacity'), 'fillSliderDescription')"
+            self.assertTrue(s.ev(f"{d}.visible"))
+            self.assertIn("terminal", s.ev(f"{d}.text"))
+            self.assertGreater(s.ev(f"{d}.height"), 8)
+            # it is inside the slider's height, not drawn over the next one
+            self.assertLessEqual(s.ev(f"{d}.y + {d}.height"), s.ev("findNamed('field:kitty_opacity').height") + 0.5)
+        finally:
+            s.close()
+
     def test_shell_text_size_is_saved_by_apply(self):
         s = Scene(width=1920, height=1080)
         try:
